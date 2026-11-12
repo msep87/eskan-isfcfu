@@ -1,0 +1,8 @@
+{
+  "name": "سامانه مدیریت سراهای دانشجویی دانشگاه فرهنگیان اصفهان",
+  "description": "سامانه جامع انتخاب اتاق و تخت، مدیریت سراهای دانشجویی، ورود اطلاعات با اکسل، گزارش‌گیری و پنل سرپرستان دانشگاه فرهنگیان اصفهان",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
