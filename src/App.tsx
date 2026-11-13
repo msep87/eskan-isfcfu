@@ -74,9 +74,11 @@ export default function App() {
   const [warehouseRequests, setWarehouseRequests] = useState<WarehouseRequest[]>(Storage.getWarehouseRequests());
 
   const [isCloudLoading, setIsCloudLoading] = useState<boolean>(true);
+  const [cloudSyncTick, setCloudSyncTick] = useState<number>(0);
 
   // بروزرسانی داده‌ها از storage
   const refreshAllData = useCallback(() => {
+    setCloudSyncTick((prev) => prev + 1);
     setSettings(Storage.getSettings());
     setDorms(Storage.getDormitories());
     setRooms(Storage.getRooms());
@@ -544,6 +546,7 @@ export default function App() {
               refreshAllData();
             }}
             onOpenUserGuide={(r) => handleOpenUserGuide(r || 'admin')}
+            cloudSyncTick={cloudSyncTick}
           />
         )}
 

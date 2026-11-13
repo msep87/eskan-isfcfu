@@ -89,13 +89,16 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
     }
   };
 
-  const handleSaveStudents = () => {
+  const handleSaveStudents = async () => {
     if (!previewStudents) return;
+    setLoading(true);
+    setErrorMsg('');
 
     try {
       const dorms = Storage.getDormitories();
       const rooms = Storage.getRooms();
       const beds = Storage.getBeds();
+      let dormsCreated = false;
 
       // پردازش تخصیص‌های اسکان از اکسل
       previewStudents.forEach((st) => {
@@ -120,7 +123,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                 description: 'ایجاد خودکار از روی بارگذاری فایل اکسل',
               };
               dorms.push(dorm);
-              Storage.setDormitories(dorms);
+              dormsCreated = true;
             }
           }
 
@@ -237,6 +240,9 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
         }
       });
 
+      if (dormsCreated) {
+        Storage.setDormitories(dorms);
+      }
       Storage.setRooms(rooms);
       Storage.setBeds(beds);
 
@@ -250,23 +256,35 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
         Storage.setStudents(Array.from(mergedMap.values()));
       }
 
+      const syncRes = await Storage.waitForPendingCloudSync();
+
       const allocatedCount = previewStudents.filter((s) => s.assignedBedId).length;
       const unassignedCount = previewStudents.length - allocatedCount;
 
-      setSuccessMsg(
-        `تعداد ${previewStudents.length} دانشجو با موفقیت وارد گردید (${allocatedCount} نفر با اسکان قطعی از اکسل، و ${unassignedCount} نفر فاقد اتاق جهت انتخاب توسط خود دانشجو).`
-      );
+      if (syncRes.success) {
+        setSuccessMsg(
+          `تعداد ${previewStudents.length} دانشجو با موفقیت در دیتابیس ابری ذخیره و همگام‌سازی گردید (${allocatedCount} نفر با اسکان قطعی از اکسل، و ${unassignedCount} نفر فاقد اتاق جهت انتخاب توسط خود دانشجو).`
+        );
+      } else {
+        setSuccessMsg(
+          `تعداد ${previewStudents.length} دانشجو در مرورگر ثبت شد، اما همگام‌سازی برخی بخش‌ها با دیتابیس ابری با تأخیر یا خطا مواجه شد.`
+        );
+      }
       setPreviewStudents(null);
       setTimeout(() => {
         onImportComplete();
       }, 1200);
     } catch (err: any) {
       setErrorMsg(err.message || 'خطا در ذخیره دانشجویان');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSaveDorms = () => {
+  const handleSaveDorms = async () => {
     if (!previewDormsData) return;
+    setLoading(true);
+    setErrorMsg('');
 
     try {
       if (replaceMode) {
@@ -292,13 +310,21 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
         Storage.setBeds(Array.from(bedsMap.values()));
       }
 
-      setSuccessMsg(`سراها، اتاق‌ها و تخت‌های دوطبقه با موفقیت وارد و ایجاد گردید.`);
+      const syncRes = await Storage.waitForPendingCloudSync();
+
+      if (syncRes.success) {
+        setSuccessMsg(`سراها، اتاق‌ها و تخت‌های دوطبقه با موفقیت در دیتابیس ابری ذخیره و همگام‌سازی گردیدند.`);
+      } else {
+        setSuccessMsg(`سراها و اتاق‌ها در مرورگر ثبت شدند، اما اتصال به دیتابیس ابری با خطا مواجه شد.`);
+      }
       setPreviewDormsData(null);
       setTimeout(() => {
         onImportComplete();
       }, 1000);
     } catch (err: any) {
       setErrorMsg(err.message || 'خطا در ذخیره سراها');
+    } finally {
+      setLoading(false);
     }
   };
 

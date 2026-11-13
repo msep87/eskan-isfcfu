@@ -142,6 +142,7 @@ export function initializeStorageIfNeeded(): void {
 
 // مدیریت زمان و وضعیت همگام‌سازی ابری برای جلوگیری از تداخل نوشتن و خواندن
 const keyWriteTimestamps: Record<string, number> = {};
+const pendingCloudRequests: Record<string, Promise<boolean> | undefined> = {};
 let activeSyncPromise: Promise<boolean> | null = null;
 const SYNCABLE_KEYS = Object.values(STORAGE_KEYS).filter((k) => k !== STORAGE_KEYS.CURRENT_USER);
 
@@ -151,13 +152,29 @@ function pushKeyToCloud<T>(key: string, value: T): void {
 
   if (typeof fetch !== 'function') return;
 
-  fetch(`${API_BASE_URL}/sync`, {
+  const reqPromise = fetch(`${API_BASE_URL}/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ key, value }),
-  }).catch((err) => {
-    console.warn(`Cloud sync POST failed for key ${key}:`, err);
-  });
+  })
+    .then((res) => {
+      if (!res.ok) {
+        console.warn(`Cloud sync POST non-OK (${res.status}) for key ${key}`);
+        return false;
+      }
+      return true;
+    })
+    .catch((err) => {
+      console.warn(`Cloud sync POST failed for key ${key}:`, err);
+      return false;
+    })
+    .finally(() => {
+      if (pendingCloudRequests[key] === reqPromise) {
+        delete pendingCloudRequests[key];
+      }
+    });
+
+  pendingCloudRequests[key] = reqPromise;
 }
 
 // تابع کمکی برای خواندن از localStorage
@@ -182,48 +199,6 @@ function set<T>(key: string, value: T): void {
 }
 
 export const Storage = {
-  // ==============================================================
-  // متدهای جدید ارتباط با دیتابیس آنلاین (Vercel + MongoDB Atlas)
-  // ==============================================================
-  
-  fetchStudentsFromDB: async (): Promise<void> => {
-    try {
-      const response = await fetch('https://khabgah-api.vercel.app/api/students');
-      if (response.ok) {
-        const data = await response.json();
-        // بروزرسانی کش محلی سایت با جدیدترین اطلاعات دیتابیس ابری
-        set(STORAGE_KEYS.STUDENTS, data); 
-      }
-    } catch (error) {
-      console.error('خطا در دریافت اطلاعات از سرور آنلاین:', error);
-    }
-  },
-
-  addStudentToDB: async (newStudent: Student): Promise<{ success: boolean; message: string }> => {
-    try {
-      const response = await fetch('https://khabgah-api.vercel.app/api/students', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newStudent),
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        
-        // اضافه کردن دانشجو به حافظه محلی برای کارکرد صحیح سایر بخش‌های سایت
-        const students = Storage.getStudents();
-        students.unshift(result.student);
-        set(STORAGE_KEYS.STUDENTS, students);
-        
-        return { success: true, message: result.message };
-      }
-      return { success: false, message: 'خطا در ثبت اطلاعات در سرور ابری' };
-    } catch (error) {
-      return { success: false, message: 'خطای شبکه در ارتباط با سرور' };
-    }
-  },
-  // ==============================================================
-
   getSettings: (): AppSettings => get(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS),
   setSettings: (settings: AppSettings) => set(STORAGE_KEYS.SETTINGS, settings),
   
@@ -1248,7 +1223,7 @@ export const Storage = {
       if (!cns) {
         return { success: false, message: 'مشاور یافت نشد.' };
       }
-      if (cns.password !== currentPasswordInput && currentPasswordInput !== '123') {
+      if (cns.password !== currentPasswordInput) {
         return { success: false, message: 'کلمه عبور فعلی مشاور اشتباه است.' };
       }
       cns.password = newPasswordInput;
@@ -1315,7 +1290,7 @@ export const Storage = {
       if (!st) {
         return { success: false, message: 'دانشجو یافت نشد.' };
       }
-      if (st.nationalId !== currentPasswordInput && currentPasswordInput !== '123') {
+      if (st.nationalId !== currentPasswordInput) {
         return { success: false, message: 'کلمه عبور (کد ملی) فعلی اشتباه است.' };
       }
       st.nationalId = newPasswordInput;
@@ -1941,42 +1916,93 @@ export const Storage = {
 
   addStudentToDB: async (
     newStudent: Student
-  ): Promise<{ success: boolean; student?: Student; message?: string }> => {
+  ): Promise<{ success: boolean; student?: Student; message: string }> => {
+    const currentStudents = Storage.getStudents();
+    if (currentStudents.some((s) => s.studentId === newStudent.studentId)) {
+      return {
+        success: false,
+        message: 'دانشجویی با این شماره دانشجویی قبلاً ثبت شده است.',
+      };
+    }
+
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
       const res = await fetch(`${API_BASE_URL}/students`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newStudent),
+        signal: controller.signal,
       });
-      const data = await res.json().catch(() => ({}));
+      clearTimeout(timeoutId);
+
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
       if (!res.ok) {
         return {
           success: false,
-          message: (data as { message?: string })?.message || 'خطا در ثبت دانشجو در دیتابیس ابری',
+          message:
+            (data as { message?: string })?.message || 'خطا در ثبت دانشجو در دیتابیس ابری',
         };
       }
-      return { success: true, student: (data as { student?: Student })?.student || newStudent };
+
+      const rawReturned = ((data as { student?: Record<string, unknown> })?.student ||
+        newStudent) as Record<string, unknown>;
+      const { _id, __v, createdAt, updatedAt, ...cleanObj } = rawReturned;
+      void _id;
+      void __v;
+      void createdAt;
+      void updatedAt;
+      const savedStudent = cleanObj as unknown as Student;
+
+      const updatedStudents = [savedStudent, ...currentStudents];
+      set(STORAGE_KEYS.STUDENTS, updatedStudents);
+
+      return {
+        success: true,
+        student: savedStudent,
+        message:
+          (data as { message?: string })?.message ||
+          'دانشجو با موفقیت در دیتابیس ابری ثبت شد.',
+      };
     } catch (err) {
       console.warn('addStudentToDB error:', err);
-      return { success: false, message: 'عدم دسترسی به سرور ابری' };
+      return {
+        success: false,
+        message: 'خطای شبکه در ارتباط با سرور ابری. لطفاً اتصال اینترنت را بررسی نمایید.',
+      };
     }
+  },
+
+  waitForPendingCloudSync: async (): Promise<{ success: boolean; failedKeys: string[] }> => {
+    const entries = Object.entries(pendingCloudRequests).filter(
+      (entry): entry is [string, Promise<boolean>] => Boolean(entry[1])
+    );
+    if (entries.length === 0) {
+      return { success: true, failedKeys: [] };
+    }
+    const results = await Promise.all(
+      entries.map(async ([key, promise]) => ({ key, ok: await promise }))
+    );
+    const failedKeys = results.filter((r) => !r.ok).map((r) => r.key);
+    return { success: failedKeys.length === 0, failedKeys };
   },
 
   syncAllToCloud: async (): Promise<boolean> => {
     try {
       const posts = SYNCABLE_KEYS.map(async (key) => {
         const raw = localStorage.getItem(key);
-        if (!raw) return;
+        if (!raw) return true;
         const value = JSON.parse(raw);
         keyWriteTimestamps[key] = Date.now();
-        await fetch(`${API_BASE_URL}/sync`, {
+        const res = await fetch(`${API_BASE_URL}/sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ key, value }),
         });
+        return res.ok;
       });
-      await Promise.allSettled(posts);
-      return true;
+      const results = await Promise.all(posts);
+      return results.every(Boolean);
     } catch (err) {
       console.warn('syncAllToCloud error:', err);
       return false;
@@ -2010,6 +2036,7 @@ export const Storage = {
             for (const [key, val] of Object.entries(cloudMap)) {
               if (!SYNCABLE_KEYS.includes(key)) continue;
               if (val === undefined || val === null) continue;
+              if (pendingCloudRequests[key]) continue;
               const lastLocalWrite = keyWriteTimestamps[key] || 0;
               if (Date.now() - lastLocalWrite < 5000) continue;
               localStorage.setItem(key, JSON.stringify(val));
@@ -2022,16 +2049,18 @@ export const Storage = {
           if (Array.isArray(rawStudents)) {
             syncedAny = true;
             const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
-            if (Date.now() - lastStudentWrite >= 5000) {
+            if (!pendingCloudRequests[STORAGE_KEYS.STUDENTS] && Date.now() - lastStudentWrite >= 5000) {
               const cleanStudents: Student[] = rawStudents.map((item: Record<string, unknown>) => {
-                const { _id, __v, ...rest } = item;
+                const { _id, __v, createdAt, updatedAt, ...rest } = item;
                 void _id;
                 void __v;
+                void createdAt;
+                void updatedAt;
                 return rest as unknown as Student;
               });
 
               const cloudSyncStudents = cloudMap?.[STORAGE_KEYS.STUDENTS];
-              if (!Array.isArray(cloudSyncStudents) || (cloudSyncStudents.length === 0 && cleanStudents.length > 0)) {
+              if (!Array.isArray(cloudSyncStudents) && cleanStudents.length > 0) {
                 localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(cleanStudents));
               }
             }
@@ -2051,6 +2080,7 @@ export const Storage = {
     return activeSyncPromise;
   },
 };
+
 
 
 

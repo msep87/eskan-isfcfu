@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   AppSettings,
   Dormitory,
@@ -111,6 +111,7 @@ interface AdminDashboardProps {
   onOpenChangePassword: () => void;
   onUpdateSettings: (newSettings: AppSettings) => void;
   onOpenUserGuide?: (role: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'student') => void;
+  cloudSyncTick?: number;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -131,6 +132,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onOpenChangePassword,
   onUpdateSettings,
   onOpenUserGuide,
+  cloudSyncTick = 0,
 }) => {
   // تب‌های اصلی داشبورد مدیر
   const [mainTab, setMainTab] = useState<'cartable' | 'announcements' | 'requests' | 'maintenance' | 'shifts' | 'counseling' | 'settings'>('cartable');
@@ -170,6 +172,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [shiftDormFilter, setShiftDormFilter] = useState('all');
   const [shiftDayFilter, setShiftDayFilter] = useState('all');
   const [shiftFeedback, setShiftFeedback] = useState<string | null>(null);
+
+  // همگام‌سازی فهرست‌های داخلی مدیر هنگام دریافت داده جدید از سرور ابری
+  useEffect(() => {
+    if (!cloudSyncTick) return;
+    setCounselorsList(Storage.getCounselors());
+    setCounselorShifts(Storage.getCounselorShifts());
+    setCounselorReports(Storage.getCounselorReports());
+    setShiftSchedules(Storage.getShiftSchedules());
+    setShiftReports(Storage.getShiftReports());
+  }, [cloudSyncTick]);
+
+  useEffect(() => {
+    setLocalSettings({ ...settings });
+  }, [settings]);
 
   // فرم ثبت شیفت دستی جدید توسط مدیر
   const [isAddShiftModalOpen, setIsAddShiftModalOpen] = useState(false);
@@ -337,7 +353,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         province: stFormProvince.trim(),
         city: stFormCity.trim(),
       });
-      setApprovalFeedback({ type: 'success', message: res.message });
+      setApprovalFeedback({ type: 'success', message: '⏳ در حال همگام‌سازی ویرایش در دیتابیس ابری...' });
+      const syncRes = await Storage.waitForPendingCloudSync();
+      setApprovalFeedback({
+        type: syncRes.success ? 'success' : 'error',
+        message: syncRes.success
+          ? res.message
+          : `${res.message} (هشدار: همگام‌سازی با سرور ابری با خطا مواجه شد.)`,
+      });
     } else {
       const newSt: Student = {
         studentId: stFormStudentId.trim(),
@@ -363,9 +386,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setApprovalFeedback({ type: 'success', message: '⏳ در حال ارسال به دیتابیس ابری...' });
       const res = await Storage.addStudentToDB(newSt);
       if (!res.success) {
+        setApprovalFeedback(null);
         setStFormError(res.message);
         return;
       }
+      await Storage.waitForPendingCloudSync();
       setApprovalFeedback({ type: 'success', message: res.message });
     }
 
@@ -724,6 +749,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
+    const compressImageDataUrl = (rawUrl: string): Promise<string> => {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 480;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width >= height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(rawUrl);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          try {
+            resolve(canvas.toDataURL('image/jpeg', 0.78));
+          } catch {
+            resolve(rawUrl);
+          }
+        };
+        img.onerror = () => resolve(rawUrl);
+        img.src = rawUrl;
+      });
+    };
+
     const promises = imageFiles.map((file) => {
       return new Promise<void>((resolve) => {
         const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
@@ -731,10 +791,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         const studentId = match ? match[0] : baseName.trim();
 
         const reader = new FileReader();
-        reader.onload = (event) => {
+        reader.onload = async (event) => {
           const dataUrl = event.target?.result as string;
           if (dataUrl && studentId) {
-            photoMap[studentId] = dataUrl;
+            photoMap[studentId] = await compressImageDataUrl(dataUrl);
           }
           resolve();
         };
@@ -746,12 +806,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     await Promise.all(promises);
 
     const result = Storage.batchAssignStudentPhotos(photoMap);
+    const syncRes = await Storage.waitForPendingCloudSync();
     onRefreshData();
 
     if (result.matchedCount > 0) {
       setBatchPhotoStatus({
-        type: 'success',
-        text: `تعداد ${result.matchedCount} عکس با موفقیت به پرونده و داشبورد دانشجویان متصل شد. (کل فایل‌های خوانده شده: ${result.totalProcessed})`,
+        type: syncRes.success ? 'success' : 'error',
+        text: syncRes.success
+          ? `تعداد ${result.matchedCount} عکس با موفقیت در پرونده دانشجویان و دیتابیس ابری ذخیره شد. (کل فایل‌های خوانده شده: ${result.totalProcessed})`
+          : `تعداد ${result.matchedCount} عکس در مرورگر ثبت شد، اما همگام‌سازی ابری با خطا مواجه شد (ممکن است حجم کل تصاویر زیاد باشد).`,
         details:
           result.unmatchedKeys.length > 0
             ? result.unmatchedKeys.map(
@@ -965,12 +1028,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const text = event.target?.result as string;
         const ok = Storage.importBackupJson(text);
         if (ok) {
-          alert('اطلاعات نسخه پشتیبان با موفقیت بازیابی شد.');
+          const syncRes = await Storage.waitForPendingCloudSync();
           onRefreshData();
+          alert(
+            syncRes.success
+              ? 'اطلاعات نسخه پشتیبان با موفقیت بازیابی و در دیتابیس ابری ذخیره شد.'
+              : 'اطلاعات نسخه پشتیبان در مرورگر بازیابی شد، اما همگام‌سازی برخی بخش‌ها با دیتابیس ابری با خطا مواجه شد.'
+          );
         } else {
           alert('فایل پشتیبان نامعتبر است.');
         }
@@ -979,9 +1047,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleResetDefaults = () => {
+  const handleResetDefaults = async () => {
     if (confirm('آیا مایل به بازنشانی پایگاه داده به حالت اولیه دانشگاه فرهنگیان هستید؟ تمام تغییرات به نمونه اولیه برمی‌گردد.')) {
       Storage.resetToDefaults();
+      await Storage.syncAllToCloud();
       onRefreshData();
     }
   };
@@ -3007,7 +3076,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       if (res.success && res.schedules.length > 0) {
                         Storage.setShiftSchedules(res.schedules);
                         setShiftSchedules(Storage.getShiftSchedules());
-                        setShiftFeedback(res.message);
+                        const syncRes = await Storage.waitForPendingCloudSync();
+                        setShiftFeedback(
+                          syncRes.success
+                            ? `${res.message} (ذخیره‌شده در دیتابیس ابری)`
+                            : `${res.message} (هشدار: همگام‌سازی ابری با تأخیر یا خطا مواجه شد)`
+                        );
                       } else {
                         setShiftFeedback(res.message || 'خطا در بارگذاری فایل اکسل');
                       }
@@ -3748,7 +3822,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             const merged = [...current, ...res.schedules];
                             Storage.setCounselorShifts(merged);
                             setCounselorShifts(merged);
-                            setCounselorFeedback(res.message);
+                            const syncRes = await Storage.waitForPendingCloudSync();
+                            setCounselorFeedback(
+                              syncRes.success
+                                ? `${res.message} (ذخیره‌شده در دیتابیس ابری)`
+                                : `${res.message} (هشدار: همگام‌سازی ابری با خطا مواجه شد)`
+                            );
                           } else {
                             alert(res.message);
                           }
