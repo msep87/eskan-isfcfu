@@ -93,7 +93,7 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
     }
 
     // بررسی جنسیت پردیس
-    if (currentDorm.gender === 'brothers' && student.fullName.includes('خانم')) {
+    if (currentDorm?.gender === 'brothers' && student.fullName.includes('خانم')) {
       // نرمال‌سازی ساده
     }
 
@@ -177,6 +177,8 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
         bed: b,
         occupant: students.find((s) => s.studentId === b.studentId),
       }));
+
+    if (!currentDorm) return;
 
     setConfirmModalData({
       bed,
@@ -320,7 +322,7 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
             >
               همه طبقات
             </button>
-            {Array.from({ length: currentDorm.totalFloors }).map((_, idx) => (
+            {Array.from({ length: currentDorm?.totalFloors || 0 }).map((_, idx) => (
               <button
                 key={idx + 1}
                 onClick={() => setSelectedFloor(idx + 1)}

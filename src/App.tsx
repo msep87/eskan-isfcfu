@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Student,
   Dormitory,
@@ -73,15 +73,90 @@ export default function App() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(Storage.getInventoryItems());
   const [warehouseRequests, setWarehouseRequests] = useState<WarehouseRequest[]>(Storage.getWarehouseRequests());
 
-  // مقداردهی اولیه داده‌ها
-// مقداردهی اولیه داده‌ها و دریافت لیست دانشجویان از دیتابیس ابری
-  useEffect(() => {
-    initializeStorageIfNeeded();
-    
-    Storage.fetchStudentsFromDB().then(() => {
-      setStudents(Storage.getStudents());
-    });
+  const [isCloudLoading, setIsCloudLoading] = useState<boolean>(true);
+
+  // بروزرسانی داده‌ها از storage
+  const refreshAllData = useCallback(() => {
+    setSettings(Storage.getSettings());
+    setDorms(Storage.getDormitories());
+    setRooms(Storage.getRooms());
+    setBeds(Storage.getBeds());
+    setStudents(Storage.getStudents());
+    setSupervisors(Storage.getSupervisors());
+    setWarnings(Storage.getWarnings());
+    setAnnouncements(Storage.getAnnouncements());
+    setMessages(Storage.getMessages());
+    setMaintenanceStaff(Storage.getMaintenanceStaff());
+    setMaintenanceTasks(Storage.getMaintenanceTasks());
+    setWarehouseStaff(Storage.getWarehouseStaff());
+    setInventoryItems(Storage.getInventoryItems());
+    setWarehouseRequests(Storage.getWarehouseRequests());
+
+    const user = Storage.getCurrentUser();
+    if (user && user.role === 'student') {
+      const refreshedStudent = Storage.getStudents().find((s) => s.studentId === user.student.studentId);
+      if (refreshedStudent) {
+        setCurrentUser({ role: 'student', student: refreshedStudent });
+      }
+    } else if (user && user.role === 'supervisor') {
+      const refreshedSup = Storage.getSupervisors().find((s) => s.id === user.supervisor.id);
+      if (refreshedSup) {
+        setCurrentUser({ role: 'supervisor', supervisor: refreshedSup });
+      }
+    } else if (user && user.role === 'maintenance') {
+      const refreshedTech = Storage.getMaintenanceStaff().find((t) => t.id === user.technician.id);
+      if (refreshedTech) {
+        setCurrentUser({ role: 'maintenance', technician: refreshedTech });
+      }
+    } else if (user && user.role === 'warehouse') {
+      const refreshedStaff = Storage.getWarehouseStaff().find((w) => w.id === user.staff.id);
+      if (refreshedStaff) {
+        setCurrentUser({ role: 'warehouse', staff: refreshedStaff });
+      }
+    } else if (user && user.role === 'counselor') {
+      const refreshedCns = Storage.getCounselors().find((c) => c.id === user.counselor.id);
+      if (refreshedCns) {
+        setCurrentUser({ role: 'counselor', counselor: refreshedCns });
+      }
+    }
   }, []);
+
+  // مقداردهی اولیه داده‌ها و همگام‌سازی خودکار با دیتابیس ابری MongoDB Atlas
+  useEffect(() => {
+    let isMounted = true;
+    initializeStorageIfNeeded();
+
+    const performInitialSync = async () => {
+      try {
+        await Storage.syncFromCloud();
+        if (isMounted) {
+          refreshAllData();
+        }
+      } finally {
+        if (isMounted) {
+          setIsCloudLoading(false);
+        }
+      }
+    };
+
+    void performInitialSync();
+
+    const handleBackgroundSync = async () => {
+      const ok = await Storage.syncFromCloud();
+      if (ok && isMounted) {
+        refreshAllData();
+      }
+    };
+
+    window.addEventListener('focus', handleBackgroundSync);
+    const intervalId = window.setInterval(handleBackgroundSync, 25000);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('focus', handleBackgroundSync);
+      window.clearInterval(intervalId);
+    };
+  }, [refreshAllData]);
 
   // تزریق پویای فونت‌های بارگذاری شده (TTF / WOFF) به سند
   useEffect(() => {
@@ -137,47 +212,6 @@ export default function App() {
       setUserGuideInitialRole('student');
     }
     setIsUserGuideOpen(true);
-  };
-
-  // بروزرسانی داده‌ها از storage
-  const refreshAllData = () => {
-    setSettings(Storage.getSettings());
-    setDorms(Storage.getDormitories());
-    setRooms(Storage.getRooms());
-    setBeds(Storage.getBeds());
-    setStudents(Storage.getStudents());
-    setSupervisors(Storage.getSupervisors());
-    setWarnings(Storage.getWarnings());
-    setAnnouncements(Storage.getAnnouncements());
-    setMessages(Storage.getMessages());
-    setMaintenanceStaff(Storage.getMaintenanceStaff());
-    setMaintenanceTasks(Storage.getMaintenanceTasks());
-    setWarehouseStaff(Storage.getWarehouseStaff());
-    setInventoryItems(Storage.getInventoryItems());
-    setWarehouseRequests(Storage.getWarehouseRequests());
-
-    const user = Storage.getCurrentUser();
-    if (user && user.role === 'student') {
-      const refreshedStudent = Storage.getStudents().find((s) => s.studentId === user.student.studentId);
-      if (refreshedStudent) {
-        setCurrentUser({ role: 'student', student: refreshedStudent });
-      }
-    } else if (user && user.role === 'maintenance') {
-      const refreshedTech = Storage.getMaintenanceStaff().find((t) => t.id === user.technician.id);
-      if (refreshedTech) {
-        setCurrentUser({ role: 'maintenance', technician: refreshedTech });
-      }
-    } else if (user && user.role === 'warehouse') {
-      const refreshedStaff = Storage.getWarehouseStaff().find((w) => w.id === user.staff.id);
-      if (refreshedStaff) {
-        setCurrentUser({ role: 'warehouse', staff: refreshedStaff });
-      }
-    } else if (user && user.role === 'counselor') {
-      const refreshedCns = Storage.getCounselors().find((c) => c.id === user.counselor.id);
-      if (refreshedCns) {
-        setCurrentUser({ role: 'counselor', counselor: refreshedCns });
-      }
-    }
   };
 
   const handleLoginSuccess = (user: NonNullable<CurrentUser>) => {
@@ -253,6 +287,19 @@ export default function App() {
 
       {/* بدنه اصلی */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        {isCloudLoading && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl px-7 py-6 shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col items-center gap-3 text-center max-w-xs w-full">
+              <div className="w-10 h-10 rounded-full border-4 border-teal-500/30 border-t-teal-600 animate-spin" />
+              <div className="text-sm font-extrabold text-slate-900 dark:text-white">
+                در حال دریافت آخرین اطلاعات از سرور ابری...
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                همگام‌سازی با پایگاه داده مرکزی سامانه جامع سراهای دانشجویی
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ۱. صفحه فرود برای مراجعین قبل از ورود به سامانه (بدون نمایش آمار به عموم) */}
         {!currentUser && (
@@ -280,7 +327,7 @@ export default function App() {
                 </div>
 
                 <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black leading-tight tracking-tight mb-6">
-                  سامانه مدیریت و انتخاب سراهای دانشجویی
+                  سامانه جامع سراهای دانشجویی
                 </h1>
 
                 <div className="flex flex-wrap items-center gap-3">

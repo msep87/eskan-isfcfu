@@ -41,6 +41,8 @@ import {
   generateInitialRoomsAndBeds,
 } from './sampleData';
 
+const API_BASE_URL = 'https://khabgah-api.vercel.app/api';
+
 const STORAGE_KEYS = {
   SETTINGS: 'farhangian_dorm_settings_prod',
   DORMITORIES: 'farhangian_dorm_dormitories_prod',
@@ -138,6 +140,26 @@ export function initializeStorageIfNeeded(): void {
   }
 }
 
+// مدیریت زمان و وضعیت همگام‌سازی ابری برای جلوگیری از تداخل نوشتن و خواندن
+const keyWriteTimestamps: Record<string, number> = {};
+let activeSyncPromise: Promise<boolean> | null = null;
+const SYNCABLE_KEYS = Object.values(STORAGE_KEYS).filter((k) => k !== STORAGE_KEYS.CURRENT_USER);
+
+function pushKeyToCloud<T>(key: string, value: T): void {
+  if (key === STORAGE_KEYS.CURRENT_USER) return;
+  keyWriteTimestamps[key] = Date.now();
+
+  if (typeof fetch !== 'function') return;
+
+  fetch(`${API_BASE_URL}/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, value }),
+  }).catch((err) => {
+    console.warn(`Cloud sync POST failed for key ${key}:`, err);
+  });
+}
+
 // تابع کمکی برای خواندن از localStorage
 function get<T>(key: string, defaultValue: T): T {
   try {
@@ -149,10 +171,11 @@ function get<T>(key: string, defaultValue: T): T {
   }
 }
 
-// تابع کمکی برای نوشتن در localStorage
+// تابع کمکی برای نوشتن در localStorage و ارسال غیرهمگام به سرور ابری
 function set<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    pushKeyToCloud(key, value);
   } catch (e) {
     console.error(`Error writing ${key} to localStorage`, e);
   }
@@ -957,8 +980,13 @@ export const Storage = {
       warehouseStaff: Storage.getWarehouseStaff(),
       inventoryItems: Storage.getInventoryItems(),
       warehouseRequests: Storage.getWarehouseRequests(),
+      shiftSchedules: Storage.getShiftSchedules(),
+      shiftReports: Storage.getShiftReports(),
+      counselors: Storage.getCounselors(),
+      counselorShifts: Storage.getCounselorShifts(),
+      counselorReports: Storage.getCounselorReports(),
       exportedAt: new Date().toISOString(),
-      appName: 'سامانه مدیریت سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
+      appName: 'سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
     };
 
     const blob = new Blob([JSON.stringify(fullBackup, null, 2)], { type: 'application/json' });
@@ -989,6 +1017,11 @@ export const Storage = {
         if (data.warehouseStaff) Storage.setWarehouseStaff(data.warehouseStaff);
         if (data.inventoryItems) Storage.setInventoryItems(data.inventoryItems);
         if (data.warehouseRequests) Storage.setWarehouseRequests(data.warehouseRequests);
+        if (data.shiftSchedules) Storage.setShiftSchedules(data.shiftSchedules);
+        if (data.shiftReports) Storage.setShiftReports(data.shiftReports);
+        if (data.counselors) Storage.setCounselors(data.counselors);
+        if (data.counselorShifts) Storage.setCounselorShifts(data.counselorShifts);
+        if (data.counselorReports) Storage.setCounselorReports(data.counselorReports);
         return true;
       }
       return false;
@@ -1191,10 +1224,11 @@ export const Storage = {
     };
   },
 
-  // بازنشانی به داده‌های اولیه
+  // بازنشانی به داده‌های اولیه و همگام‌سازی با دیتابیس ابری
   resetToDefaults: () => {
     localStorage.clear();
     initializeStorageIfNeeded();
+    void Storage.syncAllToCloud();
   },
 
   // تغییر کلمه عبور برای تمام نقش‌ها
@@ -1868,7 +1902,156 @@ export const Storage = {
     Storage.setCounselorReports(filtered);
     return { success: true };
   },
+
+  // -------------------------------------------------------------
+  // توابع همگام‌سازی دوطرفه با دیتابیس ابری MongoDB Atlas
+  // -------------------------------------------------------------
+  fetchStudentsFromDB: async (): Promise<Student[] | null> => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${API_BASE_URL}/students`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) return null;
+      const rawData = await res.json();
+      if (!Array.isArray(rawData)) return null;
+
+      const cleanStudents: Student[] = rawData.map((item: Record<string, unknown>) => {
+        const { _id, __v, ...rest } = item;
+        void _id;
+        void __v;
+        return rest as unknown as Student;
+      });
+
+      const lastLocalWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
+      if (Date.now() - lastLocalWrite > 5000 && cleanStudents.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(cleanStudents));
+      }
+      return cleanStudents;
+    } catch (err) {
+      console.warn('fetchStudentsFromDB error:', err);
+      return null;
+    }
+  },
+
+  addStudentToDB: async (
+    newStudent: Student
+  ): Promise<{ success: boolean; student?: Student; message?: string }> => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/students`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newStudent),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return {
+          success: false,
+          message: (data as { message?: string })?.message || 'خطا در ثبت دانشجو در دیتابیس ابری',
+        };
+      }
+      return { success: true, student: (data as { student?: Student })?.student || newStudent };
+    } catch (err) {
+      console.warn('addStudentToDB error:', err);
+      return { success: false, message: 'عدم دسترسی به سرور ابری' };
+    }
+  },
+
+  syncAllToCloud: async (): Promise<boolean> => {
+    try {
+      const posts = SYNCABLE_KEYS.map(async (key) => {
+        const raw = localStorage.getItem(key);
+        if (!raw) return;
+        const value = JSON.parse(raw);
+        keyWriteTimestamps[key] = Date.now();
+        await fetch(`${API_BASE_URL}/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key, value }),
+        });
+      });
+      await Promise.allSettled(posts);
+      return true;
+    } catch (err) {
+      console.warn('syncAllToCloud error:', err);
+      return false;
+    }
+  },
+
+  syncFromCloud: async (): Promise<boolean> => {
+    if (activeSyncPromise) {
+      return activeSyncPromise;
+    }
+
+    activeSyncPromise = (async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+      try {
+        const [syncResult, studentsResult] = await Promise.allSettled([
+          fetch(`${API_BASE_URL}/sync`, { method: 'GET', cache: 'no-store', signal: controller.signal }),
+          fetch(`${API_BASE_URL}/students`, { method: 'GET', cache: 'no-store', signal: controller.signal }),
+        ]);
+
+        let syncedAny = false;
+        let cloudMap: Record<string, unknown> | null = null;
+
+        if (syncResult.status === 'fulfilled' && syncResult.value.ok) {
+          const parsed = await syncResult.value.json();
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            cloudMap = parsed as Record<string, unknown>;
+            syncedAny = true;
+
+            for (const [key, val] of Object.entries(cloudMap)) {
+              if (!SYNCABLE_KEYS.includes(key)) continue;
+              if (val === undefined || val === null) continue;
+              const lastLocalWrite = keyWriteTimestamps[key] || 0;
+              if (Date.now() - lastLocalWrite < 5000) continue;
+              localStorage.setItem(key, JSON.stringify(val));
+            }
+          }
+        }
+
+        if (studentsResult.status === 'fulfilled' && studentsResult.value.ok) {
+          const rawStudents = await studentsResult.value.json();
+          if (Array.isArray(rawStudents)) {
+            syncedAny = true;
+            const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
+            if (Date.now() - lastStudentWrite >= 5000) {
+              const cleanStudents: Student[] = rawStudents.map((item: Record<string, unknown>) => {
+                const { _id, __v, ...rest } = item;
+                void _id;
+                void __v;
+                return rest as unknown as Student;
+              });
+
+              const cloudSyncStudents = cloudMap?.[STORAGE_KEYS.STUDENTS];
+              if (!Array.isArray(cloudSyncStudents) || (cloudSyncStudents.length === 0 && cleanStudents.length > 0)) {
+                localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(cleanStudents));
+              }
+            }
+          }
+        }
+
+        return syncedAny;
+      } catch (err) {
+        console.warn('syncFromCloud error:', err);
+        return false;
+      } finally {
+        clearTimeout(timeoutId);
+        activeSyncPromise = null;
+      }
+    })();
+
+    return activeSyncPromise;
+  },
 };
+
 
 
 
