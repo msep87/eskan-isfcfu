@@ -57,6 +57,7 @@ import {
   Plus,
   Trash2,
   Lock,
+  Unlock,
   Palette,
   KeyRound,
   GraduationCap,
@@ -289,6 +290,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [roomFloorInput, setRoomFloorInput] = useState(1);
   const [roomCapacityInput, setRoomCapacityInput] = useState(4);
   const [structureDormFilter, setStructureDormFilter] = useState<string>(dorms[0]?.id || 'all');
+
+  // ویرایش و تغییر نام سرا و اتاق توسط مدیر
+  const [editingDorm, setEditingDorm] = useState<Dormitory | null>(null);
+  const [editDormName, setEditDormName] = useState('');
+  const [editDormCampus, setEditDormCampus] = useState('');
+  const [editDormGender, setEditDormGender] = useState<'brothers' | 'sisters'>('brothers');
+  const [editDormFloors, setEditDormFloors] = useState(3);
+  const [editDormSupervisor, setEditDormSupervisor] = useState('');
+  const [editDormAddress, setEditDormAddress] = useState('');
+  const [editDormError, setEditDormError] = useState<string | null>(null);
+
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  const [editRoomNumber, setEditRoomNumber] = useState('');
+  const [editRoomFloor, setEditRoomFloor] = useState(1);
+  const [editRoomError, setEditRoomError] = useState<string | null>(null);
 
   // فرم تنظیمات بازه زمانی و سال تحصیلی
   const [localSettings, setLocalSettings] = useState<AppSettings>({ ...settings });
@@ -576,6 +592,64 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setTimeout(() => setApprovalFeedback(null), 3500);
     } else {
       alert(res.message);
+    }
+  };
+
+  // باز کردن مدال ویرایش و تغییر نام سرا
+  const handleOpenEditDorm = (dorm: Dormitory) => {
+    setEditingDorm(dorm);
+    setEditDormName(dorm.name);
+    setEditDormCampus(dorm.campus || '');
+    setEditDormGender(dorm.gender);
+    setEditDormFloors(dorm.totalFloors || 1);
+    setEditDormSupervisor(dorm.supervisorName || '');
+    setEditDormAddress(dorm.address || '');
+    setEditDormError(null);
+  };
+
+  const handleEditDormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDorm) return;
+    const res = Storage.updateDormitory(editingDorm.id, {
+      name: editDormName.trim(),
+      campus: editDormCampus.trim(),
+      gender: editDormGender,
+      totalFloors: editDormFloors,
+      supervisorName: editDormSupervisor.trim() || undefined,
+      address: editDormAddress.trim() || undefined,
+    });
+    if (res.success) {
+      setApprovalFeedback({ type: 'success', message: res.message });
+      setEditingDorm(null);
+      onRefreshData();
+      setTimeout(() => setApprovalFeedback(null), 3500);
+    } else {
+      setEditDormError(res.message);
+    }
+  };
+
+  // باز کردن مدال ویرایش و تغییر نام / شماره اتاق
+  const handleOpenEditRoom = (room: Room) => {
+    setEditingRoom(room);
+    setEditRoomNumber(room.roomNumber);
+    setEditRoomFloor(room.floor ?? 1);
+    setEditRoomError(null);
+  };
+
+  const handleEditRoomSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRoom) return;
+    const res = Storage.updateRoom(editingRoom.id, {
+      roomNumber: editRoomNumber.trim(),
+      floor: editRoomFloor,
+    });
+    if (res.success) {
+      setApprovalFeedback({ type: 'success', message: res.message });
+      setEditingRoom(null);
+      onRefreshData();
+      setTimeout(() => setApprovalFeedback(null), 3500);
+    } else {
+      setEditRoomError(res.message);
     }
   };
 
@@ -909,6 +983,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onUpdateSettings(localSettings);
     setSaveStatus(true);
     setTimeout(() => setSaveStatus(false), 3000);
+  };
+
+  // دکمه فوری باز یا بسته کردن امکان انتخاب اتاق و تخت برای دانشجویان
+  const handleToggleSelectionActive = () => {
+    const nextActive = !settings.selectionActive;
+    const updated: AppSettings = {
+      ...settings,
+      selectionActive: nextActive,
+    };
+    setLocalSettings(updated);
+    Storage.setSettings(updated);
+    Storage.addActivityLog({
+      category: 'settings',
+      action: nextActive ? 'باز کردن امکان انتخاب اتاق و تخت' : 'بستن امکان انتخاب اتاق و تخت',
+      details: nextActive
+        ? 'امکان انتخاب و جابجایی اتاق و تخت توسط مدیر سامانه برای دانشجویان باز (فعال) شد.'
+        : 'امکان انتخاب و جابجایی اتاق و تخت توسط مدیر سامانه برای دانشجویان بسته (غیرفعال) شد.',
+      targetName: nextActive ? 'انتخاب اتاق: باز' : 'انتخاب اتاق: بسته',
+      severity: nextActive ? 'info' : 'warning',
+    });
+    setActivityLogs(Storage.getActivityLogs());
+    onUpdateSettings(updated);
+    setApprovalFeedback({
+      type: 'success',
+      message: nextActive
+        ? 'امکان انتخاب اتاق و تخت برای دانشجویان با موفقیت باز (فعال) و در سرور ذخیره شد.'
+        : 'امکان انتخاب اتاق و تخت برای دانشجویان با موفقیت بسته (غیرفعال) و در سرور ذخیره شد.',
+    });
+    setTimeout(() => setApprovalFeedback(null), 4000);
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1313,6 +1416,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="flex flex-wrap gap-2.5">
+            <button
+              type="button"
+              onClick={handleToggleSelectionActive}
+              className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-md cursor-pointer border ${
+                settings.selectionActive
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-400/50 shadow-emerald-600/25'
+                  : 'bg-rose-600 hover:bg-rose-700 text-white border-rose-400/50 shadow-rose-600/25'
+              }`}
+              title="کلیک برای باز کردن یا بستن فوری امکان انتخاب اتاق و تخت توسط دانشجویان"
+            >
+              {settings.selectionActive ? (
+                <Unlock className="w-4 h-4 shrink-0" />
+              ) : (
+                <Lock className="w-4 h-4 shrink-0" />
+              )}
+              <span>
+                {settings.selectionActive
+                  ? 'انتخاب اتاق و تخت: باز (کلیک برای بستن)'
+                  : 'انتخاب اتاق و تخت: بسته (کلیک برای باز کردن)'}
+              </span>
+            </button>
+
             <button
               onClick={onOpenAppearance}
               className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-amber-600/20 cursor-pointer"
@@ -2213,6 +2338,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             {dormRooms.length} اتاق • {dormBeds.length} تخت ({dormVacant} خالی)
                           </span>
                           <button
+                            type="button"
+                            onClick={() => handleOpenEditDorm(dorm)}
+                            className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                            title="تغییر نام و ویرایش مشخصات این سرا"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>تغییر نام / ویرایش سرا</span>
+                          </button>
+                          <button
                             onClick={() => handleDeleteDormitory(dorm.id, dorm.name)}
                             className="p-1.5 text-slate-400 hover:text-rose-600 transition cursor-pointer"
                             title="حذف کامل این سرا"
@@ -2260,6 +2394,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     >
                                       {occupiedBeds.length} از {roomBeds.length} تخت پر
                                     </span>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEditRoom(room)}
+                                      className="p-1 text-slate-400 hover:text-amber-600 transition cursor-pointer"
+                                      title="تغییر نام / شماره و طبقه اتاق"
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5" />
+                                    </button>
 
                                     <button
                                       onClick={() => handleDeleteRoom(room.id, room.roomNumber)}
@@ -6516,6 +6659,209 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 >
                   <Save className="w-4 h-4" />
                   <span>ثبت اتاق و ساخت تخت‌ها</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* مدال ویرایش و تغییر نام سرای دانشجویی توسط مدیر */}
+      {editingDorm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-amber-600" />
+                <span>تغییر نام و ویرایش سرای دانشجویی</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingDorm(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditDormSubmit} className="space-y-3 text-xs">
+              {editDormError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 dark:text-rose-300 font-bold">
+                  {editDormError}
+                </div>
+              )}
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  نام کامل سرا *
+                </label>
+                <input
+                  type="text"
+                  value={editDormName}
+                  onChange={(e) => setEditDormName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  پردیس مربوطه
+                </label>
+                <input
+                  type="text"
+                  value={editDormCampus}
+                  onChange={(e) => setEditDormCampus(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    جنسیت
+                  </label>
+                  <select
+                    value={editDormGender}
+                    onChange={(e) => setEditDormGender(e.target.value as 'brothers' | 'sisters')}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                  >
+                    <option value="brothers">برادران</option>
+                    <option value="sisters">خواهران</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    تعداد طبقات
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="15"
+                    value={editDormFloors}
+                    onChange={(e) => setEditDormFloors(Number(e.target.value) || 1)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  نام سرپرست مسئول سرا
+                </label>
+                <input
+                  type="text"
+                  value={editDormSupervisor}
+                  onChange={(e) => setEditDormSupervisor(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  نشانی یا موقعیت
+                </label>
+                <input
+                  type="text"
+                  value={editDormAddress}
+                  onChange={(e) => setEditDormAddress(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingDorm(null)}
+                  className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 transition cursor-pointer"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>ذخیره تغییرات سرا</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* مدال ویرایش و تغییر نام / شماره اتاق توسط مدیر */}
+      {editingRoom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-amber-600" />
+                <span>تغییر نام / شماره اتاق ({editingRoom.roomNumber})</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingRoom(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditRoomSubmit} className="space-y-3.5 text-xs">
+              {editRoomError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 dark:text-rose-300 font-bold">
+                  {editRoomError}
+                </div>
+              )}
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  شماره یا نام جدید اتاق *
+                </label>
+                <input
+                  type="text"
+                  value={editRoomNumber}
+                  onChange={(e) => setEditRoomNumber(e.target.value)}
+                  placeholder="مثال: 105 یا اتاق مطالعه"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  طبقه
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="15"
+                  value={editRoomFloor}
+                  onChange={(e) => setEditRoomFloor(Number(e.target.value) || 0)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                  required
+                />
+                <span className="text-[10px] text-slate-400 mt-0.5 block">۰ = همکف، ۱ = طبقه اول</span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingRoom(null)}
+                  className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 transition cursor-pointer"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>ثبت نام جدید اتاق</span>
                 </button>
               </div>
             </form>

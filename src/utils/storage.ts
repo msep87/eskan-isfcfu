@@ -430,6 +430,122 @@ export const Storage = {
     return { success: true, message: 'سرا و کلیه اتاق‌ها و تخت‌های مربوطه با موفقیت حذف گردیدند.' };
   },
 
+  // ویرایش و تغییر نام سرای دانشجویی
+  updateDormitory: (
+    dormId: string,
+    updates: Partial<Dormitory>
+  ): { success: boolean; message: string } => {
+    const dorms = Storage.getDormitories();
+    const idx = dorms.findIndex((d) => d.id === dormId);
+    if (idx === -1) {
+      return { success: false, message: 'سرای مورد نظر یافت نشد.' };
+    }
+
+    const oldDorm = dorms[idx];
+    const cleanName = updates.name !== undefined ? updates.name.trim() : oldDorm.name;
+    if (!cleanName) {
+      return { success: false, message: 'نام سرا نمی‌تواند خالی باشد.' };
+    }
+
+    if (dorms.some((d) => d.id !== dormId && d.name.trim() === cleanName)) {
+      return { success: false, message: `سرایی با نام «${cleanName}» قبلاً در سامانه ثبت شده است.` };
+    }
+
+    const updatedDorm: Dormitory = {
+      ...oldDorm,
+      ...updates,
+      name: cleanName,
+      campus: updates.campus !== undefined ? updates.campus.trim() : oldDorm.campus,
+    };
+    dorms[idx] = updatedDorm;
+    Storage.setDormitories(dorms);
+
+    if (cleanName !== oldDorm.name) {
+      // بروزرسانی نام سرا در پرونده دانشجویان
+      const students = Storage.getStudents();
+      let stChanged = false;
+      students.forEach((s) => {
+        if (s.assignedDormId === dormId) {
+          s.assignedDormName = cleanName;
+          stChanged = true;
+        }
+      });
+      if (stChanged) Storage.setStudents(students);
+
+      // بروزرسانی در ارزیابی‌ها و تذکرات
+      const evals = Storage.getStudentEvaluations();
+      let evChanged = false;
+      evals.forEach((ev) => {
+        if (ev.dormId === dormId) {
+          ev.dormName = cleanName;
+          evChanged = true;
+        }
+      });
+      if (evChanged) Storage.setStudentEvaluations(evals);
+
+      // بروزرسانی در مأموریت‌های تأسیساتی
+      const tasks = Storage.getMaintenanceTasks();
+      let tChanged = false;
+      tasks.forEach((t) => {
+        if (t.dormId === dormId) {
+          t.dormName = cleanName;
+          tChanged = true;
+        }
+      });
+      if (tChanged) set(STORAGE_KEYS.MAINTENANCE_TASKS, tasks);
+
+      // بروزرسانی در حواله‌های انبار
+      const reqs = Storage.getWarehouseRequests();
+      let wChanged = false;
+      reqs.forEach((w) => {
+        if (w.dormId === dormId) {
+          w.dormName = cleanName;
+          wChanged = true;
+        }
+      });
+      if (wChanged) set(STORAGE_KEYS.WAREHOUSE_REQUESTS, reqs);
+
+      // بروزرسانی در شیفت‌ها و گزارش شیفت‌ها
+      const schedules = Storage.getShiftSchedules();
+      let scChanged = false;
+      schedules.forEach((sc) => {
+        if (sc.dormId === dormId) {
+          sc.dormName = cleanName;
+          scChanged = true;
+        }
+      });
+      if (scChanged) Storage.setShiftSchedules(schedules);
+
+      const shiftReports = Storage.getShiftReports();
+      let srChanged = false;
+      shiftReports.forEach((sr) => {
+        if (sr.dormId === dormId) {
+          sr.dormName = cleanName;
+          srChanged = true;
+        }
+      });
+      if (srChanged) set(STORAGE_KEYS.SHIFT_REPORTS, shiftReports);
+    }
+
+    Storage.addActivityLog({
+      category: 'dorm_structure',
+      action: cleanName !== oldDorm.name ? 'تغییر نام و ویرایش سرا' : 'ویرایش مشخصات سرا',
+      details:
+        cleanName !== oldDorm.name
+          ? `نام سرا از «${oldDorm.name}» به «${cleanName}» تغییر یافت.`
+          : `مشخصات سرای «${cleanName}» بروزرسانی شد.`,
+      targetName: cleanName,
+    });
+
+    return {
+      success: true,
+      message:
+        cleanName !== oldDorm.name
+          ? `نام سرا با موفقیت به «${cleanName}» تغییر یافت.`
+          : `مشخصات سرای «${cleanName}» با موفقیت بروزرسانی شد.`,
+    };
+  },
+
   // افزودن تخت مجزا به اتاق
   addBedToRoom: (
     roomId: string,
@@ -507,7 +623,7 @@ export const Storage = {
     return { success: true, message: 'تخت با موفقیت حذف گردید.' };
   },
 
-  // ویرایش مشخصات و امکانات و سهمیه‌های اتاق
+  // ویرایش مشخصات، تغییر نام/شماره و امکانات و سهمیه‌های اتاق
   updateRoom: (
     roomId: string,
     updates: Partial<Room>
@@ -517,9 +633,76 @@ export const Storage = {
     if (idx === -1) {
       return { success: false, message: 'اتاق یافت نشد.' };
     }
-    rooms[idx] = { ...rooms[idx], ...updates };
+
+    const oldRoom = rooms[idx];
+    const cleanRoomNumber =
+      updates.roomNumber !== undefined ? updates.roomNumber.trim() : oldRoom.roomNumber;
+    if (!cleanRoomNumber) {
+      return { success: false, message: 'نام یا شماره اتاق نمی‌تواند خالی باشد.' };
+    }
+
+    if (
+      cleanRoomNumber !== oldRoom.roomNumber &&
+      rooms.some((r) => r.dormId === oldRoom.dormId && r.id !== roomId && r.roomNumber.trim() === cleanRoomNumber)
+    ) {
+      return {
+        success: false,
+        message: `اتاقی با شماره/نام «${cleanRoomNumber}» در این سرا از قبل وجود دارد.`,
+      };
+    }
+
+    rooms[idx] = { ...oldRoom, ...updates, roomNumber: cleanRoomNumber };
     Storage.setRooms(rooms);
-    return { success: true, message: 'اطلاعات و امکانات اتاق با موفقیت بروزرسانی شد.' };
+
+    if (cleanRoomNumber !== oldRoom.roomNumber) {
+      // بروزرسانی نام/شماره اتاق در پرونده دانشجویان
+      const students = Storage.getStudents();
+      let stChanged = false;
+      students.forEach((s) => {
+        if (s.assignedRoomId === roomId) {
+          s.assignedRoomNumber = cleanRoomNumber;
+          stChanged = true;
+        }
+      });
+      if (stChanged) Storage.setStudents(students);
+
+      // بروزرسانی در ارزیابی‌ها و تذکرات
+      const evals = Storage.getStudentEvaluations();
+      let evChanged = false;
+      evals.forEach((ev) => {
+        if (ev.roomId === roomId) {
+          ev.roomNumber = cleanRoomNumber;
+          evChanged = true;
+        }
+      });
+      if (evChanged) Storage.setStudentEvaluations(evals);
+
+      // بروزرسانی در مأموریت‌های تأسیساتی
+      const tasks = Storage.getMaintenanceTasks();
+      let tChanged = false;
+      tasks.forEach((t) => {
+        if (t.dormId === oldRoom.dormId && t.roomNumber === oldRoom.roomNumber) {
+          t.roomNumber = cleanRoomNumber;
+          tChanged = true;
+        }
+      });
+      if (tChanged) set(STORAGE_KEYS.MAINTENANCE_TASKS, tasks);
+
+      Storage.addActivityLog({
+        category: 'dorm_structure',
+        action: 'تغییر نام / شماره اتاق',
+        details: `نام/شماره اتاق از «${oldRoom.roomNumber}» به «${cleanRoomNumber}» تغییر یافت.`,
+        targetName: `اتاق ${cleanRoomNumber}`,
+      });
+    }
+
+    return {
+      success: true,
+      message:
+        cleanRoomNumber !== oldRoom.roomNumber
+          ? `نام/شماره اتاق با موفقیت از «${oldRoom.roomNumber}» به «${cleanRoomNumber}» تغییر یافت.`
+          : 'اطلاعات و امکانات اتاق با موفقیت بروزرسانی شد.',
+    };
   },
 
   deleteRoom: (roomId: string): { success: boolean; message: string } => {

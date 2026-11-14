@@ -18,6 +18,8 @@ import {
   Plus,
   Trash2,
   FileText,
+  Edit3,
+  Save,
 } from 'lucide-react';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 
@@ -84,6 +86,12 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
     room: Room;
     bed: Bed;
   } | null>(null);
+
+  // ویرایش و تغییر نام اتاق
+  const [editingRoomModal, setEditingRoomModal] = useState<Room | null>(null);
+  const [editRoomNumberInput, setEditRoomNumberInput] = useState('');
+  const [editRoomFloorInput, setEditRoomFloorInput] = useState(1);
+  const [editRoomError, setEditRoomError] = useState<string | null>(null);
 
   const currentDorm = dorms.find((d) => d.id === selectedDormId) || dorms[0];
   const dormRooms = rooms.filter((r) => r.dormId === selectedDormId);
@@ -167,6 +175,24 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
       setActionMessage({ type: 'success', text: res.message });
       onDataChanged();
       setTimeout(() => setActionMessage(null), 3500);
+    }
+  };
+
+  // ویرایش و تغییر نام / شماره اتاق
+  const handleEditRoomSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRoomModal) return;
+    const res = Storage.updateRoom(editingRoomModal.id, {
+      roomNumber: editRoomNumberInput.trim(),
+      floor: editRoomFloorInput,
+    });
+    if (res.success) {
+      setActionMessage({ type: 'success', text: res.message });
+      setEditingRoomModal(null);
+      onDataChanged();
+      setTimeout(() => setActionMessage(null), 3500);
+    } else {
+      setEditRoomError(res.message);
     }
   };
 
@@ -315,6 +341,19 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                       فاقد نماینده
                     </span>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingRoomModal(room);
+                      setEditRoomNumberInput(room.roomNumber);
+                      setEditRoomFloorInput(room.floor ?? 1);
+                      setEditRoomError(null);
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-amber-600 transition cursor-pointer rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950"
+                    title="تغییر نام / شماره و طبقه اتاق"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
                   <button
                     onClick={() => handleDeleteRoom(room.id, room.roomNumber)}
                     className="p-1.5 text-slate-400 hover:text-rose-600 transition cursor-pointer rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950"
@@ -747,6 +786,80 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsCreateRoomModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-50"
+                >
+                  انصراف
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* مدال تغییر نام / شماره اتاق */}
+      {editingRoomModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-amber-600" />
+                <span>تغییر نام / شماره اتاق ({editingRoomModal.roomNumber})</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingRoomModal(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditRoomSubmit} className="space-y-3.5 text-xs">
+              {editRoomError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 dark:text-rose-300 font-bold">
+                  {editRoomError}
+                </div>
+              )}
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  شماره یا نام جدید اتاق *
+                </label>
+                <input
+                  type="text"
+                  value={editRoomNumberInput}
+                  onChange={(e) => setEditRoomNumberInput(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  طبقه
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="15"
+                  value={editRoomFloorInput}
+                  onChange={(e) => setEditRoomFloorInput(Number(e.target.value) || 0)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>ثبت تغییر نام اتاق</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingRoomModal(null)}
                   className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-50"
                 >
                   انصراف

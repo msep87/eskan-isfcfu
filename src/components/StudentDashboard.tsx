@@ -341,17 +341,21 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
           }`}
         >
-          {!student.isProfileCompleted ? (
+          {!student.isProfileCompleted || !settings.selectionActive ? (
             <Lock className="w-4 h-4 text-amber-600 shrink-0" />
           ) : (
             <Sparkles className="w-4 h-4 text-amber-500" />
           )}
           <span>انتخاب یا جابجایی اتاق و تخت بصری</span>
-          {!student.isProfileCompleted && (
+          {!student.isProfileCompleted ? (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-extrabold mr-1 shrink-0">
               قفل (نیازمند تکمیل پرونده)
             </span>
-          )}
+          ) : !settings.selectionActive ? (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-extrabold mr-1 shrink-0">
+              بسته توسط مدیر
+            </span>
+          ) : null}
         </button>
 
         <button
@@ -622,18 +626,28 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             </button>
           </div>
         ) : (
-          <VisualBedPicker
-            student={student}
-            dorms={dorms}
-            rooms={rooms}
-            beds={beds}
-            students={students}
-            settings={settings}
-            onBedSelected={() => {
-              onRefreshData();
-              setActiveTab('overview');
-            }}
-          />
+          <div className="space-y-4">
+            {!settings.selectionActive && (
+              <div className="p-4 rounded-3xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 flex items-center gap-3 text-xs font-bold">
+                <Lock className="w-5 h-5 text-rose-600 shrink-0" />
+                <span>
+                  امکان انتخاب یا جابجایی اتاق و تخت هم‌اکنون توسط مدیر سامانه بسته (غیرفعال) شده است. تنها مشاهده وضعیت اتاق‌ها فعال می‌باشد.
+                </span>
+              </div>
+            )}
+            <VisualBedPicker
+              student={student}
+              dorms={dorms}
+              rooms={rooms}
+              beds={beds}
+              students={students}
+              settings={settings}
+              onBedSelected={() => {
+                onRefreshData();
+                setActiveTab('overview');
+              }}
+            />
+          </div>
         )
       )}
 

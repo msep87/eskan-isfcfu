@@ -30,7 +30,32 @@ import {
   HelpCircle,
   ShieldCheck,
   CheckCheck,
+  PieChart as PieChartIcon,
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+} from 'recharts';
+
+const ANALYTICS_COLORS = [
+  '#0d9488',
+  '#4f46e5',
+  '#f59e0b',
+  '#0284c7',
+  '#ec4899',
+  '#10b981',
+  '#8b5cf6',
+  '#ef4444',
+];
 
 interface ReportsViewProps {
   isOpen: boolean;
@@ -49,7 +74,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   beds,
   students,
 }) => {
-  const [tab, setTab] = useState<'vacant' | 'provinces' | 'majors' | 'health' | 'domains'>('domains');
+  const [tab, setTab] = useState<'analytics' | 'domains' | 'vacant' | 'provinces' | 'majors' | 'health'>('analytics');
+  const [analyticsDormFilter, setAnalyticsDormFilter] = useState<string>('all');
   const [selectedDormFilter, setSelectedDormFilter] = useState<string>('all');
   const [selectedTierFilter, setSelectedTierFilter] = useState<'all' | 'lower' | 'upper'>('all');
 
@@ -140,6 +166,105 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const handlePrint = () => {
     window.print();
   };
+
+  // محاسبه داده‌های تحلیل آماری نمودارهای Recharts
+  const dormAnalyticsData = useMemo(() => {
+    return dorms.map((d, index) => {
+      const dRooms = rooms.filter((r) => r.dormId === d.id);
+      const dBeds = beds.filter((b) => b.dormId === d.id);
+      const occupiedBeds = dBeds.filter((b) => Boolean(b.studentId)).length;
+      const vacantBeds = Math.max(0, dBeds.length - occupiedBeds);
+      const assignedStudents = students.filter(
+        (s) => s.assignedDormId === d.id && s.assignmentStatus !== 'none'
+      ).length;
+      const studentCount = Math.max(assignedStudents, occupiedBeds);
+      const totalCap = dBeds.length;
+      const occupancyPercent = totalCap > 0 ? Math.round((occupiedBeds / totalCap) * 100) : 0;
+
+      return {
+        id: d.id,
+        name: d.name,
+        shortName: d.name.length > 22 ? `${d.name.slice(0, 20)}…` : d.name,
+        campus: d.campus,
+        roomCount: dRooms.length,
+        totalBeds: totalCap,
+        occupiedBeds,
+        vacantBeds,
+        studentCount,
+        occupancyPercent,
+        color: ANALYTICS_COLORS[index % ANALYTICS_COLORS.length],
+      };
+    });
+  }, [dorms, rooms, beds, students]);
+
+  const unassignedStudentCount = useMemo(
+    () => students.filter((s) => !s.assignedBedId || s.assignmentStatus === 'none').length,
+    [students]
+  );
+
+  const studentDistributionPieData = useMemo(() => {
+    const slices = dormAnalyticsData
+      .filter((d) => d.studentCount > 0)
+      .map((d) => ({
+        name: d.name,
+        value: d.studentCount,
+        color: d.color,
+      }));
+    if (unassignedStudentCount > 0) {
+      slices.push({
+        name: 'فاقد اتاق / اسکان‌نیافته',
+        value: unassignedStudentCount,
+        color: '#94a3b8',
+      });
+    }
+    return slices;
+  }, [dormAnalyticsData, unassignedStudentCount]);
+
+  const roomCapacityBarData = useMemo(() => {
+    const targetRooms =
+      analyticsDormFilter === 'all'
+        ? rooms
+        : rooms.filter((r) => r.dormId === analyticsDormFilter);
+
+    return targetRooms.map((r) => {
+      const rBeds = beds.filter((b) => b.roomId === r.id);
+      const occupied = rBeds.filter((b) => Boolean(b.studentId)).length;
+      const vacant = Math.max(0, rBeds.length - occupied);
+      const dormName = dormsMap.get(r.dormId) || 'سرا';
+      return {
+        id: r.id,
+        label: analyticsDormFilter === 'all' ? `${r.roomNumber} (${dormName.slice(0, 10)})` : `اتاق ${r.roomNumber}`,
+        roomNumber: r.roomNumber,
+        dormName,
+        floor: r.floor,
+        total: rBeds.length,
+        occupied,
+        vacant,
+        occupancyPercent: rBeds.length > 0 ? Math.round((occupied / rBeds.length) * 100) : 0,
+      };
+    });
+  }, [rooms, beds, analyticsDormFilter, dormsMap]);
+
+  const overallCapacityStats = useMemo(() => {
+    const relevantBeds =
+      analyticsDormFilter === 'all'
+        ? beds
+        : beds.filter((b) => b.dormId === analyticsDormFilter);
+    const total = relevantBeds.length;
+    const occupied = relevantBeds.filter((b) => Boolean(b.studentId)).length;
+    const vacant = Math.max(0, total - occupied);
+    const rate = total > 0 ? Math.round((occupied / total) * 100) : 0;
+    return { total, occupied, vacant, rate };
+  }, [beds, analyticsDormFilter]);
+
+  const capacityStatusPieData = useMemo(
+    () =>
+      [
+        { name: 'تخت‌های پر (اشغال‌شده)', value: overallCapacityStats.occupied, color: '#0d9488' },
+        { name: 'تخت‌های خالی', value: overallCapacityStats.vacant, color: '#f59e0b' },
+      ].filter((item) => item.value > 0),
+    [overallCapacityStats]
+  );
 
   // بارگذاری داده‌های زنده حوزه‌ها
   const maintenanceTasks = useMemo(() => Storage.getMaintenanceTasks(), [isOpen, tab]);
@@ -465,8 +590,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         {/* تب‌ها */}
         <div className="flex flex-wrap gap-2 py-3 border-b border-slate-100 dark:border-slate-800">
           <button
+            onClick={() => setTab('analytics')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              tab === 'analytics'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            <PieChartIcon className="w-3.5 h-3.5" />
+            <span>تحلیل آماری و نمودارها (Recharts)</span>
+          </button>
+
+          <button
             onClick={() => setTab('domains')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
               tab === 'domains'
                 ? 'bg-teal-600 text-white shadow-xs'
                 : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
@@ -528,6 +665,324 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
         {/* محتوای تب‌ها */}
         <div className="flex-1 overflow-y-auto py-4">
+
+          {/* تب تحلیل آماری گرافیکی با Recharts */}
+          {tab === 'analytics' && (
+            <div className="space-y-6">
+              {/* نوار فیلتر سرا و خلاصه وضعیت */}
+              <div className="p-4 rounded-3xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <PieChartIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <div>
+                    <span className="font-extrabold text-xs text-slate-800 dark:text-slate-100 block">
+                      داشبورد تحلیل آماری توزیع دانشجویان و ظرفیت اتاق‌ها
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      مقایسه لحظه‌ای ظرفیت پر و خالی خوابگاه‌ها و اتاق‌ها با نمودار دایره‌ای و میله‌ای
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-slate-500 font-bold whitespace-nowrap">فیلتر سرا برای آمار اتاق‌ها:</span>
+                  <select
+                    value={analyticsDormFilter}
+                    onChange={(e) => setAnalyticsDormFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100"
+                  >
+                    <option value="all">همه سراهای دانشجویی ({dorms.length})</option>
+                    {dorms.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* کارت‌های خلاصه آمار */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/60">
+                  <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 block">
+                    کل دانشجویان ثبت‌شده
+                  </span>
+                  <div className="text-2xl font-black text-indigo-900 dark:text-indigo-100 mt-1">
+                    {students.length.toLocaleString('fa-IR')} <span className="text-xs font-bold">نفر</span>
+                  </div>
+                  <span className="text-[10px] text-indigo-600/80 dark:text-indigo-400">
+                    {unassignedStudentCount.toLocaleString('fa-IR')} نفر بدون اتاق
+                  </span>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
+                  <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">
+                    کل ظرفیت تخت‌ها
+                  </span>
+                  <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
+                    {overallCapacityStats.total.toLocaleString('fa-IR')} <span className="text-xs font-bold">تخت</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    در {(analyticsDormFilter === 'all' ? rooms : rooms.filter((r) => r.dormId === analyticsDormFilter)).length.toLocaleString('fa-IR')} اتاق
+                  </span>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-900/60">
+                  <span className="text-[11px] font-bold text-teal-700 dark:text-teal-300 block">
+                    تخت‌های پر (اشغال‌شده)
+                  </span>
+                  <div className="text-2xl font-black text-teal-800 dark:text-teal-200 mt-1">
+                    {overallCapacityStats.occupied.toLocaleString('fa-IR')} <span className="text-xs font-bold">({overallCapacityStats.rate}٪)</span>
+                  </div>
+                  <span className="text-[10px] text-teal-600/80 dark:text-teal-400">نرخ اشغال</span>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60">
+                  <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300 block">
+                    ظرفیت خالی باقی‌مانده
+                  </span>
+                  <div className="text-2xl font-black text-amber-800 dark:text-amber-200 mt-1">
+                    {overallCapacityStats.vacant.toLocaleString('fa-IR')} <span className="text-xs font-bold">تخت</span>
+                  </div>
+                  <span className="text-[10px] text-amber-600/80 dark:text-amber-400">آماده تخصیص</span>
+                </div>
+              </div>
+
+              {/* ردیف نمودارهای دایره‌ای (PieCharts) */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {/* نمودار دایره‌ای توزیع دانشجویان در خوابگاه‌های مختلف */}
+                <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+                  <div>
+                    <h4 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                      <Users className="w-4 h-4 text-indigo-600" />
+                      <span>نمودار دایره‌ای توزیع دانشجویان در خوابگاه‌ها</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      سهم هر سرا از جمعیت کل دانشجویان ثبت‌شده در سامانه
+                    </p>
+                  </div>
+
+                  {studentDistributionPieData.length === 0 ? (
+                    <div className="h-72 flex items-center justify-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl">
+                      داده‌ای برای رسم نمودار توزیع دانشجویان موجود نیست.
+                    </div>
+                  ) : (
+                    <div dir="ltr" className="w-full h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={studentDistributionPieData}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="48%"
+                            innerRadius={52}
+                            outerRadius={92}
+                            paddingAngle={3}
+                          >
+                            {studentDistributionPieData.map((entry, idx) => (
+                              <Cell key={`student-pie-${idx}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(value: any, name: any) => [`${Number(value).toLocaleString('fa-IR')} دانشجو`, String(name)]}
+                            contentStyle={{
+                              borderRadius: '12px',
+                              border: '1px solid #e2e8f0',
+                              fontSize: '12px',
+                              direction: 'rtl',
+                              textAlign: 'right',
+                            }}
+                          />
+                          <Legend
+                            wrapperStyle={{ fontSize: '11px', direction: 'rtl' }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+
+                {/* نمودار دایره‌ای آمار کل ظرفیت پر و خالی */}
+                <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+                  <div>
+                    <h4 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                      <BedIcon className="w-4 h-4 text-teal-600" />
+                      <span>نمودار دایره‌ای نسبت ظرفیت پر و خالی</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      نمای کلی تخت‌های اشغال‌شده در برابر تخت‌های خالی ({analyticsDormFilter === 'all' ? 'همه سراها' : dormsMap.get(analyticsDormFilter)})
+                    </p>
+                  </div>
+
+                  {capacityStatusPieData.length === 0 ? (
+                    <div className="h-72 flex items-center justify-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl">
+                      تختی برای نمایش وضعیت ظرفیت ثبت نشده است.
+                    </div>
+                  ) : (
+                    <div dir="ltr" className="w-full h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={capacityStatusPieData}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="48%"
+                            innerRadius={52}
+                            outerRadius={92}
+                            paddingAngle={4}
+                          >
+                            {capacityStatusPieData.map((entry, idx) => (
+                              <Cell key={`cap-pie-${idx}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(value: any, name: any) => [`${Number(value).toLocaleString('fa-IR')} تخت`, String(name)]}
+                            contentStyle={{
+                              borderRadius: '12px',
+                              border: '1px solid #e2e8f0',
+                              fontSize: '12px',
+                              direction: 'rtl',
+                              textAlign: 'right',
+                            }}
+                          />
+                          <Legend
+                            wrapperStyle={{ fontSize: '11px', direction: 'rtl' }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* نمودار میله‌ای مقایسه ظرفیت پر و خالی به تفکیک خوابگاه‌ها */}
+              <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+                <div>
+                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                    <Building className="w-4 h-4 text-teal-600" />
+                    <span>نمودار میله‌ای مقایسه ظرفیت پر و خالی به تفکیک خوابگاه‌ها</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    مقایسه تعداد تخت‌های پر و خالی در هر یک از سراهای دانشجویی
+                  </p>
+                </div>
+
+                {dormAnalyticsData.length === 0 ? (
+                  <div className="h-72 flex items-center justify-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl">
+                    سرایی برای نمایش نمودار ثبت نشده است.
+                  </div>
+                ) : (
+                  <div dir="ltr" className="w-full h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={dormAnalyticsData} margin={{ top: 10, right: 20, left: 0, bottom: 16 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="shortName" tick={{ fontSize: 11 }} />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                        <Tooltip
+                          formatter={(value: any, name: any) => [`${Number(value).toLocaleString('fa-IR')} تخت`, String(name)]}
+                          contentStyle={{
+                            borderRadius: '12px',
+                            border: '1px solid #e2e8f0',
+                            fontSize: '12px',
+                            direction: 'rtl',
+                            textAlign: 'right',
+                          }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: '11px', direction: 'rtl' }} />
+                        <Bar dataKey="occupiedBeds" name="ظرفیت پر (تخت اشغال)" fill="#0d9488" radius={[6, 6, 0, 0]} />
+                        <Bar dataKey="vacantBeds" name="ظرفیت خالی (تخت آماده)" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+
+              {/* نمودار میله‌ای آمار ظرفیت خالی و پر به تفکیک اتاق‌ها */}
+              <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-indigo-600" />
+                      <span>نمودار میله‌ای وضعیت ظرفیت پر و خالی اتاق‌ها</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      نمایش تخت‌های پر و خالی به ازای هر اتاق ({roomCapacityBarData.length.toLocaleString('fa-IR')} اتاق)
+                    </p>
+                  </div>
+                </div>
+
+                {roomCapacityBarData.length === 0 ? (
+                  <div className="h-72 flex items-center justify-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl">
+                    اتاقی در این سرا برای نمایش نمودار یافت نشد.
+                  </div>
+                ) : (
+                  <div dir="ltr" className="w-full h-80 overflow-x-auto">
+                    <div style={{ minWidth: Math.max(520, roomCapacityBarData.length * 46), height: '100%' }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={roomCapacityBarData} margin={{ top: 10, right: 20, left: 0, bottom: 24 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                          <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={0} />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                          <Tooltip
+                            formatter={(value: any, name: any) => [`${Number(value).toLocaleString('fa-IR')} تخت`, String(name)]}
+                            contentStyle={{
+                              borderRadius: '12px',
+                              border: '1px solid #e2e8f0',
+                              fontSize: '12px',
+                              direction: 'rtl',
+                              textAlign: 'right',
+                            }}
+                          />
+                          <Legend wrapperStyle={{ fontSize: '11px', direction: 'rtl' }} />
+                          <Bar dataKey="occupied" stackId="roomCap" name="تخت پر" fill="#4f46e5" radius={[0, 0, 0, 0]} />
+                          <Bar dataKey="vacant" stackId="roomCap" name="تخت خالی" fill="#10b981" radius={[6, 6, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* جدول خلاصه آماری سراها */}
+              <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                    <tr>
+                      <th className="p-3">نام سرا</th>
+                      <th className="p-3">پردیس</th>
+                      <th className="p-3 text-center">تعداد اتاق</th>
+                      <th className="p-3 text-center">کل ظرفیت</th>
+                      <th className="p-3 text-center">تخت پر</th>
+                      <th className="p-3 text-center">تخت خالی</th>
+                      <th className="p-3 text-center">درصد اشغال</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {dormAnalyticsData.map((d) => (
+                      <tr key={d.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="p-3 font-extrabold text-slate-900 dark:text-white">{d.name}</td>
+                        <td className="p-3 text-slate-500">{d.campus}</td>
+                        <td className="p-3 text-center font-bold">{d.roomCount.toLocaleString('fa-IR')}</td>
+                        <td className="p-3 text-center font-bold">{d.totalBeds.toLocaleString('fa-IR')}</td>
+                        <td className="p-3 text-center font-bold text-teal-700 dark:text-teal-300">
+                          {d.occupiedBeds.toLocaleString('fa-IR')}
+                        </td>
+                        <td className="p-3 text-center font-bold text-amber-600">
+                          {d.vacantBeds.toLocaleString('fa-IR')}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-extrabold text-[11px]">
+                            {d.occupancyPercent}٪
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* تب جامع گزارش ارجاعی و عملکرد حوزه‌ها در بازه زمانی دلخواه */}
           {tab === 'domains' && (
