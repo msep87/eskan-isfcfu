@@ -37,6 +37,7 @@ export const INITIAL_SETTINGS: AppSettings = {
   wallpaper: 'pattern-islamic',
   darkMode: false,
   adminPassword: '261',
+  studentSecondaryEditEnabled: false,
 };
 
 // سراهای دانشجویی اولیه (کاملاً خالی برای نسخه نهایی انتشار)

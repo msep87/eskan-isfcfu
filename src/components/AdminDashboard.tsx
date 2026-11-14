@@ -415,6 +415,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [stFormEmergency, setStFormEmergency] = useState('');
   const [stFormProvince, setStFormProvince] = useState('اصفهان');
   const [stFormCity, setStFormCity] = useState('اصفهان');
+  const [stFormParentPhone, setStFormParentPhone] = useState('');
+  const [stFormPostalAddress, setStFormPostalAddress] = useState('');
+  const [stFormBirthDate, setStFormBirthDate] = useState('1382/01/01');
+  const [stFormPhotoUrl, setStFormPhotoUrl] = useState<string>('');
+  const [stFormProfileCompleted, setStFormProfileCompleted] = useState<boolean>(true);
   const [stFormError, setStFormError] = useState<string | null>(null);
 
   const handleOpenAddStudent = () => {
@@ -429,6 +434,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormEmergency('');
     setStFormProvince('اصفهان');
     setStFormCity('اصفهان');
+    setStFormParentPhone('');
+    setStFormPostalAddress('');
+    setStFormBirthDate('1382/01/01');
+    setStFormPhotoUrl('');
+    setStFormProfileCompleted(false);
     setStFormError(null);
     setIsAddStudentModalOpen(true);
   };
@@ -445,8 +455,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormEmergency(st.emergencyPhone || '');
     setStFormProvince(st.province || 'اصفهان');
     setStFormCity(st.city || 'اصفهان');
+    setStFormParentPhone(st.parentPhone || '');
+    setStFormPostalAddress(st.postalAddress || '');
+    setStFormBirthDate(st.birthDate || '1382/01/01');
+    setStFormPhotoUrl(st.photoUrl || '');
+    setStFormProfileCompleted(Boolean(st.isProfileCompleted));
     setStFormError(null);
     setIsAddStudentModalOpen(true);
+  };
+
+  const handleAdminStudentPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      setStFormError('حجم تصویر پرسنلی نباید بیشتر از ۳ مگابایت باشد.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target?.result as string;
+      if (base64) setStFormPhotoUrl(base64);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSaveStudentSubmit = async (e: React.FormEvent) => {
@@ -465,8 +496,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         fatherName: stFormFatherName.trim(),
         mobile: stFormMobile.trim(),
         emergencyPhone: stFormEmergency.trim(),
+        parentPhone: stFormParentPhone.trim(),
         province: stFormProvince.trim(),
         city: stFormCity.trim(),
+        postalAddress: stFormPostalAddress.trim(),
+        birthDate: stFormBirthDate.trim() || '1382/01/01',
+        photoUrl: stFormPhotoUrl || undefined,
+        isProfileCompleted: stFormProfileCompleted,
       });
       setApprovalFeedback({ type: 'success', message: '⏳ در حال همگام‌سازی ویرایش در دیتابیس ابری...' });
       const syncRes = await Storage.waitForPendingCloudSync();
@@ -484,18 +520,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         fieldOfStudy: stFormField.trim(),
         entryTerm: stFormEntryTerm.trim(),
         fatherName: stFormFatherName.trim(),
-        birthDate: '1382/01/01',
+        birthDate: stFormBirthDate.trim() || '1382/01/01',
         province: stFormProvince.trim(),
         city: stFormCity.trim(),
+        postalAddress: stFormPostalAddress.trim(),
         phone: '',
         mobile: stFormMobile.trim(),
         emergencyPhone: stFormEmergency.trim(),
-        parentPhone: '',
+        parentPhone: stFormParentPhone.trim(),
         religion: 'اسلام، شیعه',
         previousDorm: '',
         previousRoom: '',
         previousScore: 100,
-        isProfileCompleted: true,
+        photoUrl: stFormPhotoUrl || undefined,
+        isProfileCompleted: stFormProfileCompleted,
         assignmentStatus: 'none',
       };
       setApprovalFeedback({ type: 'success', message: '⏳ در حال ارسال به دیتابیس ابری...' });
@@ -1031,6 +1069,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       message: nextActive
         ? 'امکان انتخاب اتاق و تخت برای دانشجویان با موفقیت باز (فعال) و در سرور ذخیره شد.'
         : 'امکان انتخاب اتاق و تخت برای دانشجویان با موفقیت بسته (غیرفعال) و در سرور ذخیره شد.',
+    });
+    setTimeout(() => setApprovalFeedback(null), 4000);
+  };
+
+  // دکمه فوری باز یا بسته کردن دسترسی ویرایش ثانویه اطلاعات و تغییر عکس توسط دانشجویان
+  const handleToggleStudentSecondaryEdit = () => {
+    const nextEnabled = !Boolean(localSettings.studentSecondaryEditEnabled);
+    const updated: AppSettings = {
+      ...localSettings,
+      studentSecondaryEditEnabled: nextEnabled,
+    };
+    setLocalSettings(updated);
+    Storage.setSettings(updated);
+    Storage.addActivityLog({
+      category: 'settings',
+      action: nextEnabled
+        ? 'باز کردن دسترسی ویرایش ثانویه اطلاعات دانشجویان'
+        : 'بستن دسترسی ویرایش ثانویه اطلاعات دانشجویان',
+      details: nextEnabled
+        ? 'امکان ویرایش مجدد اطلاعات و تغییر عکس پرسنلی برای دانشجویانی که پرونده خود را تکمیل کرده‌اند باز شد.'
+        : 'پس از ثبت اولیه پرونده، دسترسی ویرایش مجدد اطلاعات و تغییر عکس توسط دانشجو بسته شد.',
+      targetName: nextEnabled ? 'ویرایش ثانویه دانشجو: باز' : 'ویرایش ثانویه دانشجو: بسته',
+      severity: nextEnabled ? 'info' : 'warning',
+    });
+    setActivityLogs(Storage.getActivityLogs());
+    onUpdateSettings(updated);
+    setApprovalFeedback({
+      type: 'success',
+      message: nextEnabled
+        ? 'دسترسی ویرایش ثانویه اطلاعات و تغییر عکس برای دانشجویان باز شد.'
+        : 'دسترسی ویرایش ثانویه اطلاعات و تغییر عکس برای دانشجویان بسته (قفل) شد.',
     });
     setTimeout(() => setApprovalFeedback(null), 4000);
   };
@@ -1773,6 +1842,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }}
           onAssignStudentRoom={handleOpenAssignStudentModal}
           onEvictStudent={handleAdminEvictStudent}
+          studentSecondaryEditEnabled={Boolean(localSettings.studentSecondaryEditEnabled)}
+          onToggleStudentSecondaryEdit={handleToggleStudentSecondaryEdit}
         />
       )}
 
@@ -5084,6 +5155,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
 
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                <div>
+                  <div className="font-bold text-sm text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    {localSettings.studentSecondaryEditEnabled ? (
+                      <Unlock className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+                    )}
+                    <span>دسترسی ویرایش ثانویه اطلاعات و تغییر عکس توسط دانشجویان</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                    در صورت بسته بودن، دانشجو پس از تکمیل بار اول پرونده دیگر قادر به تغییر اطلاعات یا بارگذاری مجدد عکس نیست (ویرایش از پنل مدیر همیشه مجاز است).
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleToggleStudentSecondaryEdit}
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer shrink-0 shadow-xs ${
+                    localSettings.studentSecondaryEditEnabled
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      : 'bg-amber-600 hover:bg-amber-700 text-white'
+                  }`}
+                >
+                  {localSettings.studentSecondaryEditEnabled ? (
+                    <>
+                      <Unlock className="w-4 h-4" />
+                      <span>باز است (کلیک برای بستن)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-4 h-4" />
+                      <span>بسته است (کلیک برای باز کردن)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -6028,6 +6137,104 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onChange={(e) => setStFormCity(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
                   />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    شماره تماس والدین / ولی
+                  </label>
+                  <input
+                    type="text"
+                    value={stFormParentPhone}
+                    onChange={(e) => setStFormParentPhone(e.target.value)}
+                    placeholder="09130000000"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono dir-ltr"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    تاریخ تولد
+                  </label>
+                  <input
+                    type="text"
+                    value={stFormBirthDate}
+                    onChange={(e) => setStFormBirthDate(e.target.value)}
+                    placeholder="1382/01/01"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono dir-ltr"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    نشانی دقیق پستی / محل سکونت
+                  </label>
+                  <input
+                    type="text"
+                    value={stFormPostalAddress}
+                    onChange={(e) => setStFormPostalAddress(e.target.value)}
+                    placeholder="استان، شهر، خیابان، کوچه، پلاک..."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                  />
+                </div>
+
+                {/* تصویر پرسنلی دانشجو (قابل تغییر یا حذف توسط مدیر) */}
+                <div className="sm:col-span-2 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    {stFormPhotoUrl ? (
+                      <img
+                        src={stFormPhotoUrl}
+                        alt="تصویر دانشجو"
+                        className="w-12 h-12 rounded-xl object-cover border border-teal-500"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-xl bg-teal-600/15 text-teal-700 dark:text-teal-300 flex items-center justify-center font-bold">
+                        <Camera className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div>
+                      <div className="font-bold text-slate-800 dark:text-slate-200">
+                        عکس پرسنلی دانشجو
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        مدیر در هر زمان امکان بارگذاری یا تغییر عکس دانشجو را دارد.
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold cursor-pointer flex items-center gap-1.5 transition">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{stFormPhotoUrl ? 'تغییر عکس' : 'آپلود عکس'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleAdminStudentPhotoUpload}
+                        className="hidden"
+                      />
+                    </label>
+                    {stFormPhotoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setStFormPhotoUrl('')}
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 hover:bg-rose-100 font-bold cursor-pointer"
+                      >
+                        حذف عکس
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* وضعیت تکمیل پرونده */}
+                <div className="sm:col-span-2">
+                  <label className="inline-flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={stFormProfileCompleted}
+                      onChange={(e) => setStFormProfileCompleted(e.target.checked)}
+                      className="w-4 h-4 rounded text-teal-600 cursor-pointer"
+                    />
+                    <span>پرونده دانشجو در وضعیت «تکمیل شده» باشد (در صورت برداشتن تیک، دانشجو در ورود بعدی ملزم به تکمیل اولیه خواهد بود)</span>
+                  </label>
                 </div>
               </div>
 

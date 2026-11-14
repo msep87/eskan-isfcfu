@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { Student } from '../types';
 import { Storage } from '../utils/storage';
@@ -29,6 +29,7 @@ interface StudentProfileModalProps {
   student: Student;
   onProfileUpdated: (updatedStudent: Student) => void;
   isFirstLoginForce?: boolean;
+  allowSecondaryEdit?: boolean;
 }
 
 export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
@@ -37,7 +38,10 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   student,
   onProfileUpdated,
   isFirstLoginForce = false,
+  allowSecondaryEdit = false,
 }) => {
+  const isReadOnly = !isFirstLoginForce && student.isProfileCompleted && !allowSecondaryEdit;
+
   const [formData, setFormData] = useState<Student>({
     ...student,
     postalAddress: student.postalAddress || '',
@@ -58,13 +62,29 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [validationError, setValidationError] = useState('');
 
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        ...student,
+        postalAddress: student.postalAddress || '',
+        customFields: { ...(student.customFields || {}) },
+      });
+      setBloodGroup(String(student.customFields?.['گروه خونی'] || 'O+'));
+      setSpecialCondition(String(student.customFields?.['بیماری خاص'] || 'ندارد'));
+      setPhotoPreview(student.photoUrl || '');
+      setValidationError('');
+      setSaveSuccess(false);
+    }
+  }, [isOpen, student]);
+
   if (!isOpen) return null;
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isReadOnly) return;
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 3 * 1024 * 1024) {
-        alert('حجم تصویر نباید بیشتر از ۳ مگابایت باشد.');
+        setValidationError('حجم تصویر نباید بیشتر از ۳ مگابایت باشد.');
         return;
       }
       const reader = new FileReader();
@@ -78,6 +98,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   };
 
   const handleAddCustomField = () => {
+    if (isReadOnly) return;
     if (!newCustomKey.trim()) return;
     setFormData((prev) => ({
       ...prev,
@@ -91,6 +112,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   };
 
   const handleRemoveCustomField = (key: string) => {
+    if (isReadOnly) return;
     setFormData((prev) => {
       const nextCustom = { ...(prev.customFields || {}) };
       delete nextCustom[key];
@@ -101,6 +123,10 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setValidationError('');
+    if (isReadOnly) {
+      setValidationError('دسترسی ویرایش ثانویه اطلاعات و تغییر عکس توسط مدیر سامانه بسته شده است.');
+      return;
+    }
 
     // اعتبارسنجی دقیق فیلدهای الزامی پرونده دانشجو
     const cleanMobile = (formData.mobile || '').replace(/\D/g, '');
@@ -157,7 +183,11 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
       photoUrl: photoPreview || formData.photoUrl,
     };
 
-    Storage.updateStudentProfile(student.studentId, updated);
+    const result = Storage.updateStudentProfile(student.studentId, updated);
+    if (!result.success) {
+      setValidationError(result.message);
+      return;
+    }
     onProfileUpdated(updated);
     setSaveSuccess(true);
 
@@ -208,17 +238,29 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
-                {isFirstLoginForce ? 'تکمیل الزامی اطلاعات پرونده اسکان دانشجو' : 'ویرایش پرونده و اطلاعات فردی'}
+                {isFirstLoginForce
+                  ? 'تکمیل الزامی اطلاعات پرونده اسکان دانشجو'
+                  : isReadOnly
+                  ? 'مشاهده پرونده و اطلاعات ثبت‌شده دانشجو'
+                  : 'ویرایش پرونده و اطلاعات فردی'}
               </h2>
               {isFirstLoginForce && (
                 <span className="px-2.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 font-extrabold text-[11px] border border-rose-300 dark:border-rose-800 animate-pulse">
                   الزامی جهت ورود و اسکان
                 </span>
               )}
+              {isReadOnly && (
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-extrabold text-[11px] border border-amber-300 dark:border-amber-800 flex items-center gap-1">
+                  <Lock className="w-3 h-3" />
+                  <span>فقط خواندنی</span>
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
               {isFirstLoginForce
                 ? 'دانشجومعلم گرامی؛ بر اساس ضوابط اسکان دانشگاه فرهنگیان، تکمیل مشخصات تماس، نشانی و وضعیت سلامت در بدو ورود الزامی می‌باشد.'
+                : isReadOnly
+                ? 'اطلاعات و تصویر پرسنلی شما پس از ثبت اولیه قفل شده است و در صورت نیاز به اصلاح باید با مدیر سامانه هماهنگ فرمایید.'
                 : 'بروزرسانی مشخصات تماس، عکس پرسنلی، نشانی و پرونده سلامت دانشجو'}
             </p>
           </div>
@@ -232,6 +274,19 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
               <div className="font-extrabold text-sm">توجه: دسترسی به انتخاب اتاق و خدمات سراها منوط به تکمیل این فرم است</div>
               <div className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
                 لطفاً تمامی فیلدهای ستاره‌دار (*) را با دقت کامل تکمیل و تأیید نمایید. پس از ثبت موفق، دسترسی شما به انتخاب تخت روی نقشه بصری بلافاصله فعال خواهد شد.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* بنر قفل بودن ویرایش ثانویه توسط مدیر */}
+        {isReadOnly && (
+          <div className="mb-5 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3">
+            <Lock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <div className="font-extrabold text-sm">دسترسی ویرایش ثانویه اطلاعات و تغییر عکس بسته شده است</div>
+              <div className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                اطلاعات پرونده و عکس پرسنلی شما پیش‌تر ثبت نهایی شده و در حال حاضر امکان تغییر مجدد توسط دانشجو وجود ندارد. برای اعمال هرگونه اصلاح یا تغییر عکس، به مدیر سراهای دانشجویی مراجعه فرمایید.
               </div>
             </div>
           </div>
@@ -276,20 +331,24 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                   {student.fullName.slice(0, 2)}
                 </div>
               )}
-              <label
-                htmlFor="photoUploadInputModal"
-                className="absolute -bottom-2 -left-2 p-2 rounded-xl bg-teal-600 text-white shadow-md hover:bg-teal-700 cursor-pointer transition"
-                title="بارگذاری / تغییر عکس"
-              >
-                <Camera className="w-4 h-4" />
-              </label>
-              <input
-                id="photoUploadInputModal"
-                type="file"
-                accept="image/*"
-                onChange={handlePhotoUpload}
-                className="hidden"
-              />
+              {!isReadOnly && (
+                <>
+                  <label
+                    htmlFor="photoUploadInputModal"
+                    className="absolute -bottom-2 -left-2 p-2 rounded-xl bg-teal-600 text-white shadow-md hover:bg-teal-700 cursor-pointer transition"
+                    title="بارگذاری / تغییر عکس"
+                  >
+                    <Camera className="w-4 h-4" />
+                  </label>
+                  <input
+                    id="photoUploadInputModal"
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoUpload}
+                    className="hidden"
+                  />
+                </>
+              )}
             </div>
 
             <div className="text-center sm:text-right flex-1">
@@ -306,15 +365,19 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 این عکس در کارت دانشجویی، داشبورد اختصاصی و لیست اتاق نمایش داده می‌شود. (فرمت JPG یا PNG، حداکثر ۳ مگابایت)
               </p>
-              <label
-                htmlFor="photoUploadInputModal"
-                className="inline-flex items-center gap-1.5 mt-2.5 px-3.5 py-1.5 rounded-xl border border-teal-400 dark:border-teal-700 text-teal-700 dark:text-teal-300 text-xs font-semibold hover:bg-teal-50 dark:hover:bg-teal-950/40 cursor-pointer transition"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>{photoPreview ? 'تغییر عکس پرسنلی' : 'بارگذاری فایل عکس پرسنلی'}</span>
-              </label>
+              {!isReadOnly && (
+                <label
+                  htmlFor="photoUploadInputModal"
+                  className="inline-flex items-center gap-1.5 mt-2.5 px-3.5 py-1.5 rounded-xl border border-teal-400 dark:border-teal-700 text-teal-700 dark:text-teal-300 text-xs font-semibold hover:bg-teal-50 dark:hover:bg-teal-950/40 cursor-pointer transition"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{photoPreview ? 'تغییر عکس پرسنلی' : 'بارگذاری فایل عکس پرسنلی'}</span>
+                </label>
+              )}
             </div>
           </div>
+
+          <fieldset disabled={isReadOnly} className="space-y-6 disabled:opacity-90">
 
           {/* بخش دوم: اطلاعات هویتی و دانشگاهی (ثابت و تأیید شده) */}
           <div className="p-4 rounded-2xl bg-teal-50/40 dark:bg-teal-950/20 border border-teal-100 dark:border-teal-900/40">
@@ -614,35 +677,37 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
             </div>
 
             {/* افزودن فیلد سفارشی جدید */}
-            <div className="p-3 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-dashed border-teal-200 dark:border-teal-800/60">
-              <span className="text-[11px] font-semibold text-teal-800 dark:text-teal-300 block mb-2">
-                افزودن مشخصه یا مهارت جدید (مثلاً رشته ورزشی، حافظ قرآن، ساز موسیقی، علایق پژوهشی):
-              </span>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="عنوان مشخصه (مثلاً رشته ورزشی)"
-                  value={newCustomKey}
-                  onChange={(e) => setNewCustomKey(e.target.value)}
-                  className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-1 focus:ring-teal-500"
-                />
-                <input
-                  type="text"
-                  placeholder="توضیح یا مهارت (مثلاً فوتسال)"
-                  value={newCustomVal}
-                  onChange={(e) => setNewCustomVal(e.target.value)}
-                  className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-1 focus:ring-teal-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddCustomField}
-                  className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer transition shadow-xs"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>ثبت</span>
-                </button>
+            {!isReadOnly && (
+              <div className="p-3 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-dashed border-teal-200 dark:border-teal-800/60">
+                <span className="text-[11px] font-semibold text-teal-800 dark:text-teal-300 block mb-2">
+                  افزودن مشخصه یا مهارت جدید (مثلاً رشته ورزشی، حافظ قرآن، ساز موسیقی، علایق پژوهشی):
+                </span>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="عنوان مشخصه (مثلاً رشته ورزشی)"
+                    value={newCustomKey}
+                    onChange={(e) => setNewCustomKey(e.target.value)}
+                    className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-1 focus:ring-teal-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="توضیح یا مهارت (مثلاً فوتسال)"
+                    value={newCustomVal}
+                    onChange={(e) => setNewCustomVal(e.target.value)}
+                    className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-1 focus:ring-teal-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddCustomField}
+                    className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer transition shadow-xs"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>ثبت</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* تعهدنامه صحت اطلاعات و منشور اخلاقی خوابگاه */}
@@ -659,23 +724,26 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
               </span>
             </label>
           </div>
+          </fieldset>
 
           {/* دکمه‌های فرم */}
           <div className="flex gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-            <button
-              type="submit"
-              className="flex-1 py-3.5 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-teal-600/25 transition cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.01]"
-            >
-              <Save className="w-4 h-4" />
-              <span>{isFirstLoginForce ? 'تکمیل اطلاعات و فعال‌سازی حساب کاربری' : 'ذخیره تغییرات پرونده'}</span>
-            </button>
+            {!isReadOnly && (
+              <button
+                type="submit"
+                className="flex-1 py-3.5 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-teal-600/25 transition cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.01]"
+              >
+                <Save className="w-4 h-4" />
+                <span>{isFirstLoginForce ? 'تکمیل اطلاعات و فعال‌سازی حساب کاربری' : 'ذخیره تغییرات پرونده'}</span>
+              </button>
+            )}
             {!isFirstLoginForce && (
               <button
                 type="button"
                 onClick={onClose}
-                className="px-6 py-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition"
+                className={`${isReadOnly ? 'w-full bg-slate-800 text-white hover:bg-slate-700' : 'px-6 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'} py-3.5 rounded-2xl text-xs font-semibold cursor-pointer transition`}
               >
-                انصراف
+                {isReadOnly ? 'بستن پنجره' : 'انصراف'}
               </button>
             )}
           </div>

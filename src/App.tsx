@@ -294,7 +294,7 @@ export default function App() {
         messages={messages}
         onOpenAppearance={() => setIsAppearanceModalOpen(true)}
         onOpenReports={() => {
-          if (currentUser) setIsReportsModalOpen(true);
+          if (currentUser && currentUser.role !== 'student') setIsReportsModalOpen(true);
         }}
         onOpenMessages={() => setIsMessagesModalOpen(true)}
         onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
@@ -723,7 +723,7 @@ export default function App() {
         />
       )}
 
-      {currentUser && (
+      {currentUser && currentUser.role !== 'student' && (
         <ReportsView
           isOpen={isReportsModalOpen}
           onClose={() => setIsReportsModalOpen(false)}

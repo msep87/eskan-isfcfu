@@ -1269,24 +1269,39 @@ export const Storage = {
     return { success: true, message: 'اطلاعات دانشجو با موفقیت بروزرسانی شد.' };
   },
 
-  updateStudentProfile: (studentId: string, updatedData: Partial<Student>) => {
+  updateStudentProfile: (
+    studentId: string,
+    updatedData: Partial<Student>
+  ): { success: boolean; message: string } => {
     const students = Storage.getStudents();
     const index = students.findIndex((s) => s.studentId === studentId);
-    if (index !== -1) {
-      students[index] = { ...students[index], ...updatedData, isProfileCompleted: true };
-      Storage.setStudents(students);
-      Storage.addActivityLog({
-        category: 'student',
-        action: 'تکمیل/ویرایش پروفایل دانشجو',
-        details: `پروفایل دانشجو ${students[index].fullName} (${studentId}) تکمیل و ذخیره شد.`,
-        targetName: `${students[index].fullName} (${studentId})`,
-      });
-
-      const currentUser = Storage.getCurrentUser();
-      if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === studentId) {
-        Storage.setCurrentUser({ role: 'student', student: students[index] });
-      }
+    if (index === -1) {
+      return { success: false, message: 'پرونده دانشجو یافت نشد.' };
     }
+
+    const currentSettings = Storage.getSettings();
+    if (students[index].isProfileCompleted && !currentSettings.studentSecondaryEditEnabled) {
+      return {
+        success: false,
+        message: 'دسترسی ویرایش ثانویه اطلاعات و تغییر عکس توسط مدیر سامانه بسته شده است.',
+      };
+    }
+
+    students[index] = { ...students[index], ...updatedData, isProfileCompleted: true };
+    Storage.setStudents(students);
+    Storage.addActivityLog({
+      category: 'student',
+      action: 'تکمیل/ویرایش پروفایل دانشجو',
+      details: `پروفایل دانشجو ${students[index].fullName} (${studentId}) تکمیل و ذخیره شد.`,
+      targetName: `${students[index].fullName} (${studentId})`,
+    });
+
+    const currentUser = Storage.getCurrentUser();
+    if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === studentId) {
+      Storage.setCurrentUser({ role: 'student', student: students[index] });
+    }
+
+    return { success: true, message: 'اطلاعات پرونده با موفقیت ثبت و ذخیره شد.' };
   },
 
   // پشتیبان‌گیری کامل از داده‌ها به صورت فایل JSON

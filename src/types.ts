@@ -291,6 +291,7 @@ export interface AppSettings {
   heroBgImageUrl?: string; // تصویر دلخواه پس‌زمینه بنر اصلی صفحه اول
   homeNotesTitle?: string; // عنوان بخش نکات مهم انتخاب اتاق و اسکان صفحه اول
   homeNotes?: HomeNoteItem[]; // کارت‌های بخش نکات مهم صفحه اول
+  studentSecondaryEditEnabled?: boolean; // اجازه ویرایش ثانویه اطلاعات و عکس توسط دانشجو پس از تکمیل اولیه پرونده
 }
 
 export interface CounselorStaff {

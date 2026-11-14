@@ -41,6 +41,8 @@ import {
   Check,
   Download,
   SlidersHorizontal,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -71,6 +73,8 @@ interface AdminUsersPanelProps {
   onEvaluateStudent: (student: Student) => void;
   onAssignStudentRoom: (student: Student) => void;
   onEvictStudent: (student: Student) => void;
+  studentSecondaryEditEnabled?: boolean;
+  onToggleStudentSecondaryEdit?: () => void;
 }
 
 type StaffRole = 'supervisor' | 'maintenance' | 'warehouse' | 'counselor';
@@ -96,6 +100,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   onEvaluateStudent,
   onAssignStudentRoom,
   onEvictStudent,
+  studentSecondaryEditEnabled = false,
+  onToggleStudentSecondaryEdit,
 }) => {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null
@@ -840,6 +846,30 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {onToggleStudentSecondaryEdit && (
+                <button
+                  type="button"
+                  onClick={onToggleStudentSecondaryEdit}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border shadow-xs ${
+                    studentSecondaryEditEnabled
+                      ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100'
+                      : 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700 hover:bg-amber-100'
+                  }`}
+                  title="باز یا بسته کردن امکان ویرایش مجدد اطلاعات و تغییر عکس توسط دانشجو پس از ثبت اولیه"
+                >
+                  {studentSecondaryEditEnabled ? (
+                    <Unlock className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <Lock className="w-4 h-4 text-amber-600" />
+                  )}
+                  <span>
+                    {studentSecondaryEditEnabled
+                      ? 'ویرایش ثانویه و تغییر عکس دانشجو: باز (کلیک برای بستن)'
+                      : 'ویرایش ثانویه و تغییر عکس دانشجو: بسته (کلیک برای باز کردن)'}
+                  </span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={onAddStudent}

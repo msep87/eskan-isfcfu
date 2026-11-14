@@ -104,16 +104,20 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       ? roomEvalList[0].score
       : null;
 
+  const canSecondaryEdit = Boolean(settings.studentSecondaryEditEnabled);
+  const canStudentEditProfile = !student.isProfileCompleted || canSecondaryEdit;
+
   return (
     <div className="space-y-6">
 
-      {/* مدال تکمیل اجباری یا اختیاری پروفایل در اولین ورود */}
+      {/* مدال تکمیل اجباری یا اختیاری پروفایل در اولین ورود (در صورت قفل بودن، فقط حالت نمایشی) */}
       <StudentProfileModal
         isOpen={isProfileModalOpen || !student.isProfileCompleted}
         onClose={() => setIsProfileModalOpen(false)}
         student={student}
         onProfileUpdated={() => onRefreshData()}
         isFirstLoginForce={!student.isProfileCompleted}
+        allowSecondaryEdit={canSecondaryEdit}
       />
 
       {/* بنر قرمز/امبر اخطار اجباری بودن تکمیل پرونده در صورت عدم تکمیل */}
@@ -167,13 +171,22 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 </div>
               )}
 
-              <button
-                onClick={() => setIsProfileModalOpen(true)}
-                className="absolute -bottom-2 -left-2 p-2 rounded-2xl bg-white text-teal-800 shadow-lg hover:bg-slate-100 transition cursor-pointer"
-                title="تغییر عکس و ویرایش مشخصات"
-              >
-                <Camera className="w-4 h-4" />
-              </button>
+              {canStudentEditProfile ? (
+                <button
+                  onClick={() => setIsProfileModalOpen(true)}
+                  className="absolute -bottom-2 -left-2 p-2 rounded-2xl bg-white text-teal-800 shadow-lg hover:bg-slate-100 transition cursor-pointer"
+                  title="تغییر عکس و ویرایش مشخصات"
+                >
+                  <Camera className="w-4 h-4" />
+                </button>
+              ) : (
+                <div
+                  className="absolute -bottom-2 -left-2 p-2 rounded-2xl bg-slate-800/90 text-amber-300 shadow-lg border border-white/30"
+                  title="تغییر عکس و ویرایش ثانویه توسط مدیر سامانه بسته شده است"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                </div>
+              )}
             </div>
 
             {/* مشخصات اصلی دانشجومعلم */}
@@ -245,9 +258,23 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
             <button
               onClick={() => setIsProfileModalOpen(true)}
-              className="mt-3 w-full py-1.5 px-3 rounded-xl bg-white text-teal-800 text-xs font-bold hover:bg-teal-50 transition cursor-pointer shadow-sm"
+              className={`mt-3 w-full py-1.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer shadow-sm flex items-center justify-center gap-1.5 ${
+                canStudentEditProfile
+                  ? 'bg-white text-teal-800 hover:bg-teal-50'
+                  : 'bg-white/20 text-white hover:bg-white/30 border border-white/30'
+              }`}
+              title={
+                canStudentEditProfile
+                  ? 'ویرایش پرونده و اطلاعات فردی'
+                  : 'ویرایش ثانویه توسط مدیر بسته شده است (فقط مشاهده پرونده)'
+              }
             >
-              ویرایش پرونده و سلامت
+              {!canStudentEditProfile && <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0" />}
+              <span>
+                {canStudentEditProfile
+                  ? 'ویرایش پرونده و سلامت'
+                  : 'مشاهده پرونده (ویرایش بسته است)'}
+              </span>
             </button>
 
             <button
