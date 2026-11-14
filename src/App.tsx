@@ -35,6 +35,7 @@ import { WarehouseDashboard } from './components/WarehouseDashboard';
 import { CounselorDashboard } from './components/CounselorDashboard';
 import { AboutModal } from './components/AboutModal';
 import { UserGuideModal } from './components/UserGuideModal';
+import { AiDormAssistant } from './components/AiDormAssistant';
 import { UserRoleType } from './utils/guideData';
 import { FarhangianEmblem } from './components/FarhangianEmblem';
 import {
@@ -732,6 +733,17 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* دستیار هوشمند خوابگاهی و آموزشی */}
+      <AiDormAssistant
+        currentUser={currentUser}
+        settings={settings}
+        dorms={dorms}
+        rooms={rooms}
+        beds={beds}
+        students={students}
+        announcements={announcements}
+      />
 
     </div>
   );
