@@ -519,7 +519,7 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!currentUser || !isOpen) return null;
 
   return (
     <div
