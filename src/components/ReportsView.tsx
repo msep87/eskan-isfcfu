@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Dormitory, Room, Bed, Student } from '../types';
 import { Storage } from '../utils/storage';
-import { exportVacantBedsToExcel, exportStudentsToExcel, exportDomainReportToExcel } from '../utils/excelUtils';
+import { exportVacantBedsToExcel, exportStudentsToExcel, exportDomainReportToExcel, toEnglishDigits } from '../utils/excelUtils';
 import {
   BarChart3,
   Download,
@@ -63,11 +63,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<'all' | 'resolved' | 'in_progress' | 'pending' | 'waiting_parts'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  if (!isOpen) return null;
-
-
-  const dormsMap = new Map(dorms.map((d) => [d.id, d.name]));
-  const roomsMap = new Map(rooms.map((r) => [r.id, `اتاق ${r.roomNumber}`]));
+  const dormsMap = useMemo(() => new Map(dorms.map((d) => [d.id, d.name])), [dorms]);
+  const roomsMap = useMemo(() => new Map(rooms.map((r) => [r.id, `اتاق ${r.roomNumber}`])), [rooms]);
 
   // تهیه لیست تخت‌های خالی
   const vacantBedsList = beds
@@ -321,17 +318,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       list.push({
         id: m.id,
-        trackingCode: m.id.replace('msg_', '#').slice(0, 10),
+        trackingCode: (m.id || '').replace('msg_', '#').slice(0, 10),
         domain,
         domainName: m.isConfidential ? `🔒 ${domainName} (محرمانه)` : domainName,
         domainBadgeColor: badgeColor,
-        title: m.subject,
-        description: m.content,
+        title: m.subject || 'بدون عنوان',
+        description: m.content || '',
         dormName: 'سراهای دانشجویی',
         location: m.isConfidential ? 'محرمانه (محفوظ)' : 'عمومی سرا',
-        requester: m.isConfidential ? 'دانشجو (🔒 هویت محرمانه)' : m.senderName,
+        requester: m.isConfidential ? 'دانشجو (🔒 هویت محرمانه)' : (m.senderName || 'کاربر'),
         assignee: isResolved ? 'سرپرستی و کارشناسان سرا' : 'در صف رسیدگی',
-        createdDate: m.date,
+        createdDate: m.date || '',
         resolvedDate: isResolved && m.replies && m.replies.length > 0 ? m.replies[m.replies.length - 1].date : undefined,
         status: st,
         statusLabel: stLabel,
@@ -346,6 +343,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   // فیلتر کردن موارد
   const filteredWorkItems = useMemo(() => {
+    const cleanStart = toEnglishDigits(startDate.trim());
+    const cleanEnd = toEnglishDigits(endDate.trim());
     return allWorkItems.filter((item) => {
       // فیلتر حوزه
       if (domainFilter !== 'all' && item.domain !== domainFilter) {
@@ -356,14 +355,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         return false;
       }
       // فیلتر بازه زمانی شروع
-      if (startDate && item.createdDate) {
-        const cDate = item.createdDate.slice(0, 10);
-        if (cDate < startDate) return false;
+      if (cleanStart && item.createdDate) {
+        const cDate = toEnglishDigits(item.createdDate).slice(0, 10);
+        if (cDate < cleanStart) return false;
       }
       // فیلتر بازه زمانی پایان
-      if (endDate && item.createdDate) {
-        const cDate = item.createdDate.slice(0, 10);
-        if (cDate > endDate) return false;
+      if (cleanEnd && item.createdDate) {
+        const cDate = toEnglishDigits(item.createdDate).slice(0, 10);
+        if (cDate > cleanEnd) return false;
       }
       // فیلتر وضعیت اقدام
       if (statusFilter !== 'all') {
@@ -375,7 +374,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       // فیلتر متن جستجو
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
-        const fullText = `${item.trackingCode} ${item.title} ${item.description} ${item.requester} ${item.assignee} ${item.location}`.toLowerCase();
+        const fullText = `${item.trackingCode || ''} ${item.title || ''} ${item.description || ''} ${item.requester || ''} ${item.assignee || ''} ${item.location || ''}`.toLowerCase();
         if (!fullText.includes(q)) return false;
       }
       return true;
@@ -424,6 +423,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     exportDomainReportToExcel(filteredWorkItems, domainName, dateRangeStr);
   };
 
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -935,28 +935,36 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {vacantBedsList.map((b, idx) => (
-                      <tr key={b.bedId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                        <td className="p-3 text-slate-400">{idx + 1}</td>
-                        <td className="p-3 font-semibold text-slate-800 dark:text-slate-200">{b.dormName}</td>
-                        <td className="p-3 font-bold text-teal-600">اتاق {b.roomNumber}</td>
-                        <td className="p-3">{b.floor === 0 ? 'همکف' : b.floor}</td>
-                        <td className="p-3">{b.bedLabel}</td>
-                        <td className="p-3">
-                          <span
-                            className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
-                              b.tier === 'lower'
-                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                : 'bg-purple-50 text-purple-700 border border-purple-200'
-                            }`}
-                          >
-                            {b.tier === 'lower' ? 'طبقه پایین ⬇️' : 'طبقه بالا ⬆️'}
-                          </span>
+                    {vacantBedsList.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="p-8 text-center text-xs text-slate-400">
+                          هیچ تخت خالی مطابق فیلترهای انتخابی یافت نشد.
                         </td>
-                        <td className="p-3">{b.roomCapacity} نفره</td>
-                        <td className="p-3 text-slate-500">{b.allowedFields}</td>
                       </tr>
-                    ))}
+                    ) : (
+                      vacantBedsList.map((b, idx) => (
+                        <tr key={b.bedId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 text-slate-400">{idx + 1}</td>
+                          <td className="p-3 font-semibold text-slate-800 dark:text-slate-200">{b.dormName}</td>
+                          <td className="p-3 font-bold text-teal-600">اتاق {b.roomNumber}</td>
+                          <td className="p-3">{b.floor === 0 ? 'همکف' : b.floor}</td>
+                          <td className="p-3">{b.bedLabel}</td>
+                          <td className="p-3">
+                            <span
+                              className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                                b.tier === 'lower'
+                                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                  : 'bg-purple-50 text-purple-700 border border-purple-200'
+                              }`}
+                            >
+                              {b.tier === 'lower' ? 'طبقه پایین ⬇️' : 'طبقه بالا ⬆️'}
+                            </span>
+                          </td>
+                          <td className="p-3">{b.roomCapacity} نفره</td>
+                          <td className="p-3 text-slate-500">{b.allowedFields}</td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -966,56 +974,68 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           {/* تب توزیع استانی */}
           {tab === 'provinces' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {sortedProvinces.map(([prov, count]) => {
-                  const percent = Math.round((count / students.length) * 100);
-                  return (
-                    <div
-                      key={prov}
-                      className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-bold text-sm text-slate-800 dark:text-slate-200">{prov}</span>
-                        <span className="text-xs font-bold text-teal-600">{count} دانشجو ({percent}٪)</span>
+              {sortedProvinces.length === 0 ? (
+                <div className="p-8 rounded-2xl bg-slate-50 dark:bg-slate-800/40 text-center text-xs text-slate-400">
+                  هنوز دانشجویی در سامانه ثبت نشده است.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {sortedProvinces.map(([prov, count]) => {
+                    const percent = students.length > 0 ? Math.round((count / students.length) * 100) : 0;
+                    return (
+                      <div
+                        key={prov}
+                        className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-bold text-sm text-slate-800 dark:text-slate-200">{prov}</span>
+                          <span className="text-xs font-bold text-teal-600">{count} دانشجو ({percent}٪)</span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                          <div
+                            className="h-full bg-teal-600 rounded-full transition-all duration-500"
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-                        <div
-                          className="h-full bg-teal-600 rounded-full transition-all duration-500"
-                          style={{ width: `${percent}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
           {/* تب آمار رشته‌ها */}
           {tab === 'majors' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {sortedMajors.map(([major, count]) => {
-                  const percent = Math.round((count / students.length) * 100);
-                  return (
-                    <div
-                      key={major}
-                      className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-bold text-sm text-slate-800 dark:text-slate-200">{major}</span>
-                        <span className="text-xs font-bold text-teal-600">{count} نفر ({percent}٪)</span>
+              {sortedMajors.length === 0 ? (
+                <div className="p-8 rounded-2xl bg-slate-50 dark:bg-slate-800/40 text-center text-xs text-slate-400">
+                  هنوز دانشجویی در سامانه ثبت نشده است.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {sortedMajors.map(([major, count]) => {
+                    const percent = students.length > 0 ? Math.round((count / students.length) * 100) : 0;
+                    return (
+                      <div
+                        key={major}
+                        className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-bold text-sm text-slate-800 dark:text-slate-200">{major}</span>
+                          <span className="text-xs font-bold text-teal-600">{count} نفر ({percent}٪)</span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-teal-500 to-cyan-500 rounded-full"
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-teal-500 to-cyan-500 rounded-full"
-                          style={{ width: `${percent}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
