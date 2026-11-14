@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
-  MessageCircle,
   X,
   Send,
   Sparkles,
@@ -40,6 +39,8 @@ interface ChatMessage {
 }
 
 interface AiDormAssistantProps {
+  isOpen: boolean;
+  onClose: () => void;
   currentUser: CurrentUser;
   settings: AppSettings;
   dorms: Dormitory[];
@@ -77,6 +78,8 @@ const INITIAL_ASSISTANT_MESSAGE: ChatMessage = {
 };
 
 export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
+  isOpen,
+  onClose,
   currentUser,
   settings,
   dorms,
@@ -85,7 +88,6 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
   students,
   announcements,
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_ASSISTANT_MESSAGE]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -516,39 +518,23 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
     }
   };
 
-  return (
-    <>
-      {/* دکمه شناور باز کردن چت‌بات در گوشه پایین صفحه */}
-      {!isOpen && (
-        <button
-          type="button"
-          onClick={() => setIsOpen(true)}
-          aria-label="باز کردن دستیار هوشمند خوابگاهی و آموزشی"
-          className="fixed bottom-5 left-5 z-40 group flex items-center gap-2.5 bg-gradient-to-l from-teal-700 to-cyan-700 hover:from-teal-800 hover:to-cyan-800 text-white px-4 py-3 rounded-2xl shadow-xl border border-white/20 transition-all duration-200 hover:scale-[1.03] active:scale-[0.98] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
-        >
-          <div className="relative flex items-center justify-center w-8 h-8 rounded-xl bg-white/15">
-            <MessageCircle className="w-5 h-5 text-white" />
-            <Sparkles className="w-3 h-3 text-amber-300 absolute -top-1 -right-1" />
-          </div>
-          <div className="hidden sm:flex flex-col items-start text-right leading-tight">
-            <span className="text-xs font-extrabold whitespace-nowrap">دستیار هوشمند سرا</span>
-            <span className="text-[10px] text-teal-100 whitespace-nowrap">
-              پاسخگوی اسکان و سوالات علمی
-            </span>
-          </div>
-        </button>
-      )}
+  if (!isOpen) return null;
 
-      {/* پنجره ویجت چت‌بات */}
-      {isOpen && (
-        <div
-          dir="rtl"
-          role="dialog"
-          aria-label="دستیار هوشمند خوابگاهی و آموزشی"
-          className="fixed bottom-4 left-4 right-4 sm:right-auto sm:w-[430px] h-[580px] max-h-[84vh] z-50 flex flex-col bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-700/80 overflow-hidden animate-in fade-in duration-200"
-        >
-          {/* هدر چت‌بات */}
-          <div className="bg-gradient-to-l from-teal-800 via-teal-700 to-cyan-700 text-white px-4 py-3.5 flex items-center justify-between gap-3 shrink-0">
+  return (
+    <div
+      dir="rtl"
+      role="dialog"
+      aria-modal="true"
+      aria-label="دستیار هوشمند خوابگاهی و آموزشی"
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg h-[620px] max-h-[88vh] flex flex-col bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-700/80 overflow-hidden"
+      >
+        {/* هدر چت‌بات */}
+        <div className="bg-gradient-to-l from-teal-800 via-teal-700 to-cyan-700 text-white px-4 py-3.5 flex items-center justify-between gap-3 shrink-0">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-9 h-9 rounded-xl bg-white/15 border border-white/20 flex items-center justify-center shrink-0">
                 <Sparkles className="w-5 h-5 text-amber-300" />
@@ -575,7 +561,7 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setIsOpen(false)}
+                onClick={onClose}
                 title="بستن دستیار"
                 className="p-2 rounded-xl bg-white/10 hover:bg-rose-500/80 text-white transition cursor-pointer"
               >
@@ -715,9 +701,8 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
                 <span className="hidden sm:inline">ارسال</span>
               </button>
             </div>
-          </form>
-        </div>
-      )}
-    </>
+        </form>
+      </div>
+    </div>
   );
 };

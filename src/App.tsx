@@ -55,6 +55,7 @@ import {
   Clock,
   Info,
   BookOpen,
+  MessageCircle,
 } from 'lucide-react';
 
 export default function App() {
@@ -206,6 +207,7 @@ export default function App() {
   const [isUserGuideOpen, setIsUserGuideOpen] = useState(false);
   const [userGuideInitialRole, setUserGuideInitialRole] = useState<UserRoleType>('student');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [isAiChatOpen, setIsAiChatOpen] = useState(false);
 
   const handleOpenExcelModal = (tab: ExcelImportTab = 'students') => {
     setExcelModalInitialTab(tab);
@@ -615,7 +617,16 @@ export default function App() {
             )}
             <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع سراهای دانشجویی</span>
           </div>
-          <div className="flex items-center gap-3 text-[11px]">
+          <div className="flex flex-wrap items-center justify-center gap-3 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setIsAiChatOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-l from-teal-700 to-cyan-700 hover:from-teal-800 hover:to-cyan-800 text-white font-extrabold text-xs shadow-xs transition cursor-pointer"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>دستیار هوشمند سرا (چت‌بات)</span>
+            </button>
+            <span className="hidden sm:inline">•</span>
             <button
               onClick={() => setIsAboutModalOpen(true)}
               className="text-teal-600 dark:text-teal-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
@@ -736,6 +747,8 @@ export default function App() {
 
       {/* دستیار هوشمند خوابگاهی و آموزشی */}
       <AiDormAssistant
+        isOpen={isAiChatOpen}
+        onClose={() => setIsAiChatOpen(false)}
         currentUser={currentUser}
         settings={settings}
         dorms={dorms}
