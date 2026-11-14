@@ -545,7 +545,7 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
                 </h3>
                 <p className="text-[11px] text-teal-100 truncate flex items-center gap-1">
                   <Globe className="w-3 h-3 shrink-0" />
-                  <span>پاسخگویی برخط با اطلاعات سامانه و جستجوی اینترنتی</span>
+                  <span>پاسخگویی سریع با اطلاعات لحظه‌ای سامانه و دانش علمی</span>
                 </p>
               </div>
             </div>
@@ -664,7 +664,7 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
               <div className="flex flex-col items-end">
                 <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-2.5 text-xs text-slate-600 dark:text-slate-300 shadow-xs">
                   <Loader2 className="w-4 h-4 text-teal-600 animate-spin shrink-0" />
-                  <span>در حال بررسی اطلاعات سامانه و جستجوی آنلاین...</span>
+                  <span>در حال بررسی اطلاعات سامانه و تنظیم پاسخ...</span>
                 </div>
               </div>
             )}
