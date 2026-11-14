@@ -131,12 +131,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }
     } else if (tab === 'counselor') {
       const counselors = Storage.getCounselors();
-      const cleanU = username.trim().toLowerCase();
+      const cleanU = toEnglishDigits(username.trim()).toLowerCase();
+      const cleanP = toEnglishDigits(password.trim());
       const cns = counselors.find(
-        (c) => c.username.toLowerCase() === cleanU && c.password.trim() === password.trim()
+        (c) =>
+          toEnglishDigits(c.username.trim()).toLowerCase() === cleanU &&
+          toEnglishDigits(c.password.trim()) === cleanP
       );
       if (cns) {
-        if (cns.status === 'inactive') {
+        if (cns.status === 'inactive' || cns.isActive === false) {
           Storage.addActivityLog({
             category: 'auth',
             action: 'تلاش ورود حساب غیرفعال مشاور',
@@ -176,12 +179,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }
     } else if (tab === 'maintenance') {
       const staffList = Storage.getMaintenanceStaff();
-      const cleanU = username.trim().toLowerCase();
+      const cleanU = toEnglishDigits(username.trim()).toLowerCase();
+      const cleanP = toEnglishDigits(password.trim());
       const tech = staffList.find(
-        (s) => s.username.toLowerCase() === cleanU && s.password.trim() === password.trim()
+        (s) =>
+          toEnglishDigits(s.username.trim()).toLowerCase() === cleanU &&
+          toEnglishDigits(s.password.trim()) === cleanP
       );
       if (tech) {
-        if (tech.status === 'inactive') {
+        if (tech.status === 'inactive' || tech.isActive === false) {
           Storage.addActivityLog({
             category: 'auth',
             action: 'تلاش ورود حساب غیرفعال تأسیسات',
@@ -221,9 +227,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }
     } else if (tab === 'warehouse') {
       const staffList = Storage.getWarehouseStaff();
-      const cleanU = username.trim().toLowerCase();
+      const cleanU = toEnglishDigits(username.trim()).toLowerCase();
+      const cleanP = toEnglishDigits(password.trim());
       const wh = staffList.find(
-        (s) => s.username.toLowerCase() === cleanU && s.password.trim() === password.trim()
+        (s) =>
+          toEnglishDigits(s.username.trim()).toLowerCase() === cleanU &&
+          toEnglishDigits(s.password.trim()) === cleanP
       );
       if (wh) {
         if (wh.status === 'inactive' || wh.isActive === false) {
@@ -265,8 +274,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         setErrorMsg('نام کاربری یا کلمه عبور مسئول انبار اشتباه است.');
       }
     } else if (tab === 'admin') {
-      const currentAdminPass = Storage.getSettings().adminPassword || '261';
-      if (username.trim() === 'admin' && password.trim() === currentAdminPass) {
+      const currentAdminPass = toEnglishDigits(String(Storage.getSettings().adminPassword || '261').trim());
+      const cleanAdminUser = toEnglishDigits(username.trim()).toLowerCase();
+      const cleanAdminPass = toEnglishDigits(password.trim());
+      if (cleanAdminUser === 'admin' && cleanAdminPass === currentAdminPass) {
         Storage.addActivityLog({
           category: 'auth',
           action: 'ورود موفق مدیر کل سامانه',

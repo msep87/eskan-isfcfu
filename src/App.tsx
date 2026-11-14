@@ -572,7 +572,7 @@ export default function App() {
             onRefreshData={refreshAllData}
             onOpenReports={() => setIsReportsModalOpen(true)}
             onOpenMessages={() => setIsMessagesModalOpen(true)}
-            onOpenExcelModal={() => setIsExcelModalOpen(true)}
+            onOpenExcelModal={() => handleOpenExcelModal('students')}
             onOpenUserGuide={(r) => handleOpenUserGuide(r || 'supervisor')}
           />
         )}
@@ -760,6 +760,7 @@ export default function App() {
           isOpen={isChangePasswordModalOpen}
           onClose={() => setIsChangePasswordModalOpen(false)}
           currentUser={currentUser}
+          onPasswordChanged={refreshAllData}
         />
       )}
 

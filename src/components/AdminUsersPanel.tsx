@@ -408,7 +408,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormSpecialty(tech.specialty || '');
       setFormNotes(tech.notes || '');
       setFormActive(tech.status !== 'inactive' && tech.isActive !== false);
-      setFormDormIds(tech.coveredDormIds || tech.assignedDormIds || dorms.map((d) => d.id));
+      const rawIds = tech.coveredDormIds || tech.assignedDormIds || [];
+      setFormDormIds(rawIds.length === 0 || rawIds.includes('all') ? dorms.map((d) => d.id) : rawIds);
     } else if (role === 'warehouse') {
       const wh = user as WarehouseStaff;
       setFormNotes(wh.notes || '');
@@ -419,7 +420,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormOfficeLocation(cns.officeLocation || '');
       setFormNotes(cns.notes || '');
       setFormActive(cns.status !== 'inactive' && cns.isActive !== false);
-      setFormDormIds(cns.assignedDormIds || dorms.map((d) => d.id));
+      const rawIds = cns.assignedDormIds || [];
+      setFormDormIds(rawIds.length === 0 || rawIds.includes('all') ? dorms.map((d) => d.id) : rawIds);
     }
 
     setStaffModalOpen(true);
@@ -556,7 +558,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       const dormIds = formDormIds.length > 0 ? formDormIds : dorms.map((d) => d.id);
       const spec = formSpecialty.trim() || 'مشاوره و سلامت روان';
       if (editingStaffId) {
-        Storage.updateCounselor(editingStaffId, {
+        const res = Storage.updateCounselor(editingStaffId, {
           fullName: cleanName,
           username: cleanUser,
           password: cleanPass,
@@ -569,7 +571,11 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           isActive: formActive,
           notes: formNotes.trim() || undefined,
         });
-        showToast('success', `مشخصات مشاور «${cleanName}» با موفقیت بروزرسانی شد.`);
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message || `مشخصات مشاور «${cleanName}» با موفقیت بروزرسانی شد.`);
       } else {
         const existing = Storage.getCounselors();
         if (existing.some((c) => c.username.trim().toLowerCase() === cleanUser)) {
@@ -1522,16 +1528,22 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                               {tech.specialty || 'تأسیسات'}
                             </span>
                             <div className="flex flex-wrap gap-1">
-                              {dorms
-                                .filter((d) => coveredIds.includes(d.id))
-                                .map((d) => (
-                                  <span
-                                    key={d.id}
-                                    className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-300"
-                                  >
-                                    {d.name}
-                                  </span>
-                                ))}
+                              {coveredIds.includes('all') || (dorms.length > 0 && coveredIds.length >= dorms.length) ? (
+                                <span className="px-1.5 py-0.5 rounded bg-teal-50 dark:bg-teal-950/50 text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                                  همه سراها
+                                </span>
+                              ) : (
+                                dorms
+                                  .filter((d) => coveredIds.includes(d.id))
+                                  .map((d) => (
+                                    <span
+                                      key={d.id}
+                                      className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-300"
+                                    >
+                                      {d.name}
+                                    </span>
+                                  ))
+                              )}
                             </div>
                           </td>
                           <td className="p-3">
@@ -1760,16 +1772,22 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                               )}
                             </div>
                             <div className="flex flex-wrap gap-1">
-                              {dorms
-                                .filter((d) => assignedIds.includes(d.id))
-                                .map((d) => (
-                                  <span
-                                    key={d.id}
-                                    className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-300"
-                                  >
-                                    {d.name}
-                                  </span>
-                                ))}
+                              {assignedIds.includes('all') || (dorms.length > 0 && assignedIds.length >= dorms.length) ? (
+                                <span className="px-1.5 py-0.5 rounded bg-teal-50 dark:bg-teal-950/50 text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                                  همه سراها
+                                </span>
+                              ) : (
+                                dorms
+                                  .filter((d) => assignedIds.includes(d.id))
+                                  .map((d) => (
+                                    <span
+                                      key={d.id}
+                                      className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-300"
+                                    >
+                                      {d.name}
+                                    </span>
+                                  ))
+                              )}
                             </div>
                           </td>
                           <td className="p-3">

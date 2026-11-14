@@ -1592,7 +1592,16 @@ export const Storage = {
     currentPasswordInput: string,
     newPasswordInput: string
   ): { success: boolean; message: string } => {
-    if (!newPasswordInput || newPasswordInput.length < 4) {
+    const normalizeDigits = (val: string) =>
+      val
+        .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+        .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+        .trim();
+
+    const cleanCurrentPass = normalizeDigits(currentPasswordInput);
+    const cleanNewPass = normalizeDigits(newPasswordInput);
+
+    if (!cleanNewPass || cleanNewPass.length < 4) {
       return { success: false, message: 'کلمه عبور جدید باید حداقل ۴ کاراکتر باشد.' };
     }
 
@@ -1602,10 +1611,10 @@ export const Storage = {
       if (!cns) {
         return { success: false, message: 'مشاور یافت نشد.' };
       }
-      if (cns.password !== currentPasswordInput) {
+      if (normalizeDigits(cns.password) !== cleanCurrentPass) {
         return { success: false, message: 'کلمه عبور فعلی مشاور اشتباه است.' };
       }
-      cns.password = newPasswordInput;
+      cns.password = cleanNewPass;
       Storage.setCounselors(counselors);
       Storage.addActivityLog({
         category: 'auth',
@@ -1618,11 +1627,11 @@ export const Storage = {
 
     if (role === 'admin') {
       const settings = Storage.getSettings();
-      const currentAdminPass = settings.adminPassword || '261';
-      if (currentPasswordInput !== currentAdminPass) {
+      const currentAdminPass = normalizeDigits(settings.adminPassword || '261');
+      if (cleanCurrentPass !== currentAdminPass) {
         return { success: false, message: 'کلمه عبور فعلی مدیر اشتباه است.' };
       }
-      settings.adminPassword = newPasswordInput;
+      settings.adminPassword = cleanNewPass;
       Storage.setSettings(settings);
       Storage.addActivityLog({
         category: 'auth',
@@ -1640,10 +1649,10 @@ export const Storage = {
       if (!sup) {
         return { success: false, message: 'کاربر سرپرست یافت نشد.' };
       }
-      if (sup.password !== currentPasswordInput) {
+      if (normalizeDigits(sup.password) !== cleanCurrentPass) {
         return { success: false, message: 'کلمه عبور فعلی سرپرست اشتباه است.' };
       }
-      sup.password = newPasswordInput;
+      sup.password = cleanNewPass;
       Storage.setSupervisors(supervisors);
       Storage.addActivityLog({
         category: 'auth',
@@ -1660,10 +1669,10 @@ export const Storage = {
       if (!tech) {
         return { success: false, message: 'کارشناس تأسیسات یافت نشد.' };
       }
-      if (tech.password !== currentPasswordInput) {
+      if (normalizeDigits(tech.password) !== cleanCurrentPass) {
         return { success: false, message: 'کلمه عبور فعلی کارشناس تأسیسات اشتباه است.' };
       }
-      tech.password = newPasswordInput;
+      tech.password = cleanNewPass;
       Storage.setMaintenanceStaff(staffList);
       Storage.addActivityLog({
         category: 'auth',
@@ -1680,10 +1689,10 @@ export const Storage = {
       if (!staff) {
         return { success: false, message: 'کاربر انبار و کارپردازی یافت نشد.' };
       }
-      if (staff.password !== currentPasswordInput) {
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
         return { success: false, message: 'کلمه عبور فعلی مسئول انبار اشتباه است.' };
       }
-      staff.password = newPasswordInput;
+      staff.password = cleanNewPass;
       Storage.setWarehouseStaff(staffList);
       Storage.addActivityLog({
         category: 'auth',
@@ -1700,10 +1709,10 @@ export const Storage = {
       if (!st) {
         return { success: false, message: 'دانشجو یافت نشد.' };
       }
-      if (st.nationalId !== currentPasswordInput) {
+      if (normalizeDigits(st.nationalId) !== cleanCurrentPass) {
         return { success: false, message: 'کلمه عبور (کد ملی) فعلی اشتباه است.' };
       }
-      st.nationalId = newPasswordInput;
+      st.nationalId = cleanNewPass;
       Storage.setStudents(students);
       Storage.addActivityLog({
         category: 'auth',
@@ -2328,13 +2337,22 @@ export const Storage = {
     return { success: true, counselor: newCounselor };
   },
 
-  updateCounselor: (id: string, updates: Partial<CounselorStaff>): { success: boolean } => {
+  updateCounselor: (
+    id: string,
+    updates: Partial<CounselorStaff>
+  ): { success: boolean; message: string } => {
     const counselors = Storage.getCounselors();
     const idx = counselors.findIndex((c) => c.id === id);
-    if (idx === -1) return { success: false };
+    if (idx === -1) return { success: false, message: 'کاربر مشاور یافت نشد.' };
+    if (updates.username) {
+      const cleanU = updates.username.trim().toLowerCase();
+      if (counselors.some((c) => c.id !== id && c.username.trim().toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای مشاور دیگری ثبت شده است.' };
+      }
+    }
     counselors[idx] = { ...counselors[idx], ...updates };
     Storage.setCounselors(counselors);
-    return { success: true };
+    return { success: true, message: 'مشخصات مشاور با موفقیت بروزرسانی شد.' };
   },
 
   deleteCounselor: (id: string): { success: boolean } => {

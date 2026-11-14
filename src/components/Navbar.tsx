@@ -55,6 +55,14 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (currentUser?.role === 'maintenance') {
       return m.category === 'maintenance' && m.status !== 'answered';
     }
+    if (currentUser?.role === 'counselor') {
+      return (
+        (m.receiverType === 'counselor' ||
+          m.category === 'counseling' ||
+          m.category === 'social_personal') &&
+        m.status !== 'answered'
+      );
+    }
     return m.status === 'pending';
   }).length;
 
@@ -163,10 +171,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span>
                       {currentUser.role === 'student' && currentUser.student.fullName}
                       {currentUser.role === 'supervisor' && currentUser.supervisor.fullName}
+                      {currentUser.role === 'counselor' && currentUser.counselor.fullName}
                       {currentUser.role === 'maintenance' && currentUser.technician.fullName}
                       {currentUser.role === 'warehouse' && currentUser.staff.fullName}
                       {currentUser.role === 'admin' && 'مدیر امور خوابگاه‌ها'}
                     </span>
+                    {currentUser.role === 'counselor' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-bold">
+                        مشاور و روانشناس
+                      </span>
+                    )}
                     {currentUser.role === 'maintenance' && (
                       <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold">
                         تکنسین فنی
@@ -192,6 +206,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="text-[10px] text-slate-400">
                     {currentUser.role === 'student' && `کد دانشجویی: ${currentUser.student.studentId}`}
                     {currentUser.role === 'supervisor' && 'سرپرست سرا'}
+                    {currentUser.role === 'counselor' && `مرکز مشاوره (${currentUser.counselor.specialty || 'سلامت روان'})`}
                     {currentUser.role === 'maintenance' && `امور تأسیسات (${currentUser.technician.specialty || 'تکنسین'})`}
                     {currentUser.role === 'warehouse' && 'مسئول انبار و تجهیزات'}
                     {currentUser.role === 'admin' && 'مدیر کل سامانه'}

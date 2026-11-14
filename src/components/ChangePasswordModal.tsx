@@ -7,12 +7,14 @@ interface ChangePasswordModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: NonNullable<CurrentUser>;
+  onPasswordChanged?: () => void;
 }
 
 export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
   isOpen,
   onClose,
   currentUser,
+  onPasswordChanged,
 }) => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -55,6 +57,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      onPasswordChanged?.();
       setTimeout(() => {
         onClose();
         setStatusMessage(null);
