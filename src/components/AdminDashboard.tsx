@@ -20,6 +20,7 @@ import {
   ActivityLog,
   StudentEvaluation,
   WarehouseStaff,
+  HomeNoteItem,
 } from '../types';
 import { Storage } from '../utils/storage';
 import { ExcelImportTab } from './ExcelImportModal';
@@ -41,6 +42,16 @@ import { VisualBedPicker } from './VisualBedPicker';
 import { RoomWarningModal } from './RoomWarningModal';
 import { DormIdCardModal } from './DormIdCardModal';
 import { StudentEvaluationModal } from './StudentEvaluationModal';
+import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
+import { AdminUsersPanel, UserCategoryKey } from './AdminUsersPanel';
+import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
+import { STANDARD_FONTS, readMultipleFontFiles } from '../utils/fonts';
+import {
+  DEFAULT_HOME_NOTES_TITLE,
+  DEFAULT_HOME_NOTES,
+  HERO_PRESET_COLORS,
+  resolveHeroBannerStyle,
+} from '../utils/homeDefaults';
 import {
   Settings,
   Calendar,
@@ -102,6 +113,7 @@ import {
   Activity,
   Award,
   Package,
+  Info,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -146,7 +158,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   cloudSyncTick = 0,
 }) => {
   // تب‌های اصلی داشبورد مدیر
-  const [mainTab, setMainTab] = useState<'cartable' | 'announcements' | 'requests' | 'maintenance' | 'shifts' | 'counseling' | 'activity_log' | 'settings'>('cartable');
+  const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'shifts' | 'counseling' | 'activity_log' | 'settings'>('cartable');
+  const [usersCategory, setUsersCategory] = useState<UserCategoryKey>('students');
 
   // لاگ فعالیت‌ها و تذکرات / ارزیابی‌های دانشجویان
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(Storage.getActivityLogs());
@@ -196,14 +209,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [shiftDayFilter, setShiftDayFilter] = useState('all');
   const [shiftFeedback, setShiftFeedback] = useState<string | null>(null);
 
-  // فهرست پرسنل انبار و فرم ثبت دستی
+  // فهرست پرسنل انبار
   const [warehouseStaffList, setWarehouseStaffList] = useState<WarehouseStaff[]>(Storage.getWarehouseStaff());
-  const [newWhName, setNewWhName] = useState('');
-  const [newWhPhone, setNewWhPhone] = useState('');
-  const [newWhUsername, setNewWhUsername] = useState('');
-  const [newWhPassword, setNewWhPassword] = useState('');
-  const [newWhNotes, setNewWhNotes] = useState('');
-  const [whFeedback, setWhFeedback] = useState<string | null>(null);
+
+  const handleUsersRefresh = () => {
+    setCounselorsList(Storage.getCounselors());
+    setWarehouseStaffList(Storage.getWarehouseStaff());
+    onRefreshData();
+  };
 
   // همگام‌سازی فهرست‌های داخلی مدیر هنگام دریافت داده جدید از سرور ابری
   useEffect(() => {
@@ -230,13 +243,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newShiftIsEveryDay, setNewShiftIsEveryDay] = useState(false);
 
   // زیرتب‌های کارتابل سرپرستی مدیر
-  const [cartableSubTab, setCartableSubTab] = useState<'manager' | 'visual_picker' | 'warnings' | 'students' | 'structure'>('manager');
+  const [cartableSubTab, setCartableSubTab] = useState<'manager' | 'visual_picker' | 'warnings' | 'structure'>('manager');
   const [selectedCartableDormId, setSelectedCartableDormId] = useState<string>('all');
   const [isAdminWarningModalOpen, setIsAdminWarningModalOpen] = useState(false);
 
   useEffect(() => {
     setActivityLogs(Storage.getActivityLogs());
     setStudentEvaluations(Storage.getStudentEvaluations());
+    setCounselorsList(Storage.getCounselors());
+    setWarehouseStaffList(Storage.getWarehouseStaff());
   }, [students, warnings, announcements, rooms, beds, mainTab, cartableSubTab]);
 
   // وضعیت‌های مدیریت تأسیسات در پنل مدیر کل
@@ -255,15 +270,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [adminNewMaintPriority, setAdminNewMaintPriority] = useState<MaintenanceTask['priority']>('normal');
   const [adminNewMaintCategory, setAdminNewMaintCategory] = useState<MaintenanceTask['category']>('plumbing');
   const [adminNewMaintStaffId, setAdminNewMaintStaffId] = useState('');
-
-  // فرم تعریف تکنسین جدید توسط مدیر
-  const [newTechName, setNewTechName] = useState('');
-  const [newTechSpecialty, setNewTechSpecialty] = useState('');
-  const [newTechMobile, setNewTechMobile] = useState('');
-  const [newTechUsername, setNewTechUsername] = useState('');
-  const [newTechPassword, setNewTechPassword] = useState('');
-  const [newTechDormIds, setNewTechDormIds] = useState<string[]>(dorms.map((d) => d.id));
-  const [techFeedback, setTechFeedback] = useState<string | null>(null);
 
   // تخصیص مستقیم دانشجوی فاقد اتاق به اتاق و تخت خالی توسط مدیر
   const [assigningStudent, setAssigningStudent] = useState<Student | null>(null);
@@ -354,6 +360,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // فرم ثبت و انتشار اطلاعیه توسط مدیر
   const [newAnnTitle, setNewAnnTitle] = useState('');
   const [newAnnContent, setNewAnnContent] = useState('');
+  const [newAnnContentHtml, setNewAnnContentHtml] = useState('');
+  const [annEditorResetKey, setAnnEditorResetKey] = useState(0);
   const [newAnnPriority, setNewAnnPriority] = useState<Announcement['priority']>('normal');
   const [newAnnTargetDormId, setNewAnnTargetDormId] = useState('all');
   const [newAnnShowOnHome, setNewAnnShowOnHome] = useState(true);
@@ -362,6 +370,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [annPreviewImage, setAnnPreviewImage] = useState<string | null>(null);
   const [editingAnnId, setEditingAnnId] = useState<string | null>(null);
   const [annFeedback, setAnnFeedback] = useState<string | null>(null);
+
+  // وضعیت آپلود چندتایی و انتخاب فونت نمایش سامانه در تب تنظیمات
+  const [adminFontName, setAdminFontName] = useState('');
+  const [adminActivateFontOnUpload, setAdminActivateFontOnUpload] = useState(false);
+  const [adminFontFeedback, setAdminFontFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // وضعیت ویرایش باکس بنر اصلی و نکات مهم صفحه اول سایت
+  const [heroBgFeedback, setHeroBgFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [draftHomeNotesTitle, setDraftHomeNotesTitle] = useState(
+    settings.homeNotesTitle?.trim() || DEFAULT_HOME_NOTES_TITLE
+  );
+  const [draftHomeNotes, setDraftHomeNotes] = useState<HomeNoteItem[]>(
+    settings.homeNotes && settings.homeNotes.length > 0
+      ? settings.homeNotes
+      : DEFAULT_HOME_NOTES
+  );
+  const [homeNotesEditorKey, setHomeNotesEditorKey] = useState(0);
+  const [homeNotesFeedback, setHomeNotesFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    setDraftHomeNotesTitle(settings.homeNotesTitle?.trim() || DEFAULT_HOME_NOTES_TITLE);
+    setDraftHomeNotes(
+      settings.homeNotes && settings.homeNotes.length > 0
+        ? settings.homeNotes
+        : DEFAULT_HOME_NOTES
+    );
+    setHomeNotesEditorKey((k) => k + 1);
+  }, [settings.homeNotesTitle, settings.homeNotes]);
 
   // مدیریت دانشجویان توسط مدیر: افزودن، ویرایش و مشاهده کارت
   const [isAddStudentModalOpen, setIsAddStudentModalOpen] = useState(false);
@@ -689,6 +725,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditingAnnId(ann.id);
     setNewAnnTitle(ann.title);
     setNewAnnContent(ann.content);
+    setNewAnnContentHtml(ann.contentHtml || plainTextToHtml(ann.content));
+    setAnnEditorResetKey((k) => k + 1);
     setNewAnnPriority(ann.priority);
     setNewAnnTargetDormId(ann.targetDormId || 'all');
     setNewAnnShowOnHome(ann.showOnHomePage !== false);
@@ -701,6 +739,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditingAnnId(null);
     setNewAnnTitle('');
     setNewAnnContent('');
+    setNewAnnContentHtml('');
+    setAnnEditorResetKey((k) => k + 1);
     setNewAnnPriority('normal');
     setNewAnnTargetDormId('all');
     setNewAnnShowOnHome(true);
@@ -723,13 +763,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.target.value = '';
   };
 
-  // فرم ثبت سرپرست جدید با امکان انتخاب چند سرا
-  const [newSupName, setNewSupName] = useState('');
-  const [newSupUser, setNewSupUser] = useState('');
-  const [newSupPass, setNewSupPass] = useState('');
-  const [newSupPhone, setNewSupPhone] = useState('');
-  const [newSupDormIds, setNewSupDormIds] = useState<string[]>(dorms[0]?.id ? [dorms[0].id] : []);
-
   // محاسبه آمار سراها برای کارتابل سرپرستی مدیر
   const activeCartableDormIds = selectedCartableDormId === 'all'
     ? dorms.map((d) => d.id)
@@ -749,24 +782,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const cartableWarnings = warnings.filter((w) =>
     selectedCartableDormId === 'all' ? true : w.dormId === selectedCartableDormId
   );
-
-  // فیلتر دانشجویان کارتابل
-  const [studentSearchQuery, setStudentSearchQuery] = useState('');
-  const cartableStudents = students.filter((s) => {
-    if (selectedCartableDormId !== 'all' && s.assignedDormId !== selectedCartableDormId) {
-      return false;
-    }
-    if (studentSearchQuery.trim()) {
-      const q = studentSearchQuery.trim();
-      return (
-        (s.fullName || '').includes(q) ||
-        (s.studentId || '').includes(q) ||
-        (s.fieldOfStudy || '').includes(q) ||
-        (s.mobile && s.mobile.includes(q))
-      );
-    }
-    return true;
-  });
 
   const handleBulkApprove = () => {
     if (pendingStudents.length === 0) return;
@@ -810,6 +825,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
+    const sanitizedHtml = sanitizeRichHtml(newAnnContentHtml) || plainTextToHtml(newAnnContent.trim());
+
     if (editingAnnId) {
       const allAnnouncements = Storage.getAnnouncements();
       const idx = allAnnouncements.findIndex((a) => a.id === editingAnnId);
@@ -818,6 +835,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           ...allAnnouncements[idx],
           title: newAnnTitle.trim(),
           content: newAnnContent.trim(),
+          contentHtml: sanitizedHtml,
           priority: newAnnPriority,
           targetDormId: newAnnTargetDormId,
           showOnHomePage: newAnnShowOnHome,
@@ -832,6 +850,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       Storage.addAnnouncement({
         title: newAnnTitle.trim(),
         content: newAnnContent.trim(),
+        contentHtml: sanitizedHtml,
         author: 'مدیریت کل امور سراهای دانشجویی',
         priority: newAnnPriority,
         date: new Date().toLocaleDateString('fa-IR'),
@@ -845,6 +864,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     setNewAnnTitle('');
     setNewAnnContent('');
+    setNewAnnContentHtml('');
+    setAnnEditorResetKey((k) => k + 1);
     setNewAnnPriority('normal');
     setNewAnnTargetDormId('all');
     setNewAnnShowOnHome(true);
@@ -1044,53 +1065,92 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => setSaveStatus(false), 2000);
   };
 
-  const handleAdminFontUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 8 * 1024 * 1024) {
-      alert('حجم فایل فونت نباید بیشتر از ۸ مگابایت باشد.');
+  const handleAdminFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const { added: parsedFonts, errors } = await readMultipleFontFiles(files, adminFontName);
+    e.target.value = '';
+
+    if (parsedFonts.length === 0) {
+      setAdminFontFeedback({
+        type: 'error',
+        message: errors[0] || 'فایل فونت معتبری انتخاب نشد.',
+      });
+      setTimeout(() => setAdminFontFeedback(null), 4500);
       return;
     }
-    const ext = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
-    let format = 'truetype';
-    if (ext === 'woff') format = 'woff';
-    else if (ext === 'woff2') format = 'woff2';
-    else if (ext === 'otf') format = 'opentype';
 
-    const displayName = file.name.substring(0, file.name.lastIndexOf('.')) || 'فونت سفارشی';
-    const fontId = `custom_font_${Date.now()}`;
-    const fontCssFamily = `CF_${Date.now()}`;
+    const existingFonts = localSettings.customFonts || [];
+    const updatedFonts = [...existingFonts, ...parsedFonts];
+    const shouldActivateFirst = adminActivateFontOnUpload;
+    const firstUploaded = parsedFonts[0];
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (!dataUrl) return;
-
-      const newCustomFont: CustomFont = {
-        id: fontId,
-        name: displayName,
-        fontFamily: fontCssFamily,
-        dataUrl,
-        format,
-      };
-
-      const existingFonts = localSettings.customFonts || [];
-      const updatedFonts = [...existingFonts, newCustomFont];
-
-      const updatedSettings: AppSettings = {
-        ...localSettings,
-        customFonts: updatedFonts,
-        fontFamily: fontCssFamily,
-        activeCustomFontId: fontId,
-      };
-
-      setLocalSettings(updatedSettings);
-      Storage.setSettings(updatedSettings);
-      onUpdateSettings(updatedSettings);
-      alert(`فونت «${displayName}» با موفقیت به سامانه افزوده و فعال گردید.`);
+    const updatedSettings: AppSettings = {
+      ...localSettings,
+      customFonts: updatedFonts,
+      ...(shouldActivateFirst
+        ? {
+            fontFamily: firstUploaded.fontFamily,
+            activeCustomFontId: firstUploaded.id,
+          }
+        : {}),
     };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+
+    setLocalSettings(updatedSettings);
+    Storage.setSettings(updatedSettings);
+    onUpdateSettings(updatedSettings);
+    setAdminFontName('');
+
+    const countText =
+      parsedFonts.length === 1
+        ? `فونت «${firstUploaded.name}»`
+        : `${parsedFonts.length} فونت جدید`;
+    const activeNote = shouldActivateFirst
+      ? ' و به عنوان فونت نمایش سایت فعال شد.'
+      : ' به لیست فونت‌های سامانه اضافه شد (از فهرست زیر قابل انتخاب است).';
+    const warningNote = errors.length > 0 ? ` (${errors.length} فایل نامعتبر نادیده گرفته شد)` : '';
+
+    setAdminFontFeedback({
+      type: 'success',
+      message: `${countText}${activeNote}${warningNote}`,
+    });
+    setTimeout(() => setAdminFontFeedback(null), 5000);
+  };
+
+  const handleSelectSiteFont = (fontFamily: AppSettings['fontFamily'], customFontId?: string) => {
+    const updatedSettings: AppSettings = {
+      ...localSettings,
+      fontFamily,
+      activeCustomFontId: customFontId,
+    };
+    setLocalSettings(updatedSettings);
+    Storage.setSettings(updatedSettings);
+    onUpdateSettings(updatedSettings);
+    setAdminFontFeedback({
+      type: 'success',
+      message: 'فونت نمایش کل سامانه با موفقیت تغییر یافت.',
+    });
+    setTimeout(() => setAdminFontFeedback(null), 3000);
+  };
+
+  const handleDeleteAdminCustomFont = (fontId: string, fontCssFamily: string) => {
+    const remainingFonts = (localSettings.customFonts || []).filter((f) => f.id !== fontId);
+    const wasActive =
+      localSettings.activeCustomFontId === fontId || localSettings.fontFamily === fontCssFamily;
+    const updatedSettings: AppSettings = {
+      ...localSettings,
+      customFonts: remainingFonts,
+      ...(wasActive ? { fontFamily: 'vazir', activeCustomFontId: undefined } : {}),
+    };
+    setLocalSettings(updatedSettings);
+    Storage.setSettings(updatedSettings);
+    onUpdateSettings(updatedSettings);
+    setAdminFontFeedback({
+      type: 'success',
+      message: 'فونت سفارشی حذف گردید.',
+    });
+    setTimeout(() => setAdminFontFeedback(null), 3000);
   };
 
   const handleAdminWallpaperUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1128,70 +1188,175 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onUpdateSettings(updated);
   };
 
-  // افزودن سرپرست جدید با پشتیبانی از انتخاب چند سرا
-  const handleAddSupervisor = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSupName.trim() || !newSupUser.trim() || !newSupPass.trim()) return;
+  // شخصی‌سازی پس‌زمینه کادر بنر اصلی صفحه اول سایت
+  const applyHeroSettings = (patch: Partial<AppSettings>, message: string) => {
+    const updated: AppSettings = {
+      ...localSettings,
+      ...patch,
+    };
+    setLocalSettings(updated);
+    Storage.setSettings(updated);
+    onUpdateSettings(updated);
+    setHeroBgFeedback({ type: 'success', message });
+    setTimeout(() => setHeroBgFeedback(null), 3500);
+  };
 
-    const validDorms = newSupDormIds.filter(Boolean);
-    const selectedDorms = validDorms.length > 0 ? validDorms : dorms[0]?.id ? [dorms[0].id] : [];
+  const handleHeroBgModeChange = (mode: 'default' | 'color' | 'image') => {
+    if (mode === 'default') {
+      applyHeroSettings(
+        { heroBgMode: 'default' },
+        'پس‌زمینه کادر بنر صفحه اول به حالت پیش‌فرض سامانه بازگشت.'
+      );
+      return;
+    }
+    if (mode === 'color') {
+      applyHeroSettings(
+        {
+          heroBgMode: 'color',
+          heroBgColor: localSettings.heroBgColor || HERO_PRESET_COLORS[0].hex,
+        },
+        'حالت رنگ دلخواه برای پس‌زمینه بنر صفحه اول انتخاب شد.'
+      );
+      return;
+    }
+    applyHeroSettings(
+      { heroBgMode: 'image' },
+      localSettings.heroBgImageUrl
+        ? 'تصویر بارگذاری‌شده برای پس‌زمینه بنر صفحه اول فعال شد.'
+        : 'اکنون یک تصویر از کادر زیر برای پس‌زمینه بنر صفحه اول انتخاب کنید.'
+    );
+  };
 
-    const currentSups = Storage.getSupervisors();
-    currentSups.push({
-      id: `sup_${Date.now()}`,
-      fullName: newSupName.trim(),
-      username: newSupUser.trim(),
-      password: newSupPass.trim(),
-      phone: newSupPhone.trim() || '09130000000',
-      assignedDormId: selectedDorms[0] || 'all',
-      assignedDormIds: selectedDorms,
-      role: 'supervisor',
+  const handleHeroBgColorChange = (hex: string) => {
+    applyHeroSettings(
+      { heroBgMode: 'color', heroBgColor: hex },
+      'رنگ پس‌زمینه بنر اصلی صفحه اول ذخیره و اعمال شد.'
+    );
+  };
+
+  const handleHeroBgImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setHeroBgFeedback({
+        type: 'error',
+        message: 'حجم تصویر بنر نباید بیشتر از ۵ مگابایت باشد.',
+      });
+      setTimeout(() => setHeroBgFeedback(null), 4000);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      if (!dataUrl) return;
+      applyHeroSettings(
+        { heroBgMode: 'image', heroBgImageUrl: dataUrl },
+        'تصویر پس‌زمینه بنر اصلی صفحه اول با موفقیت بارگذاری و فعال شد.'
+      );
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleResetHeroBg = () => {
+    applyHeroSettings(
+      { heroBgMode: 'default', heroBgColor: undefined, heroBgImageUrl: undefined },
+      'پس‌زمینه بنر صفحه اول به حالت پیش‌فرض اولیه بازنشانی شد.'
+    );
+  };
+
+  // ویرایش بخش نکات مهم انتخاب اتاق و اسکان در صفحه اول
+  const handleUpdateHomeNote = (id: string, patch: Partial<HomeNoteItem>) => {
+    setDraftHomeNotes((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    );
+  };
+
+  const handleAddHomeNote = () => {
+    const newIndex = draftHomeNotes.length + 1;
+    setDraftHomeNotes((prev) => [
+      ...prev,
+      {
+        id: `note_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        title: `${newIndex.toLocaleString('fa-IR')}. نکته جدید:`,
+        body: 'متن توضیحی نکته جدید را در اینجا بنویسید...',
+      },
+    ]);
+    setHomeNotesEditorKey((k) => k + 1);
+  };
+
+  const handleDeleteHomeNote = (id: string) => {
+    if (draftHomeNotes.length <= 1) {
+      setHomeNotesFeedback({
+        type: 'error',
+        message: 'حداقل یک کارت نکته باید در این بخش وجود داشته باشد.',
+      });
+      setTimeout(() => setHomeNotesFeedback(null), 3500);
+      return;
+    }
+    setDraftHomeNotes((prev) => prev.filter((item) => item.id !== id));
+    setHomeNotesEditorKey((k) => k + 1);
+  };
+
+  const handleSaveHomeNotes = () => {
+    const cleanTitle = draftHomeNotesTitle.trim() || DEFAULT_HOME_NOTES_TITLE;
+    const cleanedNotes: HomeNoteItem[] = draftHomeNotes
+      .map((item) => ({
+        id: item.id,
+        title: item.title.trim(),
+        body: item.body.trim(),
+        bodyHtml: item.bodyHtml ? sanitizeRichHtml(item.bodyHtml) : undefined,
+      }))
+      .filter((item) => item.title || item.body);
+
+    if (cleanedNotes.length === 0) {
+      setHomeNotesFeedback({
+        type: 'error',
+        message: 'لطفاً حداقل یک نکته با عنوان یا متن معتبر وارد فرمایید.',
+      });
+      setTimeout(() => setHomeNotesFeedback(null), 3500);
+      return;
+    }
+
+    const updated: AppSettings = {
+      ...localSettings,
+      homeNotesTitle: cleanTitle,
+      homeNotes: cleanedNotes,
+    };
+    setLocalSettings(updated);
+    Storage.setSettings(updated);
+    Storage.addActivityLog({
+      category: 'settings',
+      action: 'ویرایش نکات مهم انتخاب اتاق صفحه اول',
+      details: `عنوان بخش: ${cleanTitle} (${cleanedNotes.length} کارت)`,
+      targetName: cleanTitle,
     });
-
-    Storage.setSupervisors(currentSups);
-    setNewSupName('');
-    setNewSupUser('');
-    setNewSupPass('');
-    setNewSupPhone('');
-    setNewSupDormIds(dorms[0]?.id ? [dorms[0].id] : []);
-    onRefreshData();
+    setActivityLogs(Storage.getActivityLogs());
+    onUpdateSettings(updated);
+    setHomeNotesFeedback({
+      type: 'success',
+      message: 'متن و کارت‌های بخش «نکات مهم انتخاب اتاق و اسکان» با موفقیت در صفحه اول ذخیره و منتشر شد.',
+    });
+    setTimeout(() => setHomeNotesFeedback(null), 4000);
   };
 
-  // تغییر سراهای یک سرپرست موجود با یک کلیک
-  const handleToggleSupervisorDorm = (supId: string, dormId: string) => {
-    const currentSups = Storage.getSupervisors();
-    const sup = currentSups.find((s) => s.id === supId);
-    if (!sup) return;
-
-    let existingDorms = sup.assignedDormIds && sup.assignedDormIds.length > 0
-      ? [...sup.assignedDormIds]
-      : sup.assignedDormId
-      ? [sup.assignedDormId]
-      : [];
-
-    if (existingDorms.includes(dormId)) {
-      if (existingDorms.length === 1) {
-        alert('حداقل یک سرا باید برای سرپرست انتخاب شده باقی بماند.');
-        return;
-      }
-      existingDorms = existingDorms.filter((d) => d !== dormId);
-    } else {
-      existingDorms.push(dormId);
-    }
-
-    sup.assignedDormIds = existingDorms;
-    sup.assignedDormId = existingDorms[0] || 'all';
-
-    Storage.setSupervisors(currentSups);
-    onRefreshData();
-  };
-
-  const handleRemoveSupervisor = (id: string) => {
-    if (confirm('آیا از حذف این سرپرست اطمینان دارید؟')) {
-      const currentSups = Storage.getSupervisors().filter((s) => s.id !== id);
-      Storage.setSupervisors(currentSups);
-      onRefreshData();
-    }
+  const handleResetHomeNotes = () => {
+    const updated: AppSettings = {
+      ...localSettings,
+      homeNotesTitle: undefined,
+      homeNotes: undefined,
+    };
+    setDraftHomeNotesTitle(DEFAULT_HOME_NOTES_TITLE);
+    setDraftHomeNotes(DEFAULT_HOME_NOTES);
+    setHomeNotesEditorKey((k) => k + 1);
+    setLocalSettings(updated);
+    Storage.setSettings(updated);
+    onUpdateSettings(updated);
+    setHomeNotesFeedback({
+      type: 'success',
+      message: 'بخش نکات مهم انتخاب اتاق و اسکان به متن پیش‌فرض سامانه بازگردانی شد.',
+    });
+    setTimeout(() => setHomeNotesFeedback(null), 3500);
   };
 
   const handleBackupExport = () => {
@@ -1291,78 +1456,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setAdminMaintFeedback(`مأموریت ${code} حذف گردید.`);
       onRefreshData();
       setTimeout(() => setAdminMaintFeedback(null), 3000);
-    }
-  };
-
-  const handleAddTechnician = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTechName.trim() || !newTechUsername.trim() || !newTechPassword.trim()) return;
-
-    const dormIds = newTechDormIds.length > 0 ? newTechDormIds : dorms.map((d) => d.id);
-    const phoneVal = newTechMobile.trim() || '۰۹۱۳۰۰۰۰۰۰۰';
-
-    const res = Storage.addMaintenanceStaff({
-      fullName: newTechName.trim(),
-      specialty: newTechSpecialty.trim() || 'تأسیسات عمومی و فنی',
-      phone: phoneVal,
-      mobile: phoneVal,
-      username: newTechUsername.trim(),
-      password: newTechPassword.trim(),
-      role: 'maintenance',
-      status: 'active',
-      assignedDormIds: dormIds,
-      coveredDormIds: dormIds,
-      isActive: true,
-    });
-
-    if (res.success) {
-      setTechFeedback(`تکنسین «${newTechName}» با موفقیت افزوده شد.`);
-      setNewTechName('');
-      setNewTechSpecialty('');
-      setNewTechMobile('');
-      setNewTechUsername('');
-      setNewTechPassword('');
-      onRefreshData();
-      setTimeout(() => setTechFeedback(null), 3500);
-    } else {
-      alert(res.message);
-    }
-  };
-
-  const handleToggleTechActive = (staffId: string, currentActive?: boolean) => {
-    const nextStatus = currentActive === false ? 'active' : 'inactive';
-    Storage.updateMaintenanceStaff(staffId, { status: nextStatus, isActive: nextStatus === 'active' });
-    onRefreshData();
-  };
-
-  const handleToggleTechDorm = (staffId: string, dormId: string) => {
-    const tech = campusStaff.find((s) => s.id === staffId);
-    if (!tech) return;
-    const existing = [...(tech.coveredDormIds || tech.assignedDormIds || [])];
-    const idx = existing.indexOf(dormId);
-    if (idx !== -1) {
-      if (existing.length === 1) {
-        alert('حداقل باید یک سرای دانشجویی تحت پوشش تکنسین باشد.');
-        return;
-      }
-      existing.splice(idx, 1);
-    } else {
-      existing.push(dormId);
-    }
-    Storage.updateMaintenanceStaff(staffId, { coveredDormIds: existing, assignedDormIds: existing });
-    onRefreshData();
-  };
-
-  const handleDeleteTechnician = (staffId: string, name: string) => {
-    if (confirm(`آیا از حذف تکنسین «${name}» اطمینان دارید؟`)) {
-      const res = Storage.deleteMaintenanceStaff(staffId);
-      if (res.success) {
-        setTechFeedback(res.message);
-        onRefreshData();
-        setTimeout(() => setTechFeedback(null), 3000);
-      } else {
-        alert(res.message);
-      }
     }
   };
 
@@ -1511,36 +1604,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* ۱. تب کارتابل سرپرستی مدیر کل */}
         <button
           onClick={() => setMainTab('cartable')}
-          className={`flex-1 min-w-[210px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+          className={`flex-1 min-w-[200px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
             mainTab === 'cartable'
               ? 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-md'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
           <Building2 className="w-4 h-4 text-purple-600" />
-          <span>کارتابل و مدیریت جامع سراها (امکانات سرپرستی)</span>
+          <span>کارتابل و مدیریت جامع سراها</span>
         </button>
 
-        {/* ۲. تب انتشار اطلاعیه‌های سایت و صفحه اول */}
+        {/* ۲. تب مجزای مدیریت کاربران (دانشجویان، سرپرستان، تأسیسات، انبار، مشاوران) */}
+        <button
+          onClick={() => setMainTab('users')}
+          className={`flex-1 min-w-[200px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+            mainTab === 'users'
+              ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-md'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Users className="w-4 h-4 text-teal-600" />
+          <span>مدیریت کاربران سامانه</span>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
+            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + counselorsList.length}
+          </span>
+        </button>
+
+        {/* ۳. تب انتشار اطلاعیه‌های سایت و صفحه اول */}
         <button
           onClick={() => setMainTab('announcements')}
-          className={`flex-1 min-w-[210px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
             mainTab === 'announcements'
               ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-md'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
           <Bell className="w-4 h-4 text-teal-600" />
-          <span>ثبت و انتشار اطلاعیه‌های سایت و صفحه اول</span>
+          <span>اطلاعیه‌های سایت و صفحه اول</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
             {announcements.length}
           </span>
         </button>
 
-        {/* ۳. تب درخواست‌های اسکان و تخصیص موقت */}
+        {/* ۴. تب درخواست‌های اسکان و تخصیص موقت */}
         <button
           onClick={() => setMainTab('requests')}
-          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+          className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
             mainTab === 'requests'
               ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-md'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -1555,10 +1664,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )}
         </button>
 
-        {/* ۴. تب مدیریت تأسیسات و امور فنی دانشگاه */}
+        {/* ۵. تب مدیریت تأسیسات و امور فنی دانشگاه */}
         <button
           onClick={() => setMainTab('maintenance')}
-          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+          className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
             mainTab === 'maintenance'
               ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-md'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -1573,68 +1682,99 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )}
         </button>
 
-        {/* ۵. تب شیفت‌بندی سرپرستان و حضور و غیاب */}
+        {/* ۶. تب شیفت‌بندی سرپرستان و حضور و غیاب */}
         <button
           onClick={() => setMainTab('shifts')}
-          className={`flex-1 min-w-[210px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
             mainTab === 'shifts'
               ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-md'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
           <Calendar className="w-4 h-4 text-teal-600" />
-          <span>شیفت‌بندی سرپرستان و حضور و غیاب</span>
+          <span>شیفت‌بندی سرپرستان و گزارش‌ها</span>
         </button>
 
-        {/* ۶. تب مرکز مشاوره، روانشناسان و شیفت‌ها */}
+        {/* ۷. تب مرکز مشاوره، روانشناسان و شیفت‌ها */}
         <button
           onClick={() => setMainTab('counseling')}
-          className={`flex-1 min-w-[210px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
             mainTab === 'counseling'
               ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-md'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
           <HeartHandshake className="w-4 h-4 text-teal-600" />
-          <span>مرکز مشاوره، روانشناسان و شیفت‌ها</span>
+          <span>مرکز مشاوره و شیفت‌های روانشناسی</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
             {counselorsList.length} مشاور
           </span>
         </button>
 
-        {/* ۷. تب گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران */}
+        {/* ۸. تب گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران */}
         <button
           onClick={() => {
             setActivityLogs(Storage.getActivityLogs());
             setMainTab('activity_log');
           }}
-          className={`flex-1 min-w-[200px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+          className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
             mainTab === 'activity_log'
               ? 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 shadow-md'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
           <Activity className="w-4 h-4 text-rose-600" />
-          <span>گزارش لاگ فعالیت و دسترسی‌ها</span>
+          <span>لاگ فعالیت‌ها و دسترسی‌ها</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-extrabold">
             {activityLogs.length}
           </span>
         </button>
 
-        {/* ۸. تب تنظیمات، سرپرستان و شخصی‌سازی */}
+        {/* ۹. تب پیکربندی و ظاهر سیستم */}
         <button
           onClick={() => setMainTab('settings')}
-          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+          className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
             mainTab === 'settings'
               ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-md'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
           <Settings className="w-4 h-4 text-indigo-600" />
-          <span>پیکربندی سیستم، سرپرستان و ظاهر</span>
+          <span>تنظیمات و ظاهر سامانه</span>
         </button>
 
       </div>
+
+      {/* ========================================================= */}
+      {/* بخش مجزا و منظم مدیریت کاربران سامانه */}
+      {/* ========================================================= */}
+      {mainTab === 'users' && (
+        <AdminUsersPanel
+          activeCategory={usersCategory}
+          onCategoryChange={setUsersCategory}
+          students={students}
+          dorms={dorms}
+          rooms={rooms}
+          beds={beds}
+          supervisors={supervisors}
+          maintenanceStaff={campusStaff}
+          warehouseStaff={warehouseStaffList}
+          counselors={counselorsList}
+          onRefreshData={handleUsersRefresh}
+          onOpenExcelModal={onOpenExcelModal}
+          onOpenReports={onOpenReports}
+          onAddStudent={handleOpenAddStudent}
+          onEditStudent={handleOpenEditStudent}
+          onDeleteStudent={handleDeleteStudent}
+          onViewStudentCard={(st) => setViewCardStudent(st)}
+          onEvaluateStudent={(st) => {
+            setEvalTargetStudent(st);
+            setIsStudentEvalModalOpen(true);
+          }}
+          onAssignStudentRoom={handleOpenAssignStudentModal}
+          onEvictStudent={handleAdminEvictStudent}
+        />
+      )}
 
       {/* ========================================================= */}
       {/* ۱. تب کارتابل و مدیریت جامع سراها (امکانات کامل سرپرستی برای مدیر) */}
@@ -1764,18 +1904,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
 
             <button
-              onClick={() => setCartableSubTab('students')}
-              className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer flex items-center gap-2 ${
-                cartableSubTab === 'students'
-                  ? 'bg-purple-600 text-white shadow-md'
-                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-              }`}
-            >
-              <Users className="w-4 h-4 text-teal-600" />
-              <span>فهرست دانشجویان و تماس‌های اضطراری ({cartableStudents.length})</span>
-            </button>
-
-            <button
               onClick={() => setCartableSubTab('structure')}
               className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer flex items-center gap-2 ${
                 cartableSubTab === 'structure'
@@ -1785,6 +1913,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               <Building2 className="w-4 h-4 text-amber-500" />
               <span>ثبت و مدیریت سراها، اتاق‌ها و تخت‌ها</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setUsersCategory('students');
+                setMainTab('users');
+              }}
+              className="px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer flex items-center gap-2 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-100 mr-auto"
+            >
+              <Users className="w-4 h-4" />
+              <span>مدیریت دانشجویان ({students.length})</span>
             </button>
           </div>
 
@@ -2023,200 +2162,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     ))}
                   </div>
                 )}
-              </div>
-            </div>
-          )}
-
-          {cartableSubTab === 'students' && (
-            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <Users className="w-5 h-5 text-teal-600" />
-                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                    فهرست کامل دانشجومعلمان و مشخصات تماس اضطراری
-                  </h3>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="جستجوی نام، کد دانشجویی یا رشته..."
-                      value={studentSearchQuery}
-                      onChange={(e) => setStudentSearchQuery(e.target.value)}
-                      className="px-3 py-1.5 pr-8 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs w-60"
-                    />
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5" />
-                  </div>
-                  <button
-                    onClick={handleOpenAddStudent}
-                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    <span>افزودن دانشجو جدید</span>
-                  </button>
-                  <button
-                    onClick={onOpenReports}
-                    className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
-                  >
-                    خروجی اکسل جامع
-                  </button>
-                </div>
-              </div>
-
-              <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
-                <table className="w-full text-right text-xs">
-                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
-                    <tr>
-                      <th className="p-3">کد دانشجویی</th>
-                      <th className="p-3">نام و نام خانوادگی</th>
-                      <th className="p-3">رشته و ورودی</th>
-                      <th className="p-3">وضعیت پرونده</th>
-                      <th className="p-3">خوابگاه / اتاق و تخت</th>
-                      <th className="p-3">شماره همراه</th>
-                      <th className="p-3">شماره اضطراری / والدین</th>
-                      <th className="p-3">شهر و نشانی</th>
-                      <th className="p-3 text-center">عملیات مدیریت</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {cartableStudents.map((st) => {
-                      const d = dorms.find((dm) => dm.id === st.assignedDormId);
-                      const r = rooms.find((rm) => rm.id === st.assignedRoomId);
-                      const b = beds.find((bd) => bd.id === st.assignedBedId);
-
-                      return (
-                        <tr key={st.studentId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-mono font-bold text-slate-800 dark:text-slate-200">{st.studentId}</td>
-                          <td className="p-3 font-bold text-slate-900 dark:text-white">
-                            <div className="flex items-center gap-2">
-                              {st.photoUrl ? (
-                                <img src={st.photoUrl} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
-                              ) : (
-                                <div
-                                  className="w-7 h-7 rounded-full text-white text-[10px] font-bold flex items-center justify-center shrink-0"
-                                  style={{ backgroundColor: st.avatarColor || '#0d9488' }}
-                                >
-                                  {st.fullName.slice(0, 1)}
-                                </div>
-                              )}
-                              <span>{st.fullName}</span>
-                            </div>
-                          </td>
-                          <td className="p-3">
-                            <div>{st.fieldOfStudy}</div>
-                            <div className="text-[10px] text-slate-400">ورودی {st.entryTerm}</div>
-                          </td>
-                          <td className="p-3">
-                            {st.isProfileCompleted ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                                <CheckCircle className="w-3 h-3 text-emerald-600" />
-                                تکمیل شده
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 animate-pulse">
-                                <AlertTriangle className="w-3 h-3 text-rose-600" />
-                                پرونده ناقص
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {d && r && b ? (
-                              <div>
-                                <span className="font-bold text-teal-600">اتاق {r.roomNumber}</span>
-                                <span className="text-[11px] text-slate-400 block">{d.name} - {b.label}</span>
-                              </div>
-                            ) : (
-                              <span className="text-slate-400">فاقد اسکان</span>
-                            )}
-                          </td>
-                          <td className="p-3 font-mono" dir="ltr">{st.mobile}</td>
-                          <td className="p-3 text-rose-600 font-mono" dir="ltr">
-                            <div>{st.emergencyPhone || '-'}</div>
-                            <div className="text-[10px] text-slate-400">والدین: {st.parentPhone || '-'}</div>
-                          </td>
-                          <td className="p-3">
-                            <div className="font-bold">{st.province} - {st.city}</div>
-                            <div className="text-[10px] text-slate-400 line-clamp-1">{st.postalAddress || '-'}</div>
-                          </td>
-                          <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
-                              {/* کارت خوابگاه و شناسایی */}
-                              <button
-                                onClick={() => setViewCardStudent(st)}
-                                className="p-1.5 rounded-lg bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 hover:bg-teal-100 border border-teal-200 dark:border-teal-800 transition cursor-pointer"
-                                title="مشاهده و چاپ کارت شناسایی و اسکان سرا"
-                              >
-                                <QrCode className="w-4 h-4" />
-                              </button>
-
-                              {/* ثبت تذکر، اخطار و نمره ارزیابی فردی/اتاق */}
-                              <button
-                                onClick={() => {
-                                  setEvalTargetStudent(st);
-                                  setIsStudentEvalModalOpen(true);
-                                }}
-                                className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 hover:bg-purple-100 border border-purple-200 dark:border-purple-800 transition cursor-pointer"
-                                title="ثبت تذکر، اخطار یا نمره ارزیابی فردی / اتاق"
-                              >
-                                <Award className="w-4 h-4" />
-                              </button>
-
-                              {/* اگر دانشجو اسکان دارد: دکمه تخلیه اتاق و آزادسازی تخت */}
-                              {st.assignedBedId && st.assignmentStatus !== 'none' ? (
-                                <button
-                                  onClick={() => handleAdminEvictStudent(st)}
-                                  className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-100 border border-rose-300 dark:border-rose-800 transition cursor-pointer"
-                                  title="تخلیه دانشجو از اتاق و آزادسازی تخت"
-                                >
-                                  <UserMinus className="w-4 h-4" />
-                                </button>
-                              ) : (
-                                /* اگر فاقد اتاق است: دکمه تخصیص مستقیم به اتاق و تخت خالی */
-                                <button
-                                  onClick={() => handleOpenAssignStudentModal(st)}
-                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-300 dark:border-emerald-800 transition cursor-pointer"
-                                  title="تخصیص دانشجو به اتاق و تخت خالی"
-                                >
-                                  <UserCheck className="w-4 h-4" />
-                                </button>
-                              )}
-
-                              {/* جابجایی یا تخصیص مجدد به تختی دیگر برای دانشجوی دارای اتاق */}
-                              {st.assignedBedId && st.assignmentStatus !== 'none' && (
-                                <button
-                                  onClick={() => handleOpenAssignStudentModal(st)}
-                                  className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
-                                  title="تغییر مستقیم اتاق یا تخت دانشجو"
-                                >
-                                  <BedIcon className="w-4 h-4" />
-                                </button>
-                              )}
-
-                              {/* ویرایش مشخصات دانشجو */}
-                              <button
-                                onClick={() => handleOpenEditStudent(st)}
-                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
-                                title="ویرایش اطلاعات دانشجو"
-                              >
-                                <Edit3 className="w-4 h-4" />
-                              </button>
-
-                              {/* حذف دانشجو */}
-                              <button
-                                onClick={() => handleDeleteStudent(st)}
-                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
-                                title="حذف کامل پرونده دانشجو"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
               </div>
             </div>
           )}
@@ -2583,15 +2528,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  متن و شرح کامل اطلاعیه *
+                  متن و شرح کامل اطلاعیه * (با قابلیت انتخاب فونت، رنگ، اندازه، بُلد و ایتالیک برای هر قسمت از متن)
                 </label>
-                <textarea
-                  rows={4}
-                  value={newAnnContent}
-                  onChange={(e) => setNewAnnContent(e.target.value)}
-                  placeholder="متن کامل بخشنامه یا اطلاعیه رسمی را در این قسمت درج فرمایید..."
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs leading-relaxed focus:ring-2 focus:ring-teal-500"
-                  required
+                <RichTextEditor
+                  valueHtml={newAnnContentHtml}
+                  onChange={(html, plain) => {
+                    setNewAnnContentHtml(html);
+                    setNewAnnContent(plain);
+                  }}
+                  customFonts={localSettings.customFonts}
+                  resetKey={annEditorResetKey}
+                  minHeightClass="min-h-[160px]"
+                  placeholder="متن کامل بخشنامه یا اطلاعیه رسمی را درج فرمایید. با انتخاب هر کلمه یا جمله می‌توانید فونت، رنگ، اندازه، بُلد یا ایتالیک آن را تغییر دهید..."
                 />
               </div>
 
@@ -2806,9 +2754,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </div>
                     </div>
 
-                    <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
-                      {ann.content}
-                    </p>
+                    <RichTextDisplay
+                      html={ann.contentHtml}
+                      fallbackText={ann.content}
+                      className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed"
+                    />
 
                     {ann.imageUrl && (
                       <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-black/5 max-w-sm">
@@ -4135,6 +4085,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
+                    onClick={() => {
+                      setUsersCategory('counselors');
+                      setMainTab('users');
+                    }}
+                    className="px-3.5 py-2 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>مدیریت کامل و تغییر رمز در بخش کاربران</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onOpenExcelModal('counselors')}
                     className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
                   >
@@ -4979,641 +4940,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       })()}
 
       {/* ========================================================= */}
-      {/* ۷. تب پیکربندی سیستم، سرپرستان (چندسرا) و شخصی‌سازی ظاهر */}
+      {/* ۹. تب پیکربندی سیستم، ظاهر و صفحه اول */}
       {/* ========================================================= */}
       {mainTab === 'settings' && (
         <div className="space-y-6 animate-in fade-in duration-200">
-          
-          {/* بخش تعریف و مدیریت سرپرستان خوابگاه‌ها با امکان انتخاب چند سرا */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
-              <div className="flex items-center gap-2">
-                <Users className="w-5 h-5 text-indigo-600" />
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                    تعریف و مدیریت سرپرستان خوابگاه‌ها (با امکان نظارت بر چند سرا)
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    امکان انتصاب یک سرپرست به یک یا چندین سرا، یا ثبت گروهی سرپرستان از طریق فایل اکسل
-                  </p>
-                </div>
+
+          {/* کارت دسترسی سریع به بخش مجزای مدیریت کاربران */}
+          <div className="bg-gradient-to-r from-indigo-50 via-teal-50 to-slate-50 dark:from-indigo-950/30 dark:via-teal-950/30 dark:to-slate-900 rounded-3xl p-5 border border-indigo-200/70 dark:border-indigo-900/50 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-teal-600 text-white shadow-sm shrink-0">
+                <Users className="w-5 h-5" />
               </div>
-              <button
-                type="button"
-                onClick={() => onOpenExcelModal('supervisors')}
-                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>ثبت گروهی با اکسل سرپرستان</span>
-              </button>
+              <div>
+                <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                  مدیریت کاربران به بخش مجزای «مدیریت کاربران سامانه» منتقل شد
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  برای مشاهده، جستجوی پیشرفته، ویرایش، تغییر/ریست رمز و ثبت تکی یا اکسل کاربران روی دسته دلخواه کلیک کنید:
+                </p>
+              </div>
             </div>
 
-            {/* لیست سرپرستان فعلی */}
-            <div className="space-y-3 mb-6">
-              {supervisors.map((sup) => {
-                const assignedIds = sup.assignedDormIds && sup.assignedDormIds.length > 0
-                  ? sup.assignedDormIds
-                  : sup.assignedDormId && sup.assignedDormId !== 'all'
-                  ? [sup.assignedDormId]
-                  : dorms.map((d) => d.id);
-
-                return (
-                  <div
-                    key={sup.id}
-                    className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3 text-xs"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <span className="font-bold text-sm text-slate-800 dark:text-slate-100">{sup.fullName}</span>
-                        <span className="text-slate-400 mr-2">(نام کاربری: {sup.username})</span>
-                        <span className="text-teal-600 font-mono mr-2">تماس: {sup.phone}</span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-slate-400 bg-white dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                          رمز عبور: {sup.password}
-                        </span>
-                        <button
-                          onClick={() => handleRemoveSupervisor(sup.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-500 transition cursor-pointer"
-                          title="حذف سرپرست"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* تگ‌های سراهای تحت نظارت با قابلیت کلیک جهت افزودن/حذف */}
-                    <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex flex-wrap items-center gap-2">
-                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                        سراهای تحت نظارت ({assignedIds.length} سرا):
-                      </span>
-                      {dorms.map((d) => {
-                        const isAssigned = assignedIds.includes(d.id);
-                        return (
-                          <button
-                            key={d.id}
-                            type="button"
-                            onClick={() => handleToggleSupervisorDorm(sup.id, d.id)}
-                            className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition flex items-center gap-1 cursor-pointer ${
-                              isAssigned
-                                ? 'bg-teal-600 text-white shadow-xs'
-                                : 'bg-slate-200 dark:bg-slate-700 text-slate-500 hover:bg-slate-300'
-                            }`}
-                            title={isAssigned ? 'کلیک جهت حذف نظارت بر این سرا' : 'کلیک جهت افزودن نظارت بر این سرا'}
-                          >
-                            {isAssigned && <Check className="w-3 h-3" />}
-                            <span>{d.name}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="flex flex-wrap gap-2">
+              {[
+                { key: 'students' as const, label: `دانشجویان (${students.length})` },
+                { key: 'supervisors' as const, label: `سرپرستان (${supervisors.length})` },
+                { key: 'maintenance' as const, label: `تأسیسات (${campusStaff.length})` },
+                { key: 'warehouse' as const, label: `انبار (${warehouseStaffList.length})` },
+                { key: 'counselors' as const, label: `مشاوران (${counselorsList.length})` },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => {
+                    setUsersCategory(item.key);
+                    setMainTab('users');
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-teal-600 hover:text-white text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold transition cursor-pointer shadow-xs"
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
-
-            {/* فرم ثبت سرپرست جدید */}
-            <form onSubmit={handleAddSupervisor} className="p-5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 space-y-4">
-              <div className="text-xs font-bold text-indigo-900 dark:text-indigo-200">افزودن سرپرست جدید با انتصاب چند سرا:</div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                <input
-                  type="text"
-                  placeholder="نام و نام خانوادگی سرپرست"
-                  value={newSupName}
-                  onChange={(e) => setNewSupName(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="نام کاربری (جهت ورود)"
-                  value={newSupUser}
-                  onChange={(e) => setNewSupUser(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
-                  required
-                />
-                <input
-                  type="password"
-                  placeholder="کلمه عبور"
-                  value={newSupPass}
-                  onChange={(e) => setNewSupPass(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="شماره تماس (همراه)"
-                  value={newSupPhone}
-                  onChange={(e) => setNewSupPhone(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
-                />
-              </div>
-
-              {/* انتخاب چند سرا برای سرپرست جدید */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-indigo-950 dark:text-indigo-200">
-                    انتخاب سراهای تحت نظارت این سرپرست (چندانتخابی):
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setNewSupDormIds(dorms.map((d) => d.id))}
-                      className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
-                    >
-                      انتخاب همه سراها
-                    </button>
-                    <span className="text-slate-300">•</span>
-                    <button
-                      type="button"
-                      onClick={() => setNewSupDormIds(dorms[0]?.id ? [dorms[0].id] : [])}
-                      className="text-[11px] text-slate-500 hover:underline"
-                    >
-                      فقط سرای اول
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                  {dorms.map((d) => {
-                    const isChecked = newSupDormIds.includes(d.id);
-                    return (
-                      <label
-                        key={d.id}
-                        className={`p-2.5 rounded-xl border flex items-center gap-2 cursor-pointer transition text-xs ${
-                          isChecked
-                            ? 'bg-teal-50 dark:bg-teal-950/40 border-teal-400 text-teal-900 dark:text-teal-200 font-bold'
-                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setNewSupDormIds((prev) => [...prev, d.id]);
-                            } else {
-                              if (newSupDormIds.length > 1) {
-                                setNewSupDormIds((prev) => prev.filter((id) => id !== d.id));
-                              }
-                            }
-                          }}
-                          className="w-4 h-4 rounded text-teal-600 focus:ring-teal-500 cursor-pointer"
-                        />
-                        <span>{d.name}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>ثبت سرپرست جدید و انتصاب سراها</span>
-              </button>
-            </form>
-          </div>
-
-          {/* بخش تعریف و مدیریت پرسنل و تکنسین‌های تأسیسات سراها */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-amber-200/80 dark:border-amber-900/40 shadow-xs">
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs">
-                  <Wrench className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                    تعریف و مدیریت پرسنل و تکنسین‌های تأسیسات سراها
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    ثبت نام تکی یا گروهی با اکسل برای کارشناسان تأسیسات و تخصیص سراهای تحت پوشش
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onOpenExcelModal('maintenance')}
-                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>ثبت گروهی با اکسل تأسیسات</span>
-              </button>
-            </div>
-
-            {techFeedback && (
-              <div className="mb-4 p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 text-emerald-800 dark:text-emerald-200 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
-                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{techFeedback}</span>
-              </div>
-            )}
-
-            {/* لیست تکنسین‌های فعلی */}
-            <div className="space-y-3 mb-6">
-              {campusStaff.length === 0 ? (
-                <div className="p-6 text-center text-xs text-slate-400">
-                  هیچ تکنسینی هنوز ثبت نشده است. از فرم زیر برای افزودن پرسنل فنی استفاده فرمایید.
-                </div>
-              ) : (
-                campusStaff.map((tech) => {
-                  const coveredIds = tech.coveredDormIds || [];
-
-                  return (
-                    <div
-                      key={tech.id}
-                      className="p-4 rounded-2xl bg-amber-50/30 dark:bg-slate-800/60 border border-amber-200/70 dark:border-slate-700 space-y-3 text-xs"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-bold text-sm text-slate-800 dark:text-slate-100">
-                            {tech.fullName}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold text-[11px]">
-                            {tech.specialty}
-                          </span>
-                          <span className="text-slate-400 mr-2">(نام کاربری: {tech.username})</span>
-                          <span className="text-teal-600 font-mono mr-2">تماس: {tech.mobile}</span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleTechActive(tech.id, tech.isActive)}
-                            className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
-                              tech.isActive
-                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
-                            }`}
-                          >
-                            {tech.isActive ? 'وضعیت: فعال' : 'وضعیت: غیرفعال'}
-                          </button>
-
-                          <span className="text-[10px] text-slate-400 bg-white dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                            رمز: {tech.password}
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTechnician(tech.id, tech.fullName)}
-                            className="p-1.5 text-slate-400 hover:text-rose-500 transition cursor-pointer"
-                            title="حذف تکنسین"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* سراهای تحت پوشش تکنسین */}
-                      <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex flex-wrap items-center gap-2">
-                        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                          سراهای تحت پوشش ({coveredIds.length} سرا):
-                        </span>
-                        {dorms.map((d) => {
-                          const isCovered = coveredIds.includes(d.id);
-                          return (
-                            <button
-                              key={d.id}
-                              type="button"
-                              onClick={() => handleToggleTechDorm(tech.id, d.id)}
-                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition flex items-center gap-1 cursor-pointer ${
-                                isCovered
-                                  ? 'bg-amber-600 text-white shadow-xs'
-                                  : 'bg-slate-200 dark:bg-slate-700 text-slate-500 hover:bg-slate-300'
-                              }`}
-                              title={isCovered ? 'کلیک جهت لغو پوشش این سرا' : 'کلیک جهت افزودن این سرا به حوزه تکنسین'}
-                            >
-                              <span>{d.name}</span>
-                              {isCovered && <Check className="w-3 h-3" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* فرم افزودن تکنسین جدید */}
-            <form
-              onSubmit={handleAddTechnician}
-              className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-4 text-xs"
-            >
-              <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <Plus className="w-4 h-4 text-amber-600" />
-                <span>افزودن تکنسین و پرسنل فنی جدید</span>
-              </h4>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                <input
-                  type="text"
-                  placeholder="نام و نام خانوادگی تکنسین (مثلاً علی اکبری)"
-                  value={newTechName}
-                  onChange={(e) => setNewTechName(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="تخصص فنی (مثلاً لوله کشی و موتورخانه یا برق)"
-                  value={newTechSpecialty}
-                  onChange={(e) => setNewTechSpecialty(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="شماره تماس (همراه)"
-                  value={newTechMobile}
-                  onChange={(e) => setNewTechMobile(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="نام کاربری ورود (انگلیسی)"
-                  value={newTechUsername}
-                  onChange={(e) => setNewTechUsername(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="رمز عبور ورود"
-                  value={newTechPassword}
-                  onChange={(e) => setNewTechPassword(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
-                  required
-                />
-              </div>
-
-              {/* انتخاب سراهای تحت پوشش */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    انتخاب سراهای تحت پوشش این تکنسین:
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setNewTechDormIds(dorms.map((d) => d.id))}
-                      className="text-[11px] text-amber-600 dark:text-amber-400 font-bold hover:underline"
-                    >
-                      پوشش همه سراها
-                    </button>
-                    <span className="text-slate-300">•</span>
-                    <button
-                      type="button"
-                      onClick={() => setNewTechDormIds(dorms[0]?.id ? [dorms[0].id] : [])}
-                      className="text-[11px] text-slate-500 hover:underline"
-                    >
-                      فقط سرای اول
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                  {dorms.map((d) => {
-                    const isChecked = newTechDormIds.includes(d.id);
-                    return (
-                      <label
-                        key={d.id}
-                        className={`p-2.5 rounded-xl border flex items-center gap-2 cursor-pointer transition text-xs ${
-                          isChecked
-                            ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-400 text-amber-900 dark:text-amber-200 font-bold'
-                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setNewTechDormIds((prev) => [...prev, d.id]);
-                            } else {
-                              if (newTechDormIds.length > 1) {
-                                setNewTechDormIds((prev) => prev.filter((id) => id !== d.id));
-                              }
-                            }
-                          }}
-                          className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
-                        />
-                        <span>{d.name}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>ثبت تکنسین جدید تأسیسات</span>
-              </button>
-            </form>
-          </div>
-
-          {/* بخش تعریف و مدیریت پرسنل انبار و کارپردازی */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-violet-200/80 dark:border-violet-900/40 shadow-xs">
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-violet-600 text-white shadow-xs">
-                  <Package className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                    تعریف و مدیریت کاربران انبار و کارپردازی ({warehouseStaffList.length} کاربر)
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    مدیریت دسترسی تحویل‌داران انبار و کارپردازی یا ثبت گروهی از طریق فایل اکسل
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => onOpenExcelModal('warehouse')}
-                className="px-3.5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>ثبت گروهی با اکسل انبار</span>
-              </button>
-            </div>
-
-            {whFeedback && (
-              <div className="mb-4 p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 text-emerald-800 dark:text-emerald-200 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
-                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{whFeedback}</span>
-              </div>
-            )}
-
-            <div className="space-y-3 mb-6">
-              {warehouseStaffList.length === 0 ? (
-                <div className="p-6 text-center text-xs text-slate-400">
-                  هیچ کاربر انباری ثبت نشده است. از فرم زیر یا دکمه ورود اکسل استفاده نمایید.
-                </div>
-              ) : (
-                warehouseStaffList.map((wh) => {
-                  const isActive = wh.status !== 'inactive' && wh.isActive !== false;
-                  return (
-                    <div
-                      key={wh.id}
-                      className="p-4 rounded-2xl bg-violet-50/40 dark:bg-slate-800/60 border border-violet-200/70 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-bold text-sm text-slate-800 dark:text-slate-100">
-                          {wh.fullName}
-                        </span>
-                        <span className="text-slate-400 mr-2">(نام کاربری: {wh.username})</span>
-                        <span className="text-teal-600 font-mono mr-2">تماس: {wh.mobile || wh.phone}</span>
-                        {wh.notes && (
-                          <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300 text-[11px] font-semibold">
-                            {wh.notes}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const nextStatus = isActive ? 'inactive' : 'active';
-                            Storage.updateWarehouseStaff(wh.id, {
-                              status: nextStatus,
-                              isActive: nextStatus === 'active',
-                            });
-                            setWarehouseStaffList(Storage.getWarehouseStaff());
-                            onRefreshData();
-                          }}
-                          className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
-                            isActive
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                              : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
-                          }`}
-                        >
-                          {isActive ? 'وضعیت: فعال' : 'وضعیت: غیرفعال'}
-                        </button>
-
-                        <span className="text-[10px] text-slate-400 bg-white dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                          رمز: {wh.password}
-                        </span>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (confirm(`آیا از حذف کاربر انبار «${wh.fullName}» اطمینان دارید؟`)) {
-                              const res = Storage.deleteWarehouseStaff(wh.id);
-                              setWarehouseStaffList(Storage.getWarehouseStaff());
-                              setWhFeedback(res.message);
-                              onRefreshData();
-                              setTimeout(() => setWhFeedback(null), 3000);
-                            }
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-rose-500 transition cursor-pointer"
-                          title="حذف کاربر انبار"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!newWhName.trim() || !newWhUsername.trim() || !newWhPassword.trim()) return;
-                const phoneVal = toEnglishDigits(newWhPhone.trim()) || '09130000000';
-                const res = Storage.addWarehouseStaff({
-                  fullName: newWhName.trim(),
-                  phone: phoneVal,
-                  mobile: phoneVal,
-                  username: toEnglishDigits(newWhUsername.trim()).toLowerCase(),
-                  password: toEnglishDigits(newWhPassword.trim()),
-                  role: 'warehouse',
-                  status: 'active',
-                  isActive: true,
-                  notes: newWhNotes.trim() || undefined,
-                });
-                if (res.success) {
-                  setWarehouseStaffList(Storage.getWarehouseStaff());
-                  setWhFeedback(res.message);
-                  setNewWhName('');
-                  setNewWhPhone('');
-                  setNewWhUsername('');
-                  setNewWhPassword('');
-                  setNewWhNotes('');
-                  onRefreshData();
-                  setTimeout(() => setWhFeedback(null), 3500);
-                } else {
-                  setWhFeedback(res.message);
-                }
-              }}
-              className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-4 text-xs"
-            >
-              <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <Plus className="w-4 h-4 text-violet-600" />
-                <span>افزودن کاربر انبار جدید</span>
-              </h4>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                <input
-                  type="text"
-                  placeholder="نام و نام خانوادگی"
-                  value={newWhName}
-                  onChange={(e) => setNewWhName(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="شماره تماس"
-                  value={newWhPhone}
-                  onChange={(e) => setNewWhPhone(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="نام کاربری (انگلیسی)"
-                  value={newWhUsername}
-                  onChange={(e) => setNewWhUsername(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="رمز عبور ورود"
-                  value={newWhPassword}
-                  onChange={(e) => setNewWhPassword(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="توضیحات / سمت (اختیاری)"
-                  value={newWhNotes}
-                  onChange={(e) => setNewWhNotes(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>ثبت کاربر جدید انبار</span>
-              </button>
-            </form>
           </div>
 
           {/* بخش تنظیمات سال تحصیلی، نیمسال و بازه زمانی مجاز انتخاب اتاق */}
@@ -5935,44 +5303,98 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* بخش بارگذاری فونت‌های TTF و والپیپر اختصاصی */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          {/* بخش مدیریت فونت‌های متعدد، انتخاب فونت نمایش و والپیپر اختصاصی */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <Palette className="w-5 h-5 text-indigo-600" />
-                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                  شخصی‌سازی: افزودن فونت‌های TTF و عکس پس‌زمینه
-                </h3>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    مدیریت فونت‌های سامانه و تصویر پس‌زمینه
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    امکان افزودن همزمان چند فونت دلخواه، انتخاب فونت فعال کل سامانه و استفاده در ویرایشگر اطلاعیه‌ها
+                  </p>
+                </div>
               </div>
               <button
                 onClick={onOpenAppearance}
-                className="px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                className="px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
               >
                 پالت کامل تم و فونت
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+            {adminFontFeedback && (
+              <div
+                className={`p-3 rounded-2xl text-xs font-bold flex items-center gap-2 border ${
+                  adminFontFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
+                }`}
+              >
+                {adminFontFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{adminFontFeedback.message}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* کارت آپلود یک یا چند فونت همزمان */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
                 <h4 className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                  <Type className="w-4 h-4 text-teal-600" />
-                  <span>آپلود فایل فونت (TTF / WOFF / OTF)</span>
+                  <Type className="w-4 h-4 text-indigo-600" />
+                  <span>افزودن یک یا چند فونت جدید (TTF / WOFF / WOFF2 / OTF)</span>
                 </h4>
-                <p className="text-[11px] text-slate-500">مدیر می‌تواند بدون محدودیت هر فونتی را به سامانه اضافه کند.</p>
-                <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-sm">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>بارگذاری فایل فونت جدید</span>
-                  <input type="file" accept=".ttf,.woff,.woff2,.otf" onChange={handleAdminFontUpload} className="hidden" />
+                <p className="text-[11px] text-slate-500">
+                  می‌توانید چند فایل فونت را همزمان انتخاب و بارگذاری کنید تا در فهرست فونت‌های سامانه ذخیره شوند و هر زمان خواستید بین آن‌ها انتخاب انجام دهید.
+                </p>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={adminFontName}
+                    onChange={(e) => setAdminFontName(e.target.value)}
+                    placeholder="نام نمایشی (اختیاری در آپلود تکی، مثلاً ایران‌سنس)"
+                    className="flex-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                  />
+                  <label className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-sm shrink-0">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>انتخاب فایل فونت (تکی یا چندتایی)</span>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".ttf,.woff,.woff2,.otf"
+                      onChange={handleAdminFontUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                <label className="inline-flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={adminActivateFontOnUpload}
+                    onChange={(e) => setAdminActivateFontOnUpload(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <span>پس از بارگذاری، بلافاصله به عنوان فونت نمایش کل سایت فعال شود</span>
                 </label>
               </div>
 
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
-                <h4 className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                  <ImageIcon className="w-4 h-4 text-teal-600" />
-                  <span>آپلود عکس اختصاصی برای پس‌زمینه سایت</span>
-                </h4>
-                <p className="text-[11px] text-slate-500">بارگذاری عکس دلخواه برای پس‌زمینه تمام صفحات وب‌سایت.</p>
-                <div className="flex gap-2">
+              {/* کارت عکس پس‌زمینه */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3 flex flex-col justify-between">
+                <div className="space-y-1.5">
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <ImageIcon className="w-4 h-4 text-teal-600" />
+                    <span>آپلود عکس اختصاصی برای پس‌زمینه سایت</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500">بارگذاری عکس دلخواه برای پس‌زمینه تمام صفحات وب‌سایت.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
                   <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-sm">
                     <Upload className="w-3.5 h-3.5" />
                     <span>آپلود عکس پس‌زمینه</span>
@@ -5980,14 +5402,434 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </label>
                   {localSettings.customWallpaperUrl && (
                     <button
+                      type="button"
                       onClick={handleAdminDeleteWallpaper}
-                      className="px-3 py-2 bg-rose-50 text-rose-700 rounded-xl text-xs font-bold hover:bg-rose-100 transition"
+                      className="px-3 py-2 bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 rounded-xl text-xs font-bold hover:bg-rose-100 transition cursor-pointer"
                     >
                       حذف پس‌زمینه
                     </button>
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* فهرست انتخاب فونت نمایش کل سامانه (استاندارد + فونت‌های بارگذاری‌شده) */}
+            <div className="pt-2 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Type className="w-4 h-4 text-teal-600" />
+                  <span>انتخاب فونت نمایش سامانه ({STANDARD_FONTS.length + (localSettings.customFonts?.length || 0)} فونت در دسترس)</span>
+                </h4>
+                <span className="text-[11px] text-slate-400">
+                  روی هر فونت کلیک کنید تا فونت کل سایت تغییر کند
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {STANDARD_FONTS.map((f) => {
+                  const isActive =
+                    localSettings.fontFamily === f.id && !localSettings.activeCustomFontId;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => handleSelectSiteFont(f.id, undefined)}
+                      className={`p-3 rounded-2xl border text-right transition flex items-center justify-between gap-2 cursor-pointer ${
+                        isActive
+                          ? 'bg-teal-50 dark:bg-teal-950/40 border-teal-500 ring-1 ring-teal-500/40'
+                          : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                            {f.name}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 shrink-0">
+                            پیش‌فرض
+                          </span>
+                        </div>
+                        <p
+                          className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate"
+                          style={{ fontFamily: f.cssFamily }}
+                        >
+                          نمونه متن سراهای دانشجویی ۱۲۳
+                        </p>
+                      </div>
+                      {isActive && (
+                        <span className="p-1 rounded-full bg-teal-600 text-white shrink-0">
+                          <Check className="w-3.5 h-3.5" />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+
+                {(localSettings.customFonts || []).map((cf) => {
+                  const isActive =
+                    localSettings.activeCustomFontId === cf.id ||
+                    localSettings.fontFamily === cf.fontFamily;
+                  return (
+                    <div
+                      key={cf.id}
+                      className={`p-3 rounded-2xl border transition flex items-center justify-between gap-2 ${
+                        isActive
+                          ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-500 ring-1 ring-indigo-500/40'
+                          : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSiteFont(cf.fontFamily, cf.id)}
+                        className="flex-1 text-right min-w-0 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-indigo-950 dark:text-indigo-200 truncate">
+                            {cf.name}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-bold shrink-0">
+                            سفارشی
+                          </span>
+                        </div>
+                        <p
+                          className="text-xs text-slate-600 dark:text-slate-300 mt-1 truncate"
+                          style={{ fontFamily: cf.fontFamily }}
+                        >
+                          نمونه متن فونت بارگذاری‌شده ۱۲۳
+                        </p>
+                      </button>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isActive && (
+                          <span className="p-1 rounded-full bg-indigo-600 text-white">
+                            <Check className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAdminCustomFont(cf.id, cf.fontFamily)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                          title="حذف این فونت"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* بخش شخصی‌سازی پس‌زمینه باکس اصلی (بنر معرفی سامانه) صفحه اول */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="w-5 h-5 text-teal-600" />
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    پس‌زمینه بنر اصلی صفحه اول سایت (کادر معرفی سامانه)
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    انتخاب بین حالت پیش‌فرض سامانه، رنگ دلخواه یا تصویر اختصاصی برای پس‌زمینه باکس اصلی صفحه اول
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleResetHeroBg}
+                className="px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>بازگشت به حالت پیش‌فرض</span>
+              </button>
+            </div>
+
+            {heroBgFeedback && (
+              <div
+                className={`p-3 rounded-2xl text-xs font-bold flex items-center gap-2 border ${
+                  heroBgFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
+                }`}
+              >
+                {heroBgFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{heroBgFeedback.message}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+              <div className="space-y-4">
+                {/* انتخاب نوع پس‌زمینه */}
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'default' as const, label: 'پیش‌فرض (گرادیانت)' },
+                    { id: 'color' as const, label: 'رنگ دلخواه' },
+                    { id: 'image' as const, label: 'تصویر دلخواه' },
+                  ].map((opt) => {
+                    const active = (localSettings.heroBgMode || 'default') === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => handleHeroBgModeChange(opt.id)}
+                        className={`px-3 py-2.5 rounded-2xl border text-xs font-bold transition cursor-pointer ${
+                          active
+                            ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                            : 'bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* تنظیمات رنگ دلخواه */}
+                {(localSettings.heroBgMode || 'default') === 'color' && (
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                        انتخاب رنگ پس‌زمینه بنر:
+                      </span>
+                      <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 cursor-pointer text-xs font-bold">
+                        <input
+                          type="color"
+                          value={localSettings.heroBgColor || '#0f766e'}
+                          onChange={(e) => handleHeroBgColorChange(e.target.value)}
+                          className="w-6 h-6 p-0 border-0 bg-transparent cursor-pointer rounded"
+                        />
+                        <span dir="ltr" className="text-slate-700 dark:text-slate-200">
+                          {localSettings.heroBgColor || '#0f766e'}
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {HERO_PRESET_COLORS.map((c) => {
+                        const isSelected = (localSettings.heroBgColor || '').toLowerCase() === c.hex.toLowerCase();
+                        return (
+                          <button
+                            key={c.hex}
+                            type="button"
+                            onClick={() => handleHeroBgColorChange(c.hex)}
+                            title={c.label}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
+                              isSelected
+                                ? 'border-teal-600 bg-white dark:bg-slate-900 ring-2 ring-teal-500/30'
+                                : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800 hover:border-teal-400'
+                            }`}
+                          >
+                            <span
+                              className="w-3.5 h-3.5 rounded-full border border-black/15 shrink-0"
+                              style={{ backgroundColor: c.hex }}
+                            />
+                            <span className="text-slate-700 dark:text-slate-200">{c.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* تنظیمات تصویر دلخواه */}
+                {(localSettings.heroBgMode || 'default') === 'image' && (
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      یک تصویر افقی باکیفیت (PNG / JPG / WebP تا ۵ مگابایت) انتخاب کنید. یک لایه تیره ملایم جهت خوانایی کامل متن سفید روی عکس اعمال می‌شود.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-sm">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{localSettings.heroBgImageUrl ? 'تغییر تصویر پس‌زمینه بنر' : 'بارگذاری تصویر پس‌زمینه بنر'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleHeroBgImageUpload}
+                          className="hidden"
+                        />
+                      </label>
+                      {localSettings.heroBgImageUrl && (
+                        <button
+                          type="button"
+                          onClick={handleResetHeroBg}
+                          className="px-3 py-2 bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 rounded-xl text-xs font-bold hover:bg-rose-100 transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>حذف و بازگشت به پیش‌فرض</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {(localSettings.heroBgMode || 'default') === 'default' && (
+                  <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-teal-950/20 border border-teal-200 dark:border-teal-900/40 text-xs text-teal-800 dark:text-teal-200">
+                    بنر اصلی صفحه اول در حالت <strong>پیش‌فرض استاندارد سامانه</strong> (طیف رنگی فیروزه‌ای دانشگاه فرهنگیان) قرار دارد. برای تغییر می‌توانید «رنگ دلخواه» یا «تصویر دلخواه» را انتخاب کنید.
+                  </div>
+                )}
+              </div>
+
+              {/* پیش‌نمایش زنده بنر اصلی */}
+              {(() => {
+                const previewBanner = resolveHeroBannerStyle(localSettings);
+                return (
+                  <div className="space-y-1.5">
+                    <span className="block text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                      پیش‌نمایش زنده بنر صفحه اول:
+                    </span>
+                    <div
+                      className={`relative rounded-2xl overflow-hidden ${previewBanner.bgClassName} text-white p-5 shadow-lg min-h-[155px] flex items-center justify-between`}
+                      style={previewBanner.style}
+                    >
+                      {previewBanner.hasImageOverlay && (
+                        <div className="absolute inset-0 bg-gradient-to-l from-slate-950/75 via-slate-950/55 to-slate-950/35 pointer-events-none" />
+                      )}
+                      <div className="relative z-10 space-y-2 max-w-xs">
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/15 text-[10px] font-bold border border-white/20">
+                          {localSettings.universityName}
+                        </div>
+                        <div className="text-base font-black">سامانه جامع سراهای دانشجویی</div>
+                        <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white text-teal-900 text-[10px] font-extrabold shadow">
+                          ورود به سامانه سراها
+                        </div>
+                      </div>
+                      <Building2 className="w-20 h-20 text-white/20 relative z-10 shrink-0" />
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* بخش ویرایش نکات مهم انتخاب اتاق و اسکان در صفحه اول سایت */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Info className="w-5 h-5 text-teal-600" />
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    ویرایش بخش «نکات مهم انتخاب اتاق و اسکان» صفحه اول سایت
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    مدیر سامانه می‌تواند عنوان بخش، عنوان هر کارت و متن کامل آن (حتی با تغییر فونت، رنگ، اندازه، بُلد و ایتالیک) را ویرایش یا کارت جدید اضافه کند.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleResetHomeNotes}
+                className="px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>بازگردانی متن پیش‌فرض</span>
+              </button>
+            </div>
+
+            {homeNotesFeedback && (
+              <div
+                className={`p-3 rounded-2xl text-xs font-bold flex items-center gap-2 border ${
+                  homeNotesFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
+                }`}
+              >
+                {homeNotesFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{homeNotesFeedback.message}</span>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                عنوان اصلی بخش در صفحه اول:
+              </label>
+              <input
+                type="text"
+                value={draftHomeNotesTitle}
+                onChange={(e) => setDraftHomeNotesTitle(e.target.value)}
+                placeholder={DEFAULT_HOME_NOTES_TITLE}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+
+            <div className="space-y-4">
+              {draftHomeNotes.map((note, idx) => (
+                <div
+                  key={note.id}
+                  className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-extrabold text-teal-700 dark:text-teal-300">
+                      کارت شماره {(idx + 1).toLocaleString('fa-IR')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteHomeNote(note.id)}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>حذف کارت</span>
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      عنوان کارت:
+                    </label>
+                    <input
+                      type="text"
+                      value={note.title}
+                      onChange={(e) => handleUpdateHomeNote(note.id, { title: e.target.value })}
+                      placeholder="مثلاً ۱. احراز هویت اولیه:"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      متن کامل کارت:
+                    </label>
+                    <RichTextEditor
+                      valueHtml={note.bodyHtml || plainTextToHtml(note.body)}
+                      onChange={(html, plain) =>
+                        handleUpdateHomeNote(note.id, { bodyHtml: html, body: plain })
+                      }
+                      customFonts={localSettings.customFonts}
+                      resetKey={`${homeNotesEditorKey}_${note.id}`}
+                      minHeightClass="min-h-[95px]"
+                      placeholder="متن نکته را بنویسید..."
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <button
+                type="button"
+                onClick={handleAddHomeNote}
+                className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4 text-teal-600" />
+                <span>افزودن کارت نکته جدید</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveHomeNotes}
+                className="px-6 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-md shadow-teal-600/20 transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                <span>ذخیره تغییرات نکات صفحه اول</span>
+              </button>
             </div>
           </div>
 

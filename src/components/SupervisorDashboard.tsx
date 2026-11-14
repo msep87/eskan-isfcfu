@@ -21,6 +21,8 @@ import { VisualBedPicker } from './VisualBedPicker';
 import { RoomWarningModal } from './RoomWarningModal';
 import { DormIdCardModal } from './DormIdCardModal';
 import { StudentEvaluationModal } from './StudentEvaluationModal';
+import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
+import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
 import {
   Building2,
   Users,
@@ -123,6 +125,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   const [editingAnnId, setEditingAnnId] = useState<string | null>(null);
   const [newAnnTitle, setNewAnnTitle] = useState('');
   const [newAnnContent, setNewAnnContent] = useState('');
+  const [newAnnContentHtml, setNewAnnContentHtml] = useState('');
+  const [annEditorResetKey, setAnnEditorResetKey] = useState(0);
   const [newAnnPriority, setNewAnnPriority] = useState<Announcement['priority']>('normal');
   const [newAnnImage, setNewAnnImage] = useState<string | null>(null);
   const [viewCardStudent, setViewCardStudent] = useState<Student | null>(null);
@@ -148,6 +152,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
     setEditingAnnId(ann.id);
     setNewAnnTitle(ann.title);
     setNewAnnContent(ann.content);
+    setNewAnnContentHtml(ann.contentHtml || plainTextToHtml(ann.content));
+    setAnnEditorResetKey((k) => k + 1);
     setNewAnnPriority(ann.priority);
     setNewAnnImage(ann.imageUrl || null);
     setShowAddAnnouncement(true);
@@ -157,6 +163,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
     setEditingAnnId(null);
     setNewAnnTitle('');
     setNewAnnContent('');
+    setNewAnnContentHtml('');
+    setAnnEditorResetKey((k) => k + 1);
     setNewAnnPriority('normal');
     setNewAnnImage(null);
     setShowAddAnnouncement(false);
@@ -281,11 +289,13 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   const handleCreateAnnouncement = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAnnTitle.trim() || !newAnnContent.trim()) return;
+    const sanitizedHtml = sanitizeRichHtml(newAnnContentHtml) || plainTextToHtml(newAnnContent.trim());
 
     if (editingAnnId) {
       Storage.updateAnnouncement(editingAnnId, {
         title: newAnnTitle.trim(),
         content: newAnnContent.trim(),
+        contentHtml: sanitizedHtml,
         priority: newAnnPriority,
         imageUrl: newAnnImage || undefined,
       });
@@ -297,6 +307,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
         id: `ann_${Date.now()}`,
         title: newAnnTitle.trim(),
         content: newAnnContent.trim(),
+        contentHtml: sanitizedHtml,
         author: `${supervisor.fullName} (سرپرست ${currentDorm?.name || 'سرا'})`,
         priority: newAnnPriority,
         date: new Date().toLocaleDateString('fa-IR'),
@@ -310,6 +321,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
 
     setNewAnnTitle('');
     setNewAnnContent('');
+    setNewAnnContentHtml('');
+    setAnnEditorResetKey((k) => k + 1);
     setNewAnnImage(null);
     setShowAddAnnouncement(false);
     onRefreshData();
@@ -737,16 +750,19 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                متن کامل اطلاعیه
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                متن کامل اطلاعیه (با امکان قالب‌بندی فونت، رنگ، اندازه، بُلد و ایتالیک برای هر بخش متن)
               </label>
-              <textarea
-                rows={3}
-                placeholder="متن کامل پیام و دستورالعمل..."
-                value={newAnnContent}
-                onChange={(e) => setNewAnnContent(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-teal-500"
-                required
+              <RichTextEditor
+                valueHtml={newAnnContentHtml}
+                onChange={(html, plain) => {
+                  setNewAnnContentHtml(html);
+                  setNewAnnContent(plain);
+                }}
+                customFonts={settings.customFonts}
+                resetKey={annEditorResetKey}
+                minHeightClass="min-h-[130px]"
+                placeholder="متن کامل پیام و دستورالعمل... می‌توانید هر کلمه یا جمله را انتخاب کرده و فونت، رنگ، اندازه، بُلد یا ایتالیک آن را تغییر دهید."
               />
             </div>
 
@@ -952,6 +968,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                   setEditingAnnId(null);
                   setNewAnnTitle('');
                   setNewAnnContent('');
+                  setNewAnnContentHtml('');
+                  setAnnEditorResetKey((k) => k + 1);
                   setNewAnnPriority('normal');
                   setNewAnnImage(null);
                   setShowAddAnnouncement(true);
@@ -1005,7 +1023,11 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                       </div>
                     </div>
 
-                    <p className="text-slate-600 dark:text-slate-300 leading-relaxed">{ann.content}</p>
+                    <RichTextDisplay
+                      html={ann.contentHtml}
+                      fallbackText={ann.content}
+                      className="text-slate-600 dark:text-slate-300 leading-relaxed"
+                    />
 
                     {ann.imageUrl && (
                       <div className="mt-2 max-w-xs overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">

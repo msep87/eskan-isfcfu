@@ -84,6 +84,7 @@ export interface Announcement {
   id: string;
   title: string;
   content: string;
+  contentHtml?: string; // محتوای قالب‌بندی‌شده اطلاعیه (فونت، رنگ، اندازه، بلد، ایتالیک)
   author: string;
   targetDormId?: string; // 'all' یا شناسه خوابگاه خاص
   priority: 'normal' | 'important' | 'urgent';
@@ -259,6 +260,13 @@ export interface CustomFont {
   format: string; // فرمت truetype, woff, woff2, opentype
 }
 
+export interface HomeNoteItem {
+  id: string;
+  title: string;
+  body: string;
+  bodyHtml?: string;
+}
+
 export interface AppSettings {
   selectionActive: boolean; // فعال بودن امکان انتخاب اتاق
   selectionStartDate: string; // تاریخ و ساعت شروع
@@ -278,6 +286,11 @@ export interface AppSettings {
   customWallpaperUrl?: string; // عکس پس‌زمینه بارگذاری شده توسط مدیر
   customFonts?: CustomFont[]; // لیست فونت‌های بارگذاری شده توسط مدیر
   activeCustomFontId?: string; // شناسه فونت سفارشی فعال
+  heroBgMode?: 'default' | 'color' | 'image'; // حالت پس‌زمینه بنر اصلی صفحه اول
+  heroBgColor?: string; // رنگ دلخواه پس‌زمینه بنر اصلی صفحه اول
+  heroBgImageUrl?: string; // تصویر دلخواه پس‌زمینه بنر اصلی صفحه اول
+  homeNotesTitle?: string; // عنوان بخش نکات مهم انتخاب اتاق و اسکان صفحه اول
+  homeNotes?: HomeNoteItem[]; // کارت‌های بخش نکات مهم صفحه اول
 }
 
 export interface CounselorStaff {

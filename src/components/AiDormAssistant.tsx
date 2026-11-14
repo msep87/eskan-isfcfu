@@ -103,13 +103,21 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
   }, [messages, isLoading, isOpen]);
 
   useEffect(() => {
-    if (isOpen) {
-      const timer = window.setTimeout(() => {
-        inputRef.current?.focus();
-      }, 120);
-      return () => window.clearTimeout(timer);
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+    const timer = window.setTimeout(() => {
+      inputRef.current?.focus();
+    }, 120);
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [isOpen, onClose]);
 
   // ساخت کانتکست عمومی کاملاً امن (بدون ارسال هیچ اطلاعات محرمانه یا هویتی سایر کاربران)
   const publicContext = useMemo(() => {
@@ -527,13 +535,8 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
       role="dialog"
       aria-modal="true"
       aria-label="دستیار هوشمند خوابگاهی و آموزشی"
-      onClick={onClose}
-      className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
+      className="fixed inset-0 sm:inset-auto sm:bottom-5 sm:left-5 z-50 w-full h-[100dvh] sm:w-[420px] sm:h-[600px] sm:max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-none sm:rounded-3xl shadow-2xl border-0 sm:border sm:border-slate-200 dark:sm:border-slate-700/80 overflow-hidden chat-slide-up"
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg h-[620px] max-h-[88vh] flex flex-col bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-700/80 overflow-hidden"
-      >
         {/* هدر چت‌بات */}
         <div className="bg-gradient-to-l from-teal-800 via-teal-700 to-cyan-700 text-white px-4 py-3.5 flex items-center justify-between gap-3 shrink-0">
             <div className="flex items-center gap-2.5 min-w-0">
@@ -703,7 +706,6 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
               </button>
             </div>
         </form>
-      </div>
     </div>
   );
 };

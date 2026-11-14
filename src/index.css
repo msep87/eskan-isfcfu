@@ -65,8 +65,20 @@ input:-webkit-autofill:active {
   font-family: 'Sahel', 'Vazirmatn', sans-serif !important;
 }
 
+.font-lalezar {
+  font-family: 'Lalezar', 'Vazirmatn', sans-serif !important;
+}
+
+.font-ibm-plex {
+  font-family: 'IBM Plex Sans Arabic', 'Vazirmatn', sans-serif !important;
+}
+
+.font-noto-naskh {
+  font-family: 'Noto Naskh Arabic', 'Vazirmatn', sans-serif !important;
+}
+
 .font-system {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Tahoma, sans-serif !important;
 }
 
 /* Wallpaper styles */
@@ -149,4 +161,25 @@ input:-webkit-autofill:active {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+@keyframes chatSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(36px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.chat-slide-up {
+  animation: chatSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-slide-up {
+    animation: none;
+  }
 }

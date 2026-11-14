@@ -36,6 +36,13 @@ import { CounselorDashboard } from './components/CounselorDashboard';
 import { AboutModal } from './components/AboutModal';
 import { UserGuideModal } from './components/UserGuideModal';
 import { AiDormAssistant } from './components/AiDormAssistant';
+import { RichTextDisplay } from './components/RichTextEditor';
+import { resolveFontCssFamily } from './utils/fonts';
+import {
+  DEFAULT_HOME_NOTES_TITLE,
+  DEFAULT_HOME_NOTES,
+  resolveHeroBannerStyle,
+} from './utils/homeDefaults';
 import { UserRoleType } from './utils/guideData';
 import { FarhangianEmblem } from './components/FarhangianEmblem';
 import {
@@ -164,8 +171,8 @@ export default function App() {
 
   // تزریق پویای فونت‌های بارگذاری شده (TTF / WOFF) به سند
   useEffect(() => {
+    let styleTag = document.getElementById('custom-uploaded-fonts') as HTMLStyleElement | null;
     if (settings.customFonts && settings.customFonts.length > 0) {
-      let styleTag = document.getElementById('custom-uploaded-fonts') as HTMLStyleElement;
       if (!styleTag) {
         styleTag = document.createElement('style');
         styleTag.id = 'custom-uploaded-fonts';
@@ -178,14 +185,16 @@ export default function App() {
         @font-face {
           font-family: '${cf.fontFamily}';
           src: url('${cf.dataUrl}') format('${cf.format || 'truetype'}');
-          font-weight: normal;
           font-style: normal;
+          font-display: swap;
         }
       `
         )
         .join('\n');
 
       styleTag.textContent = fontFaceRules;
+    } else if (styleTag) {
+      styleTag.textContent = '';
     }
   }, [settings.customFonts]);
 
@@ -247,9 +256,9 @@ export default function App() {
   // اعمال استایل فونت، اندازه، والپیپر سفارشی و دارک‌مود
   const isCustomFont = settings.customFonts?.some((cf) => cf.fontFamily === settings.fontFamily);
   const fontClass = isCustomFont ? '' : `font-${settings.fontFamily || 'vazir'}`;
-  const fontStyle = isCustomFont
-    ? { fontFamily: `'${settings.fontFamily}', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif` }
-    : undefined;
+  const fontStyle = {
+    fontFamily: resolveFontCssFamily(settings.fontFamily, settings.customFonts),
+  };
 
   const fontSizeClass =
     settings.fontSize === 'sm' ? 'text-xs' : settings.fontSize === 'lg' ? 'text-base' : 'text-sm';
@@ -321,10 +330,30 @@ export default function App() {
         )}
 
         {/* ۱. صفحه فرود برای مراجعین قبل از ورود به سامانه (بدون نمایش آمار به عموم) */}
-        {!currentUser && (
+        {!currentUser && (() => {
+          const heroBanner = resolveHeroBannerStyle(settings);
+          const homeNotesTitle = settings.homeNotesTitle?.trim() || DEFAULT_HOME_NOTES_TITLE;
+          const homeNotesList =
+            settings.homeNotes && settings.homeNotes.length > 0
+              ? settings.homeNotes
+              : DEFAULT_HOME_NOTES;
+          const notesGridClass =
+            homeNotesList.length === 1
+              ? 'grid-cols-1'
+              : homeNotesList.length === 2
+              ? 'grid-cols-1 sm:grid-cols-2'
+              : 'grid-cols-1 sm:grid-cols-3';
+
+          return (
           <div className="space-y-8 animate-in fade-in duration-300">
             {/* هیرو بنر رسمی با آرم دانشگاه فرهنگیان */}
-            <div className="relative rounded-3xl overflow-hidden bg-gradient-to-r from-teal-800 via-teal-700 to-cyan-800 text-white p-8 sm:p-12 shadow-2xl">
+            <div
+              className={`relative rounded-3xl overflow-hidden ${heroBanner.bgClassName} text-white p-8 sm:p-12 shadow-2xl transition-all duration-300`}
+              style={heroBanner.style}
+            >
+              {heroBanner.hasImageOverlay && (
+                <div className="absolute inset-0 bg-gradient-to-l from-slate-950/75 via-slate-950/55 to-slate-950/35 pointer-events-none" />
+              )}
               <div className="max-w-3xl relative z-10">
                 
                 {/* آرم دانشگاه و نشان رسمی (در صورت بارگذاری توسط مدیر) */}
@@ -448,9 +477,11 @@ export default function App() {
                         <span className="text-[11px] text-slate-400">{ann.date}</span>
                       </div>
 
-                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                        {ann.content}
-                      </p>
+                      <RichTextDisplay
+                        html={ann.contentHtml}
+                        fallbackText={ann.content}
+                        className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed"
+                      />
 
                       {ann.imageUrl && (
                         <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-black/5">
@@ -476,31 +507,37 @@ export default function App() {
               )}
             </div>
 
-            {/* راهنمای نحوه استفاده و ضوابط عمومی */}
+            {/* راهنمای نحوه استفاده و ضوابط عمومی (قابل ویرایش توسط مدیر در تنظیمات) */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200/80 dark:border-slate-800 shadow-xs">
               <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                 <Info className="w-4 h-4 text-teal-600" />
-                <span>نکات مهم انتخاب اتاق و اسکان در سراهای دانشگاه فرهنگیان اصفهان</span>
+                <span>{homeNotesTitle}</span>
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 block mb-1">۱. احراز هویت اولیه:</span>
-                  دانشجومعلمان با شماره دانشجویی و کد ملی وارد سامانه شده و در اولین ورود اطلاعات تماس ضروری و تصویر پرسنلی خود را تکمیل می‌نمایند.
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 block mb-1">۲. انتخاب هوشمند اتاق و تخت:</span>
-                  انتخاب تخت به صورت کاملاً تعاملی و بر اساس سهمیه رشته‌ها و ورودی‌ها انجام می‌پذیرد و مشخصات هم‌اتاقی‌ها قابل مشاهده است.
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 block mb-1">۳. پشتیبانی و پیام مستقیم:</span>
-                  در صورت نیاز به جابجایی یا گزارش تأسیسات اتاق، ارسال پیام و تیکت مستقیم به سرپرست سرا از درون سامانه مقدور است.
-                </div>
+              <div className={`grid ${notesGridClass} gap-4 text-xs text-slate-600 dark:text-slate-400 leading-relaxed`}>
+                {homeNotesList.map((note) => (
+                  <div
+                    key={note.id}
+                    className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800"
+                  >
+                    {note.title && (
+                      <span className="font-bold text-slate-800 dark:text-slate-200 block mb-1">
+                        {note.title}
+                      </span>
+                    )}
+                    <RichTextDisplay
+                      html={note.bodyHtml}
+                      fallbackText={note.body}
+                      className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 
           </div>
-        )}
+          );
+        })()}
 
         {/* ۲. در صورتی که کاربر دانشجو است */}
         {currentUser?.role === 'student' && (

@@ -261,6 +261,24 @@ export const Storage = {
   getSupervisors: (): Supervisor[] => get(STORAGE_KEYS.SUPERVISORS, INITIAL_SUPERVISORS),
   setSupervisors: (supervisors: Supervisor[]) => set(STORAGE_KEYS.SUPERVISORS, supervisors),
 
+  updateSupervisor: (
+    id: string,
+    updates: Partial<Supervisor>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getSupervisors();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر سرپرست یافت نشد.' };
+    if (updates.username) {
+      const cleanU = updates.username.trim().toLowerCase();
+      if (list.some((s) => s.id !== id && s.username.trim().toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای سرپرست دیگری ثبت شده است.' };
+      }
+    }
+    list[idx] = { ...list[idx], ...updates };
+    Storage.setSupervisors(list);
+    return { success: true, message: 'مشخصات سرپرست با موفقیت بروزرسانی شد.' };
+  },
+
   getWarnings: (): RoomWarning[] => get(STORAGE_KEYS.WARNINGS, INITIAL_WARNINGS),
   setWarnings: (warnings: RoomWarning[]) => set(STORAGE_KEYS.WARNINGS, warnings),
 
@@ -1697,6 +1715,121 @@ export const Storage = {
     }
 
     return { success: false, message: 'خطای نامشخص در تغییر کلمه عبور' };
+  },
+
+  // تغییر یا ریست مستقیم رمز عبور کاربران توسط مدیر کل (بدون نیاز به رمز قبلی)
+  adminResetUserPassword: (
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor',
+    idOrStudentId: string,
+    newPasswordInput: string
+  ): { success: boolean; message: string } => {
+    const normalize = (val: string) =>
+      val
+        .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+        .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+        .trim();
+
+    const cleanPass = normalize(newPasswordInput);
+    if (!cleanPass || cleanPass.length < 4) {
+      return { success: false, message: 'کلمه عبور جدید باید حداقل ۴ کاراکتر باشد.' };
+    }
+
+    if (role === 'student') {
+      const students = Storage.getStudents();
+      const idx = students.findIndex((s) => s.studentId === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'دانشجو یافت نشد.' };
+      students[idx] = { ...students[idx], nationalId: cleanPass };
+      Storage.setStudents(students);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز دانشجو توسط مدیر',
+        details: `کلمه عبور (کد ملی ورود) دانشجو ${students[idx].fullName} (${students[idx].studentId}) توسط مدیر تنظیم شد.`,
+        targetName: `${students[idx].fullName} (${students[idx].studentId})`,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز ورود دانشجو «${students[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'supervisor') {
+      const list = Storage.getSupervisors();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'سرپرست یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setSupervisors(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز سرپرست توسط مدیر',
+        details: `کلمه عبور سرپرست ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور سرپرست «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'maintenance') {
+      const list = Storage.getMaintenanceStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کارشناس تأسیسات یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setMaintenanceStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز تأسیسات توسط مدیر',
+        details: `کلمه عبور تکنسین ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور تکنسین «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'warehouse') {
+      const list = Storage.getWarehouseStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر انبار یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setWarehouseStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز انباردار توسط مدیر',
+        details: `کلمه عبور کاربر انبار ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور کاربر انبار «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'counselor') {
+      const list = Storage.getCounselors();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'مشاور یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setCounselors(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز مشاور توسط مدیر',
+        details: `کلمه عبور مشاور ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور مشاور «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    return { success: false, message: 'نقش کاربری معتبر نیست.' };
   },
 
   // -------------------------------------------------------------

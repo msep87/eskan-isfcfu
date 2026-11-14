@@ -5,6 +5,7 @@ import { RoommatesCard } from './RoommatesCard';
 import { VisualBedPicker } from './VisualBedPicker';
 import { StudentProfileModal } from './StudentProfileModal';
 import { DormIdCardModal } from './DormIdCardModal';
+import { RichTextDisplay } from './RichTextEditor';
 import {
   User,
   Bed as BedIcon,
@@ -422,9 +423,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   </div>
                   <span className="text-[11px] text-slate-400">{ann.date}</span>
                 </div>
-                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                  {ann.content}
-                </p>
+                <RichTextDisplay
+                  html={ann.contentHtml}
+                  fallbackText={ann.content}
+                  className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed"
+                />
                 {ann.imageUrl && (
                   <div className="mt-2.5 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-black/5 max-w-md">
                     <img

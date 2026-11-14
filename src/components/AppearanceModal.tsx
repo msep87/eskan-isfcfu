@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { AppSettings, CustomFont } from '../types';
-import { Palette, Type, Image as ImageIcon, X, Check, Upload, Trash2, Plus, AlertCircle, Percent, Sliders } from 'lucide-react';
+import { AppSettings } from '../types';
+import { Palette, Type, Image as ImageIcon, X, Check, Upload, Trash2, Plus, AlertCircle, Percent } from 'lucide-react';
+import { STANDARD_FONTS, readMultipleFontFiles } from '../utils/fonts';
 
 interface AppearanceModalProps {
   isOpen: boolean;
@@ -16,6 +17,7 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
   onUpdateSettings,
 }) => {
   const [newFontName, setNewFontName] = useState('');
+  const [activateOnUpload, setActivateOnUpload] = useState(true);
   const [fontError, setFontError] = useState('');
   const [fontSuccess, setFontSuccess] = useState('');
 
@@ -30,12 +32,7 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
     { id: 'clean-slate', name: 'ساده و مینیمال (روشن)', preview: '#f8fafc' },
   ];
 
-  const standardFonts = [
-    { id: 'vazir', name: 'وزیرمتن (استاندارد وب و رسمی)' },
-    { id: 'shabnam', name: 'شبنم (خوانا و نرم)' },
-    { id: 'sahel', name: 'ساحل (کلاسیک و زیبا)' },
-    { id: 'system', name: 'فونت پیش‌فرض سیستم' },
-  ];
+  const standardFonts = STANDARD_FONTS;
 
   const colorThemes = [
     { id: 'turquoise', name: 'فیروزه‌ای اصفهان', colorClass: 'bg-teal-600', ringClass: 'ring-teal-500' },
@@ -45,68 +42,46 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
     { id: 'amber', name: 'کهربایی زرین', colorClass: 'bg-amber-600', ringClass: 'ring-amber-500' },
   ];
 
-  const fontSizes = [
-    { id: 'sm', name: 'کوچک و فشرده' },
-    { id: 'md', name: 'متوسط و استاندارد' },
-    { id: 'lg', name: 'بزرگ و خوانا' },
-  ];
-
-  // آپلود فونت جدید (TTF, WOFF, WOFF2, OTF)
-  const handleFontUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  // آپلود یک یا چند فایل فونت جدید (TTF, WOFF, WOFF2, OTF)
+  const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
     setFontError('');
     setFontSuccess('');
 
-    if (!file) return;
+    if (!files || files.length === 0) return;
 
-    if (file.size > 8 * 1024 * 1024) {
-      setFontError('حجم فایل فونت نباید بیشتر از ۸ مگابایت باشد.');
-      return;
+    const { added, errors } = await readMultipleFontFiles(files, newFontName);
+    e.target.value = '';
+
+    if (errors.length > 0) {
+      setFontError(errors.join(' '));
     }
 
-    const ext = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
-    let format = 'truetype';
-    if (ext === 'woff') format = 'woff';
-    else if (ext === 'woff2') format = 'woff2';
-    else if (ext === 'otf') format = 'opentype';
+    if (added.length === 0) return;
 
-    const displayName = newFontName.trim() || file.name.substring(0, file.name.lastIndexOf('.')) || 'فونت سفارشی';
-    const fontId = `custom_font_${Date.now()}`;
-    const fontCssFamily = `CF_${Date.now()}`;
+    const existingFonts = settings.customFonts || [];
+    const updatedFonts = [...existingFonts, ...added];
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (!dataUrl) {
-        setFontError('خطا در خواندن فایل فونت.');
-        return;
-      }
-
-      const newCustomFont: CustomFont = {
-        id: fontId,
-        name: displayName,
-        fontFamily: fontCssFamily,
-        dataUrl,
-        format,
-      };
-
-      const existingFonts = settings.customFonts || [];
-      const updatedFonts = [...existingFonts, newCustomFont];
-
-      const updatedSettings: AppSettings = {
-        ...settings,
-        customFonts: updatedFonts,
-        fontFamily: fontCssFamily, // فعال‌سازی بلافاصله
-        activeCustomFontId: fontId,
-      };
-
-      onUpdateSettings(updatedSettings);
-      setNewFontName('');
-      setFontSuccess(`فونت «${displayName}» با موفقیت افزوده و فعال شد.`);
-      setTimeout(() => setFontSuccess(''), 3000);
+    const shouldActivate = activateOnUpload && added.length > 0;
+    const updatedSettings: AppSettings = {
+      ...settings,
+      customFonts: updatedFonts,
+      ...(shouldActivate
+        ? {
+            fontFamily: added[0].fontFamily,
+            activeCustomFontId: added[0].id,
+          }
+        : {}),
     };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+
+    onUpdateSettings(updatedSettings);
+    setNewFontName('');
+    setFontSuccess(
+      added.length === 1
+        ? `فونت «${added[0].name}» با موفقیت به فهرست فونت‌ها اضافه${shouldActivate ? ' و فعال' : ''} شد.`
+        : `${added.length} فونت جدید با موفقیت به فهرست فونت‌ها اضافه شد. اکنون می‌توانید از بین آن‌ها انتخاب کنید.`
+    );
+    setTimeout(() => setFontSuccess(''), 4000);
   };
 
   // حذف فونت سفارشی
@@ -216,18 +191,19 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
           </div>
 
           {/* لیست فونت‌های استاندارد */}
-          <div className="grid grid-cols-2 gap-2.5 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
             {standardFonts.map((f) => (
               <button
                 key={f.id}
-                onClick={() => onUpdateSettings({ ...settings, fontFamily: f.id as any })}
+                onClick={() => onUpdateSettings({ ...settings, fontFamily: f.id, activeCustomFontId: undefined })}
+                style={{ fontFamily: f.cssFamily }}
                 className={`flex items-center justify-between p-3 rounded-2xl border text-xs font-medium transition text-right cursor-pointer ${
                   settings.fontFamily === f.id
                     ? 'border-teal-500 bg-teal-50/50 dark:bg-teal-950/30 text-teal-700 dark:text-teal-300 ring-2 ring-teal-500/20'
                     : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50'
                 }`}
               >
-                <span>{f.name}</span>
+                <span className="truncate">{f.name}</span>
                 {settings.fontFamily === f.id && <Check className="w-4 h-4 text-teal-600 shrink-0" />}
               </button>
             ))}
@@ -268,11 +244,11 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
             </div>
           )}
 
-          {/* باکس بارگذاری فونت جدید TTF توسط مدیر */}
+          {/* باکس بارگذاری یک یا چند فونت جدید TTF توسط مدیر */}
           <div className="p-3.5 rounded-2xl bg-teal-50/60 dark:bg-teal-950/20 border border-dashed border-teal-300 dark:border-teal-800 space-y-2.5">
             <div className="text-xs font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
               <Plus className="w-3.5 h-3.5" />
-              <span>بارگذاری فایل فونت جدید (TTF, WOFF, WOFF2, OTF):</span>
+              <span>افزودن یک یا چند فایل فونت (TTF, WOFF, WOFF2, OTF):</span>
             </div>
 
             {fontError && (
@@ -293,22 +269,33 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
                 type="text"
                 value={newFontName}
                 onChange={(e) => setNewFontName(e.target.value)}
-                placeholder="نام نمایشی فونت (اختیاری)"
+                placeholder="نام نمایشی (برای آپلود تکی - اختیاری)"
                 className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
               />
               <label className="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs shrink-0">
                 <Upload className="w-3.5 h-3.5" />
-                <span>انتخاب فایل TTF / WOFF</span>
+                <span>انتخاب یک یا چند فایل فونت</span>
                 <input
                   type="file"
+                  multiple
                   accept=".ttf,.woff,.woff2,.otf"
                   onChange={handleFontUpload}
                   className="hidden"
                 />
               </label>
             </div>
+
+            <label className="flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={activateOnUpload}
+                onChange={(e) => setActivateOnUpload(e.target.checked)}
+                className="w-3.5 h-3.5 rounded text-teal-600 cursor-pointer"
+              />
+              <span>بلافاصله پس از افزودن، فونت جدید برای سامانه فعال شود</span>
+            </label>
             <p className="text-[10px] text-slate-400">
-              با انتخاب فایل، فونت بارگذاری شده بلافاصله در کل سامانه اعمال و در لیست فونت‌ها ذخیره می‌شود.
+              تمام فونت‌های اضافه‌شده در مخزن فونت‌های سایت ذخیره می‌شوند و هم برای نمایش کل سامانه و هم در ویرایشگر اطلاعیه‌ها قابل انتخاب خواهند بود.
             </p>
           </div>
         </div>
