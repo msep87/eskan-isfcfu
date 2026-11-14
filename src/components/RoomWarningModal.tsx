@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dormitory, Room, RoomWarning } from '../types';
 import { Storage } from '../utils/storage';
 import { ShieldAlert, AlertTriangle, X, Check } from 'lucide-react';
@@ -22,6 +22,12 @@ export const RoomWarningModal: React.FC<RoomWarningModalProps> = ({
 }) => {
   const [selectedDormId, setSelectedDormId] = useState(dorms[0]?.id || '');
   const [selectedRoomId, setSelectedRoomId] = useState('');
+
+  useEffect(() => {
+    if (dorms.length > 0 && (!selectedDormId || !dorms.some((d) => d.id === selectedDormId))) {
+      setSelectedDormId(dorms[0].id);
+    }
+  }, [dorms, selectedDormId]);
   const [title, setTitle] = useState('تذکر رعایت نظم و نظافت اتاق');
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState<'info' | 'warning' | 'critical'>('warning');

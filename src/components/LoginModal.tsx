@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Storage } from '../utils/storage';
+import { toEnglishDigits } from '../utils/excelUtils';
 import { CurrentUser } from '../types';
 import {
   GraduationCap,
@@ -52,11 +53,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
 
     const students = Storage.getStudents();
-    const cleanId = studentId.trim();
-    const cleanNat = nationalId.trim();
+    const cleanId = toEnglishDigits(studentId.trim());
+    const cleanNat = toEnglishDigits(nationalId.trim());
 
     const student = students.find(
-      (s) => s.studentId === cleanId && s.nationalId === cleanNat
+      (s) =>
+        Boolean(s.studentId) &&
+        Boolean(s.nationalId) &&
+        toEnglishDigits(String(s.studentId).trim()) === cleanId &&
+        toEnglishDigits(String(s.nationalId).trim()) === cleanNat
     );
 
     if (student) {

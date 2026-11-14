@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { Dormitory, Room, Bed, Student, AppSettings } from '../types';
 import { Storage } from '../utils/storage';
@@ -44,6 +44,12 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
   const [selectedDormId, setSelectedDormId] = useState<string>(
     student?.assignedDormId || dorms[0]?.id || ''
   );
+
+  useEffect(() => {
+    if (dorms.length > 0 && (!selectedDormId || !dorms.some((d) => d.id === selectedDormId))) {
+      setSelectedDormId(student?.assignedDormId || dorms[0].id);
+    }
+  }, [dorms, selectedDormId, student?.assignedDormId]);
   const [selectedFloor, setSelectedFloor] = useState<number | 'all'>('all');
   const [filterVacantOnly, setFilterVacantOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -93,19 +99,20 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
     }
 
     // بررسی جنسیت پردیس
-    if (currentDorm?.gender === 'brothers' && student.fullName.includes('خانم')) {
+    if (currentDorm?.gender === 'brothers' && (student.fullName || '').includes('خانم')) {
       // نرمال‌سازی ساده
     }
 
     // بررسی سهمیه رشته
     if (room.allowedFields && room.allowedFields.length > 0) {
+      const stField = student.fieldOfStudy || '';
       const match = room.allowedFields.some(
-        (f) => student.fieldOfStudy.includes(f) || f.includes(student.fieldOfStudy)
+        (f) => stField.includes(f) || (stField && f.includes(stField))
       );
       if (!match) {
         return {
           eligible: false,
-          reason: `این اتاق ویژه رشته‌های [${room.allowedFields.join('، ')}] است و با رشته شما (${student.fieldOfStudy}) مطابقت ندارد.`,
+          reason: `این اتاق ویژه رشته‌های [${room.allowedFields.join('، ')}] است و با رشته شما (${stField || 'نامشخص'}) مطابقت ندارد.`,
         };
       }
     }

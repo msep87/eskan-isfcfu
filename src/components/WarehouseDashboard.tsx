@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   WarehouseStaff,
   InventoryItem,
@@ -94,6 +94,12 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
   // مودال صدور مستقیم درخواست اقلام برای سرا
   const [isDirectReqModalOpen, setIsDirectReqModalOpen] = useState(false);
   const [dirDormId, setDirDormId] = useState(dorms[0]?.id || '');
+
+  useEffect(() => {
+    if (dorms.length > 0 && (!dirDormId || !dorms.some((d) => d.id === dirDormId))) {
+      setDirDormId(dorms[0].id);
+    }
+  }, [dorms, dirDormId]);
   const [dirItemTitle, setDirItemTitle] = useState('');
   const [dirItemId, setDirItemId] = useState('');
   const [dirQty, setDirQty] = useState(1);

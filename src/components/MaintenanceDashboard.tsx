@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   MaintenanceStaff,
   MaintenanceTask,
@@ -81,6 +81,12 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newDormId, setNewDormId] = useState(dorms[0]?.id || '');
+
+  useEffect(() => {
+    if (dorms.length > 0 && (!newDormId || !dorms.some((d) => d.id === newDormId))) {
+      setNewDormId(dorms[0].id);
+    }
+  }, [dorms, newDormId]);
   const [newRoomNumber, setNewRoomNumber] = useState('');
   const [newLocationDetails, setNewLocationDetails] = useState('');
   const [newPriority, setNewPriority] = useState<MaintenanceTask['priority']>('normal');

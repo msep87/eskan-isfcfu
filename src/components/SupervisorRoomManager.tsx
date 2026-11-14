@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dormitory, Room, Bed, Student } from '../types';
 import { Storage } from '../utils/storage';
 import {
@@ -39,6 +39,14 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
   const [selectedDormId, setSelectedDormId] = useState(
     supervisorDormId && supervisorDormId !== 'all' ? supervisorDormId : dorms[0]?.id || ''
   );
+
+  useEffect(() => {
+    if (dorms.length > 0 && (!selectedDormId || !dorms.some((d) => d.id === selectedDormId))) {
+      setSelectedDormId(
+        supervisorDormId && supervisorDormId !== 'all' ? supervisorDormId : dorms[0].id
+      );
+    }
+  }, [dorms, selectedDormId, supervisorDormId]);
   const [selectedFloor, setSelectedFloor] = useState<number | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -74,9 +82,9 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
     if (!assignStudentSearch.trim()) return true;
     const q = assignStudentSearch.trim().toLowerCase();
     return (
-      s.fullName.toLowerCase().includes(q) ||
-      s.studentId.includes(q) ||
-      s.fieldOfStudy.toLowerCase().includes(q)
+      (s.fullName || '').toLowerCase().includes(q) ||
+      (s.studentId || '').includes(q) ||
+      (s.fieldOfStudy || '').toLowerCase().includes(q)
     );
   });
 

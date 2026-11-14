@@ -259,6 +259,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [localSettings, setLocalSettings] = useState<AppSettings>({ ...settings });
   const [saveStatus, setSaveStatus] = useState(false);
 
+  // اطمینان از انتخاب خودکار اولین سرای/سرپرست/مشاور معتبر پس از بارگذاری یا ایجاد داده‌ها
+  useEffect(() => {
+    if (dorms.length > 0) {
+      if (!roomDormId || !dorms.some((d) => d.id === roomDormId)) {
+        setRoomDormId(dorms[0].id);
+      }
+      if (!adminNewMaintDormId || !dorms.some((d) => d.id === adminNewMaintDormId)) {
+        setAdminNewMaintDormId(dorms[0].id);
+      }
+    }
+  }, [dorms, roomDormId, adminNewMaintDormId]);
+
+  useEffect(() => {
+    if (supervisors.length > 0 && (!newShiftSupId || !supervisors.some((s) => s.id === newShiftSupId))) {
+      setNewShiftSupId(supervisors[0].id);
+    }
+  }, [supervisors, newShiftSupId]);
+
+  useEffect(() => {
+    if (counselorsList.length > 0 && (!newCnsShiftCounselorId || !counselorsList.some((c) => c.id === newCnsShiftCounselorId))) {
+      setNewCnsShiftCounselorId(counselorsList[0].id);
+    }
+  }, [counselorsList, newCnsShiftCounselorId]);
+
   // مدیریت درخواست‌های اسکان موقت
   const pendingStudents = students.filter(
     (s) => s.assignedBedId && s.assignmentStatus === 'temporary'
@@ -591,7 +615,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newSupUser, setNewSupUser] = useState('');
   const [newSupPass, setNewSupPass] = useState('');
   const [newSupPhone, setNewSupPhone] = useState('');
-  const [newSupDormIds, setNewSupDormIds] = useState<string[]>([dorms[0]?.id || '']);
+  const [newSupDormIds, setNewSupDormIds] = useState<string[]>(dorms[0]?.id ? [dorms[0].id] : []);
 
   // محاسبه آمار سراها برای کارتابل سرپرستی مدیر
   const activeCartableDormIds = selectedCartableDormId === 'all'
@@ -622,9 +646,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (studentSearchQuery.trim()) {
       const q = studentSearchQuery.trim();
       return (
-        s.fullName.includes(q) ||
-        s.studentId.includes(q) ||
-        s.fieldOfStudy.includes(q) ||
+        (s.fullName || '').includes(q) ||
+        (s.studentId || '').includes(q) ||
+        (s.fieldOfStudy || '').includes(q) ||
         (s.mobile && s.mobile.includes(q))
       );
     }
@@ -960,7 +984,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     if (!newSupName.trim() || !newSupUser.trim() || !newSupPass.trim()) return;
 
-    const selectedDorms = newSupDormIds.length > 0 ? newSupDormIds : [dorms[0]?.id || ''];
+    const validDorms = newSupDormIds.filter(Boolean);
+    const selectedDorms = validDorms.length > 0 ? validDorms : dorms[0]?.id ? [dorms[0].id] : [];
 
     const currentSups = Storage.getSupervisors();
     currentSups.push({
@@ -979,7 +1004,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setNewSupUser('');
     setNewSupPass('');
     setNewSupPhone('');
-    setNewSupDormIds([dorms[0]?.id || '']);
+    setNewSupDormIds(dorms[0]?.id ? [dorms[0].id] : []);
     onRefreshData();
   };
 
@@ -4440,7 +4465,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <span className="text-slate-300">•</span>
                     <button
                       type="button"
-                      onClick={() => setNewSupDormIds([dorms[0]?.id || ''])}
+                      onClick={() => setNewSupDormIds(dorms[0]?.id ? [dorms[0].id] : [])}
                       className="text-[11px] text-slate-500 hover:underline"
                     >
                       فقط سرای اول
@@ -4670,7 +4695,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <span className="text-slate-300">•</span>
                     <button
                       type="button"
-                      onClick={() => setNewTechDormIds([dorms[0]?.id || ''])}
+                      onClick={() => setNewTechDormIds(dorms[0]?.id ? [dorms[0].id] : [])}
                       className="text-[11px] text-slate-500 hover:underline"
                     >
                       فقط سرای اول

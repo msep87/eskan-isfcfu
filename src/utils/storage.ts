@@ -177,6 +177,37 @@ function pushKeyToCloud<T>(key: string, value: T): void {
   pendingCloudRequests[key] = reqPromise;
 }
 
+function normalizeStudentRecord(raw: Record<string, unknown>): Student {
+  const { _id, __v, createdAt, updatedAt, ...rest } = raw;
+  void _id;
+  void __v;
+  void createdAt;
+  void updatedAt;
+  const r = rest as Partial<Student>;
+  return {
+    ...r,
+    studentId: String(r.studentId ?? ''),
+    nationalId: String(r.nationalId ?? ''),
+    fullName: String(r.fullName ?? ''),
+    fieldOfStudy: String(r.fieldOfStudy ?? ''),
+    entryTerm: String(r.entryTerm ?? ''),
+    fatherName: String(r.fatherName ?? ''),
+    birthDate: String(r.birthDate ?? ''),
+    province: String(r.province ?? ''),
+    city: String(r.city ?? ''),
+    phone: String(r.phone ?? ''),
+    mobile: String(r.mobile ?? ''),
+    emergencyPhone: String(r.emergencyPhone ?? ''),
+    parentPhone: String(r.parentPhone ?? ''),
+    religion: String(r.religion ?? 'اسلام، شیعه'),
+    previousDorm: String(r.previousDorm ?? ''),
+    previousRoom: String(r.previousRoom ?? ''),
+    previousScore: typeof r.previousScore === 'number' ? r.previousScore : 100,
+    isProfileCompleted: Boolean(r.isProfileCompleted),
+    assignmentStatus: r.assignmentStatus || 'none',
+  };
+}
+
 // تابع کمکی برای خواندن از localStorage
 function get<T>(key: string, defaultValue: T): T {
   try {
@@ -513,7 +544,8 @@ export const Storage = {
 
     // بررسی سهمیه رشته
     if (room?.allowedFields && room.allowedFields.length > 0) {
-      if (!room.allowedFields.some((f) => student.fieldOfStudy.includes(f) || f.includes(student.fieldOfStudy))) {
+      const stField = student.fieldOfStudy || '';
+      if (!room.allowedFields.some((f) => stField.includes(f) || (stField && f.includes(stField)))) {
         return { success: false, message: `این اتاق ویژه رشته‌های [${room.allowedFields.join('، ')}] می‌باشد.` };
       }
     }
@@ -904,6 +936,9 @@ export const Storage = {
     Storage.releaseBed(studentId);
     const students = Storage.getStudents().filter((s) => s.studentId !== studentId);
     Storage.setStudents(students);
+    if (typeof fetch === 'function') {
+      fetch(`${API_BASE_URL}/students/${encodeURIComponent(studentId)}`, { method: 'DELETE' }).catch(() => {});
+    }
     return { success: true, message: 'دانشجو و سوابق اسکان وی با موفقیت از سیستم حذف شد.' };
   },
 
@@ -1896,12 +1931,9 @@ export const Storage = {
       const rawData = await res.json();
       if (!Array.isArray(rawData)) return null;
 
-      const cleanStudents: Student[] = rawData.map((item: Record<string, unknown>) => {
-        const { _id, __v, ...rest } = item;
-        void _id;
-        void __v;
-        return rest as unknown as Student;
-      });
+      const cleanStudents: Student[] = rawData.map((item: Record<string, unknown>) =>
+        normalizeStudentRecord(item)
+      );
 
       const lastLocalWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
       if (Date.now() - lastLocalWrite > 5000 && cleanStudents.length > 0) {
@@ -1964,11 +1996,14 @@ export const Storage = {
           (data as { message?: string })?.message ||
           'دانشجو با موفقیت در دیتابیس ابری ثبت شد.',
       };
-    } catch (err) {
+    } catch (err: unknown) {
       console.warn('addStudentToDB error:', err);
+      const isTimeout = err instanceof Error && err.name === 'AbortError';
       return {
         success: false,
-        message: 'خطای شبکه در ارتباط با سرور ابری. لطفاً اتصال اینترنت را بررسی نمایید.',
+        message: isTimeout
+          ? 'زمان انتظار پاسخ از سرور ابری به پایان رسید. لطفاً چند لحظه بعد دوباره تلاش نمایید.'
+          : 'عدم امکان برقراری ارتباط با سرور ابری (khabgah-api). لطفاً وضعیت سرور بک‌اند در Vercel و اتصال اینترنت را بررسی نمایید.',
       };
     }
   },
@@ -2050,14 +2085,9 @@ export const Storage = {
             syncedAny = true;
             const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
             if (!pendingCloudRequests[STORAGE_KEYS.STUDENTS] && Date.now() - lastStudentWrite >= 5000) {
-              const cleanStudents: Student[] = rawStudents.map((item: Record<string, unknown>) => {
-                const { _id, __v, createdAt, updatedAt, ...rest } = item;
-                void _id;
-                void __v;
-                void createdAt;
-                void updatedAt;
-                return rest as unknown as Student;
-              });
+              const cleanStudents: Student[] = rawStudents.map((item: Record<string, unknown>) =>
+                normalizeStudentRecord(item)
+              );
 
               const cloudSyncStudents = cloudMap?.[STORAGE_KEYS.STUDENTS];
               if (!Array.isArray(cloudSyncStudents) && cleanStudents.length > 0) {
