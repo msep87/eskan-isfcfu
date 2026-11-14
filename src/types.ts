@@ -421,7 +421,7 @@ export interface StudentEvaluation {
   dormName?: string;
   roomId?: string;
   roomNumber?: string;
-  type: 'evaluation' | 'notice' | 'warning';
+  type: 'evaluation' | 'notice' | 'warning' | 'report';
   scope: 'individual' | 'room';
   score?: number; // نمره ارزیابی بین ۰ تا ۱۰۰
   title: string;

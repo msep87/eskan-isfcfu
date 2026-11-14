@@ -24,7 +24,7 @@ import { Navbar } from './components/Navbar';
 import { LoginModal } from './components/LoginModal';
 import { AppearanceModal } from './components/AppearanceModal';
 import { ReportsView } from './components/ReportsView';
-import { ExcelImportModal } from './components/ExcelImportModal';
+import { ExcelImportModal, ExcelImportTab } from './components/ExcelImportModal';
 import { MessagingPanel } from './components/MessagingPanel';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { StudentDashboard } from './components/StudentDashboard';
@@ -198,12 +198,18 @@ export default function App() {
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
+  const [excelModalInitialTab, setExcelModalInitialTab] = useState<ExcelImportTab>('students');
   const [isMessagesModalOpen, setIsMessagesModalOpen] = useState(false);
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isUserGuideOpen, setIsUserGuideOpen] = useState(false);
   const [userGuideInitialRole, setUserGuideInitialRole] = useState<UserRoleType>('student');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  const handleOpenExcelModal = (tab: ExcelImportTab = 'students') => {
+    setExcelModalInitialTab(tab);
+    setIsExcelModalOpen(true);
+  };
 
   const handleOpenUserGuide = (role?: UserRoleType) => {
     if (role) {
@@ -544,7 +550,7 @@ export default function App() {
             maintenanceTasks={maintenanceTasks}
             maintenanceStaff={maintenanceStaff}
             onRefreshData={refreshAllData}
-            onOpenExcelModal={() => setIsExcelModalOpen(true)}
+            onOpenExcelModal={handleOpenExcelModal}
             onOpenReports={() => setIsReportsModalOpen(true)}
             onOpenAppearance={() => setIsAppearanceModalOpen(true)}
             onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
@@ -677,6 +683,8 @@ export default function App() {
       <ExcelImportModal
         isOpen={isExcelModalOpen}
         onClose={() => setIsExcelModalOpen(false)}
+        initialTab={excelModalInitialTab}
+        allowStaffTabs={currentUser?.role === 'admin'}
         onImportComplete={() => {
           setIsExcelModalOpen(false);
           refreshAllData();

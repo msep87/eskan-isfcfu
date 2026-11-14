@@ -97,8 +97,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
     if (tab === 'supervisor') {
       const supervisors = Storage.getSupervisors();
+      const cleanU = toEnglishDigits(username.trim()).toLowerCase();
+      const cleanP = toEnglishDigits(password.trim());
       const sup = supervisors.find(
-        (s) => s.username === username.trim() && s.password === password.trim()
+        (s) =>
+          toEnglishDigits(s.username.trim()).toLowerCase() === cleanU &&
+          toEnglishDigits(s.password.trim()) === cleanP
       );
       if (sup) {
         Storage.addActivityLog({

@@ -47,7 +47,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   // تعداد پیام‌های خوانده‌نشده
   const pendingMessagesCount = messages.filter((m) => {
     if (currentUser?.role === 'student') {
-      return m.senderId === currentUser.student.studentId && m.replies.length > 0;
+      return (
+        (m.senderId === currentUser.student.studentId && m.replies.length > 0) ||
+        (m.receiverId === currentUser.student.studentId && m.status !== 'answered')
+      );
     }
     if (currentUser?.role === 'maintenance') {
       return m.category === 'maintenance' && m.status !== 'answered';

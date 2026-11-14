@@ -915,6 +915,9 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           students={students}
           onDataChanged={onRefreshData}
           supervisorDormId={selectedDormId}
+          actorName={supervisor.fullName}
+          actorRole="supervisor"
+          actorId={supervisor.id}
         />
       )}
 
@@ -927,6 +930,9 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           settings={settings}
           onBedSelected={onRefreshData}
           isSupervisorMode={true}
+          actorName={supervisor.fullName}
+          actorRole="supervisor"
+          actorId={supervisor.id}
         />
       )}
 
@@ -1119,6 +1125,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                               className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
                                 ev.type === 'evaluation'
                                   ? 'bg-emerald-600 text-white'
+                                  : ev.type === 'report'
+                                  ? 'bg-blue-600 text-white'
                                   : ev.type === 'warning'
                                   ? 'bg-rose-600 text-white'
                                   : 'bg-amber-500 text-white'
@@ -1126,6 +1134,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                             >
                               {ev.type === 'evaluation'
                                 ? `نمره: ${ev.score ?? '-'}`
+                                : ev.type === 'report'
+                                ? 'گزارش'
                                 : ev.type === 'warning'
                                 ? 'اخطار رسمی'
                                 : 'تذکر'}
@@ -1144,7 +1154,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                           </div>
                         </div>
 
-                        {ev.type !== 'evaluation' && !ev.resolved && (
+                        {(ev.type === 'notice' || ev.type === 'warning') && !ev.resolved && (
                           <button
                             onClick={() => {
                               Storage.resolveStudentEvaluation(ev.id);

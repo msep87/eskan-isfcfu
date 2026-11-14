@@ -17,7 +17,9 @@ import {
   UserPlus,
   Plus,
   Trash2,
+  FileText,
 } from 'lucide-react';
+import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 
 interface SupervisorRoomManagerProps {
   dorms: Dormitory[];
@@ -26,6 +28,9 @@ interface SupervisorRoomManagerProps {
   students: Student[];
   onDataChanged: () => void;
   supervisorDormId?: string;
+  actorName?: string;
+  actorRole?: 'admin' | 'supervisor';
+  actorId?: string;
 }
 
 export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
@@ -35,6 +40,9 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
   students,
   onDataChanged,
   supervisorDormId,
+  actorName = 'سرپرست / مدیر سرا',
+  actorRole = 'supervisor',
+  actorId,
 }) => {
   const [selectedDormId, setSelectedDormId] = useState(
     supervisorDormId && supervisorDormId !== 'all' ? supervisorDormId : dorms[0]?.id || ''
@@ -69,6 +77,13 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
 
   // حضور و غیاب شبانه درون‌حافظه
   const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent' | 'leave' | 'late'>>({});
+
+  // مودال مشاهده عکس، مشخصات و ثبت گزارش/تذکر/نمره/پیام دانشجو
+  const [selectedStudentModal, setSelectedStudentModal] = useState<{
+    student: Student;
+    room: Room;
+    bed: Bed;
+  } | null>(null);
 
   const currentDorm = dorms.find((d) => d.id === selectedDormId) || dorms[0];
   const dormRooms = rooms.filter((r) => r.dormId === selectedDormId);
@@ -328,23 +343,28 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                         className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/60 text-xs"
                       >
                         <div className="flex items-start justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedStudentModal({ student: st, room, bed })}
+                            className="flex items-center gap-2.5 text-right group cursor-pointer rounded-xl p-1 -m-1 hover:bg-teal-50/70 dark:hover:bg-teal-950/30 transition"
+                            title="مشاهده عکس و پرونده دانشجو و ثبت گزارش، تذکر، اخطار، نمره و پیام"
+                          >
                             {st.photoUrl ? (
                               <img
                                 src={st.photoUrl}
                                 alt={st.fullName}
-                                className="w-9 h-9 rounded-xl object-cover shrink-0"
+                                className="w-10 h-10 rounded-xl object-cover shrink-0 ring-2 ring-transparent group-hover:ring-teal-500 transition"
                               />
                             ) : (
                               <div
-                                className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs shrink-0"
+                                className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-xs shrink-0 ring-2 ring-transparent group-hover:ring-teal-500 transition"
                                 style={{ backgroundColor: st.avatarColor || '#0d9488' }}
                               >
                                 {st.fullName.slice(0, 1)}
                               </div>
                             )}
                             <div>
-                              <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                              <div className="font-bold text-slate-900 dark:text-slate-100 group-hover:text-teal-700 dark:group-hover:text-teal-300 flex items-center gap-1.5 transition underline decoration-dotted decoration-teal-500/50 underline-offset-4">
                                 <span>{st.fullName}</span>
                                 {isRepresentative && <span className="text-[10px] text-purple-600">🌟</span>}
                               </div>
@@ -352,7 +372,7 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                                 {st.fieldOfStudy} • ورودی {st.entryTerm} • {st.city}
                               </div>
                             </div>
-                          </div>
+                          </button>
 
                           <div className="text-right">
                             <span className="text-[10px] text-teal-700 dark:text-teal-300 font-bold bg-teal-50 dark:bg-teal-950 px-2 py-0.5 rounded-lg border border-teal-200 block text-center mb-1">
@@ -364,6 +384,15 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                         {/* ابزارهای سرپرستی و مدیریتی برای هر دانشجو */}
                         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/50 dark:border-slate-700/50">
                           <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedStudentModal({ student: st, room, bed })}
+                              className="px-2 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300 text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
+                            >
+                              <FileText className="w-3 h-3" />
+                              <span>پرونده / گزارش و پیام</span>
+                            </button>
+
                             {!isRepresentative && (
                               <button
                                 onClick={() => handleAppointRepresentative(room.id, st.studentId)}
@@ -727,6 +756,20 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
           </div>
         </div>
       )}
+
+      {/* مدال پروفایل، عکس، گزارش، تذکر، اخطار، نمره ارزیابی و پیام دانشجو */}
+      <StudentRoomProfileModal
+        isOpen={Boolean(selectedStudentModal)}
+        onClose={() => setSelectedStudentModal(null)}
+        student={selectedStudentModal?.student || null}
+        dorm={currentDorm}
+        room={selectedStudentModal?.room || null}
+        bed={selectedStudentModal?.bed || null}
+        actorName={actorName}
+        actorRole={actorRole}
+        actorId={actorId}
+        onDataChanged={onDataChanged}
+      />
 
     </div>
   );

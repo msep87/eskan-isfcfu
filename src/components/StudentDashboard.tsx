@@ -92,7 +92,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   );
   const individualEvalList = myEvaluations.filter((e) => e.type === 'evaluation' && e.scope === 'individual');
   const roomEvalList = myEvaluations.filter((e) => e.type === 'evaluation' && e.scope === 'room');
-  const activePersonalAlerts = myEvaluations.filter((e) => e.type !== 'evaluation' && !e.resolved);
+  const activePersonalAlerts = myEvaluations.filter((e) => (e.type === 'notice' || e.type === 'warning') && !e.resolved);
 
   const latestIndividualScore =
     individualEvalList.length > 0 && typeof individualEvalList[0].score === 'number'
@@ -521,6 +521,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                     className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                       ev.type === 'evaluation'
                         ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
+                        : ev.type === 'report'
+                        ? 'bg-blue-50/60 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50'
                         : ev.type === 'warning'
                         ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50'
                         : 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50'
@@ -532,6 +534,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                           className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold inline-flex items-center gap-1 ${
                             ev.type === 'evaluation'
                               ? 'bg-emerald-600 text-white'
+                              : ev.type === 'report'
+                              ? 'bg-blue-600 text-white'
                               : ev.type === 'warning'
                               ? 'bg-rose-600 text-white'
                               : 'bg-amber-500 text-white'
@@ -545,6 +549,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                           <span>
                             {ev.type === 'evaluation'
                               ? `نمره ارزیابی: ${ev.score ?? '-'} از ۱۰۰`
+                              : ev.type === 'report'
+                              ? 'گزارش ثبت‌شده'
                               : ev.type === 'warning'
                               ? 'اخطار رسمی'
                               : 'تذکر'}
@@ -553,7 +559,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                         <span className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300">
                           {ev.scope === 'room' ? 'مربوط به اتاق' : 'ارزیابی فردی'}
                         </span>
-                        {ev.type !== 'evaluation' && (
+                        {(ev.type === 'notice' || ev.type === 'warning') && (
                           <span
                             className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
                               ev.resolved

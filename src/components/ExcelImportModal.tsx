@@ -1,13 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   parseStudentExcel,
   parseDormitoryExcel,
   downloadStudentTemplate,
   downloadDormitoryTemplate,
+  parseSupervisorExcel,
+  downloadSupervisorTemplate,
+  parseMaintenanceExcel,
+  downloadMaintenanceTemplate,
+  parseCounselorExcel,
+  downloadCounselorTemplate,
+  parseWarehouseExcel,
+  downloadWarehouseTemplate,
   toEnglishDigits,
 } from '../utils/excelUtils';
 import { Storage } from '../utils/storage';
-import { Student, Dormitory, Room, Bed } from '../types';
+import {
+  Student,
+  Dormitory,
+  Room,
+  Bed,
+  Supervisor,
+  MaintenanceStaff,
+  CounselorStaff,
+  WarehouseStaff,
+} from '../types';
 import {
   FileSpreadsheet,
   Download,
@@ -19,20 +36,36 @@ import {
   Building2,
   Users,
   Sparkles,
+  UserCheck,
+  Wrench,
+  HeartHandshake,
+  Package,
 } from 'lucide-react';
+
+export type ExcelImportTab =
+  | 'students'
+  | 'dorms'
+  | 'supervisors'
+  | 'maintenance'
+  | 'counselors'
+  | 'warehouse';
 
 interface ExcelImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImportComplete: () => void;
+  initialTab?: ExcelImportTab;
+  allowStaffTabs?: boolean;
 }
 
 export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
   isOpen,
   onClose,
   onImportComplete,
+  initialTab = 'students',
+  allowStaffTabs = true,
 }) => {
-  const [tab, setTab] = useState<'students' | 'dorms'>('students');
+  const [tab, setTab] = useState<ExcelImportTab>('students');
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -50,10 +83,64 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
     beds: Bed[];
   } | null>(null);
 
+  // پیش‌نمایش کاربران سرپرست، تأسیسات، مشاور و انبار
+  const [previewSupervisors, setPreviewSupervisors] = useState<{
+    list: Supervisor[];
+    skippedRows: number;
+  } | null>(null);
+
+  const [previewMaintenance, setPreviewMaintenance] = useState<{
+    list: MaintenanceStaff[];
+    skippedRows: number;
+  } | null>(null);
+
+  const [previewCounselors, setPreviewCounselors] = useState<{
+    list: CounselorStaff[];
+    skippedRows: number;
+  } | null>(null);
+
+  const [previewWarehouse, setPreviewWarehouse] = useState<{
+    list: WarehouseStaff[];
+    skippedRows: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      const targetTab = allowStaffTabs
+        ? initialTab || 'students'
+        : initialTab === 'dorms'
+        ? 'dorms'
+        : 'students';
+      setTab(targetTab);
+      setErrorMsg('');
+      setSuccessMsg('');
+      setReplaceMode(false);
+    }
+  }, [isOpen, initialTab, allowStaffTabs]);
+
   if (!isOpen) return null;
+
+  const existingDorms = Storage.getDormitories();
+  const dormNameMap = new Map(existingDorms.map((d) => [d.id, d.name]));
+
+  const formatDormListLabel = (ids?: string[]) => {
+    if (!ids || ids.length === 0) return 'نامشخص';
+    if (ids.includes('all') || (existingDorms.length > 0 && ids.length >= existingDorms.length)) {
+      return 'همه سراهای دانشگاه';
+    }
+    return ids.map((id) => dormNameMap.get(id) || id).join('، ');
+  };
+
+  const switchTab = (nextTab: ExcelImportTab) => {
+    setTab(nextTab);
+    setErrorMsg('');
+    setSuccessMsg('');
+    setReplaceMode(false);
+  };
 
   const handleStudentFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     setLoading(true);
@@ -73,6 +160,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
 
   const handleDormFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     setLoading(true);
@@ -89,6 +177,82 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
     }
   };
 
+  const handleSupervisorFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await parseSupervisorExcel(file, Storage.getDormitories());
+      setPreviewSupervisors({ list: res.supervisors, skippedRows: res.skippedRows });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در بارگذاری فایل اکسل کاربران سرپرست');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMaintenanceFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await parseMaintenanceExcel(file, Storage.getDormitories());
+      setPreviewMaintenance({ list: res.staff, skippedRows: res.skippedRows });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در بارگذاری فایل اکسل کاربران تأسیسات');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCounselorFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await parseCounselorExcel(file, Storage.getDormitories());
+      setPreviewCounselors({ list: res.counselors, skippedRows: res.skippedRows });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در بارگذاری فایل اکسل کاربران مشاور');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleWarehouseFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await parseWarehouseExcel(file);
+      setPreviewWarehouse({ list: res.staff, skippedRows: res.skippedRows });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در بارگذاری فایل اکسل کاربران انبار');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSaveStudents = async () => {
     if (!previewStudents) return;
     setLoading(true);
@@ -100,7 +264,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
       const beds = Storage.getBeds();
       let dormsCreated = false;
 
-      // پردازش تخصیص‌های اسکان از اکسل
       previewStudents.forEach((st) => {
         const dormName = String(st.assignedDormName || '').trim();
         const roomNum = toEnglishDigits(String(st.assignedRoomNumber || '')).trim();
@@ -108,7 +271,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
 
         if (roomNum && bedNumRaw) {
           const bedNum = parseInt(bedNumRaw, 10) || 1;
-          // ۱. پیدا کردن یا انتخاب سرا
           let dorm = dorms.find((d) => d.name === dormName || d.name.includes(dormName) || d.id === dormName);
           if (!dorm) {
             if (dorms.length > 0) {
@@ -127,7 +289,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
             }
           }
 
-          // ۲. پیدا کردن یا ایجاد اتاق در این سرا با رعایت قاعده زوج=بالا، فرد=پایین
           let room = rooms.find((r) => r.dormId === dorm.id && (r.roomNumber === roomNum || toEnglishDigits(r.roomNumber) === roomNum));
           if (!room) {
             const capacity = Math.max(8, bedNum, Math.ceil(bedNum / 2) * 2);
@@ -143,7 +304,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
             };
             rooms.push(room);
 
-            // ایجاد خودکار تخت‌ها با شماره‌گذاری فرد=پایین، زوج=بالا (مثلاً در ۸ تخته: ۱، ۳، ۵، ۷ پایین)
             const pairs = Math.ceil(capacity / 2);
             let bIdx = 1;
             for (let p = 1; p <= pairs; p++) {
@@ -176,7 +336,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
             }
           }
 
-          // ۳. پیدا کردن یا ایجاد تخت در این اتاق با قاعده زوج=بالا، فرد=پایین
           const expectedTier = bedNum % 2 === 1 ? 'lower' : 'upper';
           const expectedBunk = Math.ceil(bedNum / 2);
 
@@ -202,13 +361,11 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
             beds.push(targetBed);
             room.capacity = Math.max(room.capacity, bedNum);
           } else {
-            // اطمینان از مقداردهی صحیح شماره تخت و برچسب
             targetBed.bedNumber = bedNum;
             targetBed.tier = expectedTier;
             targetBed.label = `تخت ${bedNum} (${expectedTier === 'lower' ? 'طبقه پایین' : 'طبقه بالا'})`;
           }
 
-          // آزادسازی تخت قبلی دانشجو در صورت وجود
           beds.forEach((b) => {
             if (b.studentId === st.studentId && b.id !== targetBed.id) {
               b.studentId = null;
@@ -216,7 +373,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
             }
           });
 
-          // ثبت تخصیص قطعی
           targetBed.studentId = st.studentId;
           targetBed.assignmentStatus = 'confirmed';
 
@@ -225,7 +381,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
           st.assignedBedId = targetBed.id;
           st.assignmentStatus = 'confirmed';
         } else {
-          // اگر ستون‌های اتاق و تخت در اکسل خالی بود: خود دانشجو باید اتاق را انتخاب کند
           st.assignedDormId = undefined;
           st.assignedRoomId = undefined;
           st.assignedBedId = undefined;
@@ -342,12 +497,188 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
     }
   };
 
+  const handleSaveSupervisors = async () => {
+    if (!previewSupervisors) return;
+    setLoading(true);
+    setErrorMsg('');
+
+    try {
+      const incoming = previewSupervisors.list;
+      if (replaceMode) {
+        Storage.setSupervisors(incoming);
+      } else {
+        const existing = Storage.getSupervisors();
+        const mergedMap = new Map<string, Supervisor>();
+        existing.forEach((s) => mergedMap.set(s.username.trim().toLowerCase(), s));
+        incoming.forEach((s) => {
+          const key = s.username.trim().toLowerCase();
+          const prev = mergedMap.get(key);
+          mergedMap.set(key, prev ? { ...s, id: prev.id } : s);
+        });
+        Storage.setSupervisors(Array.from(mergedMap.values()));
+      }
+
+      const syncRes = await Storage.waitForPendingCloudSync();
+
+      Storage.addActivityLog({
+        category: 'excel',
+        action: replaceMode ? 'بارگذاری و جایگزینی اکسل سرپرستان' : 'ثبت گروهی کاربران سرپرست از اکسل',
+        details: `تعداد ${incoming.length} حساب کاربری سرپرست سرا از فایل اکسل ثبت و ذخیره شد.`,
+        targetName: `${incoming.length} سرپرست`,
+      });
+
+      setSuccessMsg(
+        syncRes.success
+          ? `تعداد ${incoming.length} کاربر سرپرست با موفقیت در دیتابیس ابری ثبت و همگام‌سازی شد.`
+          : `تعداد ${incoming.length} کاربر سرپرست در مرورگر ثبت شد، اما همگام‌سازی ابری با تأخیر مواجه شد.`
+      );
+      setPreviewSupervisors(null);
+      setTimeout(() => onImportComplete(), 1100);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در ذخیره کاربران سرپرست');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveMaintenance = async () => {
+    if (!previewMaintenance) return;
+    setLoading(true);
+    setErrorMsg('');
+
+    try {
+      const incoming = previewMaintenance.list;
+      if (replaceMode) {
+        Storage.setMaintenanceStaff(incoming);
+      } else {
+        const existing = Storage.getMaintenanceStaff();
+        const mergedMap = new Map<string, MaintenanceStaff>();
+        existing.forEach((s) => mergedMap.set(s.username.trim().toLowerCase(), s));
+        incoming.forEach((s) => {
+          const key = s.username.trim().toLowerCase();
+          const prev = mergedMap.get(key);
+          mergedMap.set(key, prev ? { ...s, id: prev.id } : s);
+        });
+        Storage.setMaintenanceStaff(Array.from(mergedMap.values()));
+      }
+
+      const syncRes = await Storage.waitForPendingCloudSync();
+
+      Storage.addActivityLog({
+        category: 'excel',
+        action: replaceMode ? 'بارگذاری و جایگزینی اکسل پرسنل تأسیسات' : 'ثبت گروهی کاربران تأسیسات از اکسل',
+        details: `تعداد ${incoming.length} حساب کاربری تکنسین و کارشناس تأسیسات از فایل اکسل ثبت شد.`,
+        targetName: `${incoming.length} کاربر تأسیسات`,
+      });
+
+      setSuccessMsg(
+        syncRes.success
+          ? `تعداد ${incoming.length} کاربر تأسیسات با موفقیت در دیتابیس ابری ثبت و همگام‌سازی شد.`
+          : `تعداد ${incoming.length} کاربر تأسیسات در مرورگر ثبت شد، اما همگام‌سازی ابری با تأخیر مواجه شد.`
+      );
+      setPreviewMaintenance(null);
+      setTimeout(() => onImportComplete(), 1100);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در ذخیره کاربران تأسیسات');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveCounselors = async () => {
+    if (!previewCounselors) return;
+    setLoading(true);
+    setErrorMsg('');
+
+    try {
+      const incoming = previewCounselors.list;
+      if (replaceMode) {
+        Storage.setCounselors(incoming);
+      } else {
+        const existing = Storage.getCounselors();
+        const mergedMap = new Map<string, CounselorStaff>();
+        existing.forEach((c) => mergedMap.set(c.username.trim().toLowerCase(), c));
+        incoming.forEach((c) => {
+          const key = c.username.trim().toLowerCase();
+          const prev = mergedMap.get(key);
+          mergedMap.set(key, prev ? { ...c, id: prev.id } : c);
+        });
+        Storage.setCounselors(Array.from(mergedMap.values()));
+      }
+
+      const syncRes = await Storage.waitForPendingCloudSync();
+
+      Storage.addActivityLog({
+        category: 'excel',
+        action: replaceMode ? 'بارگذاری و جایگزینی اکسل مشاوران' : 'ثبت گروهی کاربران مشاور از اکسل',
+        details: `تعداد ${incoming.length} حساب کاربری مشاور و روانشناس از فایل اکسل ثبت شد.`,
+        targetName: `${incoming.length} کاربر مشاور`,
+      });
+
+      setSuccessMsg(
+        syncRes.success
+          ? `تعداد ${incoming.length} کاربر مشاور با موفقیت در دیتابیس ابری ثبت و همگام‌سازی شد.`
+          : `تعداد ${incoming.length} کاربر مشاور در مرورگر ثبت شد، اما همگام‌سازی ابری با تأخیر مواجه شد.`
+      );
+      setPreviewCounselors(null);
+      setTimeout(() => onImportComplete(), 1100);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در ذخیره کاربران مشاور');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveWarehouse = async () => {
+    if (!previewWarehouse) return;
+    setLoading(true);
+    setErrorMsg('');
+
+    try {
+      const incoming = previewWarehouse.list;
+      if (replaceMode) {
+        Storage.setWarehouseStaff(incoming);
+      } else {
+        const existing = Storage.getWarehouseStaff();
+        const mergedMap = new Map<string, WarehouseStaff>();
+        existing.forEach((w) => mergedMap.set(w.username.trim().toLowerCase(), w));
+        incoming.forEach((w) => {
+          const key = w.username.trim().toLowerCase();
+          const prev = mergedMap.get(key);
+          mergedMap.set(key, prev ? { ...w, id: prev.id } : w);
+        });
+        Storage.setWarehouseStaff(Array.from(mergedMap.values()));
+      }
+
+      const syncRes = await Storage.waitForPendingCloudSync();
+
+      Storage.addActivityLog({
+        category: 'excel',
+        action: replaceMode ? 'بارگذاری و جایگزینی اکسل پرسنل انبار' : 'ثبت گروهی کاربران انبار از اکسل',
+        details: `تعداد ${incoming.length} حساب کاربری مسئول انبار و کارپردازی از فایل اکسل ثبت شد.`,
+        targetName: `${incoming.length} کاربر انبار`,
+      });
+
+      setSuccessMsg(
+        syncRes.success
+          ? `تعداد ${incoming.length} کاربر انبار با موفقیت در دیتابیس ابری ثبت و همگام‌سازی شد.`
+          : `تعداد ${incoming.length} کاربر انبار در مرورگر ثبت شد، اما همگام‌سازی ابری با تأخیر مواجه شد.`
+      );
+      setPreviewWarehouse(null);
+      setTimeout(() => onImportComplete(), 1100);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در ذخیره کاربران انبار');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 relative max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-4xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 relative max-h-[90vh] overflow-y-auto">
         <button
           onClick={onClose}
-          className="absolute top-5 left-5 p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+          className="absolute top-5 left-5 p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -358,46 +689,103 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
           </div>
           <div>
             <h3 className="font-extrabold text-base sm:text-lg text-slate-900 dark:text-white">
-              ورود داده‌ها از طریق فایل اکسل (Excel / CSV)
+              ورود داده‌ها و ثبت کاربران از طریق فایل اکسل (Excel / CSV)
             </h3>
             <p className="text-xs text-slate-500">
-              بارگذاری اکسل مشخصات دانشجویان (با پشتیبانی از ستون‌های دلخواه) و سراهای خوابگاهی
+              {allowStaffTabs
+                ? 'بارگذاری مجزا برای دانشجویان، سراها و اتاق‌ها، سرپرستان، پرسنل تأسیسات، مشاوران و انبارداران'
+                : 'بارگذاری اکسل مشخصات دانشجویان (با پشتیبانی از ستون‌های دلخواه) و سراهای خوابگاهی'}
             </p>
           </div>
         </div>
 
-        {/* تب‌های اکسل */}
-        <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-6">
+        {/* تب‌های انتخاب نوع فایل اکسل */}
+        <div
+          className={`grid gap-1.5 p-1.5 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-6 ${
+            allowStaffTabs ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6' : 'grid-cols-2'
+          }`}
+        >
           <button
-            onClick={() => {
-              setTab('students');
-              setErrorMsg('');
-              setSuccessMsg('');
-            }}
-            className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 ${
+            type="button"
+            onClick={() => switchTab('students')}
+            className={`py-2.5 px-2 text-[11px] font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
               tab === 'students'
                 ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
+                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            <Users className="w-4 h-4" />
-            <span>اکسل دانشجویان (مشخصات و فیلدهای سفارشی)</span>
+            <Users className="w-3.5 h-3.5 shrink-0" />
+            <span>دانشجویان</span>
           </button>
+
           <button
-            onClick={() => {
-              setTab('dorms');
-              setErrorMsg('');
-              setSuccessMsg('');
-            }}
-            className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 ${
+            type="button"
+            onClick={() => switchTab('dorms')}
+            className={`py-2.5 px-2 text-[11px] font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
               tab === 'dorms'
                 ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
+                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            <Building2 className="w-4 h-4" />
-            <span>اکسل سراها، اتاق‌ها و تخت‌ها</span>
+            <Building2 className="w-3.5 h-3.5 shrink-0" />
+            <span>سراها و اتاق‌ها</span>
           </button>
+
+          {allowStaffTabs && (
+            <>
+              <button
+                type="button"
+                onClick={() => switchTab('supervisors')}
+                className={`py-2.5 px-2 text-[11px] font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tab === 'supervisors'
+                    ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5 shrink-0" />
+                <span>کاربران سرپرست</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => switchTab('maintenance')}
+                className={`py-2.5 px-2 text-[11px] font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tab === 'maintenance'
+                    ? 'bg-white dark:bg-slate-700 text-amber-700 dark:text-amber-300 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <Wrench className="w-3.5 h-3.5 shrink-0" />
+                <span>کاربران تأسیسات</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => switchTab('counselors')}
+                className={`py-2.5 px-2 text-[11px] font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tab === 'counselors'
+                    ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <HeartHandshake className="w-3.5 h-3.5 shrink-0" />
+                <span>کاربران مشاور</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => switchTab('warehouse')}
+                className={`py-2.5 px-2 text-[11px] font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tab === 'warehouse'
+                    ? 'bg-white dark:bg-slate-700 text-violet-700 dark:text-violet-300 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <Package className="w-3.5 h-3.5 shrink-0" />
+                <span>کاربران انبار</span>
+              </button>
+            </>
+          )}
         </div>
 
         {errorMsg && (
@@ -414,13 +802,13 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
           </div>
         )}
 
-        {/* محتوای تب دانشجویان */}
+        {/* ۱. محتوای تب دانشجویان */}
         {tab === 'students' && (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/60">
               <div>
                 <h4 className="text-xs font-bold text-teal-950 dark:text-teal-200">
-                  دانلود فایل اکسل نمونه و قالب استاندارد
+                  دانلود فایل اکسل نمونه و قالب استاندارد دانشجویان
                 </h4>
                 <p className="text-[11px] text-teal-700 dark:text-teal-400 mt-0.5">
                   شامل تمام ستون‌ها به همراه ستون‌های تخصیص اتاق و تخت و فیلدهای دلخواه
@@ -436,7 +824,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
               </button>
             </div>
 
-            {/* راهنمای اختصاص اتاق و تخت در اکسل ورودی */}
             <div className="p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/70 text-xs text-indigo-950 dark:text-indigo-200 space-y-1.5 leading-relaxed">
               <div className="flex items-center gap-2 font-extrabold text-indigo-900 dark:text-indigo-100">
                 <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
@@ -452,11 +839,10 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                 • <strong>اگر این ستون‌ها خالی باشند:</strong> دانشجو فاقد اسکان ثبت شده و خودش موظف است به صورت آنلاین وارد نقشه بصری شده و اتاق و تخت را انتخاب کند.
               </p>
               <p className="text-[11px] font-bold text-indigo-900 dark:text-indigo-200">
-                • <strong>قاعده شماره‌گذاری تخت‌ها:</strong> شماره‌های فرد (۱، ۳، ۵، ۷، ...) طبقه پایین و شماره‌های زوج (۲، ۴، ۶، ۸، ...) طبقه بالا هستند (مثلاً در یک اتاق ۸ تخته، تخت‌های ۱ و ۳ و ۵ و ۷ پایین هستند).
+                • <strong>قاعده شماره‌گذاری تخت‌ها:</strong> شماره‌های فرد (۱، ۳، ۵، ۷، ...) طبقه پایین و شماره‌های زوج (۲، ۴، ۶، ۸، ...) طبقه بالا هستند.
               </p>
             </div>
 
-            {/* دراپ‌زون بارگذاری فایل */}
             <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-teal-500 rounded-3xl p-8 text-center transition">
               <UploadCloud className="w-12 h-12 mx-auto text-teal-600 mb-3" />
               <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200 mb-1">
@@ -476,10 +862,9 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
 
             {loading && <div className="text-center text-xs text-teal-600 font-bold">در حال پردازش فایل اکسل...</div>}
 
-            {/* پیش‌نمایش داده‌های خوانده‌شده */}
             {previewStudents && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <FileCheck className="w-5 h-5 text-emerald-600" />
                     <span className="font-bold text-sm text-slate-800 dark:text-slate-200">
@@ -511,7 +896,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {previewStudents.slice(0, 8).map((st, i) => (
+                      {previewStudents.slice(0, 12).map((st, i) => (
                         <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                           <td className="p-2.5 font-bold">{st.studentId}</td>
                           <td className="p-2.5">{st.fullName}</td>
@@ -526,7 +911,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                                 <span>•</span>
                                 <span>
                                   تخت {st.assignedBedNumber} (
-                                  {parseInt(String(st.assignedBedNumber), 10) % 2 === 1 ? 'پایین ⬇️' : 'بالا ⬆️'}
+                                  {parseInt(String(st.assignedBedNumber), 10) % 2 === 1 ? 'پایین' : 'بالا'}
                                   )
                                 </span>
                               </span>
@@ -545,7 +930,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                   </table>
                 </div>
 
-                <div className="flex items-center justify-between pt-2">
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                   <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
                     <input
                       type="checkbox"
@@ -557,8 +942,10 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                   </label>
 
                   <button
+                    type="button"
+                    disabled={loading}
                     onClick={handleSaveStudents}
-                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
                   >
                     تأیید و ذخیره دائمی در سامانه
                   </button>
@@ -568,7 +955,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
           </div>
         )}
 
-        {/* محتوای تب سراها و اتاق‌ها */}
+        {/* ۲. محتوای تب سراها و اتاق‌ها */}
         {tab === 'dorms' && (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/60">
@@ -611,13 +998,13 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
 
             {previewDormsData && (
               <div className="space-y-4">
-                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 text-xs flex items-center justify-between">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 text-xs flex items-center justify-between flex-wrap gap-2">
                   <span>تعداد سراها: <b>{previewDormsData.dorms.length}</b></span>
                   <span>تعداد اتاق‌ها: <b>{previewDormsData.rooms.length}</b></span>
                   <span className="text-teal-600 font-bold">تعداد کل تخت‌های دوطبقه ایجاد شده: <b>{previewDormsData.beds.length}</b></span>
                 </div>
 
-                <div className="flex items-center justify-between pt-2">
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                   <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
                     <input
                       type="checkbox"
@@ -629,8 +1016,10 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                   </label>
 
                   <button
+                    type="button"
+                    disabled={loading}
                     onClick={handleSaveDorms}
-                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
                   >
                     تأیید و ساخت سراها و تخت‌ها در سامانه
                   </button>
@@ -640,6 +1029,486 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
           </div>
         )}
 
+        {/* ۳. محتوای تب کاربران سرپرست */}
+        {allowStaffTabs && tab === 'supervisors' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60">
+              <div>
+                <h4 className="text-xs font-bold text-indigo-950 dark:text-indigo-200">
+                  دانلود قالب اکسل ثبت گروهی کاربران سرپرست سرا
+                </h4>
+                <p className="text-[11px] text-indigo-700 dark:text-indigo-400 mt-0.5">
+                  ستون‌ها: نام و نام خانوادگی، نام کاربری، کلمه عبور، شماره تماس، سراهای تحت پوشش (یا «همه سراها»)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={downloadSupervisorTemplate}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>دانلود قالب اکسل سرپرستان</span>
+              </button>
+            </div>
+
+            <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-indigo-500 rounded-3xl p-8 text-center transition">
+              <UploadCloud className="w-12 h-12 mx-auto text-indigo-600 mb-3" />
+              <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200 mb-1">
+                فایل اکسل کاربران سرپرست را انتخاب کنید
+              </h4>
+              <p className="text-xs text-slate-500 mb-4">فرمت‌های مجاز: .xlsx, .xls, .csv (نام کاربری تکراری بروزرسانی می‌شود)</p>
+              <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-md shadow-indigo-600/20">
+                <span>انتخاب فایل اکسل سرپرستان</span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleSupervisorFileSelect}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {loading && <div className="text-center text-xs text-indigo-600 font-bold">در حال پردازش فایل اکسل سرپرستان...</div>}
+
+            {previewSupervisors && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <FileCheck className="w-5 h-5 text-emerald-600" />
+                    <span className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                      پیش‌نمایش: {previewSupervisors.list.length} کاربر سرپرست آماده ثبت
+                    </span>
+                  </div>
+                  {previewSupervisors.skippedRows > 0 && (
+                    <span className="text-[11px] text-amber-600 font-semibold">
+                      ({previewSupervisors.skippedRows} ردیف خالی نادیده گرفته شد)
+                    </span>
+                  )}
+                </div>
+
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-60">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold sticky top-0">
+                      <tr>
+                        <th className="p-2.5">ردیف</th>
+                        <th className="p-2.5">نام و نام خانوادگی</th>
+                        <th className="p-2.5">نام کاربری</th>
+                        <th className="p-2.5">کلمه عبور</th>
+                        <th className="p-2.5">شماره تماس</th>
+                        <th className="p-2.5">سراهای تحت نظارت</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {previewSupervisors.list.map((sup, i) => (
+                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-2.5">{i + 1}</td>
+                          <td className="p-2.5 font-bold">{sup.fullName}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{sup.username}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{sup.password}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{sup.phone}</td>
+                          <td className="p-2.5 text-indigo-700 dark:text-indigo-300 font-semibold">
+                            {formatDormListLabel(sup.assignedDormIds)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={replaceMode}
+                      onChange={(e) => setReplaceMode(e.target.checked)}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                    />
+                    <span>جایگزینی کامل لیست سرپرستان قبلی (در غیر این صورت به لیست فعلی افزوده/بروزرسانی می‌شود)</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={handleSaveSupervisors}
+                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                  >
+                    تأیید و ثبت سرپرستان در سامانه ابری
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ۴. محتوای تب کاربران تأسیسات */}
+        {allowStaffTabs && tab === 'maintenance' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60">
+              <div>
+                <h4 className="text-xs font-bold text-amber-950 dark:text-amber-200">
+                  دانلود قالب اکسل ثبت گروهی کاربران و تکنسین‌های تأسیسات
+                </h4>
+                <p className="text-[11px] text-amber-800 dark:text-amber-400 mt-0.5">
+                  ستون‌ها: نام و نام خانوادگی، نام کاربری، کلمه عبور، تخصص فنی، شماره تماس، سراهای تحت پوشش، وضعیت، توضیحات
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={downloadMaintenanceTemplate}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>دانلود قالب اکسل تأسیسات</span>
+              </button>
+            </div>
+
+            <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-amber-500 rounded-3xl p-8 text-center transition">
+              <UploadCloud className="w-12 h-12 mx-auto text-amber-600 mb-3" />
+              <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200 mb-1">
+                فایل اکسل کاربران تأسیسات را انتخاب کنید
+              </h4>
+              <p className="text-xs text-slate-500 mb-4">فرمت‌های مجاز: .xlsx, .xls, .csv (نام کاربری تکراری بروزرسانی می‌شود)</p>
+              <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-md shadow-amber-600/20">
+                <span>انتخاب فایل اکسل تأسیسات</span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleMaintenanceFileSelect}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {loading && <div className="text-center text-xs text-amber-600 font-bold">در حال پردازش فایل اکسل تأسیسات...</div>}
+
+            {previewMaintenance && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <FileCheck className="w-5 h-5 text-emerald-600" />
+                    <span className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                      پیش‌نمایش: {previewMaintenance.list.length} کاربر تأسیسات آماده ثبت
+                    </span>
+                  </div>
+                  {previewMaintenance.skippedRows > 0 && (
+                    <span className="text-[11px] text-amber-600 font-semibold">
+                      ({previewMaintenance.skippedRows} ردیف خالی نادیده گرفته شد)
+                    </span>
+                  )}
+                </div>
+
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-60">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold sticky top-0">
+                      <tr>
+                        <th className="p-2.5">ردیف</th>
+                        <th className="p-2.5">نام و نام خانوادگی</th>
+                        <th className="p-2.5">تخصص فنی</th>
+                        <th className="p-2.5">نام کاربری</th>
+                        <th className="p-2.5">کلمه عبور</th>
+                        <th className="p-2.5">شماره تماس</th>
+                        <th className="p-2.5">سراهای تحت پوشش</th>
+                        <th className="p-2.5">وضعیت</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {previewMaintenance.list.map((tech, i) => (
+                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-2.5">{i + 1}</td>
+                          <td className="p-2.5 font-bold">{tech.fullName}</td>
+                          <td className="p-2.5 text-amber-700 dark:text-amber-300 font-semibold">{tech.specialty}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{tech.username}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{tech.password}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{tech.mobile || tech.phone}</td>
+                          <td className="p-2.5">{formatDormListLabel(tech.coveredDormIds)}</td>
+                          <td className="p-2.5">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                tech.status === 'active'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {tech.status === 'active' ? 'فعال' : 'غیرفعال'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={replaceMode}
+                      onChange={(e) => setReplaceMode(e.target.checked)}
+                      className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-4 h-4"
+                    />
+                    <span>جایگزینی کامل لیست پرسنل تأسیسات قبلی</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={handleSaveMaintenance}
+                    className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                  >
+                    تأیید و ثبت پرسنل تأسیسات در سامانه ابری
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ۵. محتوای تب کاربران مشاور */}
+        {allowStaffTabs && tab === 'counselors' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60">
+              <div>
+                <h4 className="text-xs font-bold text-emerald-950 dark:text-emerald-200">
+                  دانلود قالب اکسل ثبت گروهی کاربران مشاور و روانشناس
+                </h4>
+                <p className="text-[11px] text-emerald-800 dark:text-emerald-400 mt-0.5">
+                  ستون‌ها: نام و نام خانوادگی، نام کاربری، کلمه عبور، تخصص مشاوره، مقطع تحصیلی، شماره تماس، محل استقرار، پردیس، سراهای تحت پوشش، وضعیت
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={downloadCounselorTemplate}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>دانلود قالب اکسل مشاوران</span>
+              </button>
+            </div>
+
+            <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 rounded-3xl p-8 text-center transition">
+              <UploadCloud className="w-12 h-12 mx-auto text-emerald-600 mb-3" />
+              <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200 mb-1">
+                فایل اکسل کاربران مشاور را انتخاب کنید
+              </h4>
+              <p className="text-xs text-slate-500 mb-4">فرمت‌های مجاز: .xlsx, .xls, .csv (نام کاربری تکراری بروزرسانی می‌شود)</p>
+              <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-md shadow-emerald-600/20">
+                <span>انتخاب فایل اکسل مشاوران</span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleCounselorFileSelect}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {loading && <div className="text-center text-xs text-emerald-600 font-bold">در حال پردازش فایل اکسل مشاوران...</div>}
+
+            {previewCounselors && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <FileCheck className="w-5 h-5 text-emerald-600" />
+                    <span className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                      پیش‌نمایش: {previewCounselors.list.length} کاربر مشاور آماده ثبت
+                    </span>
+                  </div>
+                  {previewCounselors.skippedRows > 0 && (
+                    <span className="text-[11px] text-amber-600 font-semibold">
+                      ({previewCounselors.skippedRows} ردیف خالی نادیده گرفته شد)
+                    </span>
+                  )}
+                </div>
+
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-60">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold sticky top-0">
+                      <tr>
+                        <th className="p-2.5">ردیف</th>
+                        <th className="p-2.5">نام و نام خانوادگی</th>
+                        <th className="p-2.5">تخصص و مقطع</th>
+                        <th className="p-2.5">نام کاربری</th>
+                        <th className="p-2.5">کلمه عبور</th>
+                        <th className="p-2.5">شماره تماس</th>
+                        <th className="p-2.5">محل استقرار</th>
+                        <th className="p-2.5">وضعیت</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {previewCounselors.list.map((cns, i) => (
+                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-2.5">{i + 1}</td>
+                          <td className="p-2.5 font-bold">{cns.fullName}</td>
+                          <td className="p-2.5 text-emerald-700 dark:text-emerald-300 font-semibold">
+                            {cns.specialty}
+                            {cns.educationLevel ? ` (${cns.educationLevel})` : ''}
+                          </td>
+                          <td className="p-2.5 font-mono" dir="ltr">{cns.username}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{cns.password}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{cns.phone}</td>
+                          <td className="p-2.5">{cns.officeLocation || 'مرکز مشاوره'}</td>
+                          <td className="p-2.5">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                cns.status === 'active'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {cns.status === 'active' ? 'فعال' : 'غیرفعال'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={replaceMode}
+                      onChange={(e) => setReplaceMode(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                    />
+                    <span>جایگزینی کامل لیست مشاوران قبلی</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={handleSaveCounselors}
+                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                  >
+                    تأیید و ثبت مشاوران در سامانه ابری
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ۶. محتوای تب کاربران انبار */}
+        {allowStaffTabs && tab === 'warehouse' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800/60">
+              <div>
+                <h4 className="text-xs font-bold text-violet-950 dark:text-violet-200">
+                  دانلود قالب اکسل ثبت گروهی کاربران انبار و کارپردازی
+                </h4>
+                <p className="text-[11px] text-violet-800 dark:text-violet-400 mt-0.5">
+                  ستون‌ها: نام و نام خانوادگی، نام کاربری، کلمه عبور، شماره تماس، وضعیت، توضیحات
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={downloadWarehouseTemplate}
+                className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>دانلود قالب اکسل انبار</span>
+              </button>
+            </div>
+
+            <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-violet-500 rounded-3xl p-8 text-center transition">
+              <UploadCloud className="w-12 h-12 mx-auto text-violet-600 mb-3" />
+              <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200 mb-1">
+                فایل اکسل کاربران انبار را انتخاب کنید
+              </h4>
+              <p className="text-xs text-slate-500 mb-4">فرمت‌های مجاز: .xlsx, .xls, .csv (نام کاربری تکراری بروزرسانی می‌شود)</p>
+              <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-md shadow-violet-600/20">
+                <span>انتخاب فایل اکسل انبار</span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleWarehouseFileSelect}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {loading && <div className="text-center text-xs text-violet-600 font-bold">در حال پردازش فایل اکسل انبار...</div>}
+
+            {previewWarehouse && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <FileCheck className="w-5 h-5 text-emerald-600" />
+                    <span className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                      پیش‌نمایش: {previewWarehouse.list.length} کاربر انبار آماده ثبت
+                    </span>
+                  </div>
+                  {previewWarehouse.skippedRows > 0 && (
+                    <span className="text-[11px] text-amber-600 font-semibold">
+                      ({previewWarehouse.skippedRows} ردیف خالی نادیده گرفته شد)
+                    </span>
+                  )}
+                </div>
+
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-60">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold sticky top-0">
+                      <tr>
+                        <th className="p-2.5">ردیف</th>
+                        <th className="p-2.5">نام و نام خانوادگی</th>
+                        <th className="p-2.5">نام کاربری</th>
+                        <th className="p-2.5">کلمه عبور</th>
+                        <th className="p-2.5">شماره تماس</th>
+                        <th className="p-2.5">وضعیت</th>
+                        <th className="p-2.5">توضیحات</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {previewWarehouse.list.map((wh, i) => (
+                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-2.5">{i + 1}</td>
+                          <td className="p-2.5 font-bold">{wh.fullName}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{wh.username}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{wh.password}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{wh.mobile || wh.phone}</td>
+                          <td className="p-2.5">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                wh.status === 'active'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {wh.status === 'active' ? 'فعال' : 'غیرفعال'}
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-slate-500">{wh.notes || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={replaceMode}
+                      onChange={(e) => setReplaceMode(e.target.checked)}
+                      className="rounded border-slate-300 text-violet-600 focus:ring-violet-500 w-4 h-4"
+                    />
+                    <span>جایگزینی کامل لیست کاربران انبار قبلی</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={handleSaveWarehouse}
+                    className="px-6 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                  >
+                    تأیید و ثبت کاربران انبار در سامانه ابری
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

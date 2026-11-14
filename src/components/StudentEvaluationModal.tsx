@@ -487,6 +487,8 @@ export const StudentEvaluationModal: React.FC<StudentEvaluationModalProps> = ({
                     className={`p-3 rounded-2xl border flex items-start justify-between gap-3 text-xs ${
                       ev.type === 'evaluation'
                         ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
+                        : ev.type === 'report'
+                        ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50'
                         : ev.type === 'warning'
                         ? 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50'
                         : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50'
@@ -498,6 +500,8 @@ export const StudentEvaluationModal: React.FC<StudentEvaluationModalProps> = ({
                           className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold ${
                             ev.type === 'evaluation'
                               ? 'bg-emerald-600 text-white'
+                              : ev.type === 'report'
+                              ? 'bg-blue-600 text-white'
                               : ev.type === 'warning'
                               ? 'bg-rose-600 text-white'
                               : 'bg-amber-500 text-white'
@@ -505,6 +509,8 @@ export const StudentEvaluationModal: React.FC<StudentEvaluationModalProps> = ({
                         >
                           {ev.type === 'evaluation'
                             ? `نمره: ${ev.score ?? '-'}`
+                            : ev.type === 'report'
+                            ? 'گزارش'
                             : ev.type === 'warning'
                             ? 'اخطار رسمی'
                             : 'تذکر'}
@@ -513,7 +519,7 @@ export const StudentEvaluationModal: React.FC<StudentEvaluationModalProps> = ({
                           {ev.scope === 'room' ? 'ارزیابی/تذکر اتاق' : 'فردی'}
                         </span>
                         <span className="font-extrabold text-slate-800 dark:text-white">{ev.title}</span>
-                        {ev.type !== 'evaluation' && (
+                        {(ev.type === 'notice' || ev.type === 'warning') && (
                           <span
                             className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
                               ev.resolved
@@ -532,7 +538,7 @@ export const StudentEvaluationModal: React.FC<StudentEvaluationModalProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      {ev.type !== 'evaluation' && !ev.resolved && (
+                      {(ev.type === 'notice' || ev.type === 'warning') && !ev.resolved && (
                         <button
                           type="button"
                           onClick={() => {

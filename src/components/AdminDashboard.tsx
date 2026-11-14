@@ -19,8 +19,10 @@ import {
   CounselorShiftReport,
   ActivityLog,
   StudentEvaluation,
+  WarehouseStaff,
 } from '../types';
 import { Storage } from '../utils/storage';
+import { ExcelImportTab } from './ExcelImportModal';
 import {
   exportShiftScheduleToExcel,
   exportShiftTemplateToExcel,
@@ -98,6 +100,7 @@ import {
   MessageSquare,
   Activity,
   Award,
+  Package,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -112,7 +115,7 @@ interface AdminDashboardProps {
   maintenanceTasks?: MaintenanceTask[];
   maintenanceStaff?: MaintenanceStaff[];
   onRefreshData: () => void;
-  onOpenExcelModal: () => void;
+  onOpenExcelModal: (tab?: ExcelImportTab) => void;
   onOpenReports: () => void;
   onOpenAppearance: () => void;
   onOpenChangePassword: () => void;
@@ -192,6 +195,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [shiftDayFilter, setShiftDayFilter] = useState('all');
   const [shiftFeedback, setShiftFeedback] = useState<string | null>(null);
 
+  // فهرست پرسنل انبار و فرم ثبت دستی
+  const [warehouseStaffList, setWarehouseStaffList] = useState<WarehouseStaff[]>(Storage.getWarehouseStaff());
+  const [newWhName, setNewWhName] = useState('');
+  const [newWhPhone, setNewWhPhone] = useState('');
+  const [newWhUsername, setNewWhUsername] = useState('');
+  const [newWhPassword, setNewWhPassword] = useState('');
+  const [newWhNotes, setNewWhNotes] = useState('');
+  const [whFeedback, setWhFeedback] = useState<string | null>(null);
+
   // همگام‌سازی فهرست‌های داخلی مدیر هنگام دریافت داده جدید از سرور ابری
   useEffect(() => {
     if (!cloudSyncTick) return;
@@ -202,6 +214,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setShiftReports(Storage.getShiftReports());
     setActivityLogs(Storage.getActivityLogs());
     setStudentEvaluations(Storage.getStudentEvaluations());
+    setWarehouseStaffList(Storage.getWarehouseStaff());
   }, [cloudSyncTick]);
 
   // فرم ثبت شیفت دستی جدید توسط مدیر
@@ -1319,11 +1332,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
 
             <button
-              onClick={onOpenExcelModal}
+              onClick={() => onOpenExcelModal('students')}
               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
             >
               <FileSpreadsheet className="w-4 h-4" />
-              <span>ورود اکسل دانشجویان و سراها</span>
+              <span>ورود اکسل (دانشجویان، سراها و کاربران)</span>
             </button>
 
             <button
@@ -1659,6 +1672,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               students={students}
               onDataChanged={onRefreshData}
               supervisorDormId={selectedCartableDormId}
+              actorName="مدیریت کل امور سراها"
+              actorRole="admin"
+              actorId="admin"
             />
           )}
 
@@ -1671,6 +1687,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               settings={settings}
               onBedSelected={onRefreshData}
               isSupervisorMode={true}
+              actorName="مدیریت کل امور سراها"
+              actorRole="admin"
+              actorId="admin"
             />
           )}
 
@@ -1800,6 +1819,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                           ev.type === 'evaluation'
                             ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
+                            : ev.type === 'report'
+                            ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50'
                             : ev.type === 'warning'
                             ? 'bg-rose-50/60 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50'
                             : 'bg-amber-50/60 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50'
@@ -1811,6 +1832,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold ${
                                 ev.type === 'evaluation'
                                   ? 'bg-emerald-600 text-white'
+                                  : ev.type === 'report'
+                                  ? 'bg-blue-600 text-white'
                                   : ev.type === 'warning'
                                   ? 'bg-rose-600 text-white'
                                   : 'bg-amber-500 text-white'
@@ -1818,6 +1841,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             >
                               {ev.type === 'evaluation'
                                 ? `نمره ارزیابی: ${ev.score ?? '-'} از ۱۰۰`
+                                : ev.type === 'report'
+                                ? 'گزارش'
                                 : ev.type === 'warning'
                                 ? 'اخطار رسمی'
                                 : 'تذکر'}
@@ -1838,12 +1863,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <div className="text-xs text-slate-600 dark:text-slate-400">{ev.description}</div>
                           <div className="text-[10px] text-slate-400">
                             ثبت‌کننده: {ev.evaluatorName} • تاریخ: {ev.date}
-                            {ev.type !== 'evaluation' && ` • وضعیت: ${ev.resolved ? 'برطرف شده' : 'فعال'}`}
+                            {(ev.type === 'notice' || ev.type === 'warning') && ` • وضعیت: ${ev.resolved ? 'برطرف شده' : 'فعال'}`}
                           </div>
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {ev.type !== 'evaluation' && !ev.resolved && (
+                          {(ev.type === 'notice' || ev.type === 'warning') && !ev.resolved && (
                             <button
                               onClick={() => {
                                 Storage.resolveStudentEvaluation(ev.id);
@@ -3955,22 +3980,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* ۱. زیرتب مشاوران */}
           {counselingSubTab === 'counselors' && (
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
                     مشاوران و کارشناسان سلامت روان فعال در سراها
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    تعریف حساب کاربری مشاوران، تخصص‌ها و شماره‌های تماس مستقیم
+                    تعریف حساب کاربری مشاوران به صورت تکی یا گروهی با فایل اکسل
                   </p>
                 </div>
-                <button
-                  onClick={() => setIsAddCounselorModalOpen(true)}
-                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>+ افزودن مشاور جدید</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpenExcelModal('counselors')}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>ثبت گروهی با اکسل مشاوران</span>
+                  </button>
+                  <button
+                    onClick={() => setIsAddCounselorModalOpen(true)}
+                    className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>+ افزودن مشاور جدید</span>
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
@@ -4808,16 +4843,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           
           {/* بخش تعریف و مدیریت سرپرستان خوابگاه‌ها با امکان انتخاب چند سرا */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center gap-2 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
-              <Users className="w-5 h-5 text-indigo-600" />
-              <div>
-                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                  تعریف و مدیریت سرپرستان خوابگاه‌ها (با امکان نظارت بر چند سرا)
-                </h3>
-                <p className="text-xs text-slate-400">
-                  امکان انتصاب یک سرپرست به یک یا چندین سرا به صورت همزمان، و تغییر سریع سراهای تحت نظارت هر سرپرست
-                </p>
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-indigo-600" />
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    تعریف و مدیریت سرپرستان خوابگاه‌ها (با امکان نظارت بر چند سرا)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    امکان انتصاب یک سرپرست به یک یا چندین سرا، یا ثبت گروهی سرپرستان از طریق فایل اکسل
+                  </p>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => onOpenExcelModal('supervisors')}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>ثبت گروهی با اکسل سرپرستان</span>
+              </button>
             </div>
 
             {/* لیست سرپرستان فعلی */}
@@ -4993,18 +5038,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {/* بخش تعریف و مدیریت پرسنل و تکنسین‌های تأسیسات سراها */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-amber-200/80 dark:border-amber-900/40 shadow-xs">
-            <div className="flex items-center gap-2 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
-              <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs">
-                <Wrench className="w-5 h-5" />
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs">
+                  <Wrench className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    تعریف و مدیریت پرسنل و تکنسین‌های تأسیسات سراها
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    ثبت نام تکی یا گروهی با اکسل برای کارشناسان تأسیسات و تخصیص سراهای تحت پوشش
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                  تعریف و مدیریت پرسنل و تکنسین‌های تأسیسات سراها
-                </h3>
-                <p className="text-xs text-slate-400">
-                  ثبت نام و ایجاد دسترسی برای کارشناسان تأسیسات (لوله کشی، برق، نجاری، آسانسور، شوفاژ) و تخصیص سراهای تحت پوشش
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => onOpenExcelModal('maintenance')}
+                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>ثبت گروهی با اکسل تأسیسات</span>
+              </button>
             </div>
 
             {techFeedback && (
@@ -5217,6 +5272,203 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               >
                 <Plus className="w-4 h-4" />
                 <span>ثبت تکنسین جدید تأسیسات</span>
+              </button>
+            </form>
+          </div>
+
+          {/* بخش تعریف و مدیریت پرسنل انبار و کارپردازی */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-violet-200/80 dark:border-violet-900/40 shadow-xs">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-violet-600 text-white shadow-xs">
+                  <Package className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    تعریف و مدیریت کاربران انبار و کارپردازی ({warehouseStaffList.length} کاربر)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    مدیریت دسترسی تحویل‌داران انبار و کارپردازی یا ثبت گروهی از طریق فایل اکسل
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onOpenExcelModal('warehouse')}
+                className="px-3.5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>ثبت گروهی با اکسل انبار</span>
+              </button>
+            </div>
+
+            {whFeedback && (
+              <div className="mb-4 p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 text-emerald-800 dark:text-emerald-200 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{whFeedback}</span>
+              </div>
+            )}
+
+            <div className="space-y-3 mb-6">
+              {warehouseStaffList.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-400">
+                  هیچ کاربر انباری ثبت نشده است. از فرم زیر یا دکمه ورود اکسل استفاده نمایید.
+                </div>
+              ) : (
+                warehouseStaffList.map((wh) => {
+                  const isActive = wh.status !== 'inactive' && wh.isActive !== false;
+                  return (
+                    <div
+                      key={wh.id}
+                      className="p-4 rounded-2xl bg-violet-50/40 dark:bg-slate-800/60 border border-violet-200/70 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-sm text-slate-800 dark:text-slate-100">
+                          {wh.fullName}
+                        </span>
+                        <span className="text-slate-400 mr-2">(نام کاربری: {wh.username})</span>
+                        <span className="text-teal-600 font-mono mr-2">تماس: {wh.mobile || wh.phone}</span>
+                        {wh.notes && (
+                          <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300 text-[11px] font-semibold">
+                            {wh.notes}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextStatus = isActive ? 'inactive' : 'active';
+                            Storage.updateWarehouseStaff(wh.id, {
+                              status: nextStatus,
+                              isActive: nextStatus === 'active',
+                            });
+                            setWarehouseStaffList(Storage.getWarehouseStaff());
+                            onRefreshData();
+                          }}
+                          className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                            isActive
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                              : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                          }`}
+                        >
+                          {isActive ? 'وضعیت: فعال' : 'وضعیت: غیرفعال'}
+                        </button>
+
+                        <span className="text-[10px] text-slate-400 bg-white dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                          رمز: {wh.password}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`آیا از حذف کاربر انبار «${wh.fullName}» اطمینان دارید؟`)) {
+                              const res = Storage.deleteWarehouseStaff(wh.id);
+                              setWarehouseStaffList(Storage.getWarehouseStaff());
+                              setWhFeedback(res.message);
+                              onRefreshData();
+                              setTimeout(() => setWhFeedback(null), 3000);
+                            }
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-rose-500 transition cursor-pointer"
+                          title="حذف کاربر انبار"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!newWhName.trim() || !newWhUsername.trim() || !newWhPassword.trim()) return;
+                const phoneVal = toEnglishDigits(newWhPhone.trim()) || '09130000000';
+                const res = Storage.addWarehouseStaff({
+                  fullName: newWhName.trim(),
+                  phone: phoneVal,
+                  mobile: phoneVal,
+                  username: toEnglishDigits(newWhUsername.trim()).toLowerCase(),
+                  password: toEnglishDigits(newWhPassword.trim()),
+                  role: 'warehouse',
+                  status: 'active',
+                  isActive: true,
+                  notes: newWhNotes.trim() || undefined,
+                });
+                if (res.success) {
+                  setWarehouseStaffList(Storage.getWarehouseStaff());
+                  setWhFeedback(res.message);
+                  setNewWhName('');
+                  setNewWhPhone('');
+                  setNewWhUsername('');
+                  setNewWhPassword('');
+                  setNewWhNotes('');
+                  onRefreshData();
+                  setTimeout(() => setWhFeedback(null), 3500);
+                } else {
+                  setWhFeedback(res.message);
+                }
+              }}
+              className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-4 text-xs"
+            >
+              <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Plus className="w-4 h-4 text-violet-600" />
+                <span>افزودن کاربر انبار جدید</span>
+              </h4>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                <input
+                  type="text"
+                  placeholder="نام و نام خانوادگی"
+                  value={newWhName}
+                  onChange={(e) => setNewWhName(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="شماره تماس"
+                  value={newWhPhone}
+                  onChange={(e) => setNewWhPhone(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="نام کاربری (انگلیسی)"
+                  value={newWhUsername}
+                  onChange={(e) => setNewWhUsername(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="رمز عبور ورود"
+                  value={newWhPassword}
+                  onChange={(e) => setNewWhPassword(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs dir-ltr"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="توضیحات / سمت (اختیاری)"
+                  value={newWhNotes}
+                  onChange={(e) => setNewWhNotes(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>ثبت کاربر جدید انبار</span>
               </button>
             </form>
           </div>

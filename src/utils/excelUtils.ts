@@ -1,5 +1,15 @@
 import * as XLSX from 'xlsx';
-import { Student, Dormitory, Room, Bed, ActivityLog } from '../types';
+import {
+  Student,
+  Dormitory,
+  Room,
+  Bed,
+  ActivityLog,
+  Supervisor,
+  MaintenanceStaff,
+  CounselorStaff,
+  WarehouseStaff,
+} from '../types';
 
 // تبدیل اعداد فارسی و عربی به انگلیسی جهت پردازش دقیق
 export function toEnglishDigits(str: string | number): string {
@@ -1092,6 +1102,443 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'لاگ فعالیت‌ها');
   XLSX.writeFile(wb, `گزارش_لاگ_فعالیت_و_دسترسی_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// =============================================================
+// توابع ثبت جداگانه کاربران (سرپرست، تأسیسات، مشاور، انبار) از طریق فایل اکسل
+// =============================================================
+
+async function readExcelSheetRows(file: File): Promise<Record<string, any>[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const buffer = e.target?.result;
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        if (!firstSheetName) {
+          throw new Error('فایل اکسل فاقد کاربرگ (Sheet) معتبر است.');
+        }
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+        if (!rows || rows.length === 0) {
+          throw new Error('فایل اکسل خالی است یا دارای سطر معتبر نمی‌باشد.');
+        }
+        resolve(rows);
+      } catch (err: any) {
+        reject(new Error(`خطا در خواندن فایل اکسل: ${err?.message || err}`));
+      }
+    };
+    reader.onerror = () => reject(new Error('خطا در بارگذاری فایل اکسل از سیستم.'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function getExcelCell(row: Record<string, any>, aliases: string[]): string {
+  const normalizedMap = new Map<string, any>();
+  Object.keys(row).forEach((k) => {
+    normalizedMap.set(k.trim().replace(/\s+/g, ' '), row[k]);
+    normalizedMap.set(k.trim().toLowerCase().replace(/[\s_]+/g, ''), row[k]);
+  });
+
+  for (const alias of aliases) {
+    const cleanAlias = alias.trim().replace(/\s+/g, ' ');
+    if (normalizedMap.has(cleanAlias)) {
+      const val = String(normalizedMap.get(cleanAlias) ?? '').trim();
+      if (val) return val;
+    }
+    const compactAlias = alias.trim().toLowerCase().replace(/[\s_]+/g, '');
+    if (normalizedMap.has(compactAlias)) {
+      const val = String(normalizedMap.get(compactAlias) ?? '').trim();
+      if (val) return val;
+    }
+  }
+  return '';
+}
+
+function resolveDormIdsFromText(
+  rawDorms: string,
+  existingDorms: Dormitory[],
+  defaultAllIfEmpty = false
+): string[] {
+  const cleaned = rawDorms.trim();
+  const allDormIds = existingDorms.map((d) => d.id);
+
+  if (!cleaned) {
+    return defaultAllIfEmpty ? (allDormIds.length > 0 ? allDormIds : ['all']) : allDormIds.slice(0, 1);
+  }
+
+  if (
+    cleaned === 'all' ||
+    cleaned.includes('همه') ||
+    cleaned.includes('تمام') ||
+    cleaned.includes('کل سراها')
+  ) {
+    return allDormIds.length > 0 ? allDormIds : ['all'];
+  }
+
+  const tokens = cleaned
+    .split(/[,،;|/]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  const matched = new Set<string>();
+  tokens.forEach((tok) => {
+    const found = existingDorms.find(
+      (d) => d.id === tok || d.name === tok || d.name.includes(tok) || tok.includes(d.name)
+    );
+    if (found) {
+      matched.add(found.id);
+    }
+  });
+
+  if (matched.size > 0) {
+    return Array.from(matched);
+  }
+
+  return defaultAllIfEmpty ? (allDormIds.length > 0 ? allDormIds : ['all']) : allDormIds.slice(0, 1);
+}
+
+function parseExcelStaffStatus(rawStatus: string): 'active' | 'inactive' {
+  const norm = toEnglishDigits(rawStatus).trim().toLowerCase();
+  if (!norm) return 'active';
+  if (
+    norm.includes('غیر') ||
+    norm.includes('inactive') ||
+    norm.includes('disabled') ||
+    norm === '0' ||
+    norm === 'no' ||
+    norm === 'خیر'
+  ) {
+    return 'inactive';
+  }
+  return 'active';
+}
+
+// ۱. دانلود قالب اکسل کاربران سرپرست
+export function downloadSupervisorTemplate() {
+  const sampleRows = [
+    {
+      'نام و نام خانوادگی': 'استاد محسن رضایی',
+      'نام کاربری': 'rezaei_sup',
+      'کلمه عبور': '123456',
+      'شماره تماس': '09131112233',
+      'سراهای تحت پوشش': 'سرای شهید باهنر - بلوک ۱',
+    },
+    {
+      'نام و نام خانوادگی': 'سرکار خانم زهرا احمدی',
+      'نام کاربری': 'ahmadi_sup',
+      'کلمه عبور': '123456',
+      'شماره تماس': '09132223344',
+      'سراهای تحت پوشش': 'همه سراها',
+    },
+  ];
+  const ws = XLSX.utils.json_to_sheet(sampleRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'سرپرستان');
+  XLSX.writeFile(wb, 'قالب_اکسل_ثبت_کاربران_سرپرست.xlsx');
+}
+
+// خواندن و اعتبارسنجی فایل اکسل کاربران سرپرست
+export async function parseSupervisorExcel(
+  file: File,
+  existingDorms: Dormitory[]
+): Promise<{ supervisors: Supervisor[]; skippedRows: number }> {
+  const rows = await readExcelSheetRows(file);
+  const supervisors: Supervisor[] = [];
+  let skippedRows = 0;
+
+  rows.forEach((row, idx) => {
+    const fullName = getExcelCell(row, ['نام و نام خانوادگی', 'نام و نام‌خانوادگی', 'نام سرپرست', 'نام کامل', 'fullname', 'name']);
+    let username = toEnglishDigits(getExcelCell(row, ['نام کاربری', 'نام‌کاربری', 'کد کاربری', 'username', 'user'])).trim();
+    const password = toEnglishDigits(getExcelCell(row, ['کلمه عبور', 'رمز عبور', 'رمز', 'کلمه‌عبور', 'password', 'pass'])).trim();
+    const phone = toEnglishDigits(getExcelCell(row, ['شماره تماس', 'شماره همراه', 'موبایل', 'تلفن', 'phone', 'mobile'])).trim();
+    const dormsRaw = getExcelCell(row, ['سراهای تحت پوشش', 'سراهای تحت نظارت', 'نام سرا', 'سرا', 'خوابگاه', 'dorms']);
+
+    if (!fullName && !username) {
+      skippedRows++;
+      return;
+    }
+
+    if (!username) {
+      username = `sup_${Date.now()}_${idx + 1}`;
+    }
+
+    const dormIds = resolveDormIdsFromText(dormsRaw, existingDorms, false);
+    const assignedDormId = dormIds.length === existingDorms.length && dormIds.length > 1 ? 'all' : dormIds[0] || 'all';
+
+    supervisors.push({
+      id: `sup_excel_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 5)}`,
+      fullName: fullName || username,
+      username,
+      password: password || phone || '123456',
+      phone: phone || '09130000000',
+      assignedDormId,
+      assignedDormIds: dormIds,
+      role: 'supervisor',
+    });
+  });
+
+  if (supervisors.length === 0) {
+    throw new Error('هیچ سطر معتبری برای ثبت سرپرست در فایل اکسل یافت نشد.');
+  }
+
+  return { supervisors, skippedRows };
+}
+
+// ۲. دانلود قالب اکسل کاربران تأسیسات
+export function downloadMaintenanceTemplate() {
+  const sampleRows = [
+    {
+      'نام و نام خانوادگی': 'مهندس علی اکبری',
+      'نام کاربری': 'akbari_tech',
+      'کلمه عبور': '123456',
+      'تخصص فنی': 'لوله‌کشی، موتورخانه و شوفاژ',
+      'شماره تماس': '09133334455',
+      'سراهای تحت پوشش': 'همه سراها',
+      'وضعیت': 'فعال',
+      'توضیحات': 'تکنسین تمام‌وقت امور تأسیسات',
+    },
+    {
+      'نام و نام خانوادگی': 'حسین محمدی',
+      'نام کاربری': 'mohammadi_elec',
+      'کلمه عبور': '123456',
+      'تخصص فنی': 'برق و روشنایی و کلید و پریز',
+      'شماره تماس': '09134445566',
+      'سراهای تحت پوشش': 'سرای شهید باهنر - بلوک ۱',
+      'وضعیت': 'فعال',
+      'توضیحات': '',
+    },
+  ];
+  const ws = XLSX.utils.json_to_sheet(sampleRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'تکنسین‌های تأسیسات');
+  XLSX.writeFile(wb, 'قالب_اکسل_ثبت_کاربران_تاسیسات.xlsx');
+}
+
+// خواندن و اعتبارسنجی فایل اکسل کاربران تأسیسات
+export async function parseMaintenanceExcel(
+  file: File,
+  existingDorms: Dormitory[]
+): Promise<{ staff: MaintenanceStaff[]; skippedRows: number }> {
+  const rows = await readExcelSheetRows(file);
+  const staff: MaintenanceStaff[] = [];
+  let skippedRows = 0;
+
+  rows.forEach((row, idx) => {
+    const fullName = getExcelCell(row, ['نام و نام خانوادگی', 'نام و نام‌خانوادگی', 'نام تکنسین', 'نام کامل', 'fullname', 'name']);
+    let username = toEnglishDigits(getExcelCell(row, ['نام کاربری', 'نام‌کاربری', 'کد کاربری', 'username', 'user'])).trim().toLowerCase();
+    const password = toEnglishDigits(getExcelCell(row, ['کلمه عبور', 'رمز عبور', 'رمز', 'password', 'pass'])).trim();
+    const specialty = getExcelCell(row, ['تخصص فنی', 'تخصص', 'رشته فنی', 'زمینه کاری', 'specialty']);
+    const phone = toEnglishDigits(getExcelCell(row, ['شماره تماس', 'شماره همراه', 'موبایل', 'تلفن', 'phone', 'mobile'])).trim();
+    const dormsRaw = getExcelCell(row, ['سراهای تحت پوشش', 'نام سرا', 'سرا', 'خوابگاه', 'dorms']);
+    const statusRaw = getExcelCell(row, ['وضعیت', 'وضعیت حساب', 'status']);
+    const notes = getExcelCell(row, ['توضیحات', 'یادداشت', 'notes']);
+
+    if (!fullName && !username) {
+      skippedRows++;
+      return;
+    }
+
+    if (!username) {
+      username = `tech_${Date.now()}_${idx + 1}`;
+    }
+
+    const coveredIds = resolveDormIdsFromText(dormsRaw, existingDorms, true);
+    const status = parseExcelStaffStatus(statusRaw);
+
+    staff.push({
+      id: `tech_excel_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 5)}`,
+      fullName: fullName || username,
+      username,
+      password: password || phone || '123456',
+      phone: phone || '09130000000',
+      mobile: phone || '09130000000',
+      specialty: specialty || 'تأسیسات عمومی و فنی',
+      assignedDormIds: coveredIds,
+      coveredDormIds: coveredIds,
+      role: 'maintenance',
+      status,
+      isActive: status === 'active',
+      notes: notes || undefined,
+    });
+  });
+
+  if (staff.length === 0) {
+    throw new Error('هیچ سطر معتبری برای ثبت کارشناس تأسیسات در فایل اکسل یافت نشد.');
+  }
+
+  return { staff, skippedRows };
+}
+
+// ۳. دانلود قالب اکسل کاربران مشاور
+export function downloadCounselorTemplate() {
+  const sampleRows = [
+    {
+      'نام و نام خانوادگی': 'دکتر سارا محمودی',
+      'نام کاربری': 'mahmoudi_cns',
+      'کلمه عبور': '123456',
+      'تخصص مشاوره': 'روانشناسی بالینی و مشاوره فردی',
+      'مقطع تحصیلی': 'دکتری تخصصی روانشناسی',
+      'شماره تماس': '09135556677',
+      'محل استقرار': 'دفتر مشاوره پردیس باهنر',
+      'پردیس': 'پردیس شهید باهنر اصفهان',
+      'سراهای تحت پوشش': 'همه سراها',
+      'وضعیت': 'فعال',
+      'توضیحات': 'مشاوره تحصیلی و سازگاری خوابگاهی',
+    },
+    {
+      'نام و نام خانوادگی': 'استاد علیرضا نادری',
+      'نام کاربری': 'naderi_cns',
+      'کلمه عبور': '123456',
+      'تخصص مشاوره': 'مشاوره تربیتی و بهداشت روان',
+      'مقطع تحصیلی': 'کارشناسی ارشد مشاوره',
+      'شماره تماس': '09136667788',
+      'محل استقرار': 'اتاق ۱۰۲ مرکز مشاوره',
+      'پردیس': 'پردیس فاطمه‌الزهرا (س)',
+      'سراهای تحت پوشش': 'همه سراها',
+      'وضعیت': 'فعال',
+      'توضیحات': '',
+    },
+  ];
+  const ws = XLSX.utils.json_to_sheet(sampleRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'مشاوران');
+  XLSX.writeFile(wb, 'قالب_اکسل_ثبت_کاربران_مشاور.xlsx');
+}
+
+// خواندن و اعتبارسنجی فایل اکسل کاربران مشاور
+export async function parseCounselorExcel(
+  file: File,
+  existingDorms: Dormitory[]
+): Promise<{ counselors: CounselorStaff[]; skippedRows: number }> {
+  const rows = await readExcelSheetRows(file);
+  const counselors: CounselorStaff[] = [];
+  let skippedRows = 0;
+
+  rows.forEach((row, idx) => {
+    const fullName = getExcelCell(row, ['نام و نام خانوادگی', 'نام و نام‌خانوادگی', 'نام مشاور', 'نام کامل', 'fullname', 'name']);
+    let username = toEnglishDigits(getExcelCell(row, ['نام کاربری', 'نام‌کاربری', 'کد کاربری', 'username', 'user'])).trim().toLowerCase();
+    const password = toEnglishDigits(getExcelCell(row, ['کلمه عبور', 'رمز عبور', 'رمز', 'password', 'pass'])).trim();
+    const specialty = getExcelCell(row, ['تخصص مشاوره', 'تخصص', 'زمینه تخصصی', 'گرایش', 'specialty']);
+    const educationLevel = getExcelCell(row, ['مقطع تحصیلی', 'مدرک تحصیلی', 'تحصیلات', 'education']);
+    const phone = toEnglishDigits(getExcelCell(row, ['شماره تماس', 'شماره همراه', 'موبایل', 'تلفن', 'phone', 'mobile'])).trim();
+    const officeLocation = getExcelCell(row, ['محل استقرار', 'دفتر استقرار', 'دفتر مشاوره', 'اتاق مشاوره', 'office']);
+    const campusName = getExcelCell(row, ['پردیس', 'نام پردیس', 'campus']);
+    const dormsRaw = getExcelCell(row, ['سراهای تحت پوشش', 'نام سرا', 'سرا', 'خوابگاه', 'dorms']);
+    const statusRaw = getExcelCell(row, ['وضعیت', 'وضعیت حساب', 'status']);
+    const notes = getExcelCell(row, ['توضیحات', 'یادداشت', 'notes']);
+
+    if (!fullName && !username) {
+      skippedRows++;
+      return;
+    }
+
+    if (!username) {
+      username = `cns_${Date.now()}_${idx + 1}`;
+    }
+
+    const assignedDormIds = resolveDormIdsFromText(dormsRaw, existingDorms, true);
+    const status = parseExcelStaffStatus(statusRaw);
+
+    counselors.push({
+      id: `cns_excel_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 5)}`,
+      fullName: fullName || username,
+      username,
+      password: password || phone || '123456',
+      phone: phone || '09130000000',
+      mobile: phone || '09130000000',
+      specialty: specialty || 'روانشناسی و مشاوره دانشجویی',
+      educationLevel: educationLevel || undefined,
+      officeLocation: officeLocation || 'مرکز مشاوره و سلامت روان',
+      campusName: campusName || undefined,
+      assignedDormIds,
+      role: 'counselor',
+      status,
+      isActive: status === 'active',
+      notes: notes || undefined,
+    });
+  });
+
+  if (counselors.length === 0) {
+    throw new Error('هیچ سطر معتبری برای ثبت کارشناس مشاور در فایل اکسل یافت نشد.');
+  }
+
+  return { counselors, skippedRows };
+}
+
+// ۴. دانلود قالب اکسل کاربران انبار
+export function downloadWarehouseTemplate() {
+  const sampleRows = [
+    {
+      'نام و نام خانوادگی': 'مهدی کریمی',
+      'نام کاربری': 'karimi_wh',
+      'کلمه عبور': '123456',
+      'شماره تماس': '09137778899',
+      'وضعیت': 'فعال',
+      'توضیحات': 'مسئول انبار مرکزی تجهیزات و قطعات سراها',
+    },
+    {
+      'نام و نام خانوادگی': 'سعید جعفری',
+      'نام کاربری': 'jafari_wh',
+      'کلمه عبور': '123456',
+      'شماره تماس': '09138889900',
+      'وضعیت': 'فعال',
+      'توضیحات': 'کارپرداز و تحویل‌دار انبار',
+    },
+  ];
+  const ws = XLSX.utils.json_to_sheet(sampleRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'کاربران انبار');
+  XLSX.writeFile(wb, 'قالب_اکسل_ثبت_کاربران_انبار.xlsx');
+}
+
+// خواندن و اعتبارسنجی فایل اکسل کاربران انبار
+export async function parseWarehouseExcel(
+  file: File
+): Promise<{ staff: WarehouseStaff[]; skippedRows: number }> {
+  const rows = await readExcelSheetRows(file);
+  const staff: WarehouseStaff[] = [];
+  let skippedRows = 0;
+
+  rows.forEach((row, idx) => {
+    const fullName = getExcelCell(row, ['نام و نام خانوادگی', 'نام و نام‌خانوادگی', 'نام مسئول انبار', 'نام کامل', 'fullname', 'name']);
+    let username = toEnglishDigits(getExcelCell(row, ['نام کاربری', 'نام‌کاربری', 'کد کاربری', 'username', 'user'])).trim().toLowerCase();
+    const password = toEnglishDigits(getExcelCell(row, ['کلمه عبور', 'رمز عبور', 'رمز', 'password', 'pass'])).trim();
+    const phone = toEnglishDigits(getExcelCell(row, ['شماره تماس', 'شماره همراه', 'موبایل', 'تلفن', 'phone', 'mobile'])).trim();
+    const statusRaw = getExcelCell(row, ['وضعیت', 'وضعیت حساب', 'status']);
+    const notes = getExcelCell(row, ['توضیحات', 'یادداشت', 'سمت', 'notes']);
+
+    if (!fullName && !username) {
+      skippedRows++;
+      return;
+    }
+
+    if (!username) {
+      username = `wh_${Date.now()}_${idx + 1}`;
+    }
+
+    const status = parseExcelStaffStatus(statusRaw);
+
+    staff.push({
+      id: `wh_excel_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 5)}`,
+      fullName: fullName || username,
+      username,
+      password: password || phone || '123456',
+      phone: phone || '09130000000',
+      mobile: phone || '09130000000',
+      role: 'warehouse',
+      status,
+      isActive: status === 'active',
+      notes: notes || undefined,
+    });
+  });
+
+  if (staff.length === 0) {
+    throw new Error('هیچ سطر معتبری برای ثبت کاربر انبار در فایل اکسل یافت نشد.');
+  }
+
+  return { staff, skippedRows };
 }
 
 

@@ -2230,7 +2230,7 @@ export const Storage = {
         ...data,
         id: `eval_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         date: dateStr,
-        resolved: data.type === 'evaluation' ? true : false,
+        resolved: data.type === 'evaluation' || data.type === 'report' ? true : false,
       };
       items.unshift(single);
       Storage.setStudentEvaluations(items);
@@ -2242,7 +2242,7 @@ export const Storage = {
           studentName: st.fullName,
           id: `eval_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
           date: dateStr,
-          resolved: data.type === 'evaluation' ? true : false,
+          resolved: data.type === 'evaluation' || data.type === 'report' ? true : false,
         };
         items.unshift(record);
 
@@ -2268,6 +2268,8 @@ export const Storage = {
         ? `نمره ارزیابی (${data.score ?? '-'} از ۱۰۰)`
         : data.type === 'warning'
         ? 'اخطار رسمی'
+        : data.type === 'report'
+        ? 'گزارش'
         : 'تذکر';
     const scopeLabel = data.scope === 'room' ? 'اتاق' : 'فردی';
     Storage.addActivityLog({

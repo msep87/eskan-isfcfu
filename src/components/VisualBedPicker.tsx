@@ -19,6 +19,7 @@ import {
   Search,
   Filter,
 } from 'lucide-react';
+import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 
 interface VisualBedPickerProps {
   student?: Student; // در صورتی که دانشجو در حال انتخاب است
@@ -29,6 +30,9 @@ interface VisualBedPickerProps {
   settings: AppSettings;
   onBedSelected: () => void;
   isSupervisorMode?: boolean;
+  actorName?: string;
+  actorRole?: 'admin' | 'supervisor';
+  actorId?: string;
 }
 
 export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
@@ -40,6 +44,9 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
   settings,
   onBedSelected,
   isSupervisorMode = false,
+  actorName = 'سرپرست / مدیر سرا',
+  actorRole = 'supervisor',
+  actorId,
 }) => {
   const [selectedDormId, setSelectedDormId] = useState<string>(
     student?.assignedDormId || dorms[0]?.id || ''
@@ -63,6 +70,11 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
   } | null>(null);
 
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [selectedOccupantModal, setSelectedOccupantModal] = useState<{
+    student: Student;
+    room: Room;
+    bed: Bed;
+  } | null>(null);
 
   const currentDorm = dorms.find((d) => d.id === selectedDormId) || dorms[0];
 
@@ -152,6 +164,10 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
     // اگر تخت پر است
     if (bed.studentId) {
       const occupant = students.find((s) => s.studentId === bed.studentId);
+      if (isSupervisorMode && occupant) {
+        setSelectedOccupantModal({ student: occupant, room, bed });
+        return;
+      }
       if (bed.studentId === student?.studentId) {
         setNotification({
           type: 'success',
@@ -512,6 +528,7 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
                             currentStudentId={student?.studentId}
                             students={students}
                             isEligible={eligibility.eligible}
+                            isSupervisorMode={isSupervisorMode}
                             onClick={() => handleBedClick(pair.upper!, room)}
                           />
                         )}
@@ -524,6 +541,7 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
                             currentStudentId={student?.studentId}
                             students={students}
                             isEligible={eligibility.eligible}
+                            isSupervisorMode={isSupervisorMode}
                             onClick={() => handleBedClick(pair.lower!, room)}
                           />
                         )}
@@ -679,6 +697,20 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
         </div>
       )}
 
+      {/* مدال پرونده، عکس، گزارش، تذکر، نمره ارزیابی و پیام دانشجو */}
+      <StudentRoomProfileModal
+        isOpen={Boolean(selectedOccupantModal)}
+        onClose={() => setSelectedOccupantModal(null)}
+        student={selectedOccupantModal?.student || null}
+        dorm={currentDorm}
+        room={selectedOccupantModal?.room || null}
+        bed={selectedOccupantModal?.bed || null}
+        actorName={actorName}
+        actorRole={actorRole}
+        actorId={actorId}
+        onDataChanged={onBedSelected}
+      />
+
     </div>
   );
 };
@@ -690,6 +722,7 @@ interface BedUnitProps {
   currentStudentId?: string;
   students: Student[];
   isEligible: boolean;
+  isSupervisorMode?: boolean;
   onClick: () => void;
 }
 
@@ -699,6 +732,7 @@ const BedUnit: React.FC<BedUnitProps> = ({
   currentStudentId,
   students,
   isEligible,
+  isSupervisorMode = false,
   onClick,
 }) => {
   const isOccupied = Boolean(bed.studentId);
@@ -741,7 +775,13 @@ const BedUnit: React.FC<BedUnitProps> = ({
     <div
       onClick={onClick}
       className={`p-2.5 rounded-xl border transition cursor-pointer select-none text-right flex flex-col justify-between min-h-[86px] hover:scale-[1.02] active:scale-[0.98] ${bgClass}`}
-      title={isOccupied ? `ساکن: ${occupant?.fullName || ''} (${occupant?.fieldOfStudy || ''})` : `کلیک برای انتخاب تخت ${bedNum}`}
+      title={
+        isOccupied
+          ? isSupervisorMode
+            ? `کلیک روی ${occupant?.fullName || 'دانشجو'} برای مشاهده عکس، اطلاعات و ثبت گزارش/تذکر/نمره/پیام`
+            : `ساکن: ${occupant?.fullName || ''} (${occupant?.fieldOfStudy || ''})`
+          : `کلیک برای انتخاب تخت ${bedNum}`
+      }
     >
       <div className="flex items-center justify-between gap-1 mb-1">
         <span className="text-[10px] font-black text-slate-800 dark:text-slate-200 flex items-center gap-1">
@@ -772,8 +812,8 @@ const BedUnit: React.FC<BedUnitProps> = ({
       </div>
 
       {isOccupied && occupant && (
-        <div className="text-[9px] text-slate-400 truncate">
-          {occupant.fieldOfStudy} • {occupant.city}
+        <div className="text-[9px] text-slate-500 dark:text-slate-400 truncate">
+          {isSupervisorMode ? 'کلیک: عکس و پرونده / گزارش و پیام' : `${occupant.fieldOfStudy} • ${occupant.city}`}
         </div>
       )}
 
