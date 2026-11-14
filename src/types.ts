@@ -135,6 +135,7 @@ export interface Supervisor {
   password: string;
   fullName: string;
   phone: string;
+  photoUrl?: string; // تصویر پروفایل سرپرست
   assignedDormId?: string; // برای سازگاری با نسخه‌های قبل
   assignedDormIds?: string[]; // امکان انتصاب و نظارت بر چندین سرا
   role: 'supervisor';
@@ -147,6 +148,7 @@ export interface MaintenanceStaff {
   fullName: string;
   phone: string;
   mobile?: string;
+  photoUrl?: string; // تصویر پروفایل پرسنل تأسیسات
   specialty: string; // تخصص مانند: لوله‌کشی و موتورخانه، برق و روشنایی، نجاری و قفل، سرمایش/گرمایش
   assignedDormIds?: string[]; // سراهای تحت پوشش یا ['all']
   coveredDormIds?: string[]; // سراهای تحت پوشش
@@ -163,6 +165,7 @@ export interface WarehouseStaff {
   fullName: string;
   phone: string;
   mobile?: string;
+  photoUrl?: string; // تصویر پروفایل مسئول انبار
   role: 'warehouse';
   status: 'active' | 'inactive';
   isActive?: boolean;
@@ -301,6 +304,7 @@ export interface CounselorStaff {
   fullName: string;
   phone: string;
   mobile?: string;
+  photoUrl?: string; // تصویر پروفایل مشاور
   specialty: string; // مشاوره فردی، بالینی، روانشناسی تربیتی، بهداشت روان
   educationLevel?: string; // دکتری روانشناسی، کارشناسی ارشد مشاوره
   roomNumber?: string; // اتاق مشاوره در پردیس / سرا

@@ -166,6 +166,27 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* اطلاعات کاربر، تغییر رمز و خروج / دکمه ورود */}
             {currentUser ? (
               <div className="flex items-center gap-2 pr-2 border-r border-slate-200 dark:border-slate-800">
+                {(() => {
+                  const avatarUrl =
+                    currentUser.role === 'student'
+                      ? currentUser.student.photoUrl
+                      : currentUser.role === 'supervisor'
+                      ? currentUser.supervisor.photoUrl
+                      : currentUser.role === 'maintenance'
+                      ? currentUser.technician.photoUrl
+                      : currentUser.role === 'warehouse'
+                      ? currentUser.staff.photoUrl
+                      : currentUser.role === 'counselor'
+                      ? currentUser.counselor.photoUrl
+                      : undefined;
+                  return avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt=""
+                      className="w-8 h-8 rounded-full object-cover border border-teal-200 dark:border-teal-700 shadow-xs shrink-0"
+                    />
+                  ) : null;
+                })()}
                 <div className="text-left hidden lg:block">
                   <div className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
                     <span>

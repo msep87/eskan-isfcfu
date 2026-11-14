@@ -43,6 +43,10 @@ import {
   SlidersHorizontal,
   Lock,
   Unlock,
+  Camera,
+  FolderUp,
+  ImagePlus,
+  Upload,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -137,7 +141,15 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const [formNotes, setFormNotes] = useState('');
   const [formActive, setFormActive] = useState(true);
   const [formDormIds, setFormDormIds] = useState<string[]>([]);
+  const [formPhotoUrl, setFormPhotoUrl] = useState('');
   const [formError, setFormError] = useState('');
+
+  // وضعیت بارگذاری جمعی عکس‌ها (پوشه یا چند فایل)
+  const [batchPhotoStatus, setBatchPhotoStatus] = useState<{
+    type: 'loading' | 'success' | 'error';
+    text: string;
+    unmatchedKeys?: string[];
+  } | null>(null);
 
   // مدال تغییر یا ریست رمز عبور برای تمام نقش‌ها (از جمله دانشجو)
   const [passwordModalTarget, setPasswordModalTarget] = useState<{
@@ -161,6 +173,168 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const showToast = (type: 'success' | 'error', message: string) => {
     setFeedback({ type, message });
     setTimeout(() => setFeedback(null), 4000);
+  };
+
+  // فشرده‌سازی و بهینه‌سازی عکس پرسنلی پیش از ذخیره در مرورگر و سرور ابری
+  const compressUserPhotoFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('خطا در خواندن فایل تصویر.'));
+      reader.onload = (ev) => {
+        const rawUrl = ev.target?.result as string;
+        if (!rawUrl) {
+          reject(new Error('فایل تصویر معتبر نیست.'));
+          return;
+        }
+        const img = new Image();
+        img.onerror = () => reject(new Error('فرمت فایل تصویر پشتیبانی نمی‌شود.'));
+        img.onload = () => {
+          const maxDim = 360;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width >= height) {
+              height = Math.max(1, Math.round((height * maxDim) / width));
+              width = maxDim;
+            } else {
+              width = Math.max(1, Math.round((width * maxDim) / height));
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(rawUrl);
+            return;
+          }
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          try {
+            resolve(canvas.toDataURL('image/jpeg', 0.78));
+          } catch {
+            resolve(rawUrl);
+          }
+        };
+        img.src = rawUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // تغییر/افزودن فوری عکس یک کاربر (تکی) از ردیف جدول
+  const handleQuickSinglePhotoUpload = async (
+    role: 'student' | StaffRole,
+    id: string,
+    fullName: string,
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 6 * 1024 * 1024) {
+      showToast('error', 'حجم تصویر انتخاب‌شده نباید بیشتر از ۶ مگابایت باشد.');
+      return;
+    }
+    try {
+      const compressed = await compressUserPhotoFile(file);
+      if (role === 'student') {
+        Storage.updateStudentAdmin(id, { photoUrl: compressed });
+        showToast('success', `تصویر پرسنلی دانشجو «${fullName}» با موفقیت ثبت شد.`);
+      } else if (role === 'supervisor') {
+        const res = Storage.updateSupervisor(id, { photoUrl: compressed });
+        showToast(res.success ? 'success' : 'error', res.success ? `عکس سرپرست «${fullName}» ثبت شد.` : res.message);
+      } else if (role === 'maintenance') {
+        const res = Storage.updateMaintenanceStaff(id, { photoUrl: compressed });
+        showToast(res.success ? 'success' : 'error', res.success ? `عکس کارشناس «${fullName}» ثبت شد.` : res.message);
+      } else if (role === 'warehouse') {
+        const res = Storage.updateWarehouseStaff(id, { photoUrl: compressed });
+        showToast(res.success ? 'success' : 'error', res.success ? `عکس کاربر انبار «${fullName}» ثبت شد.` : res.message);
+      } else if (role === 'counselor') {
+        const res = Storage.updateCounselor(id, { photoUrl: compressed });
+        showToast(res.success ? 'success' : 'error', res.success ? `عکس مشاور «${fullName}» ثبت شد.` : res.message);
+      }
+      onRefreshData();
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : 'خطا در پردازش تصویر.');
+    }
+  };
+
+  // پردازش جمعی پوشه یا چند فایل عکس برای دانشجویان (بر اساس کد دانشجویی) و سایر کاربران (بر اساس نام/کد کاربری)
+  const handleBatchPhotosImport = async (
+    targetRole: 'student' | StaffRole,
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const imageFiles = Array.from(files).filter(
+      (f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp)$/i.test(f.name)
+    );
+    e.target.value = '';
+
+    if (imageFiles.length === 0) {
+      setBatchPhotoStatus({
+        type: 'error',
+        text: 'هیچ فایل تصویری معتبری (JPG / PNG / WebP) در انتخاب شما یافت نشد.',
+      });
+      return;
+    }
+
+    setBatchPhotoStatus({
+      type: 'loading',
+      text: `در حال خواندن، بهینه‌سازی و تطبیق ${imageFiles.length} فایل تصویر... لطفاً شکیبا باشید.`,
+    });
+
+    const photoMap: Record<string, string> = {};
+    for (const file of imageFiles) {
+      const dotIdx = file.name.lastIndexOf('.');
+      const rawBase = dotIdx > 0 ? file.name.substring(0, dotIdx) : file.name;
+      const cleanBase = toEnglishDigits(rawBase).trim();
+      const key =
+        targetRole === 'student'
+          ? cleanBase.match(/\d+/)?.[0] || cleanBase
+          : cleanBase;
+      if (!key) continue;
+      try {
+        photoMap[key] = await compressUserPhotoFile(file);
+      } catch {
+        // فایل خراب نادیده گرفته می‌شود
+      }
+    }
+
+    const result =
+      targetRole === 'student'
+        ? Storage.batchAssignStudentPhotos(photoMap)
+        : Storage.batchAssignStaffPhotos(targetRole, photoMap);
+
+    const syncRes = await Storage.waitForPendingCloudSync();
+    onRefreshData();
+
+    const identifierHint =
+      targetRole === 'student' ? 'شماره دانشجویی' : 'نام/کد کاربری';
+
+    if (result.matchedCount > 0 && result.saved) {
+      setBatchPhotoStatus({
+        type: syncRes.success ? 'success' : 'error',
+        text: syncRes.success
+          ? `تعداد ${result.matchedCount} عکس از ${result.totalProcessed} تصویر بر اساس ${identifierHint} با موفقیت متصل و در دیتابیس ابری ذخیره شد.`
+          : `تعداد ${result.matchedCount} عکس در مرورگر ثبت شد، اما همگام‌سازی ابری با خطا مواجه شد (ممکن است مجموع حجم تصاویر زیاد باشد).`,
+        unmatchedKeys: result.unmatchedKeys.slice(0, 12),
+      });
+    } else if (result.matchedCount > 0 && !result.saved) {
+      setBatchPhotoStatus({
+        type: 'error',
+        text: 'حافظه ذخیره‌سازی مرورگر برای ذخیره این تعداد تصویر کافی نیست. لطفاً تصاویر را در دسته‌های کوچک‌تر بارگذاری کنید.',
+      });
+    } else {
+      setBatchPhotoStatus({
+        type: 'error',
+        text: `هیچ‌یک از ${result.totalProcessed} تصویر با ${identifierHint} کاربران موجود مطابقت نداشت.`,
+        unmatchedKeys: result.unmatchedKeys.slice(0, 12),
+      });
+    }
   };
 
   const toggleRevealPassword = (key: string) => {
@@ -378,6 +552,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     setFormOfficeLocation('');
     setFormNotes('');
     setFormActive(true);
+    setFormPhotoUrl('');
     setFormDormIds(
       role === 'supervisor'
         ? dorms[0]?.id
@@ -397,6 +572,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     setFormUsername(user.username || '');
     setFormPassword(user.password || '');
     setFormPhone(('mobile' in user && user.mobile) || user.phone || '');
+    setFormPhotoUrl(user.photoUrl || '');
     setFormError('');
 
     if (role === 'supervisor') {
@@ -433,6 +609,23 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     setStaffModalOpen(true);
   };
 
+  const handleModalStaffPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 6 * 1024 * 1024) {
+      setFormError('حجم تصویر انتخاب‌شده نباید بیشتر از ۶ مگابایت باشد.');
+      return;
+    }
+    try {
+      const compressed = await compressUserPhotoFile(file);
+      setFormPhotoUrl(compressed);
+      setFormError('');
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'خطا در بارگذاری تصویر.');
+    }
+  };
+
   const handleSaveStaffModal = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
@@ -455,6 +648,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           username: cleanUser,
           password: cleanPass,
           phone: cleanPhone,
+          photoUrl: formPhotoUrl || undefined,
           assignedDormIds: dormIds,
           assignedDormId: dormIds[0] || 'all',
         });
@@ -475,6 +669,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           username: cleanUser,
           password: cleanPass,
           phone: cleanPhone,
+          photoUrl: formPhotoUrl || undefined,
           assignedDormId: dormIds[0] || 'all',
           assignedDormIds: dormIds,
           role: 'supervisor',
@@ -492,6 +687,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
+          photoUrl: formPhotoUrl || undefined,
           specialty: spec,
           coveredDormIds: dormIds,
           assignedDormIds: dormIds,
@@ -511,6 +707,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
+          photoUrl: formPhotoUrl || undefined,
           specialty: spec,
           coveredDormIds: dormIds,
           assignedDormIds: dormIds,
@@ -533,6 +730,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
+          photoUrl: formPhotoUrl || undefined,
           status: formActive ? 'active' : 'inactive',
           isActive: formActive,
           notes: formNotes.trim() || undefined,
@@ -549,6 +747,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
+          photoUrl: formPhotoUrl || undefined,
           role: 'warehouse',
           status: formActive ? 'active' : 'inactive',
           isActive: formActive,
@@ -570,6 +769,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
+          photoUrl: formPhotoUrl || undefined,
           specialty: spec,
           officeLocation: formOfficeLocation.trim() || 'مرکز مشاوره پردیس',
           assignedDormIds: dormIds,
@@ -594,6 +794,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
+          photoUrl: formPhotoUrl || undefined,
           specialty: spec,
           officeLocation: formOfficeLocation.trim() || 'مرکز مشاوره پردیس',
           assignedDormIds: dormIds,
@@ -761,11 +962,12 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
               <button
                 key={cat.key}
                 type="button"
-                onClick={() => {
+                  onClick={() => {
                   onCategoryChange(cat.key);
                   setStaffQuery('');
                   setStaffDormFilter('all');
                   setStaffStatusFilter('all');
+                  setBatchPhotoStatus(null);
                 }}
                 className={`p-3.5 rounded-2xl border text-right transition flex flex-col justify-between gap-2 cursor-pointer ${
                   isActive
@@ -821,6 +1023,49 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           <button onClick={() => setFeedback(null)} className="p-1 hover:opacity-75 cursor-pointer">
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* پیام بازخورد بارگذاری جمعی عکس‌ها */}
+      {batchPhotoStatus && (
+        <div
+          className={`p-4 rounded-2xl text-xs border animate-in fade-in space-y-2 ${
+            batchPhotoStatus.type === 'loading'
+              ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-800'
+              : batchPhotoStatus.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800'
+              : 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 border-rose-200 dark:border-rose-800'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 font-bold">
+              {batchPhotoStatus.type === 'loading' ? (
+                <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin shrink-0" />
+              ) : batchPhotoStatus.type === 'success' ? (
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              )}
+              <span>{batchPhotoStatus.text}</span>
+            </div>
+            {batchPhotoStatus.type !== 'loading' && (
+              <button
+                type="button"
+                onClick={() => setBatchPhotoStatus(null)}
+                className="p-1 hover:opacity-75 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          {batchPhotoStatus.unmatchedKeys && batchPhotoStatus.unmatchedKeys.length > 0 && (
+            <div className="text-[11px] opacity-90 pt-1 border-t border-current/15">
+              <span>موارد تطبیق‌نیافته: </span>
+              <span className="font-mono" dir="ltr">
+                {batchPhotoStatus.unmatchedKeys.join(' ، ')}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -888,6 +1133,36 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 <span>ورود گروهی با اکسل</span>
               </button>
 
+              <label
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="انتخاب پوشه شامل تصاویر دانشجویان با نام کد دانشجویی (مثلاً 40214545.jpg یا 40214545.png)"
+              >
+                <FolderUp className="w-4 h-4" />
+                <span>وارد کردن پوشه عکس‌ها</span>
+                <input
+                  type="file"
+                  multiple
+                  {...({ webkitdirectory: '', directory: '' } as any)}
+                  onChange={(e) => handleBatchPhotosImport('student', e)}
+                  className="hidden"
+                />
+              </label>
+
+              <label
+                className="px-3.5 py-2 bg-sky-50 dark:bg-sky-950/50 hover:bg-sky-100 text-sky-700 dark:text-sky-200 border border-sky-200 dark:border-sky-800 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="انتخاب چند فایل عکس هم‌زمان با نام شماره دانشجویی (مثلاً 40214545.jpg)"
+              >
+                <ImagePlus className="w-4 h-4" />
+                <span>انتخاب چند عکس</span>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  onChange={(e) => handleBatchPhotosImport('student', e)}
+                  className="hidden"
+                />
+              </label>
+
               <button
                 type="button"
                 onClick={onOpenReports}
@@ -897,6 +1172,15 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 <span>خروجی اکسل جامع</span>
               </button>
             </div>
+          </div>
+
+          <div className="px-3.5 py-2 rounded-xl bg-cyan-50/70 dark:bg-cyan-950/20 border border-cyan-200/80 dark:border-cyan-900/40 text-[11px] text-cyan-900 dark:text-cyan-200 flex flex-wrap items-center gap-1.5">
+            <Camera className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
+            <span>
+              <strong>ثبت عکس دانشجویان:</strong> برای ثبت جمعی از دکمه «وارد کردن پوشه عکس‌ها» استفاده کنید؛ نام هر فایل باید شماره دانشجویی باشد (مثلاً{' '}
+              <span className="font-mono font-bold" dir="ltr">40214545.jpg</span> یا{' '}
+              <span className="font-mono font-bold" dir="ltr">40214545.png</span>). برای ثبت تکی از دکمه دوربین هر ردیف یا دکمه ویرایش استفاده نمایید.
+            </span>
           </div>
 
           {/* پنل جستجوی پیشرفته دانشجویان */}
@@ -1177,6 +1461,21 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                         </td>
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1 flex-wrap">
+                            <label
+                              className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                              title="بارگذاری یا تغییر سریع عکس دانشجو"
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) =>
+                                  handleQuickSinglePhotoUpload('student', st.studentId, st.fullName, e)
+                                }
+                                className="hidden"
+                              />
+                            </label>
+
                             <button
                               type="button"
                               onClick={() => onEditStudent(st)}
@@ -1344,7 +1643,60 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 <FileSpreadsheet className="w-4 h-4" />
                 <span>ثبت گروهی با اکسل</span>
               </button>
+
+              {(() => {
+                const currentStaffRole: StaffRole =
+                  activeCategory === 'supervisors'
+                    ? 'supervisor'
+                    : activeCategory === 'maintenance'
+                    ? 'maintenance'
+                    : activeCategory === 'warehouse'
+                    ? 'warehouse'
+                    : 'counselor';
+                return (
+                  <>
+                    <label
+                      className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="انتخاب پوشه عکس‌ها بر اساس نام/کد کاربری (مثلاً username.jpg یا 1001.png)"
+                    >
+                      <FolderUp className="w-4 h-4" />
+                      <span>وارد کردن پوشه عکس‌ها</span>
+                      <input
+                        type="file"
+                        multiple
+                        {...({ webkitdirectory: '', directory: '' } as any)}
+                        onChange={(e) => handleBatchPhotosImport(currentStaffRole, e)}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <label
+                      className="px-3.5 py-2 bg-sky-50 dark:bg-sky-950/50 hover:bg-sky-100 text-sky-700 dark:text-sky-200 border border-sky-200 dark:border-sky-800 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="انتخاب چند فایل عکس هم‌زمان با نام کاربری"
+                    >
+                      <ImagePlus className="w-4 h-4" />
+                      <span>انتخاب چند عکس</span>
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={(e) => handleBatchPhotosImport(currentStaffRole, e)}
+                        className="hidden"
+                      />
+                    </label>
+                  </>
+                );
+              })()}
             </div>
+          </div>
+
+          <div className="px-3.5 py-2 rounded-xl bg-cyan-50/70 dark:bg-cyan-950/20 border border-cyan-200/80 dark:border-cyan-900/40 text-[11px] text-cyan-900 dark:text-cyan-200 flex flex-wrap items-center gap-1.5">
+            <Camera className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
+            <span>
+              <strong>ثبت عکس پرسنلی (تکی یا جمعی):</strong> برای ثبت جمعی، نام فایل هر تصویر باید مطابق نام/کد کاربری باشد (مثلاً{' '}
+              <span className="font-mono font-bold" dir="ltr">username.jpg</span> یا{' '}
+              <span className="font-mono font-bold" dir="ltr">username.png</span>). برای ثبت تکی از دکمه دوربین هر ردیف یا پنجره افزودن/ویرایش استفاده کنید.
+            </span>
           </div>
 
           {/* نوار جستجوی پیشرفته برای کارکنان */}
@@ -1429,7 +1781,22 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
 
                       return (
                         <tr key={sup.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-bold text-slate-900 dark:text-white">{sup.fullName}</td>
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {sup.photoUrl ? (
+                                <img
+                                  src={sup.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-indigo-200 dark:border-indigo-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(sup.fullName || 'س').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{sup.fullName}</span>
+                            </div>
+                          </td>
                           <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
                             {sup.username}
                           </td>
@@ -1467,6 +1834,20 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              <label
+                                className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                title="بارگذاری یا تغییر عکس سرپرست"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('supervisor', sup.id, sup.fullName, e)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
                               <button
                                 type="button"
                                 onClick={() => openEditStaffModal('supervisor', sup)}
@@ -1531,7 +1912,22 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
 
                       return (
                         <tr key={tech.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-bold text-slate-900 dark:text-white">{tech.fullName}</td>
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {tech.photoUrl ? (
+                                <img
+                                  src={tech.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-amber-200 dark:border-amber-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-amber-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(tech.fullName || 'ت').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{tech.fullName}</span>
+                            </div>
+                          </td>
                           <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
                             {tech.username}
                           </td>
@@ -1598,6 +1994,20 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              <label
+                                className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                title="بارگذاری یا تغییر عکس کارشناس"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('maintenance', tech.id, tech.fullName, e)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
                               <button
                                 type="button"
                                 onClick={() => openEditStaffModal('maintenance', tech)}
@@ -1661,7 +2071,22 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
 
                       return (
                         <tr key={wh.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-bold text-slate-900 dark:text-white">{wh.fullName}</td>
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {wh.photoUrl ? (
+                                <img
+                                  src={wh.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-violet-200 dark:border-violet-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-violet-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(wh.fullName || 'ا').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{wh.fullName}</span>
+                            </div>
+                          </td>
                           <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
                             {wh.username}
                           </td>
@@ -1706,6 +2131,20 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              <label
+                                className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                title="بارگذاری یا تغییر عکس کاربر انبار"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('warehouse', wh.id, wh.fullName, e)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
                               <button
                                 type="button"
                                 onClick={() => openEditStaffModal('warehouse', wh)}
@@ -1770,7 +2209,22 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
 
                       return (
                         <tr key={cns.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-bold text-slate-900 dark:text-white">{cns.fullName}</td>
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {cns.photoUrl ? (
+                                <img
+                                  src={cns.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-rose-200 dark:border-rose-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-rose-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(cns.fullName || 'م').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{cns.fullName}</span>
+                            </div>
+                          </td>
                           <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
                             {cns.username}
                           </td>
@@ -1842,6 +2296,20 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              <label
+                                className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                title="بارگذاری یا تغییر عکس مشاور"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('counselor', cns.id, cns.fullName, e)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
                               <button
                                 type="button"
                                 onClick={() => openEditStaffModal('counselor', cns)}
@@ -1927,6 +2395,48 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             )}
 
             <form onSubmit={handleSaveStaffModal} className="space-y-4 text-xs">
+              {/* بخش انتخاب یا تغییر عکس پرسنلی کاربر */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center gap-3">
+                {formPhotoUrl ? (
+                  <img
+                    src={formPhotoUrl}
+                    alt="عکس پرسنلی"
+                    className="w-14 h-14 rounded-2xl object-cover border-2 border-teal-500 shadow-xs shrink-0"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-2xl bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-300 flex items-center justify-center shrink-0">
+                    <Camera className="w-6 h-6" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-[180px] space-y-1.5">
+                  <div className="font-bold text-slate-800 dark:text-slate-200">
+                    تصویر پرسنلی {roleLabels[staffModalRole]}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-[11px] transition cursor-pointer">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{formPhotoUrl ? 'تغییر عکس' : 'انتخاب عکس'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleModalStaffPhotoUpload}
+                        className="hidden"
+                      />
+                    </label>
+                    {formPhotoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setFormPhotoUrl('')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[11px] hover:bg-rose-100 transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>حذف عکس</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">

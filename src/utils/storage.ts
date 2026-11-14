@@ -190,6 +190,14 @@ function pushKeyToCloud<T>(key: string, value: T): void {
   pendingCloudRequests[key] = reqPromise;
 }
 
+function normalizeLookupKey(raw: string | number | null | undefined): string {
+  return String(raw ?? '')
+    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .trim()
+    .toLowerCase();
+}
+
 function normalizeStudentRecord(raw: Record<string, unknown>): Student {
   const { _id, __v, createdAt, updatedAt, ...rest } = raw;
   void _id;
@@ -278,6 +286,10 @@ export const Storage = {
     }
     list[idx] = { ...list[idx], ...updates };
     Storage.setSupervisors(list);
+    const currentUser = Storage.getCurrentUser();
+    if (currentUser && currentUser.role === 'supervisor' && currentUser.supervisor.id === id) {
+      Storage.setCurrentUser({ role: 'supervisor', supervisor: list[idx] });
+    }
     return { success: true, message: 'مشخصات سرپرست با موفقیت بروزرسانی شد.' };
   },
 
@@ -1100,29 +1112,41 @@ export const Storage = {
   // تطبیق و اتصال دسته‌جمعی عکس‌های دانشجویان از روی پوشه و نام فایل (کد دانشجویی)
   batchAssignStudentPhotos: (
     photoMap: Record<string, string>
-  ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number } => {
+  ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     const students = Storage.getStudents();
     let matchedCount = 0;
     const unmatchedKeys: string[] = [];
 
     Object.entries(photoMap).forEach(([studentIdKey, photoDataUrl]) => {
-      const cleanKey = studentIdKey.trim();
-      const st = students.find((s) => s.studentId === cleanKey);
+      const cleanKey = normalizeLookupKey(studentIdKey);
+      const digitMatch = cleanKey.match(/\d+/)?.[0] || cleanKey;
+      const st =
+        students.find((s) => normalizeLookupKey(s.studentId) === cleanKey) ||
+        students.find((s) => normalizeLookupKey(s.studentId) === digitMatch);
       if (st) {
         st.photoUrl = photoDataUrl;
         matchedCount++;
       } else {
-        unmatchedKeys.push(cleanKey);
+        unmatchedKeys.push(studentIdKey.trim());
       }
     });
 
+    let saved = true;
     if (matchedCount > 0) {
-      Storage.setStudents(students);
-      const currentUser = Storage.getCurrentUser();
-      if (currentUser && currentUser.role === 'student') {
-        const refreshed = students.find((s) => s.studentId === currentUser.student.studentId);
-        if (refreshed) {
-          Storage.setCurrentUser({ role: 'student', student: refreshed });
+      saved = Storage.setStudents(students);
+      if (saved) {
+        Storage.addActivityLog({
+          category: 'student',
+          action: 'بارگذاری دسته‌جمعی عکس دانشجویان',
+          details: `تعداد ${matchedCount} تصویر پرسنلی از طریق تطبیق کد دانشجویی به پرونده دانشجویان متصل شد.`,
+          targetName: `${matchedCount} دانشجو`,
+        });
+        const currentUser = Storage.getCurrentUser();
+        if (currentUser && currentUser.role === 'student') {
+          const refreshed = students.find((s) => s.studentId === currentUser.student.studentId);
+          if (refreshed) {
+            Storage.setCurrentUser({ role: 'student', student: refreshed });
+          }
         }
       }
     }
@@ -1131,6 +1155,128 @@ export const Storage = {
       matchedCount,
       unmatchedKeys,
       totalProcessed: Object.keys(photoMap).length,
+      saved,
+    };
+  },
+
+  // تطبیق و اتصال دسته‌جمعی عکس‌های پرسنل و کادر بر اساس نام/کد کاربری
+  batchAssignStaffPhotos: (
+    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor',
+    photoMap: Record<string, string>
+  ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
+    let matchedCount = 0;
+    const unmatchedKeys: string[] = [];
+    let saved = true;
+
+    const findMatch = <T extends { id: string; username: string; photoUrl?: string }>(
+      list: T[],
+      rawKey: string
+    ): T | undefined => {
+      const cleanKey = normalizeLookupKey(rawKey);
+      return (
+        list.find((u) => normalizeLookupKey(u.username) === cleanKey) ||
+        list.find((u) => normalizeLookupKey(u.id) === cleanKey)
+      );
+    };
+
+    if (role === 'supervisor') {
+      const list = Storage.getSupervisors();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setSupervisors(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'supervisor') {
+          const ref = list.find((s) => s.id === cu.supervisor.id);
+          if (ref) Storage.setCurrentUser({ role: 'supervisor', supervisor: ref });
+        }
+      }
+    } else if (role === 'maintenance') {
+      const list = Storage.getMaintenanceStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setMaintenanceStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'maintenance') {
+          const ref = list.find((t) => t.id === cu.technician.id);
+          if (ref) Storage.setCurrentUser({ role: 'maintenance', technician: ref });
+        }
+      }
+    } else if (role === 'warehouse') {
+      const list = Storage.getWarehouseStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setWarehouseStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'warehouse') {
+          const ref = list.find((w) => w.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'warehouse', staff: ref });
+        }
+      }
+    } else if (role === 'counselor') {
+      const list = Storage.getCounselors();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setCounselors(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'counselor') {
+          const ref = list.find((c) => c.id === cu.counselor.id);
+          if (ref) Storage.setCurrentUser({ role: 'counselor', counselor: ref });
+        }
+      }
+    }
+
+    if (matchedCount > 0 && saved) {
+      const roleFa: Record<typeof role, string> = {
+        supervisor: 'سرپرستان',
+        maintenance: 'پرسنل تأسیسات',
+        warehouse: 'پرسنل انبار',
+        counselor: 'مشاوران',
+      };
+      Storage.addActivityLog({
+        category: 'staff',
+        action: `بارگذاری دسته‌جمعی عکس ${roleFa[role]}`,
+        details: `تعداد ${matchedCount} تصویر بر اساس نام/کد کاربری به حساب ${roleFa[role]} متصل شد.`,
+        targetName: `${matchedCount} کاربر`,
+      });
+    }
+
+    return {
+      matchedCount,
+      unmatchedKeys,
+      totalProcessed: Object.keys(photoMap).length,
+      saved,
     };
   },
 
@@ -1421,6 +1567,10 @@ export const Storage = {
     if (idx === -1) return { success: false, message: 'کاربر تأسیسات یافت نشد.' };
     list[idx] = { ...list[idx], ...updates };
     Storage.setMaintenanceStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'maintenance' && cu.technician.id === id) {
+      Storage.setCurrentUser({ role: 'maintenance', technician: list[idx] });
+    }
     return { success: true, message: 'اطلاعات کارشناس تأسیسات با موفقیت بروزرسانی شد.' };
   },
 
@@ -1898,6 +2048,10 @@ export const Storage = {
     if (idx === -1) return { success: false, message: 'کاربر انبار یافت نشد.' };
     list[idx] = { ...list[idx], ...updates };
     Storage.setWarehouseStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'warehouse' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'warehouse', staff: list[idx] });
+    }
     return { success: true, message: 'اطلاعات پرسنل انبار با موفقیت بروزرسانی شد.' };
   },
 
@@ -2339,8 +2493,8 @@ export const Storage = {
     return get<CounselorStaff[]>(STORAGE_KEYS.COUNSELORS, INITIAL_COUNSELORS);
   },
 
-  setCounselors: (counselors: CounselorStaff[]): void => {
-    set(STORAGE_KEYS.COUNSELORS, counselors);
+  setCounselors: (counselors: CounselorStaff[]): boolean => {
+    return set(STORAGE_KEYS.COUNSELORS, counselors);
   },
 
   addCounselor: (counselor: Omit<CounselorStaff, 'id'>): { success: boolean; counselor: CounselorStaff } => {
@@ -2369,6 +2523,10 @@ export const Storage = {
     }
     counselors[idx] = { ...counselors[idx], ...updates };
     Storage.setCounselors(counselors);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'counselor' && cu.counselor.id === id) {
+      Storage.setCurrentUser({ role: 'counselor', counselor: counselors[idx] });
+    }
     return { success: true, message: 'مشخصات مشاور با موفقیت بروزرسانی شد.' };
   },
 
