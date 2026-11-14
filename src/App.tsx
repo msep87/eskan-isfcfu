@@ -351,6 +351,14 @@ export default function App() {
               className={`relative rounded-3xl overflow-hidden ${heroBanner.bgClassName} text-white p-8 sm:p-12 shadow-2xl transition-all duration-300`}
               style={heroBanner.style}
             >
+              {heroBanner.imageUrl && (
+                <img
+                  src={heroBanner.imageUrl}
+                  alt=""
+                  aria-hidden="true"
+                  className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none"
+                />
+              )}
               {heroBanner.hasImageOverlay && (
                 <div className="absolute inset-0 bg-gradient-to-l from-slate-950/75 via-slate-950/55 to-slate-950/35 pointer-events-none" />
               )}

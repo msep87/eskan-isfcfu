@@ -233,18 +233,20 @@ function get<T>(key: string, defaultValue: T): T {
 }
 
 // تابع کمکی برای نوشتن در localStorage و ارسال غیرهمگام به سرور ابری
-function set<T>(key: string, value: T): void {
+function set<T>(key: string, value: T): boolean {
   try {
     localStorage.setItem(key, JSON.stringify(value));
     pushKeyToCloud(key, value);
+    return true;
   } catch (e) {
     console.error(`Error writing ${key} to localStorage`, e);
+    return false;
   }
 }
 
 export const Storage = {
   getSettings: (): AppSettings => get(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS),
-  setSettings: (settings: AppSettings) => set(STORAGE_KEYS.SETTINGS, settings),
+  setSettings: (settings: AppSettings): boolean => set(STORAGE_KEYS.SETTINGS, settings),
   
   getDormitories: (): Dormitory[] => get(STORAGE_KEYS.DORMITORIES, INITIAL_DORMITORIES),
   setDormitories: (dorms: Dormitory[]) => set(STORAGE_KEYS.DORMITORIES, dorms),

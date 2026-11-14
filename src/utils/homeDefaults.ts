@@ -37,18 +37,22 @@ export function resolveHeroBannerStyle(settings: AppSettings): {
   bgClassName: string;
   style?: React.CSSProperties;
   hasImageOverlay: boolean;
+  imageUrl?: string;
 } {
   const mode = settings.heroBgMode || 'default';
+  const cleanImageUrl =
+    typeof settings.heroBgImageUrl === 'string' ? settings.heroBgImageUrl.trim() : '';
 
-  if (mode === 'image' && settings.heroBgImageUrl) {
+  if (mode === 'image' && cleanImageUrl) {
     return {
       bgClassName: 'bg-teal-900',
       style: {
-        backgroundImage: `url("${settings.heroBgImageUrl}")`,
+        backgroundImage: `url("${cleanImageUrl}")`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
       },
       hasImageOverlay: true,
+      imageUrl: cleanImageUrl,
     };
   }
 

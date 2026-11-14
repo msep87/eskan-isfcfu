@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   AppSettings,
   Dormitory,
@@ -314,9 +314,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // فرم تنظیمات بازه زمانی و سال تحصیلی
   const [localSettings, setLocalSettings] = useState<AppSettings>({ ...settings });
+  const localSettingsRef = useRef<AppSettings>(localSettings);
+  localSettingsRef.current = localSettings;
   const [saveStatus, setSaveStatus] = useState(false);
 
   useEffect(() => {
+    localSettingsRef.current = { ...settings };
     setLocalSettings({ ...settings });
   }, [settings]);
 
@@ -1260,14 +1263,75 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // شخصی‌سازی پس‌زمینه کادر بنر اصلی صفحه اول سایت
   const applyHeroSettings = (patch: Partial<AppSettings>, message: string) => {
     const updated: AppSettings = {
-      ...localSettings,
+      ...localSettingsRef.current,
       ...patch,
     };
+    const saved = Storage.setSettings(updated);
+    if (!saved) {
+      setHeroBgFeedback({
+        type: 'error',
+        message:
+          'ذخیره تصویر پس‌زمینه در حافظه مرورگر با خطا مواجه شد (حجم ذخیره‌سازی پر است). لطفاً تصویر سبک‌تری انتخاب کنید.',
+      });
+      setTimeout(() => setHeroBgFeedback(null), 5000);
+      return;
+    }
+    localSettingsRef.current = updated;
     setLocalSettings(updated);
-    Storage.setSettings(updated);
     onUpdateSettings(updated);
     setHeroBgFeedback({ type: 'success', message });
     setTimeout(() => setHeroBgFeedback(null), 3500);
+  };
+
+  const compressHeroBannerImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('خطا در خواندن فایل تصویر.'));
+      reader.onload = (ev) => {
+        const rawDataUrl = ev.target?.result as string;
+        if (!rawDataUrl) {
+          reject(new Error('فایل تصویر معتبر نیست.'));
+          return;
+        }
+        const img = new Image();
+        img.onerror = () => reject(new Error('فرمت این تصویر توسط مرورگر پشتیبانی نمی‌شود.'));
+        img.onload = () => {
+          const encodeWithLimit = (maxW: number, maxH: number, quality: number): string => {
+            let targetW = img.naturalWidth || img.width || 1200;
+            let targetH = img.naturalHeight || img.height || 600;
+            if (targetW > maxW || targetH > maxH) {
+              const ratio = Math.min(maxW / targetW, maxH / targetH);
+              targetW = Math.max(1, Math.round(targetW * ratio));
+              targetH = Math.max(1, Math.round(targetH * ratio));
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = targetW;
+            canvas.height = targetH;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return rawDataUrl;
+            ctx.fillStyle = '#0f766e';
+            ctx.fillRect(0, 0, targetW, targetH);
+            ctx.drawImage(img, 0, 0, targetW, targetH);
+            return canvas.toDataURL('image/jpeg', quality);
+          };
+
+          try {
+            let compressed = encodeWithLimit(1400, 700, 0.82);
+            if (compressed.length > 280_000) {
+              compressed = encodeWithLimit(1200, 600, 0.7);
+            }
+            if (compressed.length > 280_000) {
+              compressed = encodeWithLimit(960, 480, 0.58);
+            }
+            resolve(compressed);
+          } catch {
+            resolve(rawDataUrl);
+          }
+        };
+        img.src = rawDataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
   };
 
   const handleHeroBgModeChange = (mode: 'default' | 'color' | 'image') => {
@@ -1282,7 +1346,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       applyHeroSettings(
         {
           heroBgMode: 'color',
-          heroBgColor: localSettings.heroBgColor || HERO_PRESET_COLORS[0].hex,
+          heroBgColor: localSettingsRef.current.heroBgColor || HERO_PRESET_COLORS[0].hex,
         },
         'حالت رنگ دلخواه برای پس‌زمینه بنر صفحه اول انتخاب شد.'
       );
@@ -1290,7 +1354,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     applyHeroSettings(
       { heroBgMode: 'image' },
-      localSettings.heroBgImageUrl
+      localSettingsRef.current.heroBgImageUrl
         ? 'تصویر بارگذاری‌شده برای پس‌زمینه بنر صفحه اول فعال شد.'
         : 'اکنون یک تصویر از کادر زیر برای پس‌زمینه بنر صفحه اول انتخاب کنید.'
     );
@@ -1303,28 +1367,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
   };
 
-  const handleHeroBgImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleHeroBgImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
+    if (file.size > 10 * 1024 * 1024) {
       setHeroBgFeedback({
         type: 'error',
-        message: 'حجم تصویر بنر نباید بیشتر از ۵ مگابایت باشد.',
+        message: 'حجم فایل تصویر بنر نباید بیشتر از ۱۰ مگابایت باشد.',
       });
       setTimeout(() => setHeroBgFeedback(null), 4000);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      if (!dataUrl) return;
+    try {
+      const compressedDataUrl = await compressHeroBannerImage(file);
       applyHeroSettings(
-        { heroBgMode: 'image', heroBgImageUrl: dataUrl },
+        { heroBgMode: 'image', heroBgImageUrl: compressedDataUrl },
         'تصویر پس‌زمینه بنر اصلی صفحه اول با موفقیت بارگذاری و فعال شد.'
       );
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      setHeroBgFeedback({
+        type: 'error',
+        message:
+          err instanceof Error
+            ? err.message
+            : 'بارگذاری تصویر با خطا مواجه شد. لطفاً فایل تصویر دیگری امتحان کنید.',
+      });
+      setTimeout(() => setHeroBgFeedback(null), 4500);
+    }
   };
 
   const handleResetHeroBg = () => {
@@ -5749,7 +5819,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {(localSettings.heroBgMode || 'default') === 'image' && (
                   <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      یک تصویر افقی باکیفیت (PNG / JPG / WebP تا ۵ مگابایت) انتخاب کنید. یک لایه تیره ملایم جهت خوانایی کامل متن سفید روی عکس اعمال می‌شود.
+                      یک تصویر افقی باکیفیت (PNG / JPG / WebP) انتخاب کنید؛ تصویر به صورت خودکار بهینه‌سازی شده و یک لایه تیره ملایم جهت خوانایی کامل متن سفید روی آن اعمال می‌شود.
                     </p>
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-sm">
@@ -5773,6 +5843,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </button>
                       )}
                     </div>
+                    {localSettings.heroBgImageUrl && (
+                      <div className="flex items-center gap-3 pt-1">
+                        <img
+                          src={localSettings.heroBgImageUrl}
+                          alt="تصویر فعلی بنر"
+                          className="w-24 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shadow-xs shrink-0"
+                        />
+                        <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                          تصویر پس‌زمینه هم‌اکنون در بنر فعال است.
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -5795,6 +5877,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className={`relative rounded-2xl overflow-hidden ${previewBanner.bgClassName} text-white p-5 shadow-lg min-h-[155px] flex items-center justify-between`}
                       style={previewBanner.style}
                     >
+                      {previewBanner.imageUrl && (
+                        <img
+                          src={previewBanner.imageUrl}
+                          alt="پیش‌نمایش پس‌زمینه بنر اصلی"
+                          className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none"
+                        />
+                      )}
                       {previewBanner.hasImageOverlay && (
                         <div className="absolute inset-0 bg-gradient-to-l from-slate-950/75 via-slate-950/55 to-slate-950/35 pointer-events-none" />
                       )}
