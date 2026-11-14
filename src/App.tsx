@@ -223,6 +223,13 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    if (currentUser) {
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'خروج کاربر از سامانه',
+        details: 'کاربر با انتخاب گزینه خروج از حساب کاربری خارج شد.',
+      });
+    }
     setCurrentUser(null);
     Storage.setCurrentUser(null);
   };

@@ -261,6 +261,13 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
       const allocatedCount = previewStudents.filter((s) => s.assignedBedId).length;
       const unassignedCount = previewStudents.length - allocatedCount;
 
+      Storage.addActivityLog({
+        category: 'excel',
+        action: replaceMode ? 'بارگذاری و جایگزینی اکسل دانشجویان' : 'بارگذاری و افزودن اکسل دانشجویان',
+        details: `${previewStudents.length} دانشجو از فایل اکسل وارد شد (${allocatedCount} نفر با اسکان قطعی، ${unassignedCount} نفر بدون اتاق).`,
+        targetName: `${previewStudents.length} دانشجو`,
+      });
+
       if (syncRes.success) {
         setSuccessMsg(
           `تعداد ${previewStudents.length} دانشجو با موفقیت در دیتابیس ابری ذخیره و همگام‌سازی گردید (${allocatedCount} نفر با اسکان قطعی از اکسل، و ${unassignedCount} نفر فاقد اتاق جهت انتخاب توسط خود دانشجو).`
@@ -311,6 +318,13 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
       }
 
       const syncRes = await Storage.waitForPendingCloudSync();
+
+      Storage.addActivityLog({
+        category: 'excel',
+        action: replaceMode ? 'بارگذاری و جایگزینی اکسل سراها' : 'بارگذاری و افزودن اکسل سراها و اتاق‌ها',
+        details: `${previewDormsData.dorms.length} سرا، ${previewDormsData.rooms.length} اتاق و ${previewDormsData.beds.length} تخت از اکسل ثبت شد.`,
+        targetName: `${previewDormsData.rooms.length} اتاق`,
+      });
 
       if (syncRes.success) {
         setSuccessMsg(`سراها، اتاق‌ها و تخت‌های دوطبقه با موفقیت در دیتابیس ابری ذخیره و همگام‌سازی گردیدند.`);

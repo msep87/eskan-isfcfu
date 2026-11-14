@@ -17,6 +17,8 @@ import {
   CounselorStaff,
   CounselorShiftSchedule,
   CounselorShiftReport,
+  ActivityLog,
+  StudentEvaluation,
 } from '../types';
 import { Storage } from '../utils/storage';
 import {
@@ -28,12 +30,15 @@ import {
   exportCounselorShiftTemplateToExcel,
   importCounselorShiftScheduleFromExcel,
   exportCounselorReportsToExcel,
+  exportActivityLogsToExcel,
+  toEnglishDigits,
 } from '../utils/excelUtils';
 import { FarhangianEmblem } from './FarhangianEmblem';
 import { SupervisorRoomManager } from './SupervisorRoomManager';
 import { VisualBedPicker } from './VisualBedPicker';
 import { RoomWarningModal } from './RoomWarningModal';
 import { DormIdCardModal } from './DormIdCardModal';
+import { StudentEvaluationModal } from './StudentEvaluationModal';
 import {
   Settings,
   Calendar,
@@ -91,6 +96,8 @@ import {
   ArrowRight,
   HeartHandshake,
   MessageSquare,
+  Activity,
+  Award,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -135,7 +142,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   cloudSyncTick = 0,
 }) => {
   // تب‌های اصلی داشبورد مدیر
-  const [mainTab, setMainTab] = useState<'cartable' | 'announcements' | 'requests' | 'maintenance' | 'shifts' | 'counseling' | 'settings'>('cartable');
+  const [mainTab, setMainTab] = useState<'cartable' | 'announcements' | 'requests' | 'maintenance' | 'shifts' | 'counseling' | 'activity_log' | 'settings'>('cartable');
+
+  // لاگ فعالیت‌ها و تذکرات / ارزیابی‌های دانشجویان
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(Storage.getActivityLogs());
+  const [logSearchQuery, setLogSearchQuery] = useState('');
+  const [logCategoryFilter, setLogCategoryFilter] = useState<string>('all');
+  const [logRoleFilter, setLogRoleFilter] = useState<string>('all');
+  const [logSeverityFilter, setLogSeverityFilter] = useState<string>('all');
+  const [confirmClearLogs, setConfirmClearLogs] = useState(false);
+
+  const [studentEvaluations, setStudentEvaluations] = useState<StudentEvaluation[]>(Storage.getStudentEvaluations());
+  const [isStudentEvalModalOpen, setIsStudentEvalModalOpen] = useState(false);
+  const [evalTargetStudent, setEvalTargetStudent] = useState<Student | null>(null);
 
   // داده‌های مشاوران و شیفت‌ها و پیام‌ها
   const [counselorsList, setCounselorsList] = useState<CounselorStaff[]>(Storage.getCounselors());
@@ -181,11 +200,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setCounselorReports(Storage.getCounselorReports());
     setShiftSchedules(Storage.getShiftSchedules());
     setShiftReports(Storage.getShiftReports());
+    setActivityLogs(Storage.getActivityLogs());
+    setStudentEvaluations(Storage.getStudentEvaluations());
   }, [cloudSyncTick]);
-
-  useEffect(() => {
-    setLocalSettings({ ...settings });
-  }, [settings]);
 
   // فرم ثبت شیفت دستی جدید توسط مدیر
   const [isAddShiftModalOpen, setIsAddShiftModalOpen] = useState(false);
@@ -202,6 +219,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [cartableSubTab, setCartableSubTab] = useState<'manager' | 'visual_picker' | 'warnings' | 'students' | 'structure'>('manager');
   const [selectedCartableDormId, setSelectedCartableDormId] = useState<string>('all');
   const [isAdminWarningModalOpen, setIsAdminWarningModalOpen] = useState(false);
+
+  useEffect(() => {
+    setActivityLogs(Storage.getActivityLogs());
+    setStudentEvaluations(Storage.getStudentEvaluations());
+  }, [students, warnings, announcements, rooms, beds, mainTab, cartableSubTab]);
 
   // وضعیت‌های مدیریت تأسیسات در پنل مدیر کل
   const [adminMaintDormFilter, setAdminMaintDormFilter] = useState<string>('all');
@@ -258,6 +280,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // فرم تنظیمات بازه زمانی و سال تحصیلی
   const [localSettings, setLocalSettings] = useState<AppSettings>({ ...settings });
   const [saveStatus, setSaveStatus] = useState(false);
+
+  useEffect(() => {
+    setLocalSettings({ ...settings });
+  }, [settings]);
 
   // اطمینان از انتخاب خودکار اولین سرای/سرپرست/مشاور معتبر پس از بارگذاری یا ایجاد داده‌ها
   useEffect(() => {
@@ -860,6 +886,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     Storage.setSettings(localSettings);
+    Storage.addActivityLog({
+      category: 'settings',
+      action: 'بروزرسانی تنظیمات سال تحصیلی و سامانه',
+      details: `سال تحصیلی: ${localSettings.currentAcademicYear}، وضعیت انتخاب اتاق: ${localSettings.selectionActive ? 'فعال' : 'غیرفعال'}`,
+      targetName: localSettings.currentAcademicYear,
+    });
+    setActivityLogs(Storage.getActivityLogs());
     onUpdateSettings(localSettings);
     setSaveStatus(true);
     setTimeout(() => setSaveStatus(false), 3000);
@@ -1230,6 +1263,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         onWarningAdded={onRefreshData}
       />
 
+      {/* مدال ثبت تذکر، اخطار و نمره ارزیابی فردی/اتاق برای دانشجو */}
+      <StudentEvaluationModal
+        isOpen={isStudentEvalModalOpen}
+        onClose={() => {
+          setIsStudentEvalModalOpen(false);
+          setEvalTargetStudent(null);
+        }}
+        students={students}
+        dorms={dorms}
+        rooms={rooms}
+        initialStudent={evalTargetStudent}
+        evaluatorName="مدیریت کل امور سراها"
+        evaluatorRole="admin"
+        onSaved={() => {
+          setStudentEvaluations(Storage.getStudentEvaluations());
+          setActivityLogs(Storage.getActivityLogs());
+          onRefreshData();
+        }}
+      />
+
       {/* سربرگ مدیریت کل */}
       <div className="bg-gradient-to-r from-purple-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl border border-purple-800/40">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
@@ -1411,7 +1464,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </span>
         </button>
 
-        {/* ۷. تب تنظیمات، سرپرستان و شخصی‌سازی */}
+        {/* ۷. تب گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران */}
+        <button
+          onClick={() => {
+            setActivityLogs(Storage.getActivityLogs());
+            setMainTab('activity_log');
+          }}
+          className={`flex-1 min-w-[200px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+            mainTab === 'activity_log'
+              ? 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 shadow-md'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Activity className="w-4 h-4 text-rose-600" />
+          <span>گزارش لاگ فعالیت و دسترسی‌ها</span>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-extrabold">
+            {activityLogs.length}
+          </span>
+        </button>
+
+        {/* ۸. تب تنظیمات، سرپرستان و شخصی‌سازی */}
         <button
           onClick={() => setMainTab('settings')}
           className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
@@ -1603,78 +1675,205 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )}
 
           {cartableSubTab === 'warnings' && (
-            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <ShieldAlert className="w-5 h-5 text-rose-600" />
-                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                    فهرست اخطارهای انضباطی صادره برای اتاق‌ها
-                  </h3>
+            <div className="space-y-6">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="w-5 h-5 text-rose-600" />
+                    <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                      فهرست اخطارهای انضباطی صادره برای اتاق‌ها
+                    </h3>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setEvalTargetStudent(null);
+                        setIsStudentEvalModalOpen(true);
+                      }}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Award className="w-4 h-4" />
+                      <span>ثبت تذکر / اخطار / نمره ارزیابی دانشجو</span>
+                    </button>
+                    <button
+                      onClick={() => setIsAdminWarningModalOpen(true)}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>ثبت اخطار جدید به اتاق</span>
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setIsAdminWarningModalOpen(true)}
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>ثبت اخطار جدید به اتاق</span>
-                </button>
-              </div>
 
-              {cartableWarnings.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl">
-                  هیچ اخطاری برای سراهای انتخابی ثبت نشده است.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {cartableWarnings.map((warn) => {
-                    const r = rooms.find((rm) => rm.id === warn.roomId);
-                    const d = dorms.find((dm) => dm.id === warn.dormId);
+                {cartableWarnings.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl">
+                    هیچ اخطاری برای سراهای انتخابی ثبت نشده است.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {cartableWarnings.map((warn) => {
+                      const r = rooms.find((rm) => rm.id === warn.roomId);
+                      const d = dorms.find((dm) => dm.id === warn.dormId);
 
-                    return (
-                      <div
-                        key={warn.id}
-                        className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                          warn.resolved
-                            ? 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 opacity-70'
-                            : 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/60'
-                        }`}
-                      >
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-extrabold text-sm text-slate-900 dark:text-white">
-                              اتاق {r?.roomNumber} ({d?.name})
-                            </span>
-                            <span
-                              className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
-                                warn.resolved ? 'bg-slate-200 text-slate-700' : 'bg-rose-600 text-white'
-                              }`}
-                            >
-                              {warn.resolved ? 'برطرف شده' : 'فعال'}
+                      return (
+                        <div
+                          key={warn.id}
+                          className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                            warn.resolved
+                              ? 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 opacity-70'
+                              : 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/60'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                                اتاق {r?.roomNumber} ({d?.name})
+                              </span>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
+                                  warn.resolved ? 'bg-slate-200 text-slate-700' : 'bg-rose-600 text-white'
+                                }`}
+                              >
+                                {warn.resolved ? 'برطرف شده' : 'فعال'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-800 dark:text-slate-200 font-bold">{warn.title}</p>
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">{warn.description}</p>
+                            <span className="text-[10px] text-slate-400 mt-2 block">
+                              صادرکننده: {warn.supervisorName} • تاریخ: {warn.date}
                             </span>
                           </div>
-                          <p className="text-xs text-slate-800 dark:text-slate-200 font-bold">{warn.title}</p>
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">{warn.description}</p>
-                          <span className="text-[10px] text-slate-400 mt-2 block">
-                            صادرکننده: {warn.supervisorName} • تاریخ: {warn.date}
-                          </span>
+
+                          {!warn.resolved && (
+                            <button
+                              onClick={() => {
+                                Storage.resolveWarning(warn.id);
+                                onRefreshData();
+                              }}
+                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shrink-0 transition cursor-pointer shadow-xs"
+                            >
+                              ثبت رفع تخلف و بستن اخطار
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* فهرست تذکرات، اخطارها و نمرات ارزیابی فردی و اتاق دانشجویان */}
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <Award className="w-5 h-5 text-indigo-600" />
+                    <div>
+                      <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                        سوابق تذکر، اخطار و نمرات ارزیابی فردی / اتاق دانشجویان ({studentEvaluations.length})
+                      </h3>
+                      <p className="text-[11px] text-slate-400">
+                        کلیه موارد ثبت‌شده مستقیماً در کارتابل شخصی دانشجو قابل مشاهده هستند.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setEvalTargetStudent(null);
+                      setIsStudentEvalModalOpen(true);
+                    }}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>ثبت مورد جدید برای دانشجو</span>
+                  </button>
+                </div>
+
+                {studentEvaluations.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl">
+                    تاکنون هیچ تذکر، اخطار یا نمره ارزیابی فردی/اتاقی برای دانشجویان ثبت نشده است.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {studentEvaluations.map((ev) => (
+                      <div
+                        key={ev.id}
+                        className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                          ev.type === 'evaluation'
+                            ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
+                            : ev.type === 'warning'
+                            ? 'bg-rose-50/60 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50'
+                            : 'bg-amber-50/60 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50'
+                        }`}
+                      >
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold ${
+                                ev.type === 'evaluation'
+                                  ? 'bg-emerald-600 text-white'
+                                  : ev.type === 'warning'
+                                  ? 'bg-rose-600 text-white'
+                                  : 'bg-amber-500 text-white'
+                              }`}
+                            >
+                              {ev.type === 'evaluation'
+                                ? `نمره ارزیابی: ${ev.score ?? '-'} از ۱۰۰`
+                                : ev.type === 'warning'
+                                ? 'اخطار رسمی'
+                                : 'تذکر'}
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300">
+                              {ev.scope === 'room' ? 'گستره: اتاق' : 'گستره: فردی'}
+                            </span>
+                            <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                              {ev.studentName} ({ev.studentId})
+                            </span>
+                            {ev.dormName && (
+                              <span className="text-[11px] text-slate-500">
+                                • {ev.dormName} {ev.roomNumber ? `(اتاق ${ev.roomNumber})` : ''}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs font-bold text-slate-800 dark:text-slate-200">{ev.title}</div>
+                          <div className="text-xs text-slate-600 dark:text-slate-400">{ev.description}</div>
+                          <div className="text-[10px] text-slate-400">
+                            ثبت‌کننده: {ev.evaluatorName} • تاریخ: {ev.date}
+                            {ev.type !== 'evaluation' && ` • وضعیت: ${ev.resolved ? 'برطرف شده' : 'فعال'}`}
+                          </div>
                         </div>
 
-                        {!warn.resolved && (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {ev.type !== 'evaluation' && !ev.resolved && (
+                            <button
+                              onClick={() => {
+                                Storage.resolveStudentEvaluation(ev.id);
+                                setStudentEvaluations(Storage.getStudentEvaluations());
+                                setActivityLogs(Storage.getActivityLogs());
+                                onRefreshData();
+                              }}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                            >
+                              رفع مورد
+                            </button>
+                          )}
                           <button
                             onClick={() => {
-                              Storage.resolveWarning(warn.id);
+                              Storage.deleteStudentEvaluation(ev.id);
+                              setStudentEvaluations(Storage.getStudentEvaluations());
+                              setActivityLogs(Storage.getActivityLogs());
                               onRefreshData();
                             }}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shrink-0 transition cursor-pointer shadow-xs"
+                            className="p-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 transition cursor-pointer"
+                            title="حذف سابقه"
                           >
-                            ثبت رفع تخلف و بستن اخطار
+                            <Trash2 className="w-4 h-4" />
                           </button>
-                        )}
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1799,6 +1998,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 title="مشاهده و چاپ کارت شناسایی و اسکان سرا"
                               >
                                 <QrCode className="w-4 h-4" />
+                              </button>
+
+                              {/* ثبت تذکر، اخطار و نمره ارزیابی فردی/اتاق */}
+                              <button
+                                onClick={() => {
+                                  setEvalTargetStudent(st);
+                                  setIsStudentEvalModalOpen(true);
+                                }}
+                                className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 hover:bg-purple-100 border border-purple-200 dark:border-purple-800 transition cursor-pointer"
+                                title="ثبت تذکر، اخطار یا نمره ارزیابی فردی / اتاق"
+                              >
+                                <Award className="w-4 h-4" />
                               </button>
 
                               {/* اگر دانشجو اسکان دارد: دکمه تخلیه اتاق و آزادسازی تخت */}
@@ -4326,7 +4537,271 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* ========================================================= */}
-      {/* ۶. تب پیکربندی سیستم، سرپرستان (چندسرا) و شخصی‌سازی ظاهر */}
+      {/* ۶. تب گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران (Activity Log) */}
+      {/* ========================================================= */}
+      {mainTab === 'activity_log' && (() => {
+        const roleLabelMap: Record<string, string> = {
+          admin: 'مدیر کل',
+          supervisor: 'سرپرست سرا',
+          student: 'دانشجو',
+          maintenance: 'تأسیسات',
+          warehouse: 'مسئول انبار',
+          counselor: 'مشاور',
+          system: 'سیستم / مهمان',
+        };
+        const categoryLabelMap: Record<string, string> = {
+          auth: 'ورود و دسترسی‌ها',
+          student: 'پرونده دانشجویان',
+          accommodation: 'اسکان و تخت‌ها',
+          dorm_structure: 'ساختار سرا و اتاق',
+          staff: 'پرسنل و کاربران',
+          maintenance: 'امور تأسیسات',
+          warehouse: 'انبار و تجهیزات',
+          warning_eval: 'تذکر، اخطار و ارزیابی',
+          settings: 'تنظیمات و اطلاعیه‌ها',
+          backup: 'پشتیبان و بازنشانی',
+          excel: 'ورود اطلاعات اکسل',
+        };
+
+        const q = toEnglishDigits(logSearchQuery.trim().toLowerCase());
+        const filteredLogs = activityLogs.filter((l) => {
+          if (logCategoryFilter !== 'all' && l.category !== logCategoryFilter) return false;
+          if (logRoleFilter !== 'all' && l.actorRole !== logRoleFilter) return false;
+          if (logSeverityFilter !== 'all' && (l.severity || 'info') !== logSeverityFilter) return false;
+          if (q) {
+            const hay = toEnglishDigits(
+              `${l.actorName} ${l.actorUsername || ''} ${l.action} ${l.details} ${l.targetName || ''}`.toLowerCase()
+            );
+            if (!hay.includes(q)) return false;
+          }
+          return true;
+        });
+
+        const authLogsCount = activityLogs.filter((l) => l.category === 'auth').length;
+        const alertLogsCount = activityLogs.filter(
+          (l) => l.severity === 'warning' || l.severity === 'critical'
+        ).length;
+        const housingStudentLogsCount = activityLogs.filter(
+          (l) => l.category === 'accommodation' || l.category === 'student' || l.category === 'warning_eval'
+        ).length;
+
+        return (
+          <div className="space-y-6 animate-in fade-in duration-200">
+            {/* کارت‌های شاخص لاگ */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-xs">
+                <div className="text-[11px] font-bold text-slate-500">کل رویدادهای ثبت‌شده</div>
+                <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">{activityLogs.length}</div>
+              </div>
+              <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-indigo-200 dark:border-indigo-900/50 shadow-xs">
+                <div className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">ورود، خروج و دسترسی‌ها</div>
+                <div className="text-2xl font-black text-indigo-700 dark:text-indigo-300 mt-1">{authLogsCount}</div>
+              </div>
+              <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-rose-200 dark:border-rose-900/50 shadow-xs">
+                <div className="text-[11px] font-bold text-rose-600 dark:text-rose-400">رویدادهای هشدار و حساس</div>
+                <div className="text-2xl font-black text-rose-700 dark:text-rose-300 mt-1">{alertLogsCount}</div>
+              </div>
+              <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-teal-200 dark:border-teal-900/50 shadow-xs">
+                <div className="text-[11px] font-bold text-teal-600 dark:text-teal-400">تغییرات اسکان، دانشجو و ارزیابی</div>
+                <div className="text-2xl font-black text-teal-700 dark:text-teal-300 mt-1">{housingStudentLogsCount}</div>
+              </div>
+            </div>
+
+            {/* فیلترها و جدول لاگ */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-rose-500/10 text-rose-600">
+                    <Activity className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                      تاریخچه فعالیت‌ها، تغییرات و دسترسی‌های کاربران (Activity Log)
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      ثبت خودکار ورود/خروج کاربران، تغییرات اسکان، تذکرات و ارزیابی‌ها، اکسل و پیکربندی (ذخیره در فضای ابری)
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setActivityLogs(Storage.getActivityLogs())}
+                    className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>بروزرسانی</span>
+                  </button>
+
+                  <button
+                    onClick={() => exportActivityLogsToExcel(filteredLogs)}
+                    disabled={filteredLogs.length === 0}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>خروجی اکسل ({filteredLogs.length})</span>
+                  </button>
+
+                  {!confirmClearLogs ? (
+                    <button
+                      onClick={() => setConfirmClearLogs(true)}
+                      disabled={activityLogs.length === 0}
+                      className="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 disabled:opacity-50 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>پاک‌سازی لاگ‌ها</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 px-2.5 py-1 rounded-xl">
+                      <span className="text-[11px] font-bold text-rose-800 dark:text-rose-200">مطمئن هستید؟</span>
+                      <button
+                        onClick={() => {
+                          Storage.clearActivityLogs();
+                          setActivityLogs([]);
+                          setConfirmClearLogs(false);
+                        }}
+                        className="px-2 py-1 rounded-lg bg-rose-600 text-white text-[11px] font-bold cursor-pointer"
+                      >
+                        بله، پاک کن
+                      </button>
+                      <button
+                        onClick={() => setConfirmClearLogs(false)}
+                        className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-bold cursor-pointer"
+                      >
+                        انصراف
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* نوار فیلترها */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={logSearchQuery}
+                    onChange={(e) => setLogSearchQuery(e.target.value)}
+                    placeholder="جستجو در نام کاربر، اقدام، جزئیات یا شناسه..."
+                    className="w-full pr-9 pl-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                </div>
+
+                <select
+                  value={logCategoryFilter}
+                  onChange={(e) => setLogCategoryFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                >
+                  <option value="all">همه دسته‌بندی‌ها</option>
+                  {Object.entries(categoryLabelMap).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={logRoleFilter}
+                  onChange={(e) => setLogRoleFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                >
+                  <option value="all">همه نقش‌های کاربری</option>
+                  {Object.entries(roleLabelMap).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={logSeverityFilter}
+                  onChange={(e) => setLogSeverityFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                >
+                  <option value="all">همه سطوح اهمیت</option>
+                  <option value="info">عادی (Info)</option>
+                  <option value="warning">هشدار (Warning)</option>
+                  <option value="critical">حساس / بحرانی (Critical)</option>
+                </select>
+              </div>
+
+              {/* جدول اختصاصی لاگ فعالیت‌ها */}
+              {filteredLogs.length === 0 ? (
+                <div className="p-10 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                  هیچ رویدادی مطابق با فیلترهای انتخابی یافت نشد.
+                </div>
+              ) : (
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-[540px] overflow-y-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold sticky top-0 z-10">
+                      <tr>
+                        <th className="p-3">ردیف</th>
+                        <th className="p-3">تاریخ و ساعت</th>
+                        <th className="p-3">کاربر و نقش</th>
+                        <th className="p-3">دسته‌بندی</th>
+                        <th className="p-3">عنوان اقدام</th>
+                        <th className="p-3">هدف / شناسه</th>
+                        <th className="p-3">شرح و جزئیات</th>
+                        <th className="p-3 text-center">سطح</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filteredLogs.map((log, idx) => (
+                        <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-mono text-slate-500">{idx + 1}</td>
+                          <td className="p-3 whitespace-nowrap font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                            {log.date}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold text-slate-900 dark:text-white">{log.actorName}</div>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                                {roleLabelMap[log.actorRole] || log.actorRole}
+                              </span>
+                              {log.actorUsername && (
+                                <span className="text-[10px] text-slate-400 font-mono" dir="ltr">
+                                  ({log.actorUsername})
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 whitespace-nowrap">
+                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800">
+                              {categoryLabelMap[log.category] || log.category}
+                            </span>
+                          </td>
+                          <td className="p-3 font-bold text-slate-800 dark:text-slate-100">{log.action}</td>
+                          <td className="p-3 text-teal-700 dark:text-teal-300 font-semibold">{log.targetName || '-'}</td>
+                          <td className="p-3 text-slate-600 dark:text-slate-300 max-w-xs leading-relaxed">
+                            {log.details}
+                          </td>
+                          <td className="p-3 text-center whitespace-nowrap">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                                log.severity === 'critical'
+                                  ? 'bg-rose-600 text-white'
+                                  : log.severity === 'warning'
+                                  ? 'bg-amber-500 text-white'
+                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                              }`}
+                            >
+                              {log.severity === 'critical' ? 'حساس' : log.severity === 'warning' ? 'هشدار' : 'عادی'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================= */}
+      {/* ۷. تب پیکربندی سیستم، سرپرستان (چندسرا) و شخصی‌سازی ظاهر */}
       {/* ========================================================= */}
       {mainTab === 'settings' && (
         <div className="space-y-6 animate-in fade-in duration-200">

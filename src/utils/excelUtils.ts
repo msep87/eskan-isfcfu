@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { Student, Dormitory, Room, Bed } from '../types';
+import { Student, Dormitory, Room, Bed, ActivityLog } from '../types';
 
 // تبدیل اعداد فارسی و عربی به انگلیسی جهت پردازش دقیق
 export function toEnglishDigits(str: string | number): string {
@@ -1042,6 +1042,58 @@ export function exportCounselorReportsToExcel(reports: any[]) {
   XLSX.utils.book_append_sheet(wb, ws, 'گزارش‌های مشاوره');
   XLSX.writeFile(wb, `گزارش_جامع_فعالیت_مشاوران_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
+
+// خروجی اکسل گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران
+export function exportActivityLogsToExcel(logs: ActivityLog[]) {
+  const roleMap: Record<string, string> = {
+    admin: 'مدیر کل',
+    supervisor: 'سرپرست سرا',
+    student: 'دانشجو',
+    maintenance: 'کارشناس تأسیسات',
+    warehouse: 'مسئول انبار',
+    counselor: 'کارشناس مشاور',
+    system: 'سیستم',
+  };
+
+  const categoryMap: Record<string, string> = {
+    auth: 'ورود و دسترسی‌ها',
+    student: 'پرونده دانشجویان',
+    accommodation: 'اسکان و تخت‌ها',
+    dorm_structure: 'ساختار سرا و اتاق',
+    staff: 'پرسنل و کاربران',
+    maintenance: 'امور تأسیسات',
+    warehouse: 'انبار و تجهیزات',
+    warning_eval: 'تذکر، اخطار و ارزیابی',
+    settings: 'تنظیمات و اطلاعیه‌ها',
+    backup: 'پشتیبان و بازنشانی',
+    excel: 'ورود اطلاعات اکسل',
+  };
+
+  const severityMap: Record<string, string> = {
+    info: 'عادی',
+    warning: 'هشدار',
+    critical: 'حساس / بحرانی',
+  };
+
+  const data = logs.map((l, idx) => ({
+    'ردیف': idx + 1,
+    'تاریخ و ساعت': l.date,
+    'کاربر اقدام‌کننده': l.actorName,
+    'نام کاربری / کد': l.actorUsername || '-',
+    'نقش': roleMap[l.actorRole] || l.actorRole,
+    'دسته‌بندی': categoryMap[l.category] || l.category,
+    'عنوان اقدام': l.action,
+    'هدف / شناسه مرتبط': l.targetName || '-',
+    'جزئیات': l.details,
+    'سطح اهمیت': severityMap[l.severity || 'info'] || 'عادی',
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'لاگ فعالیت‌ها');
+  XLSX.writeFile(wb, `گزارش_لاگ_فعالیت_و_دسترسی_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
 
 
 

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Student, Dormitory, Room, Bed, Announcement, RoomWarning, AppSettings } from '../types';
+import { Student, Dormitory, Room, Bed, Announcement, RoomWarning, AppSettings, StudentEvaluation } from '../types';
+import { Storage } from '../utils/storage';
 import { RoommatesCard } from './RoommatesCard';
 import { VisualBedPicker } from './VisualBedPicker';
 import { StudentProfileModal } from './StudentProfileModal';
@@ -26,6 +27,8 @@ import {
   Printer,
   BookOpen,
   HeartHandshake,
+  Award,
+  MessageSquareWarning,
 } from 'lucide-react';
 
 interface StudentDashboardProps {
@@ -80,6 +83,25 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const myRoomWarnings = studentRoom
     ? warnings.filter((w) => w.roomId === studentRoom.id)
     : [];
+
+  // تذکرات، اخطارها و نمرات ارزیابی فردی و اتاق دانشجو
+  const myEvaluations: StudentEvaluation[] = Storage.getStudentEvaluations().filter(
+    (e) =>
+      e.studentId === student.studentId ||
+      (e.scope === 'room' && student.assignedRoomId && e.roomId === student.assignedRoomId)
+  );
+  const individualEvalList = myEvaluations.filter((e) => e.type === 'evaluation' && e.scope === 'individual');
+  const roomEvalList = myEvaluations.filter((e) => e.type === 'evaluation' && e.scope === 'room');
+  const activePersonalAlerts = myEvaluations.filter((e) => e.type !== 'evaluation' && !e.resolved);
+
+  const latestIndividualScore =
+    individualEvalList.length > 0 && typeof individualEvalList[0].score === 'number'
+      ? individualEvalList[0].score
+      : student.previousScore ?? 100;
+  const latestRoomScore =
+    roomEvalList.length > 0 && typeof roomEvalList[0].score === 'number'
+      ? roomEvalList[0].score
+      : null;
 
   return (
     <div className="space-y-6">
@@ -419,22 +441,159 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
       {/* محتوای تب فعال */}
       {activeTab === 'overview' && (
-        <RoommatesCard
-          student={student}
-          dorm={studentDorm}
-          room={studentRoom}
-          bed={studentBed}
-          roommates={roommates}
-          roomWarnings={myRoomWarnings}
-          onSelectBedClick={() => {
-            if (!student.isProfileCompleted) {
-              setIsProfileModalOpen(true);
-              return;
-            }
-            setActiveTab('picker');
-          }}
-          isSelectionActive={settings.selectionActive}
-        />
+        <div className="space-y-6">
+          {/* کارت ارزیابی عملکرد، نمره فردی/اتاق و تذکرات دانشجو */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
+                    ارزیابی عملکرد، نمره فردی / اتاق و وضعیت تذکرات انضباطی
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    نمرات ارزیابی و تذکرات ثبت‌شده توسط سرپرستی و مدیریت کل سراهای دانشجویی
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+              <div className="p-4 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50">
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 block">
+                  نمره ارزیابی فردی
+                </span>
+                <div className="text-2xl font-black text-emerald-800 dark:text-emerald-200 mt-1">
+                  {latestIndividualScore}{' '}
+                  <span className="text-xs font-bold text-emerald-600/80">از ۱۰۰</span>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-900/50">
+                <span className="text-[11px] font-bold text-teal-700 dark:text-teal-300 block">
+                  نمره ارزیابی اتاق {studentRoom ? `(اتاق ${studentRoom.roomNumber})` : ''}
+                </span>
+                <div className="text-2xl font-black text-teal-800 dark:text-teal-200 mt-1">
+                  {latestRoomScore !== null ? (
+                    <>
+                      {latestRoomScore} <span className="text-xs font-bold text-teal-600/80">از ۱۰۰</span>
+                    </>
+                  ) : (
+                    <span className="text-sm font-bold text-slate-500 dark:text-slate-400">هنوز ثبت نشده</span>
+                  )}
+                </div>
+              </div>
+
+              <div
+                className={`p-4 rounded-2xl border ${
+                  activePersonalAlerts.length + myRoomWarnings.filter((w) => !w.resolved).length > 0
+                    ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50'
+                    : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
+                }`}
+              >
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">
+                  تذکرات و اخطارهای فعال
+                </span>
+                <div
+                  className={`text-2xl font-black mt-1 ${
+                    activePersonalAlerts.length + myRoomWarnings.filter((w) => !w.resolved).length > 0
+                      ? 'text-rose-700 dark:text-rose-300'
+                      : 'text-slate-800 dark:text-slate-200'
+                  }`}
+                >
+                  {activePersonalAlerts.length + myRoomWarnings.filter((w) => !w.resolved).length}{' '}
+                  <span className="text-xs font-bold">مورد</span>
+                </div>
+              </div>
+            </div>
+
+            {myEvaluations.length === 0 ? (
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 text-center text-xs text-slate-500">
+                تاکنون هیچ تذکر، اخطار یا نمره ارزیابی جدیدی در کارتابل شما ثبت نشده است و وضعیت انضباطی شما مطلوب می‌باشد.
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {myEvaluations.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                      ev.type === 'evaluation'
+                        ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
+                        : ev.type === 'warning'
+                        ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50'
+                        : 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50'
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold inline-flex items-center gap-1 ${
+                            ev.type === 'evaluation'
+                              ? 'bg-emerald-600 text-white'
+                              : ev.type === 'warning'
+                              ? 'bg-rose-600 text-white'
+                              : 'bg-amber-500 text-white'
+                          }`}
+                        >
+                          {ev.type === 'evaluation' ? (
+                            <Award className="w-3 h-3" />
+                          ) : (
+                            <MessageSquareWarning className="w-3 h-3" />
+                          )}
+                          <span>
+                            {ev.type === 'evaluation'
+                              ? `نمره ارزیابی: ${ev.score ?? '-'} از ۱۰۰`
+                              : ev.type === 'warning'
+                              ? 'اخطار رسمی'
+                              : 'تذکر'}
+                          </span>
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300">
+                          {ev.scope === 'room' ? 'مربوط به اتاق' : 'ارزیابی فردی'}
+                        </span>
+                        {ev.type !== 'evaluation' && (
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
+                              ev.resolved
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                                : 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
+                            }`}
+                          >
+                            {ev.resolved ? 'برطرف شده' : 'فعال'}
+                          </span>
+                        )}
+                      </div>
+                      <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white">{ev.title}</h4>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{ev.description}</p>
+                      <div className="text-[10px] text-slate-400">
+                        ثبت‌کننده: {ev.evaluatorName} • تاریخ: {ev.date}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <RoommatesCard
+            student={student}
+            dorm={studentDorm}
+            room={studentRoom}
+            bed={studentBed}
+            roommates={roommates}
+            roomWarnings={myRoomWarnings}
+            onSelectBedClick={() => {
+              if (!student.isProfileCompleted) {
+                setIsProfileModalOpen(true);
+                return;
+              }
+              setActiveTab('picker');
+            }}
+            isSelectionActive={settings.selectionActive}
+          />
+        </div>
       )}
 
       {activeTab === 'picker' && (

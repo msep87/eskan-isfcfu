@@ -65,9 +65,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     );
 
     if (student) {
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'ورود موفق دانشجو',
+        details: `دانشجو ${student.fullName} (${student.studentId}) وارد سامانه شد.`,
+        targetName: `${student.fullName} (${student.studentId})`,
+        actorName: student.fullName,
+        actorRole: 'student',
+        actorUsername: student.studentId,
+      });
       onLoginSuccess({ role: 'student', student });
       onClose();
     } else {
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تلاش ناموفق ورود دانشجو',
+        details: `تلاش ناموفق ورود با شماره دانشجویی «${cleanId}» ثبت شد.`,
+        targetName: cleanId,
+        severity: 'warning',
+        actorName: 'کاربر مهمان',
+        actorRole: 'system',
+        actorUsername: cleanId,
+      });
       setErrorMsg('اطلاعات وارد شده یافت نشد. شماره دانشجویی یا کد ملی نادرست است.');
     }
   };
@@ -82,9 +101,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         (s) => s.username === username.trim() && s.password === password.trim()
       );
       if (sup) {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'ورود موفق سرپرست سرا',
+          details: `سرپرست ${sup.fullName} (${sup.username}) وارد سامانه شد.`,
+          targetName: sup.fullName,
+          actorName: sup.fullName,
+          actorRole: 'supervisor',
+          actorUsername: sup.username,
+        });
         onLoginSuccess({ role: 'supervisor', supervisor: sup });
         onClose();
       } else {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'تلاش ناموفق ورود سرپرست',
+          details: `تلاش ناموفق ورود سرپرست با نام کاربری «${username.trim() || '-'}» ثبت شد.`,
+          targetName: username.trim() || '-',
+          severity: 'warning',
+          actorName: 'کاربر مهمان',
+          actorRole: 'system',
+          actorUsername: username.trim(),
+        });
         setErrorMsg('نام کاربری یا کلمه عبور سرپرست اشتباه است.');
       }
     } else if (tab === 'counselor') {
@@ -95,12 +133,41 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       );
       if (cns) {
         if (cns.status === 'inactive') {
+          Storage.addActivityLog({
+            category: 'auth',
+            action: 'تلاش ورود حساب غیرفعال مشاور',
+            details: `کارشناس مشاور ${cns.fullName} (${cns.username}) با حساب غیرفعال تلاش به ورود کرد.`,
+            targetName: cns.fullName,
+            severity: 'warning',
+            actorName: cns.fullName,
+            actorRole: 'counselor',
+            actorUsername: cns.username,
+          });
           setErrorMsg('حساب کاربری مشاور غیرفعال است.');
           return;
         }
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'ورود موفق کارشناس مشاور',
+          details: `مشاور ${cns.fullName} (${cns.username}) وارد سامانه شد.`,
+          targetName: cns.fullName,
+          actorName: cns.fullName,
+          actorRole: 'counselor',
+          actorUsername: cns.username,
+        });
         onLoginSuccess({ role: 'counselor', counselor: cns });
         onClose();
       } else {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'تلاش ناموفق ورود مشاور',
+          details: `تلاش ناموفق ورود مشاور با نام کاربری «${cleanU || '-'}» ثبت شد.`,
+          targetName: cleanU || '-',
+          severity: 'warning',
+          actorName: 'کاربر مهمان',
+          actorRole: 'system',
+          actorUsername: cleanU,
+        });
         setErrorMsg('نام کاربری یا کلمه عبور کارشناس مشاور اشتباه است.');
       }
     } else if (tab === 'maintenance') {
@@ -111,12 +178,41 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       );
       if (tech) {
         if (tech.status === 'inactive') {
+          Storage.addActivityLog({
+            category: 'auth',
+            action: 'تلاش ورود حساب غیرفعال تأسیسات',
+            details: `کارشناس تأسیسات ${tech.fullName} (${tech.username}) با حساب غیرفعال تلاش به ورود کرد.`,
+            targetName: tech.fullName,
+            severity: 'warning',
+            actorName: tech.fullName,
+            actorRole: 'maintenance',
+            actorUsername: tech.username,
+          });
           setErrorMsg('حساب کاربری تکنسین غیرفعال شده است. لطفاً با مدیر سیستم تماس بگیرید.');
           return;
         }
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'ورود موفق کارشناس تأسیسات',
+          details: `تکنسین تأسیسات ${tech.fullName} (${tech.username}) وارد سامانه شد.`,
+          targetName: tech.fullName,
+          actorName: tech.fullName,
+          actorRole: 'maintenance',
+          actorUsername: tech.username,
+        });
         onLoginSuccess({ role: 'maintenance', technician: tech });
         onClose();
       } else {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'تلاش ناموفق ورود تأسیسات',
+          details: `تلاش ناموفق ورود تأسیسات با نام کاربری «${cleanU || '-'}» ثبت شد.`,
+          targetName: cleanU || '-',
+          severity: 'warning',
+          actorName: 'کاربر مهمان',
+          actorRole: 'system',
+          actorUsername: cleanU,
+        });
         setErrorMsg('نام کاربری یا کلمه عبور کارشناس تأسیسات اشتباه است.');
       }
     } else if (tab === 'warehouse') {
@@ -127,20 +223,68 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       );
       if (wh) {
         if (wh.status === 'inactive' || wh.isActive === false) {
+          Storage.addActivityLog({
+            category: 'auth',
+            action: 'تلاش ورود حساب غیرفعال انبار',
+            details: `مسئول انبار ${wh.fullName} (${wh.username}) با حساب غیرفعال تلاش به ورود کرد.`,
+            targetName: wh.fullName,
+            severity: 'warning',
+            actorName: wh.fullName,
+            actorRole: 'warehouse',
+            actorUsername: wh.username,
+          });
           setErrorMsg('حساب کاربری پرسنل انبار غیرفعال است.');
           return;
         }
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'ورود موفق مسئول انبار',
+          details: `مسئول انبار ${wh.fullName} (${wh.username}) وارد سامانه شد.`,
+          targetName: wh.fullName,
+          actorName: wh.fullName,
+          actorRole: 'warehouse',
+          actorUsername: wh.username,
+        });
         onLoginSuccess({ role: 'warehouse', staff: wh });
         onClose();
       } else {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'تلاش ناموفق ورود انبار',
+          details: `تلاش ناموفق ورود مسئول انبار با نام کاربری «${cleanU || '-'}» ثبت شد.`,
+          targetName: cleanU || '-',
+          severity: 'warning',
+          actorName: 'کاربر مهمان',
+          actorRole: 'system',
+          actorUsername: cleanU,
+        });
         setErrorMsg('نام کاربری یا کلمه عبور مسئول انبار اشتباه است.');
       }
     } else if (tab === 'admin') {
       const currentAdminPass = Storage.getSettings().adminPassword || '261';
       if (username.trim() === 'admin' && password.trim() === currentAdminPass) {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'ورود موفق مدیر کل سامانه',
+          details: 'مدیر کل سراهای دانشجویی (admin) با موفقیت وارد سامانه شد.',
+          targetName: 'admin',
+          actorName: 'مدیر کل سراهای دانشجویی',
+          actorRole: 'admin',
+          actorUsername: 'admin',
+        });
         onLoginSuccess({ role: 'admin', name: 'مدیر کل سراهای دانشجویی', username: 'admin' });
         onClose();
       } else {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'تلاش ناموفق ورود مدیر کل',
+          details: `تلاش ناموفق ورود با نام کاربری «${username.trim() || '-'}» در بخش مدیر کل ثبت شد.`,
+          targetName: username.trim() || '-',
+          severity: 'critical',
+          actorName: 'کاربر مهمان',
+          actorRole: 'system',
+          actorUsername: username.trim(),
+        });
         setErrorMsg('نام کاربری یا کلمه عبور مدیر اشتباه است.');
       }
     }

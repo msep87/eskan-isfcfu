@@ -386,3 +386,49 @@ export interface CounselorShiftReport {
   createdAt: string;
 }
 
+export type ActivityLogCategory =
+  | 'auth'
+  | 'student'
+  | 'accommodation'
+  | 'dorm_structure'
+  | 'staff'
+  | 'maintenance'
+  | 'warehouse'
+  | 'warning_eval'
+  | 'settings'
+  | 'backup'
+  | 'excel';
+
+export interface ActivityLog {
+  id: string;
+  timestamp: string; // ISO string برای مرتب‌سازی دقیق
+  date: string; // تاریخ و ساعت شمسی خوانا
+  actorName: string;
+  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'system';
+  actorUsername?: string;
+  category: ActivityLogCategory;
+  action: string;
+  details: string;
+  targetName?: string;
+  severity?: 'info' | 'warning' | 'critical';
+}
+
+export interface StudentEvaluation {
+  id: string;
+  studentId: string;
+  studentName: string;
+  dormId?: string;
+  dormName?: string;
+  roomId?: string;
+  roomNumber?: string;
+  type: 'evaluation' | 'notice' | 'warning';
+  scope: 'individual' | 'room';
+  score?: number; // نمره ارزیابی بین ۰ تا ۱۰۰
+  title: string;
+  description: string;
+  evaluatorName: string;
+  evaluatorRole: 'admin' | 'supervisor';
+  date: string;
+  resolved?: boolean;
+  resolvedAt?: string;
+}

@@ -12,6 +12,7 @@ import {
   MaintenanceStaff,
   SupervisorShiftSchedule,
   ShiftLogReport,
+  StudentEvaluation,
 } from '../types';
 import { Storage } from '../utils/storage';
 import { exportShiftReportsToExcel } from '../utils/excelUtils';
@@ -19,6 +20,7 @@ import { SupervisorRoomManager } from './SupervisorRoomManager';
 import { VisualBedPicker } from './VisualBedPicker';
 import { RoomWarningModal } from './RoomWarningModal';
 import { DormIdCardModal } from './DormIdCardModal';
+import { StudentEvaluationModal } from './StudentEvaluationModal';
 import {
   Building2,
   Users,
@@ -55,6 +57,7 @@ import {
   Boxes,
   BookOpen,
   Printer,
+  Award,
 } from 'lucide-react';
 
 interface SupervisorDashboardProps {
@@ -94,6 +97,9 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'announcements' | 'students' | 'maintenance' | 'warehouse' | 'shifts'>('manager');
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
+  const [isStudentEvalModalOpen, setIsStudentEvalModalOpen] = useState(false);
+  const [evalTargetStudent, setEvalTargetStudent] = useState<Student | null>(null);
+  const [evalRefreshTick, setEvalRefreshTick] = useState(0);
 
   // فرم ثبت گزارش شیفت و دفتر وقایع روزانه
   const [isAddShiftReportModalOpen, setIsAddShiftReportModalOpen] = useState(false);
@@ -430,6 +436,24 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
         onWarningAdded={onRefreshData}
       />
 
+      <StudentEvaluationModal
+        isOpen={isStudentEvalModalOpen}
+        onClose={() => {
+          setIsStudentEvalModalOpen(false);
+          setEvalTargetStudent(null);
+        }}
+        students={students}
+        dorms={myDorms.length > 0 ? myDorms : dorms}
+        rooms={rooms}
+        initialStudent={evalTargetStudent}
+        evaluatorName={supervisor.fullName}
+        evaluatorRole="supervisor"
+        onSaved={() => {
+          setEvalRefreshTick((t) => t + 1);
+          onRefreshData();
+        }}
+      />
+
       {/* بنر سرپرستی و آمار */}
       <div className="bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-teal-800/40">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
@@ -508,6 +532,17 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           >
             <ShieldAlert className="w-4 h-4" />
             <span>اعلام اخطار به اتاق</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setEvalTargetStudent(null);
+              setIsStudentEvalModalOpen(true);
+            }}
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-purple-600/20 cursor-pointer"
+          >
+            <Award className="w-4 h-4" />
+            <span>تذکر / نمره ارزیابی دانشجو</span>
           </button>
 
           <button
@@ -1040,6 +1075,94 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
               </div>
             )}
           </div>
+
+          {/* تذکرات، اخطارها و ارزیابی‌های فردی و اتاق دانشجویان */}
+          {(() => {
+            void evalRefreshTick;
+            const myDormIds = (myDorms.length > 0 ? myDorms : dorms).map((d) => d.id);
+            const studentEvals: StudentEvaluation[] = Storage.getStudentEvaluations().filter(
+              (ev) => !ev.dormId || myDormIds.includes(ev.dormId)
+            );
+            return (
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                    <Award className="w-5 h-5 text-indigo-600" />
+                    <span>تذکرات، اخطارها و نمرات ارزیابی دانشجویان ({studentEvals.length})</span>
+                  </h3>
+                  <button
+                    onClick={() => {
+                      setEvalTargetStudent(null);
+                      setIsStudentEvalModalOpen(true);
+                    }}
+                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>ثبت مورد جدید</span>
+                  </button>
+                </div>
+
+                {studentEvals.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    هنوز تذکر یا نمره ارزیابی فردی/اتاقی برای دانشجویان ثبت نشده است.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {studentEvals.map((ev) => (
+                      <div
+                        key={ev.id}
+                        className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
+                                ev.type === 'evaluation'
+                                  ? 'bg-emerald-600 text-white'
+                                  : ev.type === 'warning'
+                                  ? 'bg-rose-600 text-white'
+                                  : 'bg-amber-500 text-white'
+                              }`}
+                            >
+                              {ev.type === 'evaluation'
+                                ? `نمره: ${ev.score ?? '-'}`
+                                : ev.type === 'warning'
+                                ? 'اخطار رسمی'
+                                : 'تذکر'}
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold">
+                              {ev.scope === 'room' ? 'اتاق' : 'فردی'}
+                            </span>
+                            <span className="font-extrabold text-xs text-slate-900 dark:text-white">
+                              {ev.studentName} ({ev.studentId})
+                            </span>
+                          </div>
+                          <div className="text-xs font-bold text-slate-800 dark:text-slate-200">{ev.title}</div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">{ev.description}</div>
+                          <div className="text-[10px] text-slate-400 mt-1">
+                            ثبت توسط: {ev.evaluatorName} • {ev.date}
+                          </div>
+                        </div>
+
+                        {ev.type !== 'evaluation' && !ev.resolved && (
+                          <button
+                            onClick={() => {
+                              Storage.resolveStudentEvaluation(ev.id);
+                              setEvalRefreshTick((t) => t + 1);
+                              onRefreshData();
+                            }}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shrink-0 cursor-pointer"
+                          >
+                            ثبت رفع مورد
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1111,13 +1234,25 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                       <td className="p-3 text-rose-600" dir="ltr">{st.emergencyPhone || '-'}</td>
                       <td className="p-3">{st.province} - {st.city}</td>
                       <td className="p-3 text-center">
-                        <button
-                          onClick={() => setViewCardStudent(st)}
-                          className="p-1.5 rounded-lg bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 hover:bg-teal-100 border border-teal-200 dark:border-teal-800 transition cursor-pointer"
-                          title="مشاهده و چاپ کارت شناسایی و اسکان سرا"
-                        >
-                          <QrCode className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              setEvalTargetStudent(st);
+                              setIsStudentEvalModalOpen(true);
+                            }}
+                            className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 hover:bg-purple-100 border border-purple-200 dark:border-purple-800 transition cursor-pointer"
+                            title="ثبت تذکر، اخطار یا نمره ارزیابی دانشجو"
+                          >
+                            <Award className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setViewCardStudent(st)}
+                            className="p-1.5 rounded-lg bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 hover:bg-teal-100 border border-teal-200 dark:border-teal-800 transition cursor-pointer"
+                            title="مشاهده و چاپ کارت شناسایی و اسکان سرا"
+                          >
+                            <QrCode className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

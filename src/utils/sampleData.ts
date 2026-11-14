@@ -18,6 +18,8 @@ import {
   CounselorStaff,
   CounselorShiftSchedule,
   CounselorShiftReport,
+  ActivityLog,
+  StudentEvaluation,
 } from '../types';
 
 export const INITIAL_SETTINGS: AppSettings = {
@@ -89,3 +91,10 @@ export const INITIAL_COUNSELOR_SHIFTS: CounselorShiftSchedule[] = [];
 
 // گزارشات شیفت مشاوران (کاملاً خالی)
 export const INITIAL_COUNSELOR_REPORTS: CounselorShiftReport[] = [];
+
+// لاگ فعالیت‌ها و دسترسی‌های کاربران (کاملاً خالی)
+export const INITIAL_ACTIVITY_LOGS: ActivityLog[] = [];
+
+// تذکرات، اخطارها و نمرات ارزیابی فردی و اتاق دانشجویان (کاملاً خالی)
+export const INITIAL_STUDENT_EVALUATIONS: StudentEvaluation[] = [];
+

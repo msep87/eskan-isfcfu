@@ -19,6 +19,9 @@ import {
   CounselorStaff,
   CounselorShiftSchedule,
   CounselorShiftReport,
+  ActivityLog,
+  ActivityLogCategory,
+  StudentEvaluation,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -38,6 +41,8 @@ import {
   INITIAL_COUNSELORS,
   INITIAL_COUNSELOR_SHIFTS,
   INITIAL_COUNSELOR_REPORTS,
+  INITIAL_ACTIVITY_LOGS,
+  INITIAL_STUDENT_EVALUATIONS,
   generateInitialRoomsAndBeds,
 } from './sampleData';
 
@@ -64,6 +69,8 @@ const STORAGE_KEYS = {
   COUNSELORS: 'farhangian_dorm_counselors_prod',
   COUNSELOR_SHIFTS: 'farhangian_dorm_counselor_shifts_prod',
   COUNSELOR_REPORTS: 'farhangian_dorm_counselor_reports_prod',
+  ACTIVITY_LOGS: 'farhangian_dorm_activity_logs_prod',
+  STUDENT_EVALUATIONS: 'farhangian_dorm_student_evaluations_prod',
 };
 
 
@@ -116,6 +123,12 @@ export function initializeStorageIfNeeded(): void {
   }
   if (!localStorage.getItem(STORAGE_KEYS.COUNSELOR_REPORTS)) {
     localStorage.setItem(STORAGE_KEYS.COUNSELOR_REPORTS, JSON.stringify(INITIAL_COUNSELOR_REPORTS));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.ACTIVITY_LOGS)) {
+    localStorage.setItem(STORAGE_KEYS.ACTIVITY_LOGS, JSON.stringify(INITIAL_ACTIVITY_LOGS));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.STUDENT_EVALUATIONS)) {
+    localStorage.setItem(STORAGE_KEYS.STUDENT_EVALUATIONS, JSON.stringify(INITIAL_STUDENT_EVALUATIONS));
   }
 
   if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
@@ -262,6 +275,12 @@ export const Storage = {
     };
     announcements.unshift(newAnn);
     Storage.setAnnouncements(announcements);
+    Storage.addActivityLog({
+      category: 'settings',
+      action: 'انتشار اطلاعیه جدید',
+      details: `اطلاعیه «${newAnn.title}» ثبت شد.`,
+      targetName: newAnn.title,
+    });
     return newAnn;
   },
 
@@ -275,8 +294,15 @@ export const Storage = {
   },
 
   deleteAnnouncement: (id: string) => {
+    const target = Storage.getAnnouncements().find((a) => a.id === id);
     const announcements = Storage.getAnnouncements().filter((a) => a.id !== id);
     Storage.setAnnouncements(announcements);
+    Storage.addActivityLog({
+      category: 'settings',
+      action: 'حذف اطلاعیه',
+      details: `اطلاعیه «${target?.title || id}» حذف شد.`,
+      targetName: target?.title || id,
+    });
   },
 
   toggleAnnouncementHomePage: (id: string) => {
@@ -352,6 +378,12 @@ export const Storage = {
 
     Storage.setRooms(rooms);
     Storage.setBeds(beds);
+    Storage.addActivityLog({
+      category: 'dorm_structure',
+      action: 'ایجاد اتاق جدید',
+      details: `اتاق ${roomNumber} با ظرفیت ${capacity} تخت ایجاد شد.`,
+      targetName: `اتاق ${roomNumber}`,
+    });
 
     return {
       success: true,
@@ -368,6 +400,12 @@ export const Storage = {
     }
     dorms.push(dorm);
     Storage.setDormitories(dorms);
+    Storage.addActivityLog({
+      category: 'dorm_structure',
+      action: 'ایجاد سرای جدید',
+      details: `سرای «${dorm.name}» در پردیس ${dorm.campus} ثبت شد.`,
+      targetName: dorm.name,
+    });
     return { success: true, message: `سرای «${dorm.name}» با موفقیت افزوده شد.` };
   },
 
@@ -377,10 +415,18 @@ export const Storage = {
     if (dorms.length <= 1) {
       return { success: false, message: 'حداقل یک سرا باید در سامانه باقی بماند و امکان حذف همه سراها وجود ندارد.' };
     }
+    const targetDorm = dorms.find((d) => d.id === dormId);
     const rooms = Storage.getRooms().filter((r) => r.dormId === dormId);
     rooms.forEach((r) => Storage.deleteRoom(r.id));
     const updatedDorms = dorms.filter((d) => d.id !== dormId);
     Storage.setDormitories(updatedDorms);
+    Storage.addActivityLog({
+      category: 'dorm_structure',
+      action: 'حذف سرا',
+      details: `سرای «${targetDorm?.name || dormId}» و کلیه اتاق‌ها و تخت‌های آن حذف شد.`,
+      targetName: targetDorm?.name || dormId,
+      severity: 'warning',
+    });
     return { success: true, message: 'سرا و کلیه اتاق‌ها و تخت‌های مربوطه با موفقیت حذف گردیدند.' };
   },
 
@@ -578,6 +624,13 @@ export const Storage = {
     Storage.setBeds(beds);
     Storage.setStudents(students);
 
+    Storage.addActivityLog({
+      category: 'accommodation',
+      action: isConfirmed ? 'تخصیص قطعی تخت' : 'درخواست انتخاب تخت (موقت)',
+      details: `تخت ${targetBed.label} در اتاق ${room?.roomNumber || '-'} برای دانشجو ${student.fullName} (${student.studentId}) ثبت شد.`,
+      targetName: `${student.fullName} (${student.studentId})`,
+    });
+
     // بروزرسانی کاربر فعال اگر دانشجو لاگین است
     const currentUser = Storage.getCurrentUser();
     if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === studentId) {
@@ -609,11 +662,18 @@ export const Storage = {
       bed.assignmentStatus = 'confirmed';
     }
 
+    const room = rooms.find((r) => r.id === student.assignedRoomId);
+
     Storage.setStudents(students);
     Storage.setBeds(beds);
+    Storage.addActivityLog({
+      category: 'accommodation',
+      action: 'تأیید قطعی اسکان دانشجو',
+      details: `اسکان دانشجو ${student.fullName} (${student.studentId}) در اتاق ${room?.roomNumber || '-'} تأیید قطعی شد.`,
+      targetName: `${student.fullName} (${student.studentId})`,
+    });
 
     // ارسال پیام تأیید قطعی به دانشجو
-    const room = rooms.find((r) => r.id === student.assignedRoomId);
     const messages = Storage.getMessages();
     messages.unshift({
       id: `msg_sys_confirm_${Date.now()}`,
@@ -686,6 +746,12 @@ export const Storage = {
       Storage.setStudents(students);
       Storage.setBeds(beds);
       Storage.setMessages(messages);
+      Storage.addActivityLog({
+        category: 'accommodation',
+        action: 'تأیید دسته‌جمعی اسکان دانشجویان',
+        details: `تعداد ${count} درخواست اسکان موقت به صورت دسته‌جمعی تأیید قطعی شد.`,
+        targetName: `${count} دانشجو`,
+      });
     }
 
     return {
@@ -742,6 +808,13 @@ export const Storage = {
     Storage.setStudents(students);
     Storage.setBeds(beds);
     Storage.setMessages(messages);
+    Storage.addActivityLog({
+      category: 'accommodation',
+      action: 'رد درخواست اسکان موقت',
+      details: `درخواست اسکان دانشجو ${student.fullName} (${student.studentId}) رد و تخت آزاد شد.`,
+      targetName: `${student.fullName} (${student.studentId})`,
+      severity: 'warning',
+    });
 
     const currentUser = Storage.getCurrentUser();
     if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === studentId) {
@@ -773,6 +846,15 @@ export const Storage = {
 
     Storage.setBeds(beds);
     Storage.setStudents(students);
+
+    if (student) {
+      Storage.addActivityLog({
+        category: 'accommodation',
+        action: 'تخلیه و آزادسازی تخت',
+        details: `تخت دانشجو ${student.fullName} (${student.studentId}) آزاد شد.`,
+        targetName: `${student.fullName} (${student.studentId})`,
+      });
+    }
 
     const currentUser = Storage.getCurrentUser();
     if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === studentId && student) {
@@ -868,6 +950,13 @@ export const Storage = {
     };
     warnings.unshift(newWarning);
     Storage.setWarnings(warnings);
+    Storage.addActivityLog({
+      category: 'warning_eval',
+      action: 'ثبت اخطار اتاق',
+      details: `اخطار «${newWarning.title}» با سطح ${newWarning.severity} توسط ${newWarning.supervisorName} ثبت شد.`,
+      targetName: `اتاق ${newWarning.roomId}`,
+      severity: newWarning.severity === 'critical' ? 'critical' : 'warning',
+    });
     return newWarning;
   },
 
@@ -878,6 +967,12 @@ export const Storage = {
     if (warn) {
       warn.resolved = true;
       Storage.setWarnings(warnings);
+      Storage.addActivityLog({
+        category: 'warning_eval',
+        action: 'بستن و رفع اخطار اتاق',
+        details: `اخطار «${warn.title}» برطرف و بسته شد.`,
+        targetName: warn.title,
+      });
     }
   },
 
@@ -933,12 +1028,20 @@ export const Storage = {
 
   // حذف دانشجو توسط مدیر (آزادسازی خودکار تخت)
   deleteStudent: (studentId: string): { success: boolean; message: string } => {
+    const target = Storage.getStudents().find((s) => s.studentId === studentId);
     Storage.releaseBed(studentId);
     const students = Storage.getStudents().filter((s) => s.studentId !== studentId);
     Storage.setStudents(students);
     if (typeof fetch === 'function') {
       fetch(`${API_BASE_URL}/students/${encodeURIComponent(studentId)}`, { method: 'DELETE' }).catch(() => {});
     }
+    Storage.addActivityLog({
+      category: 'student',
+      action: 'حذف پرونده دانشجو',
+      details: `پرونده دانشجو ${target?.fullName || ''} (${studentId}) از سامانه حذف شد.`,
+      targetName: `${target?.fullName || studentId}`,
+      severity: 'warning',
+    });
     return { success: true, message: 'دانشجو و سوابق اسکان وی با موفقیت از سیستم حذف شد.' };
   },
 
@@ -951,6 +1054,12 @@ export const Storage = {
     }
     students[index] = { ...students[index], ...updatedData };
     Storage.setStudents(students);
+    Storage.addActivityLog({
+      category: 'student',
+      action: 'ویرایش اطلاعات دانشجو',
+      details: `مشخصات دانشجو ${students[index].fullName} (${studentId}) ویرایش شد.`,
+      targetName: `${students[index].fullName} (${studentId})`,
+    });
 
     const currentUser = Storage.getCurrentUser();
     if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === studentId) {
@@ -965,6 +1074,12 @@ export const Storage = {
     if (index !== -1) {
       students[index] = { ...students[index], ...updatedData, isProfileCompleted: true };
       Storage.setStudents(students);
+      Storage.addActivityLog({
+        category: 'student',
+        action: 'تکمیل/ویرایش پروفایل دانشجو',
+        details: `پروفایل دانشجو ${students[index].fullName} (${studentId}) تکمیل و ذخیره شد.`,
+        targetName: `${students[index].fullName} (${studentId})`,
+      });
 
       const currentUser = Storage.getCurrentUser();
       if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === studentId) {
@@ -995,6 +1110,8 @@ export const Storage = {
       counselors: Storage.getCounselors(),
       counselorShifts: Storage.getCounselorShifts(),
       counselorReports: Storage.getCounselorReports(),
+      activityLogs: Storage.getActivityLogs(),
+      studentEvaluations: Storage.getStudentEvaluations(),
       exportedAt: new Date().toISOString(),
       appName: 'سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
     };
@@ -1032,6 +1149,14 @@ export const Storage = {
         if (data.counselors) Storage.setCounselors(data.counselors);
         if (data.counselorShifts) Storage.setCounselorShifts(data.counselorShifts);
         if (data.counselorReports) Storage.setCounselorReports(data.counselorReports);
+        if (data.activityLogs) Storage.setActivityLogs(data.activityLogs);
+        if (data.studentEvaluations) Storage.setStudentEvaluations(data.studentEvaluations);
+        Storage.addActivityLog({
+          category: 'backup',
+          action: 'بازیابی نسخه پشتیبان JSON',
+          details: 'فایل پشتیبان اطلاعات سامانه با موفقیت بازیابی شد.',
+          severity: 'warning',
+        });
         return true;
       }
       return false;
@@ -1107,6 +1232,12 @@ export const Storage = {
     };
     tasks.unshift(newTask);
     Storage.setMaintenanceTasks(tasks);
+    Storage.addActivityLog({
+      category: 'maintenance',
+      action: 'ثبت درخواست/مأموریت تأسیسات',
+      details: `گزارش «${newTask.title}» (${newTask.trackingCode}) در ${newTask.dormName} ثبت شد.`,
+      targetName: newTask.trackingCode,
+    });
     return {
       success: true,
       message: `سفارش کار و مأموریت تأسیساتی با کد رهگیری «${newTask.trackingCode}» با موفقیت ثبت شد.`,
@@ -1123,6 +1254,12 @@ export const Storage = {
     if (idx === -1) return { success: false, message: 'سفارش کار تأسیسات یافت نشد.' };
     tasks[idx] = { ...tasks[idx], ...updates };
     Storage.setMaintenanceTasks(tasks);
+    Storage.addActivityLog({
+      category: 'maintenance',
+      action: 'بروزرسانی وضعیت مأموریت تأسیسات',
+      details: `سفارش کار ${tasks[idx].trackingCode} به وضعیت «${tasks[idx].status}» تغییر یافت.`,
+      targetName: tasks[idx].trackingCode,
+    });
 
     // اگر تسک دارای پیام دانشجو بود و رفع شد، به دانشجو پیام خودکار بده
     if (updates.status === 'resolved' && tasks[idx].sourceMessageId) {
@@ -1238,6 +1375,12 @@ export const Storage = {
   resetToDefaults: () => {
     localStorage.clear();
     initializeStorageIfNeeded();
+    Storage.addActivityLog({
+      category: 'backup',
+      action: 'بازنشانی کل داده‌های سامانه',
+      details: 'اطلاعات سامانه به وضعیت پیش‌فرض کارخانه بازنشانی شد.',
+      severity: 'critical',
+    });
     void Storage.syncAllToCloud();
   },
 
@@ -1263,6 +1406,12 @@ export const Storage = {
       }
       cns.password = newPasswordInput;
       Storage.setCounselors(counselors);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور مشاور',
+        details: `کلمه عبور کارشناس مشاور ${cns.fullName} تغییر یافت.`,
+        targetName: cns.fullName,
+      });
       return { success: true, message: 'کلمه عبور مشاور با موفقیت تغییر یافت.' };
     }
 
@@ -1274,6 +1423,13 @@ export const Storage = {
       }
       settings.adminPassword = newPasswordInput;
       Storage.setSettings(settings);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور مدیر کل',
+        details: 'کلمه عبور حساب مدیر کل سامانه با موفقیت تغییر یافت.',
+        targetName: 'admin',
+        severity: 'warning',
+      });
       return { success: true, message: 'کلمه عبور مدیر سامانه با موفقیت تغییر یافت.' };
     }
 
@@ -1288,6 +1444,12 @@ export const Storage = {
       }
       sup.password = newPasswordInput;
       Storage.setSupervisors(supervisors);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور سرپرست',
+        details: `کلمه عبور سرپرست ${sup.fullName} تغییر یافت.`,
+        targetName: sup.fullName,
+      });
       return { success: true, message: 'کلمه عبور سرپرست با موفقیت تغییر یافت.' };
     }
 
@@ -1302,6 +1464,12 @@ export const Storage = {
       }
       tech.password = newPasswordInput;
       Storage.setMaintenanceStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور تأسیسات',
+        details: `کلمه عبور کارشناس تأسیسات ${tech.fullName} تغییر یافت.`,
+        targetName: tech.fullName,
+      });
       return { success: true, message: 'کلمه عبور کارشناس تأسیسات با موفقیت تغییر یافت.' };
     }
 
@@ -1316,6 +1484,12 @@ export const Storage = {
       }
       staff.password = newPasswordInput;
       Storage.setWarehouseStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور انباردار',
+        details: `کلمه عبور مسئول انبار ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
       return { success: true, message: 'کلمه عبور مسئول انبار با موفقیت تغییر یافت.' };
     }
 
@@ -1330,6 +1504,12 @@ export const Storage = {
       }
       st.nationalId = newPasswordInput;
       Storage.setStudents(students);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور دانشجو',
+        details: `کلمه عبور دانشجو ${st.fullName} (${st.studentId}) تغییر یافت.`,
+        targetName: `${st.fullName} (${st.studentId})`,
+      });
       return { success: true, message: 'کلمه عبور با موفقیت بروزرسانی شد.' };
     }
 
@@ -1611,6 +1791,12 @@ export const Storage = {
     }
 
     Storage.setWarehouseRequests(requests);
+    Storage.addActivityLog({
+      category: 'warehouse',
+      action: 'صدور حواله و تحویل کالا از انبار',
+      details: `حواله ${req.requestCode} برای «${req.itemTitle}» به تعداد ${data.issuedQuantity} ${req.unit} صادر شد.`,
+      targetName: req.requestCode,
+    });
     return {
       success: true,
       message: `حواله با کد «${req.requestCode}» صادر گردید، موجودی انبار کسر شد و هزینه به مأموریت پیوند داده شد.`,
@@ -1914,6 +2100,229 @@ export const Storage = {
   },
 
   // -------------------------------------------------------------
+  // سیستم ثبت و گزارش‌گیری لاگ فعالیت‌ها و دسترسی‌های کاربران (Activity Log)
+  // -------------------------------------------------------------
+  getActivityLogs: (): ActivityLog[] => {
+    return get<ActivityLog[]>(STORAGE_KEYS.ACTIVITY_LOGS, INITIAL_ACTIVITY_LOGS);
+  },
+
+  setActivityLogs: (logs: ActivityLog[]): void => {
+    set(STORAGE_KEYS.ACTIVITY_LOGS, logs);
+  },
+
+  addActivityLog: (entry: {
+    category: ActivityLogCategory;
+    action: string;
+    details: string;
+    targetName?: string;
+    severity?: 'info' | 'warning' | 'critical';
+    actorName?: string;
+    actorRole?: ActivityLog['actorRole'];
+    actorUsername?: string;
+  }): ActivityLog => {
+    const currentUser = Storage.getCurrentUser();
+    let actorName = entry.actorName;
+    let actorRole: ActivityLog['actorRole'] = entry.actorRole || 'system';
+    let actorUsername = entry.actorUsername;
+
+    if (!actorName && currentUser) {
+      if (currentUser.role === 'admin') {
+        actorName = currentUser.name;
+        actorRole = 'admin';
+        actorUsername = currentUser.username;
+      } else if (currentUser.role === 'supervisor') {
+        actorName = currentUser.supervisor.fullName;
+        actorRole = 'supervisor';
+        actorUsername = currentUser.supervisor.username;
+      } else if (currentUser.role === 'student') {
+        actorName = currentUser.student.fullName;
+        actorRole = 'student';
+        actorUsername = currentUser.student.studentId;
+      } else if (currentUser.role === 'maintenance') {
+        actorName = currentUser.technician.fullName;
+        actorRole = 'maintenance';
+        actorUsername = currentUser.technician.username;
+      } else if (currentUser.role === 'warehouse') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'warehouse';
+        actorUsername = currentUser.staff.username;
+      } else if (currentUser.role === 'counselor') {
+        actorName = currentUser.counselor.fullName;
+        actorRole = 'counselor';
+        actorUsername = currentUser.counselor.username;
+      }
+    }
+
+    const now = new Date();
+    const newLog: ActivityLog = {
+      id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: now.toISOString(),
+      date: `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })}`,
+      actorName: actorName || 'سیستم / کاربر مهمان',
+      actorRole,
+      actorUsername,
+      category: entry.category,
+      action: entry.action,
+      details: entry.details,
+      targetName: entry.targetName,
+      severity: entry.severity || 'info',
+    };
+
+    const logs = Storage.getActivityLogs();
+    const updated = [newLog, ...logs].slice(0, 500);
+    Storage.setActivityLogs(updated);
+    return newLog;
+  },
+
+  clearActivityLogs: (): void => {
+    Storage.setActivityLogs([]);
+  },
+
+  // -------------------------------------------------------------
+  // تذکرات، اخطارها و نمرات ارزیابی فردی و اتاق دانشجویان
+  // -------------------------------------------------------------
+  getStudentEvaluations: (): StudentEvaluation[] => {
+    return get<StudentEvaluation[]>(STORAGE_KEYS.STUDENT_EVALUATIONS, INITIAL_STUDENT_EVALUATIONS);
+  },
+
+  setStudentEvaluations: (items: StudentEvaluation[]): void => {
+    set(STORAGE_KEYS.STUDENT_EVALUATIONS, items);
+  },
+
+  addStudentEvaluation: (
+    data: Omit<StudentEvaluation, 'id' | 'date'>,
+    applyToRoommates = false
+  ): { success: boolean; createdCount: number; message: string } => {
+    const now = new Date();
+    const dateStr = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const items = Storage.getStudentEvaluations();
+    const students = Storage.getStudents();
+    const beds = Storage.getBeds();
+
+    const targetStudents: Student[] = [];
+    const primaryStudent = students.find((s) => s.studentId === data.studentId);
+    if (primaryStudent) {
+      targetStudents.push(primaryStudent);
+    }
+
+    if (applyToRoommates && data.scope === 'room' && data.roomId) {
+      const roomOccupantIds = beds
+        .filter((b) => b.roomId === data.roomId && b.studentId && b.studentId !== data.studentId)
+        .map((b) => b.studentId as string);
+      roomOccupantIds.forEach((occId) => {
+        const occ = students.find((s) => s.studentId === occId);
+        if (occ && !targetStudents.some((t) => t.studentId === occ.studentId)) {
+          targetStudents.push(occ);
+        }
+      });
+    }
+
+    if (targetStudents.length === 0) {
+      const single: StudentEvaluation = {
+        ...data,
+        id: `eval_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        date: dateStr,
+        resolved: data.type === 'evaluation' ? true : false,
+      };
+      items.unshift(single);
+      Storage.setStudentEvaluations(items);
+    } else {
+      targetStudents.forEach((st, idx) => {
+        const record: StudentEvaluation = {
+          ...data,
+          studentId: st.studentId,
+          studentName: st.fullName,
+          id: `eval_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+          date: dateStr,
+          resolved: data.type === 'evaluation' ? true : false,
+        };
+        items.unshift(record);
+
+        if (data.type === 'evaluation' && typeof data.score === 'number') {
+          st.previousScore = data.score;
+        }
+      });
+      Storage.setStudentEvaluations(items);
+      if (data.type === 'evaluation' && typeof data.score === 'number') {
+        Storage.setStudents(students);
+        const currentUser = Storage.getCurrentUser();
+        if (currentUser && currentUser.role === 'student') {
+          const updatedSelf = students.find((s) => s.studentId === currentUser.student.studentId);
+          if (updatedSelf) {
+            Storage.setCurrentUser({ role: 'student', student: updatedSelf });
+          }
+        }
+      }
+    }
+
+    const typeLabel =
+      data.type === 'evaluation'
+        ? `نمره ارزیابی (${data.score ?? '-'} از ۱۰۰)`
+        : data.type === 'warning'
+        ? 'اخطار رسمی'
+        : 'تذکر';
+    const scopeLabel = data.scope === 'room' ? 'اتاق' : 'فردی';
+    Storage.addActivityLog({
+      category: 'warning_eval',
+      action: `ثبت ${typeLabel} (${scopeLabel})`,
+      details: `${typeLabel} با عنوان «${data.title}» برای ${targetStudents.length > 1 ? `${targetStudents.length} نفر از ساکنین اتاق ${data.roomNumber || ''}` : data.studentName} ثبت شد.`,
+      targetName: data.studentName,
+      severity: data.type === 'warning' ? 'warning' : 'info',
+      actorName: data.evaluatorName,
+      actorRole: data.evaluatorRole,
+    });
+
+    const createdCount = Math.max(1, targetStudents.length);
+    return {
+      success: true,
+      createdCount,
+      message:
+        createdCount > 1
+          ? `${typeLabel} (${scopeLabel}) برای ${createdCount} دانشجوی هم‌اتاقی با موفقیت ثبت شد.`
+          : `${typeLabel} (${scopeLabel}) برای ${data.studentName} با موفقیت ثبت شد.`,
+    };
+  },
+
+  resolveStudentEvaluation: (id: string): void => {
+    const items = Storage.getStudentEvaluations();
+    const target = items.find((e) => e.id === id);
+    if (target) {
+      target.resolved = true;
+      target.resolvedAt = new Date().toLocaleDateString('fa-IR');
+      Storage.setStudentEvaluations(items);
+      Storage.addActivityLog({
+        category: 'warning_eval',
+        action: 'رفع تذکر/اخطار دانشجو',
+        details: `مورد «${target.title}» مربوط به ${target.studentName} برطرف شده ثبت شد.`,
+        targetName: target.studentName,
+      });
+    }
+  },
+
+  deleteStudentEvaluation: (id: string): void => {
+    const items = Storage.getStudentEvaluations();
+    const target = items.find((e) => e.id === id);
+    Storage.setStudentEvaluations(items.filter((e) => e.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'warning_eval',
+        action: 'حذف سابقه ارزیابی/تذکر دانشجو',
+        details: `سابقه «${target.title}» برای ${target.studentName} حذف شد.`,
+        targetName: target.studentName,
+        severity: 'warning',
+      });
+    }
+  },
+
+  // -------------------------------------------------------------
   // توابع همگام‌سازی دوطرفه با دیتابیس ابری MongoDB Atlas
   // -------------------------------------------------------------
   fetchStudentsFromDB: async (): Promise<Student[] | null> => {
@@ -1988,6 +2397,12 @@ export const Storage = {
 
       const updatedStudents = [savedStudent, ...currentStudents];
       set(STORAGE_KEYS.STUDENTS, updatedStudents);
+      Storage.addActivityLog({
+        category: 'student',
+        action: 'ثبت دانشجوی جدید در دیتابیس ابری',
+        details: `دانشجو ${savedStudent.fullName} (${savedStudent.studentId}) ثبت شد.`,
+        targetName: `${savedStudent.fullName} (${savedStudent.studentId})`,
+      });
 
       return {
         success: true,
