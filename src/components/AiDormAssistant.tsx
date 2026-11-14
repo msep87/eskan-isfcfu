@@ -208,29 +208,29 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
             )
           : null;
 
-      return {
-        dormName: dorm?.name || 'نامشخص',
-        roomNumber: room.roomNumber,
+      const compactRoom: Record<string, unknown> = {
+        dorm: dorm?.name || 'نامشخص',
+        room: room.roomNumber,
         floor: room.floor,
-        status:
-          room.status === 'maintenance'
-            ? 'در حال تعمیر'
-            : room.status === 'inactive'
-            ? 'غیرفعال'
-            : 'فعال',
-        capacity: totalCapacity,
-        occupiedCount,
-        vacantCount,
-        facilities: room.facilities || [],
-        allowedFields: room.allowedFields && room.allowedFields.length > 0 ? room.allowedFields : ['همه رشته‌ها'],
-        allowedEntryTerms:
-          room.allowedEntryTerms && room.allowedEntryTerms.length > 0
-            ? room.allowedEntryTerms
-            : ['همه ورودی‌ها'],
-        previousScoreAverage,
-        evaluationScoreAverage,
-        evaluationCount: roomEvalScores.length,
+        cap: totalCapacity,
+        occ: occupiedCount,
+        vac: vacantCount,
       };
+      if (room.status === 'maintenance') compactRoom.status = 'در حال تعمیر';
+      else if (room.status === 'inactive') compactRoom.status = 'غیرفعال';
+      if (room.allowedFields && room.allowedFields.length > 0) {
+        compactRoom.fields = room.allowedFields;
+      }
+      if (room.allowedEntryTerms && room.allowedEntryTerms.length > 0) {
+        compactRoom.terms = room.allowedEntryTerms;
+      }
+      if (previousScoreAverage !== null) {
+        compactRoom.prevAvg = previousScoreAverage;
+      }
+      if (evaluationScoreAverage !== null) {
+        compactRoom.evalAvg = evaluationScoreAverage;
+      }
+      return compactRoom;
     });
 
     const totalBedsAll = beds.length;
@@ -238,13 +238,12 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
 
     const publicAnnouncements = announcements
       .filter((a) => currentUser !== null || a.showOnHomePage !== false)
-      .slice(0, 20)
+      .slice(0, 8)
       .map((a) => ({
         title: a.title,
-        content: a.content,
+        content: a.content.length > 260 ? `${a.content.slice(0, 260)}...` : a.content,
         priority: a.priority === 'urgent' ? 'فوری' : a.priority === 'important' ? 'مهم' : 'عادی',
         date: a.date,
-        author: a.author,
         targetDorm:
           !a.targetDormId || a.targetDormId === 'all'
             ? 'همه سراها'
@@ -438,6 +437,8 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
             ? data.error
             : typeof data?.message === 'string'
             ? data.message
+            : typeof data?.reply === 'string'
+            ? data.reply
             : 'در حال حاضر ارتباط با سرویس دستیار هوشمند با خطا مواجه شد.';
         throw new Error(errMessage);
       }
