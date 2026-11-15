@@ -42,6 +42,7 @@ interface SupervisorRoomManagerProps {
   actorName?: string;
   actorRole?: 'admin' | 'supervisor';
   actorId?: string;
+  onEditStudent?: (student: Student) => void;
 }
 
 export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
@@ -55,6 +56,7 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
   actorName = 'سرپرست / مدیر سرا',
   actorRole = 'supervisor',
   actorId,
+  onEditStudent,
 }) => {
   const [selectedDormId, setSelectedDormId] = useState(
     supervisorDormId && supervisorDormId !== 'all' ? supervisorDormId : dorms[0]?.id || ''
@@ -1205,6 +1207,7 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
             actorRole={actorRole}
             actorId={actorId}
             onDataChanged={onDataChanged}
+            onEditStudent={onEditStudent}
           />
         );
       })()}

@@ -3366,45 +3366,48 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   </div>
                 )}
 
-                {(staffModalRole === 'warehouse' || staffModalRole === 'finance' || staffModalRole === 'procurement') && (
-                  <>
-                    {(staffModalRole === 'finance' || staffModalRole === 'procurement') && (
-                      <div className="sm:col-span-2">
-                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                          {staffModalRole === 'procurement' ? 'بخش / واحد کارپردازی' : 'بخش / واحد مالی'}
-                        </label>
-                        <input
-                          type="text"
-                          value={formDepartment}
-                          onChange={(e) => setFormDepartment(e.target.value)}
-                          placeholder={
-                            staffModalRole === 'procurement'
-                              ? 'واحد کارپردازی و تدارکات سراها'
-                              : 'واحد امور مالی و حسابداری پردیس'
-                          }
-                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
-                        />
-                      </div>
-                    )}
-                    <div className="sm:col-span-2">
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        سمت / توضیحات (اختیاری)
-                      </label>
-                      <input
-                        type="text"
-                        value={formNotes}
-                        onChange={(e) => setFormNotes(e.target.value)}
-                        placeholder={
-                          staffModalRole === 'finance'
-                            ? 'کارشناس بررسی کسورات ۴۵٪ و ۲۵٪ / حسابدار...'
-                            : staffModalRole === 'procurement'
-                            ? 'کارپرداز خرید تجهیزات و قطعات مصرفی سراها...'
-                            : 'مسئول انبار مرکزی...'
-                        }
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
-                      />
-                    </div>
-                  </>
+                {(staffModalRole === 'finance' || staffModalRole === 'procurement') && (
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {staffModalRole === 'procurement' ? 'بخش / واحد کارپردازی' : 'بخش / واحد مالی'}
+                    </label>
+                    <input
+                      type="text"
+                      value={formDepartment}
+                      onChange={(e) => setFormDepartment(e.target.value)}
+                      placeholder={
+                        staffModalRole === 'procurement'
+                          ? 'واحد کارپردازی و تدارکات سراها'
+                          : 'واحد امور مالی و حسابداری پردیس'
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
+                    />
+                  </div>
+                )}
+
+                {staffModalRole !== 'supervisor' && (
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      سمت / توضیحات (اختیاری)
+                    </label>
+                    <input
+                      type="text"
+                      value={formNotes}
+                      onChange={(e) => setFormNotes(e.target.value)}
+                      placeholder={
+                        staffModalRole === 'finance'
+                          ? 'کارشناس بررسی کسورات ۴۵٪ و ۲۵٪ / حسابدار...'
+                          : staffModalRole === 'procurement'
+                          ? 'کارپرداز خرید تجهیزات و قطعات مصرفی سراها...'
+                          : staffModalRole === 'maintenance'
+                          ? 'سرپرست شیفت تأسیسات / تکنسین فنی...'
+                          : staffModalRole === 'counselor'
+                          ? 'ساعات حضور یا توضیحات پرونده مشاوره...'
+                          : 'مسئول انبار مرکزی...'
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
+                    />
+                  </div>
                 )}
               </div>
 
@@ -3651,6 +3654,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             actorRole="admin"
             actorId="admin"
             onDataChanged={onRefreshData}
+            onEditStudent={onEditStudent}
           />
         );
       })()}

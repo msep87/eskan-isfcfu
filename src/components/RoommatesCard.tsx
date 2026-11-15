@@ -362,20 +362,6 @@ export const RoommatesCard: React.FC<RoommatesCardProps> = ({
                     </div>
                   </div>
                 </div>
-
-                {/* فیلدهای سفارشی (گروه خونی، رشته ورزشی و علایق) */}
-                {rm.customFields && Object.keys(rm.customFields).length > 0 && (
-                  <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-1.5">
-                    {Object.entries(rm.customFields).map(([key, val]) => (
-                      <span
-                        key={key}
-                        className="text-[10px] px-2 py-0.5 rounded-lg bg-teal-50 dark:bg-teal-950/40 text-teal-800 dark:text-teal-300 font-medium"
-                      >
-                        {key}: {String(val)}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
             );
           });

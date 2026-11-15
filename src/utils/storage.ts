@@ -1549,25 +1549,130 @@ export const Storage = {
     return { success: true, message: 'دانشجو و سوابق اسکان وی با موفقیت از سیستم حذف شد.' };
   },
 
-  // ویرایش اطلاعات دانشجو توسط مدیر
+  // ویرایش اطلاعات دانشجو توسط مدیر (پشتیبانی از تغییر کلیه فیلدها از جمله شماره دانشجویی)
   updateStudentAdmin: (studentId: string, updatedData: Partial<Student>): { success: boolean; message: string } => {
     const students = Storage.getStudents();
     const index = students.findIndex((s) => s.studentId === studentId);
     if (index === -1) {
       return { success: false, message: 'دانشجو یافت نشد.' };
     }
-    students[index] = { ...students[index], ...updatedData };
+
+    const nextStudentId =
+      updatedData.studentId !== undefined ? updatedData.studentId.trim() : studentId;
+    if (!nextStudentId) {
+      return { success: false, message: 'شماره دانشجویی نمی‌تواند خالی باشد.' };
+    }
+
+    const isStudentIdChanged = nextStudentId !== studentId;
+    if (
+      isStudentIdChanged &&
+      students.some((s, i) => i !== index && s.studentId.trim() === nextStudentId)
+    ) {
+      return { success: false, message: `شماره دانشجویی «${nextStudentId}» قبلاً برای دانشجوی دیگری ثبت شده است.` };
+    }
+
+    const updatedStudent: Student = {
+      ...students[index],
+      ...updatedData,
+      studentId: nextStudentId,
+    };
+    students[index] = updatedStudent;
     Storage.setStudents(students);
+
+    // همگام‌سازی وضعیت تخت یا شماره دانشجویی در ارجاعات مرتبط
+    if (isStudentIdChanged || updatedData.assignmentStatus !== undefined) {
+      const beds = Storage.getBeds();
+      let bedsChanged = false;
+      const nextBeds = beds.map((b) => {
+        if (b.studentId === studentId) {
+          bedsChanged = true;
+          return {
+            ...b,
+            studentId: nextStudentId,
+            assignmentStatus:
+              updatedData.assignmentStatus !== undefined
+                ? updatedData.assignmentStatus
+                : b.assignmentStatus,
+          };
+        }
+        return b;
+      });
+      if (bedsChanged) Storage.setBeds(nextBeds);
+    }
+
+    if (isStudentIdChanged) {
+      const rooms = Storage.getRooms();
+      let roomsChanged = false;
+      const nextRooms = rooms.map((r) => {
+        if (r.representativeStudentId === studentId) {
+          roomsChanged = true;
+          return { ...r, representativeStudentId: nextStudentId };
+        }
+        return r;
+      });
+      if (roomsChanged) Storage.setRooms(nextRooms);
+
+      const finances = Storage.getStudentFinances();
+      let finChanged = false;
+      const nextFinances = finances.map((f) => {
+        if (f.studentId === studentId) {
+          finChanged = true;
+          return { ...f, studentId: nextStudentId };
+        }
+        return f;
+      });
+      if (finChanged) Storage.setStudentFinances(nextFinances);
+
+      const evals = Storage.getStudentEvaluations();
+      let evalChanged = false;
+      const nextEvals = evals.map((ev) => {
+        if (ev.studentId === studentId) {
+          evalChanged = true;
+          return { ...ev, studentId: nextStudentId };
+        }
+        return ev;
+      });
+      if (evalChanged) Storage.setStudentEvaluations(nextEvals);
+
+      const guests = Storage.getGuestRequests();
+      let guestChanged = false;
+      const nextGuests = guests.map((g) => {
+        if (g.studentId === studentId) {
+          guestChanged = true;
+          return { ...g, studentId: nextStudentId };
+        }
+        return g;
+      });
+      if (guestChanged) Storage.setGuestRequests(nextGuests);
+
+      const msgs = Storage.getMessages();
+      let msgChanged = false;
+      const nextMsgs = msgs.map((m) => {
+        if (m.senderId === studentId || m.receiverId === studentId) {
+          msgChanged = true;
+          return {
+            ...m,
+            senderId: m.senderId === studentId ? nextStudentId : m.senderId,
+            receiverId: m.receiverId === studentId ? nextStudentId : m.receiverId,
+          };
+        }
+        return m;
+      });
+      if (msgChanged) Storage.setMessages(nextMsgs);
+    }
+
     Storage.addActivityLog({
       category: 'student',
       action: 'ویرایش اطلاعات دانشجو',
-      details: `مشخصات دانشجو ${students[index].fullName} (${studentId}) ویرایش شد.`,
-      targetName: `${students[index].fullName} (${studentId})`,
+      details: isStudentIdChanged
+        ? `مشخصات دانشجو ${updatedStudent.fullName} (تغییر کد از ${studentId} به ${nextStudentId}) ویرایش شد.`
+        : `مشخصات دانشجو ${updatedStudent.fullName} (${nextStudentId}) ویرایش شد.`,
+      targetName: `${updatedStudent.fullName} (${nextStudentId})`,
     });
 
     const currentUser = Storage.getCurrentUser();
     if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === studentId) {
-      Storage.setCurrentUser({ role: 'student', student: students[index] });
+      Storage.setCurrentUser({ role: 'student', student: updatedStudent });
     }
     return { success: true, message: 'اطلاعات دانشجو با موفقیت بروزرسانی شد.' };
   },
@@ -1734,7 +1839,16 @@ export const Storage = {
     const list = Storage.getMaintenanceStaff();
     const idx = list.findIndex((s) => s.id === id);
     if (idx === -1) return { success: false, message: 'کاربر تأسیسات یافت نشد.' };
-    list[idx] = { ...list[idx], ...updates };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizedUpdates.username.trim().toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((s) => s.id !== id && s.username.trim().toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کارشناس تأسیسات دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
     Storage.setMaintenanceStaff(list);
     const cu = Storage.getCurrentUser();
     if (cu && cu.role === 'maintenance' && cu.technician.id === id) {
@@ -2293,7 +2407,16 @@ export const Storage = {
     const list = Storage.getWarehouseStaff();
     const idx = list.findIndex((s) => s.id === id);
     if (idx === -1) return { success: false, message: 'کاربر انبار یافت نشد.' };
-    list[idx] = { ...list[idx], ...updates };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizedUpdates.username.trim().toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((s) => s.id !== id && s.username.trim().toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر انبار دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
     Storage.setWarehouseStaff(list);
     const cu = Storage.getCurrentUser();
     if (cu && cu.role === 'warehouse' && cu.staff.id === id) {

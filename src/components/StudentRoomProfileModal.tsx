@@ -31,6 +31,7 @@ import {
   Users,
   Lock,
   MessageSquare,
+  Edit3,
 } from 'lucide-react';
 
 interface StudentRoomProfileModalProps {
@@ -46,6 +47,7 @@ interface StudentRoomProfileModalProps {
   actorRole: 'admin' | 'supervisor';
   actorId?: string;
   onDataChanged: () => void;
+  onEditStudent?: (student: Student) => void;
 }
 
 type ModalTab = 'report_warning' | 'evaluation' | 'message' | 'history';
@@ -75,6 +77,7 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
   actorRole,
   actorId,
   onDataChanged,
+  onEditStudent,
 }) => {
   const [activeTab, setActiveTab] = useState<ModalTab>('report_warning');
   const [isPhotoZoomed, setIsPhotoZoomed] = useState(false);
@@ -447,6 +450,19 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                   <Award className="w-3.5 h-3.5 text-amber-300" />
                   <span>نمره ارزیابی فعلی: {student.previousScore ?? 100} از ۱۰۰</span>
                 </span>
+                {actorRole === 'admin' && onEditStudent && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onEditStudent(student);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-900 font-black transition cursor-pointer shadow-sm"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>ویرایش کامل اطلاعات دانشجو</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

@@ -474,6 +474,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [stFormParentPhone, setStFormParentPhone] = useState('');
   const [stFormPostalAddress, setStFormPostalAddress] = useState('');
   const [stFormBirthDate, setStFormBirthDate] = useState('1382/01/01');
+  const [stFormPhone, setStFormPhone] = useState('');
+  const [stFormReligion, setStFormReligion] = useState('اسلام / شیعه');
+  const [stFormPreviousDorm, setStFormPreviousDorm] = useState('');
+  const [stFormPreviousRoom, setStFormPreviousRoom] = useState('');
+  const [stFormPreviousScore, setStFormPreviousScore] = useState('100');
+  const [stFormAssignmentStatus, setStFormAssignmentStatus] = useState<'none' | 'temporary' | 'confirmed'>('none');
+  const [stFormBloodGroup, setStFormBloodGroup] = useState('O+');
+  const [stFormSpecialCondition, setStFormSpecialCondition] = useState('ندارد');
+  const [stFormCustomFields, setStFormCustomFields] = useState<Record<string, string>>({});
+  const [stFormNewCustomKey, setStFormNewCustomKey] = useState('');
+  const [stFormNewCustomVal, setStFormNewCustomVal] = useState('');
   const [stFormPhotoUrl, setStFormPhotoUrl] = useState<string>('');
   const [stFormProfileCompleted, setStFormProfileCompleted] = useState<boolean>(true);
   const [stFormError, setStFormError] = useState<string | null>(null);
@@ -487,12 +498,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormEntryTerm('۴۰۲۱');
     setStFormFatherName('');
     setStFormMobile('');
+    setStFormPhone('');
     setStFormEmergency('');
     setStFormProvince('اصفهان');
     setStFormCity('اصفهان');
     setStFormParentPhone('');
     setStFormPostalAddress('');
     setStFormBirthDate('1382/01/01');
+    setStFormReligion('اسلام / شیعه');
+    setStFormPreviousDorm('');
+    setStFormPreviousRoom('');
+    setStFormPreviousScore('100');
+    setStFormAssignmentStatus('none');
+    setStFormBloodGroup('O+');
+    setStFormSpecialCondition('ندارد');
+    setStFormCustomFields({});
+    setStFormNewCustomKey('');
+    setStFormNewCustomVal('');
     setStFormPhotoUrl('');
     setStFormProfileCompleted(false);
     setStFormError(null);
@@ -508,16 +530,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormEntryTerm(st.entryTerm);
     setStFormFatherName(st.fatherName || '');
     setStFormMobile(st.mobile || '');
+    setStFormPhone(st.phone || '');
     setStFormEmergency(st.emergencyPhone || '');
     setStFormProvince(st.province || 'اصفهان');
     setStFormCity(st.city || 'اصفهان');
     setStFormParentPhone(st.parentPhone || '');
     setStFormPostalAddress(st.postalAddress || '');
     setStFormBirthDate(st.birthDate || '1382/01/01');
+    setStFormReligion(st.religion || 'اسلام / شیعه');
+    setStFormPreviousDorm(st.previousDorm || '');
+    setStFormPreviousRoom(st.previousRoom || '');
+    setStFormPreviousScore(String(st.previousScore ?? 100));
+    setStFormAssignmentStatus(st.assignmentStatus || (st.assignedBedId ? 'temporary' : 'none'));
+    const rawCustom = st.customFields || {};
+    setStFormBloodGroup(String(rawCustom['گروه خونی'] || 'ثبت نشده'));
+    setStFormSpecialCondition(String(rawCustom['بیماری خاص'] || 'ندارد'));
+    const otherCustom: Record<string, string> = {};
+    Object.entries(rawCustom).forEach(([k, v]) => {
+      if (k !== 'گروه خونی' && k !== 'بیماری خاص') {
+        otherCustom[k] = String(v ?? '');
+      }
+    });
+    setStFormCustomFields(otherCustom);
+    setStFormNewCustomKey('');
+    setStFormNewCustomVal('');
     setStFormPhotoUrl(st.photoUrl || '');
     setStFormProfileCompleted(Boolean(st.isProfileCompleted));
     setStFormError(null);
     setIsAddStudentModalOpen(true);
+  };
+
+  const handleAddStudentCustomField = () => {
+    const key = stFormNewCustomKey.trim();
+    if (!key) return;
+    if (key === 'گروه خونی') {
+      setStFormBloodGroup(stFormNewCustomVal.trim() || 'ثبت نشده');
+    } else if (key === 'بیماری خاص') {
+      setStFormSpecialCondition(stFormNewCustomVal.trim() || 'ندارد');
+    } else {
+      setStFormCustomFields((prev) => ({
+        ...prev,
+        [key]: stFormNewCustomVal.trim(),
+      }));
+    }
+    setStFormNewCustomKey('');
+    setStFormNewCustomVal('');
   };
 
   const handleAdminStudentPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -539,12 +596,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleSaveStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setStFormError(null);
     if (!stFormFullName.trim() || !stFormStudentId.trim() || !stFormNationalId.trim()) {
       setStFormError('لطفاً نام و نام خانوادگی، شماره دانشجویی و کد ملی را تکمیل فرمایید.');
       return;
     }
 
-    const targetStudentId = (editingStudent ? editingStudent.studentId : stFormStudentId).trim();
+    const targetStudentId = toEnglishDigits(stFormStudentId.trim());
     let resolvedPhotoUrl = stFormPhotoUrl || undefined;
     let photoCloudWarning = '';
 
@@ -567,23 +625,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     }
 
+    const mergedCustomFields: Record<string, string | number | boolean> = {
+      ...stFormCustomFields,
+      'گروه خونی': stFormBloodGroup || 'ثبت نشده',
+      'بیماری خاص': stFormSpecialCondition.trim() || 'ندارد',
+    };
+
+    const parsedScoreNum = Number(toEnglishDigits(stFormPreviousScore.trim()));
+    const normalizedScore =
+      stFormPreviousScore.trim() === ''
+        ? 100
+        : Number.isFinite(parsedScoreNum)
+        ? parsedScoreNum
+        : stFormPreviousScore.trim();
+
     if (editingStudent) {
       const res = Storage.updateStudentAdmin(editingStudent.studentId, {
+        studentId: targetStudentId,
         fullName: stFormFullName.trim(),
-        nationalId: stFormNationalId.trim(),
+        nationalId: toEnglishDigits(stFormNationalId.trim()),
         fieldOfStudy: stFormField.trim(),
         entryTerm: stFormEntryTerm.trim(),
         fatherName: stFormFatherName.trim(),
         mobile: stFormMobile.trim(),
+        phone: stFormPhone.trim(),
         emergencyPhone: stFormEmergency.trim(),
         parentPhone: stFormParentPhone.trim(),
         province: stFormProvince.trim(),
         city: stFormCity.trim(),
         postalAddress: stFormPostalAddress.trim(),
         birthDate: stFormBirthDate.trim() || '1382/01/01',
+        religion: stFormReligion.trim() || 'اسلام / شیعه',
+        previousDorm: stFormPreviousDorm.trim(),
+        previousRoom: stFormPreviousRoom.trim(),
+        previousScore: normalizedScore,
+        assignmentStatus: editingStudent.assignedBedId ? stFormAssignmentStatus : editingStudent.assignmentStatus,
+        customFields: mergedCustomFields,
         photoUrl: resolvedPhotoUrl,
         isProfileCompleted: stFormProfileCompleted,
       });
+      if (!res.success) {
+        setApprovalFeedback(null);
+        setStFormError(res.message);
+        return;
+      }
       setApprovalFeedback({ type: 'success', message: '⏳ در حال همگام‌سازی ویرایش در دیتابیس ابری...' });
       const syncRes = await Storage.waitForPendingCloudSync();
       setApprovalFeedback({
@@ -595,7 +680,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } else {
       const newSt: Student = {
         studentId: targetStudentId,
-        nationalId: stFormNationalId.trim(),
+        nationalId: toEnglishDigits(stFormNationalId.trim()),
         fullName: stFormFullName.trim(),
         fieldOfStudy: stFormField.trim(),
         entryTerm: stFormEntryTerm.trim(),
@@ -604,14 +689,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         province: stFormProvince.trim(),
         city: stFormCity.trim(),
         postalAddress: stFormPostalAddress.trim(),
-        phone: '',
+        phone: stFormPhone.trim(),
         mobile: stFormMobile.trim(),
         emergencyPhone: stFormEmergency.trim(),
         parentPhone: stFormParentPhone.trim(),
-        religion: 'اسلام، شیعه',
-        previousDorm: '',
-        previousRoom: '',
-        previousScore: 100,
+        religion: stFormReligion.trim() || 'اسلام / شیعه',
+        previousDorm: stFormPreviousDorm.trim(),
+        previousRoom: stFormPreviousRoom.trim(),
+        previousScore: normalizedScore,
+        customFields: mergedCustomFields,
         photoUrl: resolvedPhotoUrl,
         isProfileCompleted: stFormProfileCompleted,
         assignmentStatus: 'none',
@@ -2271,6 +2357,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               actorName="مدیریت کل امور سراها"
               actorRole="admin"
               actorId="admin"
+              onEditStudent={handleOpenEditStudent}
             />
           )}
 
@@ -6718,16 +6805,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* مدال افزودن یا ویرایش دانشجو توسط مدیر */}
+      {/* مدال افزودن یا ویرایش کامل همه اطلاعات دانشجو توسط مدیر */}
       {isAddStudentModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-3xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-teal-600" />
-                <span>{editingStudent ? 'ویرایش مشخصات دانشجومعلم' : 'ثبت و افزودن دانشجومعلم جدید'}</span>
+                <span>
+                  {editingStudent
+                    ? `ویرایش کامل همه اطلاعات دانشجومعلم (${editingStudent.fullName})`
+                    : 'ثبت و افزودن دانشجومعلم جدید (پرونده کامل)'}
+                </span>
               </h3>
               <button
+                type="button"
                 onClick={() => setIsAddStudentModalOpen(false)}
                 className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
               >
@@ -6742,239 +6834,494 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
 
-            <form onSubmit={handleSaveStudentSubmit} className="space-y-3.5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    نام و نام خانوادگی *
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormFullName}
-                    onChange={(e) => setStFormFullName(e.target.value)}
-                    placeholder="مثلاً علی رضایی"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                    required
-                  />
+            <form onSubmit={handleSaveStudentSubmit} className="space-y-4 text-xs">
+              {/* بخش ۱: مشخصات هویتی و آموزشی */}
+              <div className="p-3.5 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/80 space-y-3">
+                <div className="font-extrabold text-teal-700 dark:text-teal-300 flex items-center gap-1.5">
+                  <GraduationCap className="w-4 h-4" />
+                  <span>مشخصات هویتی، آموزشی و ورود به سامانه</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      نام و نام خانوادگی *
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormFullName}
+                      onChange={(e) => setStFormFullName(e.target.value)}
+                      placeholder="مثلاً علی رضایی"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      شماره دانشجویی *
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormStudentId}
+                      onChange={(e) => setStFormStudentId(e.target.value)}
+                      placeholder="مثلاً 4021008"
+                      dir="ltr"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      کد ملی / رمز ورود *
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormNationalId}
+                      onChange={(e) => setStFormNationalId(e.target.value)}
+                      placeholder="مثلاً 1270001234"
+                      dir="ltr"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      رشته تحصیلی *
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormField}
+                      onChange={(e) => setStFormField(e.target.value)}
+                      placeholder="آموزش ابتدایی، آموزش ریاضی و..."
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      دوره / سال ورودی *
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormEntryTerm}
+                      onChange={(e) => setStFormEntryTerm(e.target.value)}
+                      placeholder="مثلاً ۴۰۲۱ یا ۱۴۰۲"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      نام پدر
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormFatherName}
+                      onChange={(e) => setStFormFatherName(e.target.value)}
+                      placeholder="نام پدر"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      تاریخ تولد
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormBirthDate}
+                      onChange={(e) => setStFormBirthDate(e.target.value)}
+                      placeholder="1382/01/01"
+                      dir="ltr"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      دین و مذهب
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormReligion}
+                      onChange={(e) => setStFormReligion(e.target.value)}
+                      placeholder="اسلام / شیعه"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* بخش ۲: اطلاعات تماس و نشانی محل سکونت */}
+              <div className="p-3.5 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/80 space-y-3">
+                <div className="font-extrabold text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+                  <Phone className="w-4 h-4" />
+                  <span>شماره‌های تماس و نشانی محل سکونت</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      شماره همراه دانشجو
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormMobile}
+                      onChange={(e) => setStFormMobile(e.target.value)}
+                      placeholder="09130000000"
+                      dir="ltr"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      تلفن ثابت منزل
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormPhone}
+                      onChange={(e) => setStFormPhone(e.target.value)}
+                      placeholder="03130000000"
+                      dir="ltr"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      تلفن تماس اضطراری
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormEmergency}
+                      onChange={(e) => setStFormEmergency(e.target.value)}
+                      placeholder="09130000000"
+                      dir="ltr"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      شماره تماس والدین / ولی
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormParentPhone}
+                      onChange={(e) => setStFormParentPhone(e.target.value)}
+                      placeholder="09130000000"
+                      dir="ltr"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      استان محل سکونت
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormProvince}
+                      onChange={(e) => setStFormProvince(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      شهر محل سکونت
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormCity}
+                      onChange={(e) => setStFormCity(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      نشانی دقیق پستی / محل سکونت
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormPostalAddress}
+                      onChange={(e) => setStFormPostalAddress(e.target.value)}
+                      placeholder="استان، شهر، خیابان، کوچه، پلاک..."
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* بخش ۳: سوابق اسکان سال قبل و وضعیت اسکان فعلی */}
+              <div className="p-3.5 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/80 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-extrabold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                    <Building2 className="w-4 h-4" />
+                    <span>سوابق اسکان سال قبل، امتیاز و وضعیت اتاق فعلی</span>
+                  </div>
+                  {editingStudent && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddStudentModalOpen(false);
+                        handleOpenAssignStudentModal(editingStudent);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold hover:bg-indigo-100 cursor-pointer"
+                    >
+                      <BedIcon className="w-3.5 h-3.5" />
+                      <span>تخصیص / تغییر اتاق و تخت</span>
+                    </button>
+                  )}
                 </div>
 
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    شماره دانشجویی *
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormStudentId}
-                    onChange={(e) => setStFormStudentId(e.target.value)}
-                    placeholder="مثلاً 4021008"
-                    disabled={!!editingStudent}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono disabled:opacity-60"
-                    required
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      سرای سال قبل
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormPreviousDorm}
+                      onChange={(e) => setStFormPreviousDorm(e.target.value)}
+                      placeholder="مثلاً سرای شهید باهنر یا نداشت"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      اتاق سال قبل
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormPreviousRoom}
+                      onChange={(e) => setStFormPreviousRoom(e.target.value)}
+                      placeholder="مثلاً ۱۰۲"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      نمره ارزیابی / امتیاز سال قبل
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormPreviousScore}
+                      onChange={(e) => setStFormPreviousScore(e.target.value)}
+                      placeholder="100"
+                      dir="ltr"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    کد ملی *
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormNationalId}
-                    onChange={(e) => setStFormNationalId(e.target.value)}
-                    placeholder="مثلاً 1270001234"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    رشته تحصیلی *
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormField}
-                    onChange={(e) => setStFormField(e.target.value)}
-                    placeholder="آموزش ابتدایی، آموزش ریاضی و..."
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    دوره / سال ورودی *
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormEntryTerm}
-                    onChange={(e) => setStFormEntryTerm(e.target.value)}
-                    placeholder="مثلاً ۴۰۲۱ یا ۱۴۰۲"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    نام پدر
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormFatherName}
-                    onChange={(e) => setStFormFatherName(e.target.value)}
-                    placeholder="نام پدر"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    شماره همراه دانشجو
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormMobile}
-                    onChange={(e) => setStFormMobile(e.target.value)}
-                    placeholder="09130000000"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono dir-ltr"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    تلفن اضطراری / والدین
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormEmergency}
-                    onChange={(e) => setStFormEmergency(e.target.value)}
-                    placeholder="09130000000"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono dir-ltr"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    استان محل سکونت
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormProvince}
-                    onChange={(e) => setStFormProvince(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    شهر محل سکونت
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormCity}
-                    onChange={(e) => setStFormCity(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    شماره تماس والدین / ولی
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormParentPhone}
-                    onChange={(e) => setStFormParentPhone(e.target.value)}
-                    placeholder="09130000000"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono dir-ltr"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    تاریخ تولد
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormBirthDate}
-                    onChange={(e) => setStFormBirthDate(e.target.value)}
-                    placeholder="1382/01/01"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono dir-ltr"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    نشانی دقیق پستی / محل سکونت
-                  </label>
-                  <input
-                    type="text"
-                    value={stFormPostalAddress}
-                    onChange={(e) => setStFormPostalAddress(e.target.value)}
-                    placeholder="استان، شهر، خیابان، کوچه، پلاک..."
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                  />
-                </div>
-
-                {/* تصویر پرسنلی دانشجو (قابل تغییر یا حذف توسط مدیر) */}
-                <div className="sm:col-span-2 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    {stFormPhotoUrl ? (
-                      <img
-                        src={stFormPhotoUrl}
-                        alt="تصویر دانشجو"
-                        className="w-12 h-12 rounded-xl object-cover border border-teal-500"
-                      />
-                    ) : (
-                      <div className="w-12 h-12 rounded-xl bg-teal-600/15 text-teal-700 dark:text-teal-300 flex items-center justify-center font-bold">
-                        <Camera className="w-5 h-5" />
-                      </div>
-                    )}
-                    <div>
-                      <div className="font-bold text-slate-800 dark:text-slate-200">
-                        عکس پرسنلی دانشجو
-                      </div>
-                      <div className="text-[11px] text-slate-400">
-                        مدیر در هر زمان امکان بارگذاری یا تغییر عکس دانشجو را دارد.
-                      </div>
+                {editingStudent && editingStudent.assignedBedId && (
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                      تخت فعلی:{' '}
+                      <span className="text-teal-700 dark:text-teal-300">
+                        {dorms.find((d) => d.id === editingStudent.assignedDormId)?.name || editingStudent.assignedDormName || 'سرا'}{' '}
+                        - اتاق {rooms.find((r) => r.id === editingStudent.assignedRoomId)?.roomNumber || editingStudent.assignedRoomNumber || '-'}{' '}
+                        ({beds.find((b) => b.id === editingStudent.assignedBedId)?.label || 'تخت تخصیص‌یافته'})
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-slate-500">وضعیت اسکان:</span>
+                      <select
+                        value={stFormAssignmentStatus}
+                        onChange={(e) =>
+                          setStFormAssignmentStatus(e.target.value as 'none' | 'temporary' | 'confirmed')
+                        }
+                        className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-[11px] font-bold"
+                      >
+                        <option value="confirmed">اسکان قطعی (تأیید شده)</option>
+                        <option value="temporary">اسکان موقت (در انتظار تأیید)</option>
+                      </select>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <label className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold cursor-pointer flex items-center gap-1.5 transition">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>{stFormPhotoUrl ? 'تغییر عکس' : 'آپلود عکس'}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleAdminStudentPhotoUpload}
-                        className="hidden"
-                      />
+                )}
+              </div>
+
+              {/* بخش ۴: پرونده سلامت و فیلدهای سفارشی (رشته ورزشی، علایق و...) */}
+              <div className="p-3.5 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/80 space-y-3">
+                <div className="font-extrabold text-rose-700 dark:text-rose-300 flex items-center gap-1.5">
+                  <Activity className="w-4 h-4" />
+                  <span>پرونده سلامت و مشخصات تکمیلی / سفارشی (محرمانه در کارتابل مدیریت)</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      گروه خونی
                     </label>
-                    {stFormPhotoUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setStFormPhotoUrl('')}
-                        className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 hover:bg-rose-100 font-bold cursor-pointer"
-                      >
-                        حذف عکس
-                      </button>
-                    )}
+                    <select
+                      value={stFormBloodGroup}
+                      onChange={(e) => setStFormBloodGroup(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    >
+                      <option value="O+">O+ (اُ مثبت)</option>
+                      <option value="O-">O- (اُ منفی)</option>
+                      <option value="A+">A+ (آ مثبت)</option>
+                      <option value="A-">A- (آ منفی)</option>
+                      <option value="B+">B+ (ب مثبت)</option>
+                      <option value="B-">B- (ب منفی)</option>
+                      <option value="AB+">AB+ (آ ب مثبت)</option>
+                      <option value="AB-">AB- (آ ب منفی)</option>
+                      <option value="ثبت نشده">نامشخص / ثبت نشده</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      بیماری خاص، آلرژی یا داروی مصرفی
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormSpecialCondition}
+                      onChange={(e) => setStFormSpecialCondition(e.target.value)}
+                      placeholder="مثلاً ندارد / حساسیت فصلی / آسم خفیف..."
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
                   </div>
                 </div>
 
-                {/* وضعیت تکمیل پرونده */}
-                <div className="sm:col-span-2">
-                  <label className="inline-flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={stFormProfileCompleted}
-                      onChange={(e) => setStFormProfileCompleted(e.target.checked)}
-                      className="w-4 h-4 rounded text-teal-600 cursor-pointer"
-                    />
-                    <span>پرونده دانشجو در وضعیت «تکمیل شده» باشد (در صورت برداشتن تیک، دانشجو در ورود بعدی ملزم به تکمیل اولیه خواهد بود)</span>
-                  </label>
+                {/* فیلدهای سفارشی موجود */}
+                {Object.keys(stFormCustomFields).length > 0 && (
+                  <div className="space-y-2 pt-1">
+                    <div className="text-[11px] font-bold text-slate-500">
+                      فیلدهای سفارشی ثبت‌شده (رشته ورزشی، علایق فرهنگی و...):
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {Object.entries(stFormCustomFields).map(([key, val]) => (
+                        <div
+                          key={key}
+                          className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+                        >
+                          <span className="font-bold text-teal-700 dark:text-teal-300 shrink-0 text-[11px]">
+                            {key}:
+                          </span>
+                          <input
+                            type="text"
+                            value={val}
+                            onChange={(e) =>
+                              setStFormCustomFields((prev) => ({
+                                ...prev,
+                                [key]: e.target.value,
+                              }))
+                            }
+                            className="flex-1 min-w-0 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setStFormCustomFields((prev) => {
+                                const next = { ...prev };
+                                delete next[key];
+                                return next;
+                              })
+                            }
+                            className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer shrink-0"
+                            title="حذف فیلد سفارشی"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* افزودن فیلد سفارشی جدید */}
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={stFormNewCustomKey}
+                    onChange={(e) => setStFormNewCustomKey(e.target.value)}
+                    placeholder="عنوان فیلد جدید (مثلاً رشته ورزشی، علایق فرهنگی...)"
+                    className="flex-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                  />
+                  <input
+                    type="text"
+                    value={stFormNewCustomVal}
+                    onChange={(e) => setStFormNewCustomVal(e.target.value)}
+                    placeholder="مقدار (مثلاً والیبال، مطالعه...)"
+                    className="flex-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddStudentCustomField}
+                    className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold flex items-center justify-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>افزودن فیلد</span>
+                  </button>
                 </div>
+              </div>
+
+              {/* تصویر پرسنلی دانشجو (قابل تغییر یا حذف توسط مدیر) */}
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  {stFormPhotoUrl ? (
+                    <img
+                      src={stFormPhotoUrl}
+                      alt="تصویر دانشجو"
+                      className="w-12 h-12 rounded-xl object-cover border border-teal-500"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-teal-600/15 text-teal-700 dark:text-teal-300 flex items-center justify-center font-bold">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                  )}
+                  <div>
+                    <div className="font-bold text-slate-800 dark:text-slate-200">
+                      عکس پرسنلی دانشجو
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      مدیر در هر زمان امکان بارگذاری یا تغییر عکس دانشجو را دارد.
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold cursor-pointer flex items-center gap-1.5 transition">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{stFormPhotoUrl ? 'تغییر عکس' : 'آپلود عکس'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAdminStudentPhotoUpload}
+                      className="hidden"
+                    />
+                  </label>
+                  {stFormPhotoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setStFormPhotoUrl('')}
+                      className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 hover:bg-rose-100 font-bold cursor-pointer"
+                    >
+                      حذف عکس
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* وضعیت تکمیل پرونده */}
+              <div>
+                <label className="inline-flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={stFormProfileCompleted}
+                    onChange={(e) => setStFormProfileCompleted(e.target.checked)}
+                    className="w-4 h-4 rounded text-teal-600 cursor-pointer"
+                  />
+                  <span>پرونده دانشجو در وضعیت «تکمیل شده» باشد (در صورت برداشتن تیک، دانشجو در ورود بعدی ملزم به تکمیل اولیه خواهد بود)</span>
+                </label>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
@@ -6990,7 +7337,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md"
                 >
                   <Save className="w-4 h-4" />
-                  <span>{editingStudent ? 'ذخیره تغییرات' : 'ثبت دانشجو در سیستم'}</span>
+                  <span>{editingStudent ? 'ذخیره کلیه تغییرات' : 'ثبت دانشجو در سیستم'}</span>
                 </button>
               </div>
             </form>
