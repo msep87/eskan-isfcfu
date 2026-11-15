@@ -130,9 +130,22 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
 
   const printIframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  // همگام‌سازی وضعیت اولیه هنگام باز شدن مدال
+  const wasOpenRef = useRef(false);
+  const lastInitKeyRef = useRef<string>('');
+
+  // همگام‌سازی وضعیت اولیه فقط هنگام باز شدن مدال یا تغییر پارامترهای ورودی
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
+    }
+    const initKey = `${initialDormId || ''}|${(initialRoomIds || []).join(',')}`;
+    if (wasOpenRef.current && lastInitKeyRef.current === initKey) {
+      return;
+    }
+    wasOpenRef.current = true;
+    lastInitKeyRef.current = initKey;
+
     setFilterDormId(initialDormId || 'all');
     setFilterFloor('all');
     setRoomSearch('');

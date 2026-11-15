@@ -31,6 +31,7 @@ export const RoomWarningModal: React.FC<RoomWarningModalProps> = ({
   const [title, setTitle] = useState('تذکر رعایت نظم و نظافت اتاق');
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState<'info' | 'warning' | 'critical'>('warning');
+  const [errorMsg, setErrorMsg] = useState('');
 
   if (!isOpen) return null;
 
@@ -38,8 +39,9 @@ export const RoomWarningModal: React.FC<RoomWarningModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg('');
     if (!selectedRoomId || !title.trim() || !description.trim()) {
-      alert('لطفاً کلیه فیلدها شامل اتاق، عنوان و متن اخطار را تکمیل فرمایید.');
+      setErrorMsg('لطفاً کلیه فیلدها شامل اتاق، عنوان و متن اخطار را تکمیل فرمایید.');
       return;
     }
 
@@ -83,6 +85,12 @@ export const RoomWarningModal: React.FC<RoomWarningModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {errorMsg && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">

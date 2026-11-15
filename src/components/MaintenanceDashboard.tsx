@@ -197,7 +197,7 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
     if (!completingTask) return;
 
     if (!technicianNotes.trim()) {
-      alert('لطفاً شرح عملیات انجام‌شده را بنویسید.');
+      showFeedback('لطفاً شرح عملیات انجام‌شده را بنویسید.', 'error');
       return;
     }
 
@@ -250,7 +250,7 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
   const handleCreateNewTask = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !newDescription.trim() || !newDormId) {
-      alert('لطفاً عنوان، سرا و شرح خرابی را تکمیل فرمایید.');
+      showFeedback('لطفاً عنوان، سرا و شرح خرابی را تکمیل فرمایید.', 'error');
       return;
     }
 

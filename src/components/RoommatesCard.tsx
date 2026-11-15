@@ -51,6 +51,7 @@ export const RoommatesCard: React.FC<RoommatesCardProps> = ({
   const [preferredRoom, setPreferredRoom] = useState('');
   const [changeDetails, setChangeDetails] = useState('');
   const [requestSentFeedback, setRequestSentFeedback] = useState('');
+  const [requestError, setRequestError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmitChangeRequest = (e: React.FormEvent) => {
@@ -98,7 +99,7 @@ export const RoommatesCard: React.FC<RoommatesCardProps> = ({
         setRequestSentFeedback('');
       }, 2500);
     } catch (err: any) {
-      alert('خطا در ثبت درخواست: ' + (err.message || err));
+      setRequestError('خطا در ثبت درخواست: ' + (err?.message || String(err)));
     } finally {
       setIsSubmitting(false);
     }
@@ -420,6 +421,11 @@ export const RoommatesCard: React.FC<RoommatesCardProps> = ({
               </div>
             ) : (
               <form onSubmit={handleSubmitChangeRequest} className="space-y-4 my-4">
+                {requestError && (
+                  <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold">
+                    {requestError}
+                  </div>
+                )}
                 {/* اسکان فعلی دانشجو */}
                 <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/70 text-xs">
                   <span className="text-slate-400 block mb-1">اسکان فعلی شما:</span>

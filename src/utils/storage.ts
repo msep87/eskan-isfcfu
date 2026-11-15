@@ -4956,14 +4956,13 @@ export const Storage = {
           fetch(`${API_BASE_URL}/students`, { method: 'GET', cache: 'no-store', signal: controller.signal }),
         ]);
 
-        let syncedAny = false;
+        let hasRemoteChanges = false;
         let cloudMap: Record<string, unknown> | null = null;
 
         if (syncResult.status === 'fulfilled' && syncResult.value.ok) {
           const parsed = await syncResult.value.json();
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
             cloudMap = parsed as Record<string, unknown>;
-            syncedAny = true;
 
             for (const [key, val] of Object.entries(cloudMap)) {
               if (!SYNCABLE_KEYS.includes(key)) continue;
@@ -4971,7 +4970,11 @@ export const Storage = {
               if (pendingCloudRequests[key]) continue;
               const lastLocalWrite = keyWriteTimestamps[key] || 0;
               if (Date.now() - lastLocalWrite < 5000) continue;
-              localStorage.setItem(key, JSON.stringify(val));
+              const serialized = JSON.stringify(val);
+              if (localStorage.getItem(key) !== serialized) {
+                localStorage.setItem(key, serialized);
+                hasRemoteChanges = true;
+              }
             }
           }
         }
@@ -4979,7 +4982,6 @@ export const Storage = {
         if (studentsResult.status === 'fulfilled' && studentsResult.value.ok) {
           const rawStudents = await studentsResult.value.json();
           if (Array.isArray(rawStudents)) {
-            syncedAny = true;
             const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
             if (!pendingCloudRequests[STORAGE_KEYS.STUDENTS] && Date.now() - lastStudentWrite >= 5000) {
               const cleanStudents: Student[] = rawStudents.map((item: Record<string, unknown>) =>
@@ -4988,13 +4990,17 @@ export const Storage = {
 
               const cloudSyncStudents = cloudMap?.[STORAGE_KEYS.STUDENTS];
               if (!Array.isArray(cloudSyncStudents) && cleanStudents.length > 0) {
-                localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(cleanStudents));
+                const serializedStudents = JSON.stringify(cleanStudents);
+                if (localStorage.getItem(STORAGE_KEYS.STUDENTS) !== serializedStudents) {
+                  localStorage.setItem(STORAGE_KEYS.STUDENTS, serializedStudents);
+                  hasRemoteChanges = true;
+                }
               }
             }
           }
         }
 
-        return syncedAny;
+        return hasRemoteChanges;
       } catch (err) {
         console.warn('syncFromCloud error:', err);
         return false;

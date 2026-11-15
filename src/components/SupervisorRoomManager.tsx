@@ -128,6 +128,14 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
   const [renameDormInput, setRenameDormInput] = useState('');
   const [renameDormError, setRenameDormError] = useState<string | null>(null);
 
+  // مدال تأیید اقدامات حساس (بدون window.confirm)
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
+
   const allVisitReports = Storage.getVisitReports();
 
   const currentDorm = dorms.find((d) => d.id === selectedDormId) || dorms[0];
@@ -159,19 +167,20 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
 
   // حذف دانشجو از اتاق (آزادسازی تخت)
   const handleEvictStudent = (st: Student) => {
-    if (
-      confirm(
-        `آیا از لغو اسکان و حذف دانشجو «${st.fullName}» از این اتاق اطمینان دارید؟\nپرونده دانشجو در سیستم محفوظ می‌ماند و وضعیت وی به «فاقد اسکان» تغییر می‌یابد و تخت آزاد می‌گردد.`
-      )
-    ) {
-      const res = Storage.releaseBed(st.studentId);
-      setActionMessage({
-        type: 'success',
-        text: `دانشجو «${st.fullName}» از اتاق حذف و تخت وی با موفقیت آزاد شد.`,
-      });
-      onDataChanged();
-      setTimeout(() => setActionMessage(null), 3500);
-    }
+    setConfirmDialog({
+      title: 'لغو اسکان و آزادسازی تخت',
+      message: `آیا از لغو اسکان و حذف دانشجو «${st.fullName}» از این اتاق اطمینان دارید؟ پرونده دانشجو در سیستم محفوظ می‌ماند و وضعیت وی به «فاقد اسکان» تغییر می‌یابد و تخت آزاد می‌گردد.`,
+      confirmLabel: 'تأیید و آزادسازی تخت',
+      onConfirm: () => {
+        Storage.releaseBed(st.studentId);
+        setActionMessage({
+          type: 'success',
+          text: `دانشجو «${st.fullName}» از اتاق حذف و تخت وی با موفقیت آزاد شد.`,
+        });
+        onDataChanged();
+        setTimeout(() => setActionMessage(null), 3500);
+      },
+    });
   };
 
   // تخصیص مستقیم دانشجوی فاقد اسکان به تخت خالی
@@ -207,12 +216,17 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
 
   // حذف کامل اتاق
   const handleDeleteRoom = (roomId: string, roomNumber: string) => {
-    if (confirm(`آیا از حذف کامل اتاق شماره ${roomNumber} و آزادسازی کلیه تخت‌های آن اطمینان دارید؟`)) {
-      const res = Storage.deleteRoom(roomId);
-      setActionMessage({ type: 'success', text: res.message });
-      onDataChanged();
-      setTimeout(() => setActionMessage(null), 3500);
-    }
+    setConfirmDialog({
+      title: `حذف کامل اتاق شماره ${roomNumber}`,
+      message: `آیا از حذف کامل اتاق شماره ${roomNumber} و آزادسازی کلیه تخت‌های آن اطمینان دارید؟`,
+      confirmLabel: 'تأیید و حذف اتاق',
+      onConfirm: () => {
+        const res = Storage.deleteRoom(roomId);
+        setActionMessage({ type: 'success', text: res.message });
+        onDataChanged();
+        setTimeout(() => setActionMessage(null), 3500);
+      },
+    });
   };
 
   // ویرایش و تغییر نام / شماره اتاق
@@ -1298,6 +1312,39 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* مدال تأیید اقدامات حساس */}
+      {confirmDialog && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <span>{confirmDialog.title}</span>
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{confirmDialog.message}</p>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const fn = confirmDialog.onConfirm;
+                  setConfirmDialog(null);
+                  fn();
+                }}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm cursor-pointer"
+              >
+                {confirmDialog.confirmLabel}
+              </button>
+            </div>
           </div>
         </div>
       )}

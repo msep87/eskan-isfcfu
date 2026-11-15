@@ -123,6 +123,7 @@ import {
   Award,
   Package,
   Info,
+  AlertCircle,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -341,7 +342,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   localSettingsRef.current = localSettings;
   const [saveStatus, setSaveStatus] = useState(false);
 
+  const lastSyncedSettingsJsonRef = useRef<string>(JSON.stringify(settings));
   useEffect(() => {
+    const incomingJson = JSON.stringify(settings);
+    if (incomingJson === lastSyncedSettingsJsonRef.current) return;
+    lastSyncedSettingsJsonRef.current = incomingJson;
     localSettingsRef.current = { ...settings };
     setLocalSettings({ ...settings });
   }, [settings]);
@@ -375,6 +380,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     (s) => s.assignedBedId && s.assignmentStatus === 'temporary'
   );
   const [approvalFeedback, setApprovalFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [adminConfirmDialog, setAdminConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    isPositive?: boolean;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
+  const [adminRejectDialog, setAdminRejectDialog] = useState<{
+    studentId: string;
+    reason: string;
+  } | null>(null);
+  const [adminNoticeDialog, setAdminNoticeDialog] = useState<{
+    title: string;
+    message: string;
+    tone: 'success' | 'error';
+  } | null>(null);
 
   // وضعیت آپلود دسته‌جمعی پوشه عکس‌ها
   const [batchPhotoStatus, setBatchPhotoStatus] = useState<{
@@ -415,7 +436,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [homeNotesEditorKey, setHomeNotesEditorKey] = useState(0);
   const [homeNotesFeedback, setHomeNotesFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  const lastSyncedHomeNotesJsonRef = useRef<string>(
+    JSON.stringify({ t: settings.homeNotesTitle || '', n: settings.homeNotes || [] })
+  );
   useEffect(() => {
+    const incomingJson = JSON.stringify({
+      t: settings.homeNotesTitle || '',
+      n: settings.homeNotes || [],
+    });
+    if (incomingJson === lastSyncedHomeNotesJsonRef.current) return;
+    lastSyncedHomeNotesJsonRef.current = incomingJson;
     setDraftHomeNotesTitle(settings.homeNotesTitle?.trim() || DEFAULT_HOME_NOTES_TITLE);
     setDraftHomeNotes(
       settings.homeNotes && settings.homeNotes.length > 0
@@ -603,27 +633,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleDeleteStudent = (st: Student) => {
-    if (confirm(`آیا از حذف کامل دانشجو «${st.fullName}» با کد دانشجویی ${st.studentId} از سامانه مطمئن هستید؟ در صورت اسکان، تخت وی آزاد خواهد شد.`)) {
-      const res = Storage.deleteStudent(st.studentId);
-      setApprovalFeedback({ type: 'success', message: res.message });
-      onRefreshData();
-      setTimeout(() => setApprovalFeedback(null), 3500);
-    }
+    setAdminConfirmDialog({
+      title: 'حذف کامل دانشجو',
+      message: `آیا از حذف کامل دانشجو «${st.fullName}» با کد دانشجویی ${st.studentId} از سامانه مطمئن هستید؟ در صورت اسکان، تخت وی آزاد خواهد شد.`,
+      confirmLabel: 'تأیید و حذف دانشجو',
+      onConfirm: () => {
+        const res = Storage.deleteStudent(st.studentId);
+        setApprovalFeedback({ type: 'success', message: res.message });
+        onRefreshData();
+        setTimeout(() => setApprovalFeedback(null), 3500);
+      },
+    });
   };
 
   // تخلیه دانشجو از اتاق و آزادسازی تخت توسط مدیر
   const handleAdminEvictStudent = (st: Student) => {
     const r = rooms.find((rm) => rm.id === st.assignedRoomId);
-    if (
-      confirm(
-        `آیا از تخلیه و لغو اسکان دانشجو «${st.fullName}» از اتاق ${r?.roomNumber || ''} اطمینان دارید؟\nتخت مربوطه فوراً آزاد گردیده و وضعیت اسکان دانشجو به «فاقد اسکان» تغییر خواهد کرد.`
-      )
-    ) {
-      const res = Storage.releaseBed(st.studentId);
-      setApprovalFeedback({ type: 'success', message: res.message });
-      onRefreshData();
-      setTimeout(() => setApprovalFeedback(null), 3500);
-    }
+    setAdminConfirmDialog({
+      title: 'تخلیه و لغو اسکان دانشجو',
+      message: `آیا از تخلیه و لغو اسکان دانشجو «${st.fullName}» از اتاق ${r?.roomNumber || ''} اطمینان دارید؟ تخت مربوطه فوراً آزاد گردیده و وضعیت اسکان دانشجو به «فاقد اسکان» تغییر خواهد کرد.`,
+      confirmLabel: 'تأیید و آزادسازی تخت',
+      onConfirm: () => {
+        const res = Storage.releaseBed(st.studentId);
+        setApprovalFeedback({ type: 'success', message: res.message });
+        onRefreshData();
+        setTimeout(() => setApprovalFeedback(null), 3500);
+      },
+    });
   };
 
   // باز کردن مدال تخصیص اتاق و تخت به دانشجو
@@ -685,22 +721,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       onRefreshData();
       setTimeout(() => setApprovalFeedback(null), 3500);
     } else {
-      alert(res.message);
+      setAdminNoticeDialog({ title: 'خطا در ثبت سرا', message: res.message, tone: 'error' });
     }
   };
 
   // حذف سرا توسط مدیر
   const handleDeleteDormitory = (dormId: string, dormName: string) => {
-    if (
-      confirm(
-        `آیا از حذف کامل سرای «${dormName}» به همراه کلیه اتاق‌ها، تخت‌ها و لغو اسکان دانشجویان ساکن در آن اطمینان دارید؟`
-      )
-    ) {
-      const res = Storage.deleteDormitory(dormId);
-      setApprovalFeedback({ type: res.success ? 'success' : 'error', message: res.message });
-      onRefreshData();
-      setTimeout(() => setApprovalFeedback(null), 3500);
-    }
+    setAdminConfirmDialog({
+      title: `حذف سرای «${dormName}»`,
+      message: `آیا از حذف کامل سرای «${dormName}» به همراه کلیه اتاق‌ها، تخت‌ها و لغو اسکان دانشجویان ساکن در آن اطمینان دارید؟`,
+      confirmLabel: 'تأیید و حذف کامل سرا',
+      onConfirm: () => {
+        const res = Storage.deleteDormitory(dormId);
+        setApprovalFeedback({ type: res.success ? 'success' : 'error', message: res.message });
+        onRefreshData();
+        setTimeout(() => setApprovalFeedback(null), 3500);
+      },
+    });
   };
 
   // ثبت اتاق جدید با تخت‌های دوطبقه توسط مدیر
@@ -715,7 +752,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       onRefreshData();
       setTimeout(() => setApprovalFeedback(null), 3500);
     } else {
-      alert(res.message);
+      setAdminNoticeDialog({ title: 'خطا در ثبت اتاق', message: res.message, tone: 'error' });
     }
   };
 
@@ -779,16 +816,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // حذف اتاق توسط مدیر
   const handleDeleteRoom = (roomId: string, roomNum: string) => {
-    if (
-      confirm(
-        `آیا از حذف کامل اتاق ${roomNum} و آزادسازی کلیه تخت‌ها و اسکان دانشجویان آن اطمینان دارید؟`
-      )
-    ) {
-      const res = Storage.deleteRoom(roomId);
-      setApprovalFeedback({ type: 'success', message: res.message });
-      onRefreshData();
-      setTimeout(() => setApprovalFeedback(null), 3500);
-    }
+    setAdminConfirmDialog({
+      title: `حذف کامل اتاق ${roomNum}`,
+      message: `آیا از حذف کامل اتاق ${roomNum} و آزادسازی کلیه تخت‌ها و اسکان دانشجویان آن اطمینان دارید؟`,
+      confirmLabel: 'تأیید و حذف اتاق',
+      onConfirm: () => {
+        const res = Storage.deleteRoom(roomId);
+        setApprovalFeedback({ type: 'success', message: res.message });
+        onRefreshData();
+        setTimeout(() => setApprovalFeedback(null), 3500);
+      },
+    });
   };
 
   // افزودن تخت مجزا به اتاق
@@ -801,12 +839,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // حذف یک تخت توسط مدیر
   const handleDeleteBed = (bedId: string, bedLabel: string) => {
-    if (confirm(`آیا از حذف «${bedLabel}» اطمینان دارید؟ در صورت اسکان دانشجو، تخت آزاد می‌گردد.`)) {
-      const res = Storage.deleteBed(bedId);
-      setApprovalFeedback({ type: res.success ? 'success' : 'error', message: res.message });
-      onRefreshData();
-      setTimeout(() => setApprovalFeedback(null), 3500);
-    }
+    setAdminConfirmDialog({
+      title: `حذف ${bedLabel}`,
+      message: `آیا از حذف «${bedLabel}» اطمینان دارید؟ در صورت اسکان دانشجو، تخت آزاد می‌گردد.`,
+      confirmLabel: 'تأیید و حذف تخت',
+      onConfirm: () => {
+        const res = Storage.deleteBed(bedId);
+        setApprovalFeedback({ type: res.success ? 'success' : 'error', message: res.message });
+        onRefreshData();
+        setTimeout(() => setApprovalFeedback(null), 3500);
+      },
+    });
   };
 
   const handleStartEditAnnouncement = (ann: Announcement) => {
@@ -840,7 +883,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      alert('حجم عکس اطلاعیه نباید بیشتر از ۵ مگابایت باشد.');
+      setAdminNoticeDialog({
+        title: 'حجم تصویر بیش از حد مجاز',
+        message: 'حجم عکس اطلاعیه نباید بیشتر از ۵ مگابایت باشد.',
+        tone: 'error',
+      });
+      e.target.value = '';
       return;
     }
     const reader = new FileReader();
@@ -873,16 +921,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleBulkApprove = () => {
     if (pendingStudents.length === 0) return;
-    if (
-      confirm(
-        `آیا از تأیید دسته‌جمعی کلیه درخواست‌های اسکان موقت (${pendingStudents.length} دانشجو) اطمینان دارید؟ وضعیت اسکان همه آنها قطعی خواهد شد.`
-      )
-    ) {
-      const res = Storage.bulkConfirmAllAssignments();
-      setApprovalFeedback({ type: 'success', message: res.message });
-      onRefreshData();
-      setTimeout(() => setApprovalFeedback(null), 4000);
-    }
+    setAdminConfirmDialog({
+      title: 'تأیید دسته‌جمعی اسکان موقت',
+      message: `آیا از تأیید دسته‌جمعی کلیه درخواست‌های اسکان موقت (${pendingStudents.length} دانشجو) اطمینان دارید؟ وضعیت اسکان همه آنها قطعی خواهد شد.`,
+      confirmLabel: 'تأیید دسته‌جمعی',
+      isPositive: true,
+      onConfirm: () => {
+        const res = Storage.bulkConfirmAllAssignments();
+        setApprovalFeedback({ type: 'success', message: res.message });
+        onRefreshData();
+        setTimeout(() => setApprovalFeedback(null), 4000);
+      },
+    });
   };
 
   const handleConfirmSingle = (studentId: string) => {
@@ -893,23 +943,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleRejectSingle = (studentId: string) => {
-    const reason = prompt(
-      'لطفاً علت عدم تأیید اسکان را وارد نمایید (این پیام به عنوان نوتیفیکیشن برای دانشجو ارسال می‌گردد):',
-      'عدم تطابق با ضوابط یا تکمیل ظرفیت'
-    );
-    if (reason !== null) {
-      const res = Storage.rejectStudentAssignment(studentId, reason);
-      setApprovalFeedback({ type: 'success', message: res.message });
-      onRefreshData();
-      setTimeout(() => setApprovalFeedback(null), 3000);
-    }
+    setAdminRejectDialog({
+      studentId,
+      reason: 'عدم تطابق با ضوابط یا تکمیل ظرفیت',
+    });
   };
 
   // ایجاد و انتشار یا ویرایش اطلاعیه توسط مدیر
   const handleAdminCreateAnnouncement = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAnnTitle.trim() || !newAnnContent.trim()) {
-      alert('لطفاً عنوان و متن اطلاعیه را وارد نمایید.');
+      setAdminNoticeDialog({
+        title: 'اطلاعات ناقص اطلاعیه',
+        message: 'لطفاً عنوان و متن اطلاعیه را وارد نمایید.',
+        tone: 'error',
+      });
       return;
     }
 
@@ -964,10 +1012,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleDeleteAnnouncement = (id: string) => {
-    if (confirm('آیا از حذف این اطلاعیه اطمینان دارید؟')) {
-      Storage.deleteAnnouncement(id);
-      onRefreshData();
-    }
+    setAdminConfirmDialog({
+      title: 'حذف اطلاعیه',
+      message: 'آیا از حذف این اطلاعیه اطمینان دارید؟',
+      confirmLabel: 'حذف اطلاعیه',
+      onConfirm: () => {
+        Storage.deleteAnnouncement(id);
+        setAnnFeedback('اطلاعیه با موفقیت حذف شد.');
+        setTimeout(() => setAnnFeedback(null), 3000);
+        onRefreshData();
+      },
+    });
   };
 
   const handleToggleAnnouncementHome = (id: string) => {
@@ -1186,7 +1241,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 3 * 1024 * 1024) {
-        alert('حجم تصویر آرم نباید بیشتر از ۳ مگابایت باشد.');
+        setAdminNoticeDialog({
+          title: 'حجم تصویر بیش از حد مجاز',
+          message: 'حجم تصویر آرم نباید بیشتر از ۳ مگابایت باشد.',
+          tone: 'error',
+        });
+        e.target.value = '';
         return;
       }
       const reader = new FileReader();
@@ -1304,7 +1364,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      alert('حجم عکس پس‌زمینه نباید بیشتر از ۵ مگابایت باشد.');
+      setAdminNoticeDialog({
+        title: 'حجم تصویر بیش از حد مجاز',
+        message: 'حجم عکس پس‌زمینه نباید بیشتر از ۵ مگابایت باشد.',
+        tone: 'error',
+      });
+      e.target.value = '';
       return;
     }
     const reader = new FileReader();
@@ -1318,7 +1383,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setLocalSettings(updated);
       Storage.setSettings(updated);
       onUpdateSettings(updated);
-      alert('تصویر پس‌زمینه سایت با موفقیت تغییر یافت و فعال شد.');
+      setAdminNoticeDialog({
+        title: 'تغییر تصویر پس‌زمینه',
+        message: 'تصویر پس‌زمینه سایت با موفقیت تغییر یافت و فعال شد.',
+        tone: 'success',
+      });
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -1587,25 +1656,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         if (ok) {
           const syncRes = await Storage.waitForPendingCloudSync();
           onRefreshData();
-          alert(
-            syncRes.success
+          setAdminNoticeDialog({
+            title: 'بازیابی نسخه پشتیبان',
+            message: syncRes.success
               ? 'اطلاعات نسخه پشتیبان با موفقیت بازیابی و در دیتابیس ابری ذخیره شد.'
-              : 'اطلاعات نسخه پشتیبان در مرورگر بازیابی شد، اما همگام‌سازی برخی بخش‌ها با دیتابیس ابری با خطا مواجه شد.'
-          );
+              : 'اطلاعات نسخه پشتیبان در مرورگر بازیابی شد، اما همگام‌سازی برخی بخش‌ها با دیتابیس ابری با خطا مواجه شد.',
+            tone: syncRes.success ? 'success' : 'error',
+          });
         } else {
-          alert('فایل پشتیبان نامعتبر است.');
+          setAdminNoticeDialog({
+            title: 'خطا در فایل پشتیبان',
+            message: 'فایل پشتیبان انتخاب‌شده نامعتبر است.',
+            tone: 'error',
+          });
         }
       };
       reader.readAsText(file);
     }
+    e.target.value = '';
   };
 
-  const handleResetDefaults = async () => {
-    if (confirm('آیا مایل به بازنشانی پایگاه داده به حالت اولیه دانشگاه فرهنگیان هستید؟ تمام تغییرات به نمونه اولیه برمی‌گردد.')) {
-      Storage.resetToDefaults();
-      await Storage.syncAllToCloud();
-      onRefreshData();
-    }
+  const handleResetDefaults = () => {
+    setAdminConfirmDialog({
+      title: 'بازنشانی کامل پایگاه داده',
+      message: 'آیا مایل به بازنشانی پایگاه داده به حالت اولیه دانشگاه فرهنگیان هستید؟ تمام تغییرات به نمونه اولیه برمی‌گردد.',
+      confirmLabel: 'تأیید و بازنشانی کامل',
+      onConfirm: async () => {
+        Storage.resetToDefaults();
+        await Storage.syncAllToCloud();
+        onRefreshData();
+        setAdminNoticeDialog({
+          title: 'بازنشانی انجام شد',
+          message: 'پایگاه داده با موفقیت به وضعیت اولیه بازگردانی و با سرور ابری همگام‌سازی شد.',
+          tone: 'success',
+        });
+      },
+    });
   };
 
   // وظایف و پرسنل تأسیساتی سراسر دانشگاه
@@ -1665,12 +1751,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleAdminDeleteTask = (taskId: string, code: string) => {
-    if (confirm(`آیا از حذف مأموریت تأسیساتی ${code} اطمینان دارید؟`)) {
-      Storage.deleteMaintenanceTask(taskId);
-      setAdminMaintFeedback(`مأموریت ${code} حذف گردید.`);
-      onRefreshData();
-      setTimeout(() => setAdminMaintFeedback(null), 3000);
-    }
+    setAdminConfirmDialog({
+      title: `حذف مأموریت تأسیساتی ${code}`,
+      message: `آیا از حذف مأموریت تأسیساتی ${code} اطمینان دارید؟`,
+      confirmLabel: 'تأیید و حذف مأموریت',
+      onConfirm: () => {
+        Storage.deleteMaintenanceTask(taskId);
+        setAdminMaintFeedback(`مأموریت ${code} حذف گردید.`);
+        onRefreshData();
+        setTimeout(() => setAdminMaintFeedback(null), 3000);
+      },
+    });
   };
 
   return (
@@ -2691,7 +2782,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                     setAssignTargetRoomId(room.id);
                                                     setAssignTargetBedId(bed.id);
                                                   } else {
-                                                    alert('هیچ دانشجوی فاقد اسکانی در سیستم یافت نشد.');
+                                                    setAdminNoticeDialog({
+                                                      title: 'عدم وجود دانشجوی فاقد اسکان',
+                                                      message: 'در حال حاضر هیچ دانشجوی فاقد اسکانی در سیستم یافت نشد.',
+                                                      tone: 'error',
+                                                    });
                                                   }
                                                 }}
                                                 className="p-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-bold transition cursor-pointer"
@@ -3940,11 +4035,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <td className="p-3 text-center">
                             <button
                               onClick={() => {
-                                if (confirm(`آیا از حذف شیفت ${s.supervisorName} مطمئن هستید؟`)) {
-                                  Storage.deleteShiftSchedule(s.id);
-                                  setShiftSchedules(Storage.getShiftSchedules());
-                                  setShiftFeedback('شیفت مورد نظر با موفقیت حذف گردید.');
-                                }
+                                setAdminConfirmDialog({
+                                  title: 'حذف برنامه شیفت',
+                                  message: `آیا از حذف شیفت ${s.supervisorName} مطمئن هستید؟`,
+                                  confirmLabel: 'تأیید و حذف شیفت',
+                                  onConfirm: () => {
+                                    Storage.deleteShiftSchedule(s.id);
+                                    setShiftSchedules(Storage.getShiftSchedules());
+                                    setShiftFeedback('شیفت مورد نظر با موفقیت حذف گردید.');
+                                  },
+                                });
                               }}
                               className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 transition cursor-pointer"
                               title="حذف این شیفت"
@@ -4428,11 +4528,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                     <button
                       onClick={() => {
-                        if (confirm(`آیا از حذف مشاور «${cns.fullName}» اطمینان دارید؟`)) {
-                          Storage.deleteCounselor(cns.id);
-                          setCounselorsList(Storage.getCounselors());
-                          setCounselorFeedback(`مشاور «${cns.fullName}» حذف گردید.`);
-                        }
+                        setAdminConfirmDialog({
+                          title: `حذف مشاور «${cns.fullName}»`,
+                          message: `آیا از حذف مشاور «${cns.fullName}» اطمینان دارید؟`,
+                          confirmLabel: 'تأیید و حذف مشاور',
+                          onConfirm: () => {
+                            Storage.deleteCounselor(cns.id);
+                            setCounselorsList(Storage.getCounselors());
+                            setCounselorFeedback(`مشاور «${cns.fullName}» حذف گردید.`);
+                          },
+                        });
                       }}
                       className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
                       title="حذف مشاور"
@@ -4490,7 +4595,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 : `${res.message} (هشدار: همگام‌سازی ابری با خطا مواجه شد)`
                             );
                           } else {
-                            alert(res.message);
+                            setAdminNoticeDialog({
+                              title: 'خطا در فایل اکسل شیفت‌ها',
+                              message: res.message,
+                              tone: 'error',
+                            });
                           }
                           e.target.value = '';
                         }
@@ -7560,6 +7669,112 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         initialDormId={selectedCartableDormId}
         actorTitle="مدیریت کل امور سراهای دانشجویی"
       />
+
+      {/* مدال تأیید عملیات حساس مدیر */}
+      {adminConfirmDialog && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+              <AlertTriangle className={`w-5 h-5 shrink-0 ${adminConfirmDialog.isPositive ? 'text-emerald-600' : 'text-rose-600'}`} />
+              <span>{adminConfirmDialog.title}</span>
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{adminConfirmDialog.message}</p>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setAdminConfirmDialog(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const fn = adminConfirmDialog.onConfirm;
+                  setAdminConfirmDialog(null);
+                  void fn();
+                }}
+                className={`px-5 py-2 rounded-xl text-white text-xs font-bold shadow-sm cursor-pointer ${
+                  adminConfirmDialog.isPositive ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'
+                }`}
+              >
+                {adminConfirmDialog.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* مدال ثبت علت رد تخصیص موقت توسط مدیر */}
+      {adminRejectDialog && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const res = Storage.rejectStudentAssignment(
+                adminRejectDialog.studentId,
+                adminRejectDialog.reason.trim() || 'عدم تأیید مدیریت'
+              );
+              setAdminRejectDialog(null);
+              setApprovalFeedback({ type: 'success', message: res.message });
+              onRefreshData();
+              setTimeout(() => setApprovalFeedback(null), 3500);
+            }}
+            className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4"
+          >
+            <h3 className="font-extrabold text-base text-slate-900 dark:text-white">ثبت علت عدم تأیید اسکان</h3>
+            <p className="text-xs text-slate-500">این پیام به عنوان اعلان رسمی برای دانشجو ارسال می‌گردد:</p>
+            <textarea
+              rows={3}
+              value={adminRejectDialog.reason}
+              onChange={(e) => setAdminRejectDialog((prev) => (prev ? { ...prev, reason: e.target.value } : null))}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+              required
+            />
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setAdminRejectDialog(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm cursor-pointer"
+              >
+                تأیید و لغو اسکان موقت
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* مدال اعلان پیام/خطای مدیر */}
+      {adminNoticeDialog && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+              {adminNoticeDialog.tone === 'success' ? (
+                <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              )}
+              <span>{adminNoticeDialog.title}</span>
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{adminNoticeDialog.message}</p>
+            <div className="flex items-center justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setAdminNoticeDialog(null)}
+                className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold cursor-pointer"
+              >
+                متوجه شدم
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

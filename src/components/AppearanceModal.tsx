@@ -102,12 +102,16 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
   };
 
   // آپلود عکس پس‌زمینه سایت
+  const [wallpaperError, setWallpaperError] = React.useState('');
+
   const handleWallpaperUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setWallpaperError('');
 
     if (file.size > 5 * 1024 * 1024) {
-      alert('حجم عکس پس‌زمینه نباید بیشتر از ۵ مگابایت باشد.');
+      setWallpaperError('حجم عکس پس‌زمینه نباید بیشتر از ۵ مگابایت باشد.');
+      e.target.value = '';
       return;
     }
 
@@ -153,6 +157,12 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {wallpaperError && (
+          <div className="mb-4 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold">
+            {wallpaperError}
+          </div>
+        )}
 
         {/* تم رنگی */}
         <div className="mb-6">

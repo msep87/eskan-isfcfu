@@ -949,25 +949,61 @@ export function generatePrintableRoleGuideHtml(role: UserRoleType): void {
     سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان • طراح: دکتر محمد سپیانی • تمامی حقوق محفوظ است.
   </div>
 
-  <script>
-    window.onload = function() {
-      window.print();
-    };
-  </script>
 </body>
 </html>
   `;
 
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, '_blank');
-  if (!win) {
-    // در صورت بلاک شدن پاپ‌آپ، فایل را دانلود می‌کنیم
+  try {
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.style.visibility = 'hidden';
+    document.body.appendChild(iframe);
+
+    const cleanup = () => {
+      window.setTimeout(() => {
+        if (iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
+      }, 1000);
+    };
+
+    iframe.onload = () => {
+      try {
+        const win = iframe.contentWindow;
+        if (!win) throw new Error('Print window unavailable');
+        win.onafterprint = cleanup;
+        win.focus();
+        win.print();
+        window.setTimeout(cleanup, 60000);
+      } catch {
+        cleanup();
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `راهنمای_کاربری_${role}_دانشگاه_فرهنگیان_${academicYear}.html`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    };
+
+    iframe.srcdoc = html;
+  } catch {
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `راهنمای_کاربری_${role}_دانشگاه_فرهنگیان_${academicYear}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 }

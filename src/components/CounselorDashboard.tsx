@@ -192,7 +192,7 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
   const handleSaveShiftReport = (e: React.FormEvent) => {
     e.preventDefault();
     if (!interventionsSummary.trim()) {
-      alert('لطفاً شرح اقدامات و مشاوره‌های ارائه‌شده را تکمیل فرمایید.');
+      showFeedback('لطفاً شرح اقدامات و مشاوره‌های ارائه‌شده را تکمیل فرمایید.', 'error');
       return;
     }
 
@@ -224,12 +224,9 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
     }
   };
 
-  // چاپ گزارش شیفت
+  // چاپ گزارش شیفت (بدون نیاز به popup / window.open)
   const handlePrintReport = (report: CounselorShiftReport) => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    printWindow.document.write(`
+    const html = `
       <html dir="rtl" lang="fa">
       <head>
         <title>گزارش شیفت مشاوره - ${report.reportCode}</title>
@@ -254,12 +251,10 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
         <div class="field"><span class="title">تعداد مراجعین دانشجو:</span> ${report.totalSessionsCount} نفر</div>
         <div class="field"><span class="title">موارد اضطراری / مداخله فوری:</span> ${report.urgentCasesCount || 0} مورد</div>
         <div class="field"><span class="title">حوزه‌های مشاوره:</span> ${(report.caseCategories || []).join('، ')}</div>
-        
         <div class="box">
           <div class="title">شرح اقدامات و مشاوره‌های ارائه‌شده:</div>
           <p>${report.interventionsSummary}</p>
         </div>
-
         ${
           report.urgentReferralDetails
             ? `<div class="box" style="border-color: #fca5a5; background: #fff5f5;">
@@ -268,7 +263,6 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
               </div>`
             : ''
         }
-
         ${
           report.recommendationsToAdmin
             ? `<div class="box">
@@ -277,15 +271,40 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
               </div>`
             : ''
         }
-
         <div class="footer">
           <p>امضای دیجیتال مشاور مرکز: <strong>${report.counselorName}</strong></p>
         </div>
       </body>
       </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+    `;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch {
+          window.print();
+        } finally {
+          setTimeout(() => iframe.remove(), 1500);
+        }
+      }, 200);
+    } else {
+      iframe.remove();
+      window.print();
+    }
   };
 
   return (

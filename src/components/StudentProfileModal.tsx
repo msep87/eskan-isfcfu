@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { Student } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
@@ -44,6 +44,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
 
   const [formData, setFormData] = useState<Student>({
     ...student,
+    religion: student.religion || 'اسلام / شیعه',
     postalAddress: student.postalAddress || '',
     customFields: { ...(student.customFields || {}) },
   });
@@ -63,10 +64,35 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [validationError, setValidationError] = useState('');
 
+  // جلوگیری از پاک شدن فیلدهای در حال تایپ هنگام رفرش پس‌زمینه یا تغییر فوکوس پنجره (مثلاً بعد از انتخاب عکس)
+  const wasOpenRef = useRef(false);
+  const loadedStudentIdRef = useRef<string | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
-    if (isOpen) {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      loadedStudentIdRef.current = null;
+      return;
+    }
+
+    const shouldInitialize =
+      !wasOpenRef.current || loadedStudentIdRef.current !== student.studentId;
+
+    if (shouldInitialize) {
+      wasOpenRef.current = true;
+      loadedStudentIdRef.current = student.studentId;
       setFormData({
         ...student,
+        religion: student.religion || 'اسلام / شیعه',
         postalAddress: student.postalAddress || '',
         customFields: { ...(student.customFields || {}) },
       });
@@ -209,7 +235,6 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
         return;
       }
       await Storage.waitForPendingCloudSync();
-      onProfileUpdated(updated);
       setSaveSuccess(true);
 
       try {
@@ -222,8 +247,12 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
         // ignore
       }
 
-      setTimeout(() => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+      closeTimerRef.current = window.setTimeout(() => {
         setSaveSuccess(false);
+        onProfileUpdated(updated);
         onClose();
       }, 1200);
     } finally {
@@ -444,8 +473,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={formData.fatherName}
-                  onChange={(e) => setFormData({ ...formData, fatherName: e.target.value })}
+                  value={formData.fatherName || ''}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, fatherName: e.target.value }))}
                   placeholder="نام پدر"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
                   required
@@ -458,8 +487,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={formData.birthDate}
-                  onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                  value={formData.birthDate || ''}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, birthDate: e.target.value }))}
                   placeholder="مثلاً 1383/05/15"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500 dir-ltr text-left"
                   dir="ltr"
@@ -473,8 +502,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={formData.religion || 'اسلام / شیعه'}
-                  onChange={(e) => setFormData({ ...formData, religion: e.target.value })}
+                  value={formData.religion ?? ''}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, religion: e.target.value }))}
                   placeholder="اسلام / شیعه"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
                   required
@@ -497,8 +526,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={formData.mobile}
-                  onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
+                  value={formData.mobile || ''}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, mobile: e.target.value }))}
                   placeholder="0913xxxxxxx"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500 dir-ltr text-left"
                   dir="ltr"
@@ -513,8 +542,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={formData.emergencyPhone}
-                  onChange={(e) => setFormData({ ...formData, emergencyPhone: e.target.value })}
+                  value={formData.emergencyPhone || ''}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, emergencyPhone: e.target.value }))}
                   placeholder="0913xxxxxxx"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500 dir-ltr text-left"
                   dir="ltr"
@@ -529,8 +558,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={formData.parentPhone}
-                  onChange={(e) => setFormData({ ...formData, parentPhone: e.target.value })}
+                  value={formData.parentPhone || ''}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, parentPhone: e.target.value }))}
                   placeholder="0913xxxxxxx"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500 dir-ltr text-left"
                   dir="ltr"
@@ -545,8 +574,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  value={formData.phone || ''}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, phone: e.target.value }))}
                   placeholder="031xxxxxxxx"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500 dir-ltr text-left"
                   dir="ltr"
@@ -569,8 +598,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={formData.province}
-                  onChange={(e) => setFormData({ ...formData, province: e.target.value })}
+                  value={formData.province || ''}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, province: e.target.value }))}
                   placeholder="مثلاً اصفهان، یزد، چهارمحال و بختیاری..."
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
                   required
@@ -583,8 +612,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={formData.city}
-                  onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                  value={formData.city || ''}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, city: e.target.value }))}
                   placeholder="مثلاً کاشان، نجف‌آباد، شهرکرد..."
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
                   required
@@ -599,8 +628,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
               </label>
               <textarea
                 rows={2}
-                value={formData.postalAddress}
-                onChange={(e) => setFormData({ ...formData, postalAddress: e.target.value })}
+                value={formData.postalAddress || ''}
+                onChange={(e) => setFormData((prev) => ({ ...prev, postalAddress: e.target.value }))}
                 placeholder="خیابان، کوچه، پلاک، طبقه و کد پستی ده‌رقمی منزل..."
                 className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
                 required

@@ -198,26 +198,32 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   };
 
   const handleDeleteAnnouncement = (id: string) => {
-    if (confirm('آیا از حذف این اطلاعیه اطمینان دارید؟')) {
-      Storage.deleteAnnouncement(id);
-      setActionFeedback('اطلاعیه با موفقیت حذف گردید.');
-      onRefreshData();
-      setTimeout(() => setActionFeedback(null), 3000);
-    }
+    setSupConfirmDialog({
+      title: 'حذف اطلاعیه',
+      message: 'آیا از حذف این اطلاعیه اطمینان دارید؟',
+      confirmLabel: 'حذف اطلاعیه',
+      onConfirm: () => {
+        Storage.deleteAnnouncement(id);
+        setActionFeedback('اطلاعیه با موفقیت حذف گردید.');
+        onRefreshData();
+        setTimeout(() => setActionFeedback(null), 3000);
+      },
+    });
   };
 
   // حذف دانشجو از اتاق / آزادسازی تخت
   const handleEvictStudent = (st: Student) => {
-    if (
-      confirm(
-        `آیا از لغو اسکان و حذف دانشجو «${st.fullName}» از اتاق اطمینان دارید؟\nپرونده دانشجو در سیستم حفظ شده و وضعیت وی به «فاقد اسکان» تغییر می‌یابد و تخت آزاد می‌گردد.`
-      )
-    ) {
-      const res = Storage.releaseBed(st.studentId);
-      setActionFeedback(res.message);
-      onRefreshData();
-      setTimeout(() => setActionFeedback(null), 3000);
-    }
+    setSupConfirmDialog({
+      title: 'لغو اسکان و آزادسازی تخت',
+      message: `آیا از لغو اسکان و حذف دانشجو «${st.fullName}» از اتاق اطمینان دارید؟ پرونده دانشجو در سیستم حفظ شده و وضعیت وی به «فاقد اسکان» تغییر می‌یابد و تخت آزاد می‌گردد.`,
+      confirmLabel: 'تأیید و لغو اسکان',
+      onConfirm: () => {
+        const res = Storage.releaseBed(st.studentId);
+        setActionFeedback(res.message);
+        onRefreshData();
+        setTimeout(() => setActionFeedback(null), 3000);
+      },
+    });
   };
 
   // تخصیص دانشجو از جدول به تخت
@@ -235,7 +241,9 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      alert('حجم عکس اطلاعیه نباید بیشتر از ۵ مگابایت باشد.');
+      setActionFeedback('خطا: حجم عکس اطلاعیه نباید بیشتر از ۵ مگابایت باشد.');
+      setTimeout(() => setActionFeedback(null), 4000);
+      e.target.value = '';
       return;
     }
     const reader = new FileReader();
@@ -451,19 +459,32 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
       activeDormIds.includes(s.assignedDormId || '')
   );
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [supConfirmDialog, setSupConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    isPositive?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+  const [rejectDialog, setRejectDialog] = useState<{
+    studentId: string;
+    reason: string;
+  } | null>(null);
 
   const handleBulkApprove = () => {
     if (pendingStudentsInMyDorm.length === 0) return;
-    if (
-      confirm(
-        `آیا از تأیید دسته‌جمعی درخواست‌های اسکان موقت (${pendingStudentsInMyDorm.length} دانشجو) اطمینان دارید؟`
-      )
-    ) {
-      const res = Storage.bulkConfirmAllAssignments(activeDormIds);
-      setActionFeedback(res.message);
-      onRefreshData();
-      setTimeout(() => setActionFeedback(null), 4000);
-    }
+    setSupConfirmDialog({
+      title: 'تأیید دسته‌جمعی اسکان موقت',
+      message: `آیا از تأیید دسته‌جمعی درخواست‌های اسکان موقت (${pendingStudentsInMyDorm.length} دانشجو) اطمینان دارید؟`,
+      confirmLabel: 'تأیید دسته‌جمعی',
+      isPositive: true,
+      onConfirm: () => {
+        const res = Storage.bulkConfirmAllAssignments(activeDormIds);
+        setActionFeedback(res.message);
+        onRefreshData();
+        setTimeout(() => setActionFeedback(null), 4000);
+      },
+    });
   };
 
   const handleConfirmSingle = (studentId: string) => {
@@ -474,16 +495,10 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   };
 
   const handleRejectSingle = (studentId: string) => {
-    const reason = prompt(
-      'لطفاً علت عدم تأیید اسکان را وارد فرمایید (برای دانشجو پیامک/نوتیفیکیشن ارسال می‌گردد):',
-      'عدم تطابق با شرایط سرا یا تغییر برنامه اسکان'
-    );
-    if (reason !== null) {
-      const res = Storage.rejectStudentAssignment(studentId, reason);
-      setActionFeedback(res.message);
-      onRefreshData();
-      setTimeout(() => setActionFeedback(null), 3000);
-    }
+    setRejectDialog({
+      studentId,
+      reason: 'عدم تطابق با شرایط سرا یا تغییر برنامه اسکان',
+    });
   };
 
   const handleCreateAnnouncement = (e: React.FormEvent) => {
@@ -608,7 +623,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   const handleCreateShiftReport = (e: React.FormEvent) => {
     e.preventDefault();
     if (!repInspections.trim() || !repHandover.trim()) {
-      alert('لطفاً خلاصه بازرسی و نکات تحویل به شیفت بعد را وارد فرمایید.');
+      setActionFeedback('خطا: لطفاً خلاصه بازرسی و نکات تحویل به شیفت بعد را وارد فرمایید.');
+      setTimeout(() => setActionFeedback(null), 4000);
       return;
     }
     const targetDorm = dorms.find((d) => d.id === (repShiftDormId || currentDorm?.id));
@@ -3129,6 +3145,83 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           />
         );
       })()}
+
+      {/* مدال تأیید عملیات سرپرست */}
+      {supConfirmDialog && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+              <AlertTriangle className={`w-5 h-5 shrink-0 ${supConfirmDialog.isPositive ? 'text-emerald-600' : 'text-rose-600'}`} />
+              <span>{supConfirmDialog.title}</span>
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{supConfirmDialog.message}</p>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSupConfirmDialog(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const fn = supConfirmDialog.onConfirm;
+                  setSupConfirmDialog(null);
+                  fn();
+                }}
+                className={`px-5 py-2 rounded-xl text-white text-xs font-bold shadow-sm cursor-pointer ${
+                  supConfirmDialog.isPositive ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'
+                }`}
+              >
+                {supConfirmDialog.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* مدال ثبت علت رد تخصیص موقت */}
+      {rejectDialog && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const res = Storage.rejectStudentAssignment(rejectDialog.studentId, rejectDialog.reason.trim() || 'عدم تأیید سرپرست');
+              setRejectDialog(null);
+              setActionFeedback(res.message);
+              onRefreshData();
+              setTimeout(() => setActionFeedback(null), 3500);
+            }}
+            className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4"
+          >
+            <h3 className="font-extrabold text-base text-slate-900 dark:text-white">ثبت علت عدم تأیید اسکان</h3>
+            <p className="text-xs text-slate-500">این پیام به عنوان اعلان رسمی برای دانشجو ارسال می‌گردد:</p>
+            <textarea
+              rows={3}
+              value={rejectDialog.reason}
+              onChange={(e) => setRejectDialog((prev) => (prev ? { ...prev, reason: e.target.value } : null))}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+              required
+            />
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setRejectDialog(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm cursor-pointer"
+              >
+                تأیید و لغو اسکان موقت
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
     </div>
   );

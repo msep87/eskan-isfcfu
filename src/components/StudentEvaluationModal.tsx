@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Student, Dormitory, Room, StudentEvaluation } from '../types';
 import { Storage } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
@@ -50,21 +50,33 @@ export const StudentEvaluationModal: React.FC<StudentEvaluationModalProps> = ({
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [evaluationsTick, setEvaluationsTick] = useState<number>(0);
 
+  const wasOpenRef = useRef(false);
+  const lastInitialStudentIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!isOpen) return;
-    if (initialStudent) {
-      setSelectedStudentId(initialStudent.studentId);
-      setScore(String(initialStudent.previousScore ?? 100));
-    } else if (students.length > 0 && !selectedStudentId) {
-      setSelectedStudentId(students[0].studentId);
-      setScore(String(students[0].previousScore ?? 100));
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      lastInitialStudentIdRef.current = null;
+      return;
     }
-    setStudentSearch('');
-    setTitle('');
-    setDescription('');
-    setFeedback(null);
-    setApplyToRoommates(false);
-  }, [isOpen, initialStudent, students]);
+    const nextInitId = initialStudent?.studentId || null;
+    if (!wasOpenRef.current || lastInitialStudentIdRef.current !== nextInitId) {
+      wasOpenRef.current = true;
+      lastInitialStudentIdRef.current = nextInitId;
+      if (initialStudent) {
+        setSelectedStudentId(initialStudent.studentId);
+        setScore(String(initialStudent.previousScore ?? 100));
+      } else if (students.length > 0 && !selectedStudentId) {
+        setSelectedStudentId(students[0].studentId);
+        setScore(String(students[0].previousScore ?? 100));
+      }
+      setStudentSearch('');
+      setTitle('');
+      setDescription('');
+      setFeedback(null);
+      setApplyToRoommates(false);
+    }
+  }, [isOpen, initialStudent, students, selectedStudentId]);
 
   const filteredStudents = useMemo(() => {
     const q = toEnglishDigits(studentSearch.trim().toLowerCase());
