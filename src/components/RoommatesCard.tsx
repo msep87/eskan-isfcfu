@@ -277,33 +277,44 @@ export const RoommatesCard: React.FC<RoommatesCardProps> = ({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {roommates.map(({ student: rm, bed: rmBed }) => {
-            const isMe = rm.studentId === student.studentId;
-            const isRepresentative = room.representativeStudentId === rm.studentId;
+          {(() => {
+            const hasExplicitRep = Boolean(
+              room.representativeStudentId &&
+                roommates.some((x) => x.student.studentId === room.representativeStudentId)
+            );
+            const effectiveRepId = hasExplicitRep
+              ? room.representativeStudentId
+              : roommates[0]?.student.studentId;
 
-            return (
-              <div
-                key={rm.studentId}
-                className={`bg-white dark:bg-slate-900 rounded-3xl p-5 border transition shadow-xs relative overflow-hidden ${
-                  isMe
-                    ? 'border-teal-400 dark:border-teal-600 ring-2 ring-teal-500/20'
-                    : 'border-slate-200/80 dark:border-slate-800'
-                }`}
-              >
-                {/* نشانگر خود دانشجو یا نماینده */}
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-1.5">
-                    {isMe && (
-                      <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-teal-600 text-white font-extrabold">
-                        پروفایل شما
-                      </span>
-                    )}
-                    {isRepresentative && (
-                      <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 font-extrabold border border-purple-200 dark:border-purple-800 flex items-center gap-1">
-                        🌟 نماینده رسمی اتاق
-                      </span>
-                    )}
-                  </div>
+            return roommates.map(({ student: rm, bed: rmBed }) => {
+              const isMe = rm.studentId === student.studentId;
+              const isRepresentative = effectiveRepId === rm.studentId;
+
+              return (
+                <div
+                  key={rm.studentId}
+                  className={`rounded-3xl p-5 border transition shadow-xs relative overflow-hidden ${
+                    isRepresentative
+                      ? 'bg-gradient-to-l from-amber-50/70 via-purple-50/70 to-white dark:from-purple-950/50 dark:via-indigo-950/40 dark:to-slate-900 border-2 border-purple-400 dark:border-purple-500 ring-2 ring-purple-500/20'
+                      : isMe
+                      ? 'bg-white dark:bg-slate-900 border-teal-400 dark:border-teal-600 ring-2 ring-teal-500/20'
+                      : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+                  }`}
+                >
+                  {/* نشانگر خود دانشجو یا نماینده */}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-1.5">
+                      {isMe && (
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-teal-600 text-white font-extrabold">
+                          پروفایل شما
+                        </span>
+                      )}
+                      {isRepresentative && (
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 font-extrabold border border-purple-200 dark:border-purple-800 flex items-center gap-1">
+                          🌟 {hasExplicitRep ? 'نماینده رسمی اتاق' : 'نماینده اتاق (پیش‌فرض نفر اول)'}
+                        </span>
+                      )}
+                    </div>
                   <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-xl">
                     {rmBed.label}
                   </span>
@@ -366,7 +377,8 @@ export const RoommatesCard: React.FC<RoommatesCardProps> = ({
                 )}
               </div>
             );
-          })}
+          });
+          })()}
         </div>
       </div>
 

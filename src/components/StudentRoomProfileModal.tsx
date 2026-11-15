@@ -40,6 +40,8 @@ interface StudentRoomProfileModalProps {
   dorm?: Dormitory | null;
   room?: Room | null;
   bed?: Bed | null;
+  isRoomRepresentative?: boolean;
+  isDefaultRepresentative?: boolean;
   actorName: string;
   actorRole: 'admin' | 'supervisor';
   actorId?: string;
@@ -67,6 +69,8 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
   dorm,
   room,
   bed,
+  isRoomRepresentative,
+  isDefaultRepresentative = false,
   actorName,
   actorRole,
   actorId,
@@ -141,7 +145,10 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
 
   if (!isOpen || !student) return null;
 
-  const isRepresentative = Boolean(room?.representativeStudentId === student.studentId);
+  const isRepresentative =
+    typeof isRoomRepresentative === 'boolean'
+      ? isRoomRepresentative
+      : Boolean(room?.representativeStudentId === student.studentId);
   const effectiveRoleLabel = actorRole === 'admin' ? 'مدیریت کل امور سراها' : 'سرپرست سرا';
 
   const recordPresets =
@@ -393,7 +400,7 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                 </h3>
                 {isRepresentative && (
                   <span className="px-2.5 py-0.5 rounded-full bg-purple-500/90 text-white text-[11px] font-extrabold border border-purple-300/40">
-                    🌟 نماینده اتاق
+                    🌟 {isDefaultRepresentative ? 'نماینده اتاق (پیش‌فرض نفر اول)' : 'نماینده اتاق'}
                   </span>
                 )}
                 <span
@@ -423,8 +430,11 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/15 text-white font-bold">
                   <Building2 className="w-3.5 h-3.5 text-amber-300" />
                   <span>
-                    {dorm?.name || student.assignedDormName || 'سرای نامشخص'} • اتاق{' '}
-                    {room?.roomNumber || student.assignedRoomNumber || '-'}
+                    {dorm?.name || student.assignedDormName || room?.roomNumber || student.assignedRoomNumber
+                      ? `${dorm?.name || student.assignedDormName || 'سرای نامشخص'} • اتاق ${
+                          room?.roomNumber || student.assignedRoomNumber || '-'
+                        }`
+                      : 'فاقد اتاق تخصیص‌یافته'}
                   </span>
                 </span>
                 {bed && (
@@ -499,6 +509,16 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                 <span className="text-[10px] text-slate-400 block">تلفن ثابت</span>
                 <span className="font-mono font-bold text-slate-800 dark:text-slate-100" dir="ltr">
                   {student.phone || 'ثبت نشده'}
+                </span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
+                <span className="text-[10px] text-slate-400 block">وضعیت اسکان فعلی</span>
+                <span className="font-bold text-slate-800 dark:text-slate-100">
+                  {student.assignedBedId && student.assignmentStatus === 'confirmed'
+                    ? 'اسکان قطعی (تأیید شده)'
+                    : student.assignedBedId && student.assignmentStatus === 'temporary'
+                    ? 'اسکان موقت (در انتظار تأیید)'
+                    : 'فاقد اتاق و تخت'}
                 </span>
               </div>
               {(student.previousDorm || student.previousRoom) && (
@@ -692,6 +712,12 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                 </div>
               </div>
 
+              {recordScope === 'room' && !room && !student.assignedRoomId && (
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-200 font-semibold">
+                  توجه: این دانشجو در حال حاضر اتاق تخصیص‌یافته‌ای ندارد؛ مورد ثبت‌شده با برچسب اتاق در پرونده خود دانشجو ثبت می‌شود.
+                </div>
+              )}
+
               {recordScope === 'room' && room && (
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-xs text-teal-800 dark:text-teal-300 bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/60 px-3.5 py-2.5 rounded-xl cursor-pointer">
@@ -823,6 +849,12 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                   </button>
                 </div>
               </div>
+
+              {evalScope === 'room' && !room && !student.assignedRoomId && (
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-200 font-semibold">
+                  توجه: این دانشجو در حال حاضر اتاق تخصیص‌یافته‌ای ندارد؛ نمره ارزیابی اتاق فقط در پرونده خود دانشجو ثبت می‌شود.
+                </div>
+              )}
 
               {evalScope === 'room' && room && (
                 <label className="flex items-center gap-2 text-xs text-teal-800 dark:text-teal-300 bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/60 px-3.5 py-2.5 rounded-xl cursor-pointer">

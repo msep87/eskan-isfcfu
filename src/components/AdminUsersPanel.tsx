@@ -12,6 +12,7 @@ import {
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import { ExcelImportTab } from './ExcelImportModal';
+import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 import {
   Users,
   GraduationCap,
@@ -47,6 +48,10 @@ import {
   FolderUp,
   ImagePlus,
   Upload,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  FileText,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -82,6 +87,14 @@ interface AdminUsersPanelProps {
 }
 
 type StaffRole = 'supervisor' | 'maintenance' | 'warehouse' | 'counselor';
+type StudentSortKey =
+  | 'default'
+  | 'lastName'
+  | 'fullName'
+  | 'studentId'
+  | 'fieldOfStudy'
+  | 'entryTerm'
+  | 'roomName';
 
 export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   activeCategory,
@@ -122,6 +135,13 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const [stAssignFilter, setStAssignFilter] = useState<'all' | 'confirmed' | 'temporary' | 'none'>('all');
   const [stProfileFilter, setStProfileFilter] = useState<'all' | 'completed' | 'incomplete'>('all');
   const [stLocationFilter, setStLocationFilter] = useState('');
+
+  // مرتب‌سازی دانشجویان
+  const [stSortBy, setStSortBy] = useState<StudentSortKey>('default');
+  const [stSortDir, setStSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // مدال پرونده کامل دانشجو با کلیک روی نام (عکس، اخطار، تذکر، پیام، ارزیابی فردی و اتاق)
+  const [profileModalStudentId, setProfileModalStudentId] = useState<string | null>(null);
 
   // جستجوی پیشرفته کارکنان (سرپرست، تأسیسات، انبار، مشاور)
   const [staffQuery, setStaffQuery] = useState('');
@@ -514,6 +534,110 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     stLocationFilter,
   ]);
 
+  const extractLastName = (fullName?: string): string => {
+    const clean = (fullName || '').trim();
+    if (!clean) return '';
+    if (clean.includes('،') || clean.includes(',')) {
+      return clean.split(/[،,]/)[0].trim();
+    }
+    const tokens = clean.split(/\s+/).filter(Boolean);
+    return tokens.length > 1 ? tokens[tokens.length - 1] : clean;
+  };
+
+  const sortedStudents = useMemo(() => {
+    if (stSortBy === 'default') return filteredStudents;
+
+    const dirFactor = stSortDir === 'asc' ? 1 : -1;
+    const list = [...filteredStudents];
+
+    list.sort((a, b) => {
+      if (stSortBy === 'lastName') {
+        const lastA = extractLastName(a.fullName);
+        const lastB = extractLastName(b.fullName);
+        const cmpLast = lastA.localeCompare(lastB, 'fa', { numeric: true });
+        if (cmpLast !== 0) return cmpLast * dirFactor;
+        return (a.fullName || '').localeCompare(b.fullName || '', 'fa', { numeric: true }) * dirFactor;
+      }
+
+      if (stSortBy === 'fullName') {
+        return (
+          (a.fullName || '').trim().localeCompare((b.fullName || '').trim(), 'fa', { numeric: true }) *
+          dirFactor
+        );
+      }
+
+      if (stSortBy === 'studentId') {
+        const idA = toEnglishDigits(a.studentId || '').trim();
+        const idB = toEnglishDigits(b.studentId || '').trim();
+        return idA.localeCompare(idB, 'en', { numeric: true }) * dirFactor;
+      }
+
+      if (stSortBy === 'fieldOfStudy') {
+        const fA = (a.fieldOfStudy || '').trim();
+        const fB = (b.fieldOfStudy || '').trim();
+        const cmp = fA.localeCompare(fB, 'fa', { numeric: true });
+        if (cmp !== 0) return cmp * dirFactor;
+        return extractLastName(a.fullName).localeCompare(extractLastName(b.fullName), 'fa') * dirFactor;
+      }
+
+      if (stSortBy === 'entryTerm') {
+        const eA = toEnglishDigits(a.entryTerm || '').trim();
+        const eB = toEnglishDigits(b.entryTerm || '').trim();
+        const cmp = eA.localeCompare(eB, 'en', { numeric: true });
+        if (cmp !== 0) return cmp * dirFactor;
+        return toEnglishDigits(a.studentId || '').localeCompare(toEnglishDigits(b.studentId || ''), 'en', {
+          numeric: true,
+        }) * dirFactor;
+      }
+
+      if (stSortBy === 'roomName') {
+        const rA = rooms.find((rm) => rm.id === a.assignedRoomId);
+        const rB = rooms.find((rm) => rm.id === b.assignedRoomId);
+        const roomA = toEnglishDigits(rA?.roomNumber || a.assignedRoomNumber || '').trim();
+        const roomB = toEnglishDigits(rB?.roomNumber || b.assignedRoomNumber || '').trim();
+
+        const hasRoomA = Boolean(roomA && a.assignmentStatus !== 'none');
+        const hasRoomB = Boolean(roomB && b.assignmentStatus !== 'none');
+
+        if (!hasRoomA && !hasRoomB) {
+          return extractLastName(a.fullName).localeCompare(extractLastName(b.fullName), 'fa');
+        }
+        if (!hasRoomA) return 1;
+        if (!hasRoomB) return -1;
+
+        const dA = dorms.find((dm) => dm.id === a.assignedDormId)?.name || a.assignedDormName || '';
+        const dB = dorms.find((dm) => dm.id === b.assignedDormId)?.name || b.assignedDormName || '';
+        const cmpRoom = roomA.localeCompare(roomB, 'fa', { numeric: true });
+        if (cmpRoom !== 0) return cmpRoom * dirFactor;
+        const cmpDorm = dA.localeCompare(dB, 'fa', { numeric: true });
+        if (cmpDorm !== 0) return cmpDorm * dirFactor;
+        return extractLastName(a.fullName).localeCompare(extractLastName(b.fullName), 'fa');
+      }
+
+      return 0;
+    });
+
+    return list;
+  }, [filteredStudents, stSortBy, stSortDir, rooms, dorms]);
+
+  const toggleStudentSort = (key: Exclude<StudentSortKey, 'default'>) => {
+    if (stSortBy === key) {
+      setStSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setStSortBy(key);
+      setStSortDir('asc');
+    }
+  };
+
+  const renderSortIcon = (key: Exclude<StudentSortKey, 'default'>) => {
+    if (stSortBy !== key) return <ArrowUpDown className="w-3.5 h-3.5 opacity-45 shrink-0" />;
+    return stSortDir === 'asc' ? (
+      <ArrowUp className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+    ) : (
+      <ArrowDown className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+    );
+  };
+
   const hasActiveStudentFilters =
     Boolean(stQuery.trim()) ||
     stFieldFilter !== 'all' ||
@@ -522,7 +646,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     Boolean(stRoomFilter.trim()) ||
     stAssignFilter !== 'all' ||
     stProfileFilter !== 'all' ||
-    Boolean(stLocationFilter.trim());
+    Boolean(stLocationFilter.trim()) ||
+    stSortBy !== 'default';
 
   const resetStudentFilters = () => {
     setStQuery('');
@@ -533,6 +658,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     setStAssignFilter('all');
     setStProfileFilter('all');
     setStLocationFilter('');
+    setStSortBy('default');
+    setStSortDir('asc');
   };
 
   // فیلتر کارکنان
@@ -1426,6 +1553,53 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
                   />
                 </div>
+
+                {/* کنترل‌های مرتب‌سازی جدول دانشجویان */}
+                <div className="sm:col-span-2 lg:col-span-4 flex flex-wrap items-center justify-between gap-2.5 pt-2.5 mt-1 border-t border-slate-200/70 dark:border-slate-700/70">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
+                      <ArrowUpDown className="w-3.5 h-3.5 text-teal-600" />
+                      <span>مرتب‌سازی بر اساس:</span>
+                    </span>
+                    <select
+                      value={stSortBy}
+                      onChange={(e) => setStSortBy(e.target.value as StudentSortKey)}
+                      className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-bold"
+                    >
+                      <option value="default">ترتیب پیش‌فرض ثبت</option>
+                      <option value="lastName">نام خانوادگی</option>
+                      <option value="fullName">نام و نام خانوادگی (کامل)</option>
+                      <option value="studentId">کد دانشجویی</option>
+                      <option value="fieldOfStudy">رشته تحصیلی</option>
+                      <option value="entryTerm">سال / ترم ورودی</option>
+                      <option value="roomName">نام / شماره اتاق</option>
+                    </select>
+
+                    {stSortBy !== 'default' && (
+                      <button
+                        type="button"
+                        onClick={() => setStSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                        className="px-3 py-1.5 rounded-xl border border-teal-300 dark:border-teal-700 bg-teal-50 dark:bg-teal-950/50 text-teal-800 dark:text-teal-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer hover:bg-teal-100 dark:hover:bg-teal-900/50 transition"
+                      >
+                        {stSortDir === 'asc' ? (
+                          <>
+                            <ArrowUp className="w-3.5 h-3.5" />
+                            <span>صعودی (الف←ی / کم←زیاد)</span>
+                          </>
+                        ) : (
+                          <>
+                            <ArrowDown className="w-3.5 h-3.5" />
+                            <span>نزولی (ی←الف / زیاد←کم)</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    نکته: با کلیک بر روی <strong className="text-teal-700 dark:text-teal-300">نام هر دانشجو</strong>، فرم کامل اطلاعات، عکس، اخطار، تذکر، پیام و نمره ارزیابی باز می‌شود.
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -1449,18 +1623,83 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
               <table className="w-full text-right text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
                   <tr>
-                    <th className="p-3">شماره دانشجویی</th>
-                    <th className="p-3">نام و نام خانوادگی</th>
+                    <th className="p-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleStudentSort('studentId')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس کد دانشجویی"
+                      >
+                        <span>شماره دانشجویی</span>
+                        {renderSortIcon('studentId')}
+                      </button>
+                    </th>
+                    <th className="p-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => toggleStudentSort('lastName')}
+                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                          title="مرتب‌سازی بر اساس نام خانوادگی"
+                        >
+                          <span>نام و نام خانوادگی</span>
+                          {renderSortIcon('lastName')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleStudentSort('lastName')}
+                          className={`text-[10px] px-1.5 py-0.5 rounded border cursor-pointer transition ${
+                            stSortBy === 'lastName'
+                              ? 'bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-700'
+                              : 'bg-white dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                          }`}
+                        >
+                          فامیلی
+                        </button>
+                      </div>
+                    </th>
                     <th className="p-3">کد ملی / رمز ورود</th>
-                    <th className="p-3">رشته و ورودی</th>
+                    <th className="p-3">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => toggleStudentSort('fieldOfStudy')}
+                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                          title="مرتب‌سازی بر اساس رشته تحصیلی"
+                        >
+                          <span>رشته</span>
+                          {renderSortIcon('fieldOfStudy')}
+                        </button>
+                        <span className="text-slate-300 dark:text-slate-600">/</span>
+                        <button
+                          type="button"
+                          onClick={() => toggleStudentSort('entryTerm')}
+                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                          title="مرتب‌سازی بر اساس سال/ترم ورودی"
+                        >
+                          <span>ورودی</span>
+                          {renderSortIcon('entryTerm')}
+                        </button>
+                      </div>
+                    </th>
                     <th className="p-3">وضعیت پرونده</th>
-                    <th className="p-3">خوابگاه / اتاق و تخت</th>
+                    <th className="p-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleStudentSort('roomName')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس نام / شماره اتاق"
+                      >
+                        <span>خوابگاه / اتاق و تخت</span>
+                        {renderSortIcon('roomName')}
+                      </button>
+                    </th>
                     <th className="p-3">تماس و شهر</th>
                     <th className="p-3 text-center">عملیات و مدیریت حساب</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredStudents.map((st) => {
+                  {sortedStudents.map((st) => {
                     const d = dorms.find((dm) => dm.id === st.assignedDormId);
                     const r = rooms.find((rm) => rm.id === st.assignedRoomId);
                     const b = beds.find((bd) => bd.id === st.assignedBedId);
@@ -1469,34 +1708,41 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
 
                     return (
                       <tr key={st.studentId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                        <td className="p-3 font-mono font-bold text-slate-800 dark:text-slate-200">
+                        <td className="p-3 font-mono font-bold text-slate-800 dark:text-slate-200 tabular-nums">
                           {st.studentId}
                         </td>
                         <td className="p-3 font-bold text-slate-900 dark:text-white">
-                          <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setProfileModalStudentId(st.studentId)}
+                            className="flex items-center gap-2 text-right group cursor-pointer rounded-xl p-1 -m-1 hover:bg-teal-50/80 dark:hover:bg-teal-950/40 transition w-full"
+                            title="مشاهده کامل اطلاعات و عکس دانشجو، ثبت اخطار، تذکر، پیام و نمره ارزیابی"
+                          >
                             {st.photoUrl ? (
                               <img
                                 src={st.photoUrl}
-                                alt=""
-                                className="w-7 h-7 rounded-full object-cover shrink-0"
+                                alt={st.fullName}
+                                className="w-8 h-8 rounded-full object-cover shrink-0 ring-2 ring-transparent group-hover:ring-teal-500 transition"
                               />
                             ) : (
                               <div
-                                className="w-7 h-7 rounded-full text-white text-[10px] font-bold flex items-center justify-center shrink-0"
+                                className="w-8 h-8 rounded-full text-white text-[11px] font-bold flex items-center justify-center shrink-0 ring-2 ring-transparent group-hover:ring-teal-500 transition"
                                 style={{ backgroundColor: st.avatarColor || '#0d9488' }}
                               >
                                 {(st.fullName || 'د').slice(0, 1)}
                               </div>
                             )}
-                            <div>
-                              <div>{st.fullName}</div>
+                            <div className="min-w-0">
+                              <div className="text-slate-900 dark:text-white group-hover:text-teal-700 dark:group-hover:text-teal-300 underline decoration-dotted decoration-teal-500/50 underline-offset-4 transition">
+                                {st.fullName}
+                              </div>
                               {st.fatherName && (
                                 <div className="text-[10px] text-slate-400 font-normal">
                                   فرزند {st.fatherName}
                                 </div>
                               )}
                             </div>
-                          </div>
+                          </button>
                         </td>
                         <td className="p-3">
                           <div className="flex items-center gap-1.5">
@@ -1552,6 +1798,15 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                         </td>
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => setProfileModalStudentId(st.studentId)}
+                              className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-teal-100 hover:text-teal-800 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
+                              title="مشاهده پرونده کامل، عکس، ثبت اخطار، تذکر، پیام و نمره ارزیابی"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                            </button>
+
                             <label
                               className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                               title="بارگذاری یا تغییر سریع عکس دانشجو"
@@ -2827,6 +3082,56 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           </div>
         </div>
       )}
+
+      {/* ========================================================= */}
+      {/* مدال پرونده کامل دانشجو (اطلاعات، عکس، اخطار، تذکر، پیام و ارزیابی فردی/اتاق) */}
+      {/* ========================================================= */}
+      {(() => {
+        const profileStudent = profileModalStudentId
+          ? students.find((s) => s.studentId === profileModalStudentId) || null
+          : null;
+        const profileDorm = profileStudent?.assignedDormId
+          ? dorms.find((dm) => dm.id === profileStudent.assignedDormId) || null
+          : null;
+        const profileRoom = profileStudent?.assignedRoomId
+          ? rooms.find((rm) => rm.id === profileStudent.assignedRoomId) || null
+          : null;
+        const profileBed = profileStudent?.assignedBedId
+          ? beds.find((bd) => bd.id === profileStudent.assignedBedId) || null
+          : null;
+        const roomOccs = profileRoom
+          ? beds
+              .filter((bd) => bd.roomId === profileRoom.id && bd.studentId)
+              .map((bd) => students.find((s) => s.studentId === bd.studentId))
+              .filter((s): s is Student => Boolean(s))
+          : [];
+        const hasExplicitRep = Boolean(
+          profileRoom?.representativeStudentId &&
+            roomOccs.some((s) => s.studentId === profileRoom.representativeStudentId)
+        );
+        const effectiveRepId = hasExplicitRep
+          ? profileRoom?.representativeStudentId
+          : roomOccs[0]?.studentId;
+        const isProfileRep = Boolean(profileStudent && effectiveRepId === profileStudent.studentId);
+        const isProfileDefaultRep = Boolean(isProfileRep && !hasExplicitRep);
+
+        return (
+          <StudentRoomProfileModal
+            isOpen={Boolean(profileStudent)}
+            onClose={() => setProfileModalStudentId(null)}
+            student={profileStudent}
+            dorm={profileDorm}
+            room={profileRoom}
+            bed={profileBed}
+            isRoomRepresentative={isProfileRep}
+            isDefaultRepresentative={isProfileDefaultRep}
+            actorName="مدیریت کل امور سراها"
+            actorRole="admin"
+            actorId="admin"
+            onDataChanged={onRefreshData}
+          />
+        );
+      })()}
     </div>
   );
 };
