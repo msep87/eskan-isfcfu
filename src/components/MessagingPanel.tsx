@@ -37,7 +37,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const [activeTab, setActiveTab] = useState<'inbox' | 'compose'>('inbox');
 
   // فرم پیام جدید
-  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor'>('supervisor');
+  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor' | 'finance'>('supervisor');
   const [category, setCategory] = useState<Message['category']>('accommodation');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
@@ -88,6 +88,9 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     if (currentUser.role === 'warehouse') {
       return m.receiverType === 'warehouse' || m.senderRole === 'warehouse';
     }
+    if (currentUser.role === 'finance') {
+      return m.receiverType === 'finance' || m.category === 'financial' || m.senderRole === 'finance';
+    }
     return true; // admin sees all
   });
 
@@ -97,7 +100,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
 
     let senderName = '';
     let senderId = '';
-    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' = 'student';
+    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' = 'student';
 
     if (currentUser.role === 'student') {
       senderName = currentUser.student.fullName;
@@ -119,6 +122,10 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       senderName = `${currentUser.staff.fullName} (انبار و کارپردازی)`;
       senderId = currentUser.staff.id;
       senderRole = 'warehouse';
+    } else if (currentUser.role === 'finance') {
+      senderName = `${currentUser.staff.fullName} (امور مالی و حسابداری)`;
+      senderId = currentUser.staff.id;
+      senderRole = 'finance';
     } else {
       senderName = currentUser.name;
       senderId = currentUser.username;
@@ -148,7 +155,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     if (!replyText.trim()) return;
 
     let senderName = '';
-    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' = 'supervisor';
+    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' = 'supervisor';
 
     if (currentUser.role === 'student') {
       senderName = currentUser.student.fullName;
@@ -156,12 +163,18 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     } else if (currentUser.role === 'supervisor') {
       senderName = `${currentUser.supervisor.fullName} (سرپرست سرا)`;
       senderRole = 'supervisor';
+    } else if (currentUser.role === 'counselor') {
+      senderName = `${currentUser.counselor.fullName} (مشاور مرکز)`;
+      senderRole = 'counselor';
     } else if (currentUser.role === 'maintenance') {
       senderName = `${currentUser.technician.fullName} (کارشناس تأسیسات - ${currentUser.technician.specialty})`;
       senderRole = 'maintenance';
     } else if (currentUser.role === 'warehouse') {
       senderName = `${currentUser.staff.fullName} (مسئول انبار و کارپردازی)`;
       senderRole = 'warehouse';
+    } else if (currentUser.role === 'finance') {
+      senderName = `${currentUser.staff.fullName} (امور مالی و حسابداری)`;
+      senderRole = 'finance';
     } else {
       senderName = 'مدیریت کل سراها';
       senderRole = 'admin';
@@ -361,6 +374,20 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                   </button>
                   <button
                     type="button"
+                    onClick={() => {
+                      setReceiverType('finance');
+                      setCategory('financial');
+                    }}
+                    className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                      receiverType === 'finance'
+                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                    }`}
+                  >
+                    امور مالی و حسابداری
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setReceiverType('admin')}
                     className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
                       receiverType === 'admin'
@@ -382,6 +409,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                   onChange={(e) => setCategory(e.target.value as any)}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-teal-500 mb-2 font-medium"
                 >
+                  <option value="financial">💳 امور مالی، کسورات ۴۵٪ / ۲۵٪، بدهی و حسابداری</option>
                   <option value="counseling">🧠 مشاوره روانشناختی، سلامت روان، دوری از خانه و استرس تحصیلی</option>
                   <option value="accommodation">🏠 امور اسکان، رزرو و انتخاب اتاق یا جابجایی تخت</option>
                   <option value="maintenance">🔧 خرابی تأسیسات، لوله‌کشی، برق، گرمایش و تعمیرات ابنیه</option>
@@ -459,6 +487,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                     className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-bold"
                   >
                     <option value="all">همه دسته‌ها ({userMessages.length})</option>
+                    <option value="financial">امور مالی و حسابداری</option>
                     <option value="counseling">مشاوره روانشناختی و فردی</option>
                     <option value="maintenance">تأسیسات و تعمیرات</option>
                     <option value="services_cleaning">خدمات و نظافت</option>
@@ -513,7 +542,9 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
 
                         <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
                           <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
-                            {msg.category === 'maintenance'
+                            {msg.category === 'financial'
+                              ? 'امور مالی'
+                              : msg.category === 'maintenance'
                               ? 'تأسیسات'
                               : msg.category === 'services_cleaning'
                               ? 'خدمات و نظافت'
@@ -553,6 +584,10 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                               ? 'تأسیسات'
                               : selectedMsg.senderRole === 'warehouse'
                               ? 'انبار'
+                              : selectedMsg.senderRole === 'counselor'
+                              ? 'مشاور'
+                              : selectedMsg.senderRole === 'finance'
+                              ? 'امور مالی'
                               : 'مدیر'}
                           </span>
                           {selectedMsg.isConfidential && (

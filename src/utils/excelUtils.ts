@@ -9,7 +9,16 @@ import {
   MaintenanceStaff,
   CounselorStaff,
   WarehouseStaff,
+  FinanceStaff,
+  StudentFinancialRecord,
+  StudentFinancialStatus,
 } from '../types';
+import {
+  computeStudentFinancialInfo,
+  FINANCIAL_STATUS_LABELS,
+  PAYMENT_METHOD_LABELS,
+  normalizePersianText,
+} from './financeUtils';
 
 // تبدیل اعداد فارسی و عربی به انگلیسی جهت پردازش دقیق
 export function toEnglishDigits(str: string | number): string {
@@ -1062,6 +1071,7 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
     maintenance: 'کارشناس تأسیسات',
     warehouse: 'مسئول انبار',
     counselor: 'کارشناس مشاور',
+    finance: 'امور مالی و حسابداری',
     system: 'سیستم',
   };
 
@@ -1073,6 +1083,7 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
     staff: 'پرسنل و کاربران',
     maintenance: 'امور تأسیسات',
     warehouse: 'انبار و تجهیزات',
+    finance: 'امور مالی و کسورات',
     warning_eval: 'تذکر، اخطار و ارزیابی',
     settings: 'تنظیمات و اطلاعیه‌ها',
     backup: 'پشتیبان و بازنشانی',
@@ -1540,6 +1551,263 @@ export async function parseWarehouseExcel(
 
   return { staff, skippedRows };
 }
+
+// ۵. دانلود قالب اکسل کاربران امور مالی و حسابداری
+export function downloadFinanceTemplate() {
+  const sampleRows = [
+    {
+      'نام و نام خانوادگی': 'حمیدرضا صادقی',
+      'نام کاربری': 'sadeghi_fin',
+      'کلمه عبور': '123456',
+      'شماره تماس': '09131112233',
+      'بخش / واحد': 'واحد حسابداری و کسورات شهریه و سرا',
+      'وضعیت': 'فعال',
+      'توضیحات': 'کارشناس امور مالی دانشجویان خوابگاهی',
+    },
+    {
+      'نام و نام خانوادگی': 'فاطمه ناصری',
+      'نام کاربری': 'naseri_fin',
+      'کلمه عبور': '123456',
+      'شماره تماس': '09134445566',
+      'بخش / واحد': 'اداره مالی پردیس',
+      'وضعیت': 'فعال',
+      'توضیحات': 'مسئول بررسی کسورات حقوق ۴۵٪ و ۲۵٪',
+    },
+  ];
+  const ws = XLSX.utils.json_to_sheet(sampleRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'کاربران امور مالی');
+  XLSX.writeFile(wb, 'قالب_اکسل_ثبت_کاربران_امور_مالی.xlsx');
+}
+
+// خواندن و اعتبارسنجی فایل اکسل کاربران امور مالی
+export async function parseFinanceExcel(
+  file: File
+): Promise<{ staff: FinanceStaff[]; skippedRows: number }> {
+  const rows = await readExcelSheetRows(file);
+  const staff: FinanceStaff[] = [];
+  let skippedRows = 0;
+
+  rows.forEach((row, idx) => {
+    const fullName = getExcelCell(row, ['نام و نام خانوادگی', 'نام و نام‌خانوادگی', 'نام کارشناس مالی', 'نام کامل', 'fullname', 'name']);
+    let username = toEnglishDigits(getExcelCell(row, ['نام کاربری', 'نام‌کاربری', 'کد کاربری', 'username', 'user'])).trim().toLowerCase();
+    const password = toEnglishDigits(getExcelCell(row, ['کلمه عبور', 'رمز عبور', 'رمز', 'password', 'pass'])).trim();
+    const phone = toEnglishDigits(getExcelCell(row, ['شماره تماس', 'شماره همراه', 'موبایل', 'تلفن', 'phone', 'mobile'])).trim();
+    const department = getExcelCell(row, ['بخش / واحد', 'بخش', 'واحد', 'سمت', 'department']);
+    const statusRaw = getExcelCell(row, ['وضعیت', 'وضعیت حساب', 'status']);
+    const notes = getExcelCell(row, ['توضیحات', 'یادداشت', 'notes']);
+
+    if (!fullName && !username) {
+      skippedRows++;
+      return;
+    }
+
+    if (!username) {
+      username = `fin_${Date.now()}_${idx + 1}`;
+    }
+
+    const status = parseExcelStaffStatus(statusRaw);
+
+    staff.push({
+      id: `fin_excel_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 5)}`,
+      fullName: fullName || username,
+      username,
+      password: password || phone || '123456',
+      phone: phone || '09130000000',
+      mobile: phone || '09130000000',
+      department: department || 'واحد امور مالی و حسابداری',
+      role: 'finance',
+      status,
+      isActive: status === 'active',
+      notes: notes || undefined,
+    });
+  });
+
+  if (staff.length === 0) {
+    throw new Error('هیچ سطر معتبری برای ثبت کاربر امور مالی در فایل اکسل یافت نشد.');
+  }
+
+  return { staff, skippedRows };
+}
+
+export interface ParsedStudentDebtRow {
+  studentId?: string;
+  nationalId?: string;
+  fullNameHint?: string;
+  debtAmount: number;
+  paidAmount?: number;
+  financialStatus?: StudentFinancialStatus;
+  documentNumber?: string;
+  fiscalNote?: string;
+}
+
+// ۶. دانلود فایل نمونه اکسل بارگذاری میزان بدهی دانشجویان برای امور مالی
+export function downloadStudentDebtTemplate() {
+  const sampleRows = [
+    {
+      'شماره دانشجویی': '40212345',
+      'کد ملی': '1271234567',
+      'نام و نام خانوادگی': 'نمونه دانشجو',
+      'میزان بدهی (ریال)': 15000000,
+      'مبلغ پرداخت شده (ریال)': 0,
+      'وضعیت مالی': 'بدهکار',
+      'شماره سند / فیش': 'F-1405-101',
+      'توضیحات مالی': 'مابه‌التفاوت اسکان نیمسال اول ۱۴۰۵ (خارج از استان اصفهان)',
+    },
+    {
+      'شماره دانشجویی': '40298765',
+      'کد ملی': '1289876543',
+      'نام و نام خانوادگی': 'نمونه دانشجو دوم',
+      'میزان بدهی (ریال)': 0,
+      'مبلغ پرداخت شده (ریال)': 12000000,
+      'وضعیت مالی': 'تسویه شده',
+      'شماره سند / فیش': 'F-1405-102',
+      'توضیحات مالی': 'تسویه کامل بدهی خوابگاه',
+    },
+  ];
+  const ws = XLSX.utils.json_to_sheet(sampleRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'بدهی دانشجویان');
+  XLSX.writeFile(wb, 'نمونه_اکسل_بدهی_مالی_دانشجویان.xlsx');
+}
+
+function parseFinancialStatusCell(raw?: string): StudentFinancialStatus | undefined {
+  const norm = normalizePersianText(raw);
+  if (!norm) return undefined;
+  if (norm.includes('تسویه') || norm.includes('پرداخت شد') || norm === 'settled') return 'settled';
+  if (norm.includes('بدهکار') || norm === 'debtor') return 'debtor';
+  if (norm.includes('خودکار') || norm.includes('کسر') || norm === 'auto_deducting') return 'auto_deducting';
+  if (norm.includes('انتظار') || norm.includes('مراجعه') || norm === 'pending_payment') return 'pending_payment';
+  return undefined;
+}
+
+function parseAmountCell(raw?: string | number): number {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
+  const cleaned = toEnglishDigits(String(raw ?? ''))
+    .replace(/[,،\s]/g, '')
+    .replace(/[^\d.-]/g, '');
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// خواندن و پردازش فایل اکسل میزان بدهی هر دانشجو
+export async function parseStudentDebtExcel(
+  file: File
+): Promise<{ rows: ParsedStudentDebtRow[]; skippedRows: number }> {
+  const rawRows = await readExcelSheetRows(file);
+  const rows: ParsedStudentDebtRow[] = [];
+  let skippedRows = 0;
+
+  rawRows.forEach((row) => {
+    const studentId = toEnglishDigits(
+      getExcelCell(row, ['شماره دانشجویی', 'کد دانشجویی', 'کددانشجویی', 'student_id', 'studentid'])
+    ).trim();
+    const nationalId = toEnglishDigits(
+      getExcelCell(row, ['کد ملی', 'کدملی', 'شماره ملی', 'national_id', 'nationalid'])
+    ).trim();
+    const fullNameHint = getExcelCell(row, ['نام و نام خانوادگی', 'نام و نام‌خانوادگی', 'نام دانشجو', 'نام']);
+    const debtStr = getExcelCell(row, [
+      'میزان بدهی (ریال)',
+      'میزان بدهی',
+      'مبلغ بدهی (ریال)',
+      'مبلغ بدهی',
+      'بدهی',
+      'debt',
+      'debt_amount',
+    ]);
+    const paidStr = getExcelCell(row, [
+      'مبلغ پرداخت شده (ریال)',
+      'مبلغ پرداخت شده',
+      'مبلغ پرداختی',
+      'پرداخت شده',
+      'paid',
+      'paid_amount',
+    ]);
+    const statusStr = getExcelCell(row, ['وضعیت مالی', 'وضعیت پرداخت', 'وضعیت', 'status']);
+    const documentNumber = toEnglishDigits(
+      getExcelCell(row, ['شماره سند / فیش', 'شماره سند', 'شماره فیش', 'شماره نامه', 'document'])
+    ).trim();
+    const fiscalNote = getExcelCell(row, ['توضیحات مالی', 'بابت', 'توضیحات', 'یادداشت', 'note']);
+
+    if (!studentId && !nationalId) {
+      skippedRows++;
+      return;
+    }
+
+    const debtAmount = Math.max(0, parseAmountCell(debtStr));
+    const paidAmount = paidStr ? Math.max(0, parseAmountCell(paidStr)) : undefined;
+
+    rows.push({
+      studentId: studentId || undefined,
+      nationalId: nationalId || undefined,
+      fullNameHint: fullNameHint || undefined,
+      debtAmount,
+      paidAmount,
+      financialStatus: parseFinancialStatusCell(statusStr),
+      documentNumber: documentNumber || undefined,
+      fiscalNote: fiscalNote || undefined,
+    });
+  });
+
+  if (rows.length === 0) {
+    throw new Error('هیچ ردیف معتبری با شماره دانشجویی یا کد ملی در فایل اکسل بدهی یافت نشد.');
+  }
+
+  return { rows, skippedRows };
+}
+
+// ۷. گزارش اکسل اختصاصی امور مالی (فقط دانشجویان خوابگاهی و فقط فیلدهای مجاز و مرتبط با حسابداری)
+export function exportDormStudentsForFinanceExcel(
+  students: Student[],
+  dorms: Dormitory[],
+  rooms: Room[],
+  finances: StudentFinancialRecord[]
+) {
+  const financeMap = new Map(finances.map((f) => [f.studentId, f]));
+  const dormStudents = students.filter((s) => Boolean(s.assignedBedId && s.assignmentStatus !== 'none'));
+
+  const data = dormStudents.map((st, idx) => {
+    const dorm = dorms.find((d) => d.id === st.assignedDormId);
+    const room = rooms.find((r) => r.id === st.assignedRoomId);
+    const fin = computeStudentFinancialInfo(st, financeMap.get(st.studentId));
+    const roomLabel = room?.roomNumber || st.assignedRoomNumber || '-';
+    const dormLabel = dorm?.name || st.assignedDormName || '-';
+    const prevDormStr = st.previousDorm && st.previousDorm !== '-' ? st.previousDorm : '';
+    const prevRoomStr = st.previousRoom && st.previousRoom !== '-' ? `اتاق ${st.previousRoom}` : '';
+    const prevStatusStr =
+      prevDormStr || prevRoomStr ? [prevDormStr, prevRoomStr].filter(Boolean).join(' - ') : 'فاقد اسکان سال قبل';
+
+    return {
+      'ردیف': idx + 1,
+      'کد دانشجویی': st.studentId,
+      'کد ملی': st.nationalId,
+      'نام و نام خانوادگی': st.fullName,
+      'نام پدر': st.fatherName || '-',
+      'رشته تحصیلی': st.fieldOfStudy || '-',
+      'سال / ترم ورود': st.entryTerm || '-',
+      'وضعیت اسکان فعلی': st.assignmentStatus === 'temporary' ? 'خوابگاهی (موقت)' : 'خوابگاهی (قطعی)',
+      'نام سرا': dormLabel,
+      'نام / شماره اتاق': roomLabel,
+      'وضعیت اسکان سال قبل': prevStatusStr,
+      'نرخ کسر قانونی از حقوق': `${fin.deductionRate}٪ حقوق`,
+      'روش پرداخت (درون/خارج استان)':
+        fin.provinceOrigin === 'unknown' && !financeMap.get(st.studentId)?.paymentMethod
+          ? 'استان نامشخص (نیازمند بررسی)'
+          : PAYMENT_METHOD_LABELS[fin.paymentMethod],
+      'میزان بدهی (ریال)': fin.debtAmount,
+      'مبلغ پرداخت/کسرشده (ریال)': fin.paidAmount,
+      'وضعیت مالی': FINANCIAL_STATUS_LABELS[fin.financialStatus],
+      'شماره سند / فیش': fin.documentNumber || '-',
+      'توضیحات مالی': fin.fiscalNote || '-',
+    };
+  });
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'دانشجویان خوابگاهی مالی');
+  XLSX.writeFile(wb, `گزارش_اکسل_مالی_دانشجویان_خوابگاهی_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
 
 
 

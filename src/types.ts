@@ -101,6 +101,7 @@ export type MessageCategory =
   | 'rights_violation' // عدم رعایت حقوق دیگران، سر و صدا و مزاحمت
   | 'social_personal' // آسیب‌های فردی و اجتماعی، ناسازگاری و مشاوره
   | 'counseling' // خدمات مشاوره، روانشناختی و سلامت روان مرکز
+  | 'financial' // امور مالی، بدهی و کسورات خوابگاه
   | 'discipline' // نظم و انضباط سرا
   | 'request' // درخواست مرخصی و تردد
   | 'other'; // سایر امور
@@ -108,7 +109,7 @@ export type MessageCategory =
 export interface MessageReply {
   id: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance';
   content: string;
   date: string;
 }
@@ -117,8 +118,8 @@ export interface Message {
   id: string;
   senderId: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor';
-  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'all';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance';
+  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'all';
   receiverId?: string;
   subject: string;
   content: string;
@@ -170,6 +171,41 @@ export interface WarehouseStaff {
   status: 'active' | 'inactive';
   isActive?: boolean;
   notes?: string;
+}
+
+export interface FinanceStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل کاربر امور مالی
+  department?: string; // عنوان بخش یا واحد حسابداری
+  role: 'finance';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
+export type StudentFinancialStatus =
+  | 'auto_deducting'
+  | 'pending_payment'
+  | 'debtor'
+  | 'settled'
+  | 'unreviewed';
+
+export interface StudentFinancialRecord {
+  studentId: string;
+  deductionRate?: 45 | 25;
+  paymentMethod?: 'auto_payroll' | 'in_person_accounting';
+  debtAmount: number;
+  paidAmount?: number;
+  financialStatus: StudentFinancialStatus;
+  fiscalNote?: string;
+  documentNumber?: string;
+  updatedAt: string;
+  updatedBy: string;
 }
 
 export interface InventoryItem {
@@ -324,6 +360,7 @@ export type CurrentUser =
   | { role: 'maintenance'; technician: MaintenanceStaff }
   | { role: 'warehouse'; staff: WarehouseStaff }
   | { role: 'counselor'; counselor: CounselorStaff }
+  | { role: 'finance'; staff: FinanceStaff }
   | null;
 
 export type DayOfWeek = 'saturday' | 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
@@ -412,6 +449,7 @@ export type ActivityLogCategory =
   | 'staff'
   | 'maintenance'
   | 'warehouse'
+  | 'finance'
   | 'warning_eval'
   | 'settings'
   | 'backup'
@@ -422,7 +460,7 @@ export interface ActivityLog {
   timestamp: string; // ISO string برای مرتب‌سازی دقیق
   date: string; // تاریخ و ساعت شمسی خوانا
   actorName: string;
-  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'system';
+  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'system';
   actorUsername?: string;
   category: ActivityLogCategory;
   action: string;

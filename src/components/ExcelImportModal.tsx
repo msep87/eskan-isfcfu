@@ -12,6 +12,8 @@ import {
   downloadCounselorTemplate,
   parseWarehouseExcel,
   downloadWarehouseTemplate,
+  parseFinanceExcel,
+  downloadFinanceTemplate,
   toEnglishDigits,
 } from '../utils/excelUtils';
 import { Storage } from '../utils/storage';
@@ -24,6 +26,7 @@ import {
   MaintenanceStaff,
   CounselorStaff,
   WarehouseStaff,
+  FinanceStaff,
 } from '../types';
 import {
   FileSpreadsheet,
@@ -40,6 +43,7 @@ import {
   Wrench,
   HeartHandshake,
   Package,
+  Wallet,
 } from 'lucide-react';
 
 export type ExcelImportTab =
@@ -48,7 +52,8 @@ export type ExcelImportTab =
   | 'supervisors'
   | 'maintenance'
   | 'counselors'
-  | 'warehouse';
+  | 'warehouse'
+  | 'finance';
 
 interface ExcelImportModalProps {
   isOpen: boolean;
@@ -101,6 +106,11 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
 
   const [previewWarehouse, setPreviewWarehouse] = useState<{
     list: WarehouseStaff[];
+    skippedRows: number;
+  } | null>(null);
+
+  const [previewFinance, setPreviewFinance] = useState<{
+    list: FinanceStaff[];
     skippedRows: number;
   } | null>(null);
 
@@ -248,6 +258,25 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
       setPreviewWarehouse({ list: res.staff, skippedRows: res.skippedRows });
     } catch (err: any) {
       setErrorMsg(err.message || 'خطا در بارگذاری فایل اکسل کاربران انبار');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFinanceFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await parseFinanceExcel(file);
+      setPreviewFinance({ list: res.staff, skippedRows: res.skippedRows });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در بارگذاری فایل اکسل کاربران امور مالی');
     } finally {
       setLoading(false);
     }
@@ -673,6 +702,50 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
     }
   };
 
+  const handleSaveFinance = async () => {
+    if (!previewFinance) return;
+    setLoading(true);
+    setErrorMsg('');
+
+    try {
+      const incoming = previewFinance.list;
+      if (replaceMode) {
+        Storage.setFinanceStaff(incoming);
+      } else {
+        const existing = Storage.getFinanceStaff();
+        const mergedMap = new Map<string, FinanceStaff>();
+        existing.forEach((f) => mergedMap.set(f.username.trim().toLowerCase(), f));
+        incoming.forEach((f) => {
+          const key = f.username.trim().toLowerCase();
+          const prev = mergedMap.get(key);
+          mergedMap.set(key, prev ? { ...f, id: prev.id } : f);
+        });
+        Storage.setFinanceStaff(Array.from(mergedMap.values()));
+      }
+
+      const syncRes = await Storage.waitForPendingCloudSync();
+
+      Storage.addActivityLog({
+        category: 'excel',
+        action: replaceMode ? 'بارگذاری و جایگزینی اکسل پرسنل امور مالی' : 'ثبت گروهی کاربران امور مالی از اکسل',
+        details: `تعداد ${incoming.length} حساب کاربری امور مالی و حسابداری از فایل اکسل ثبت شد.`,
+        targetName: `${incoming.length} کاربر امور مالی`,
+      });
+
+      setSuccessMsg(
+        syncRes.success
+          ? `تعداد ${incoming.length} کاربر امور مالی با موفقیت در دیتابیس ابری ثبت و همگام‌سازی شد.`
+          : `تعداد ${incoming.length} کاربر امور مالی در مرورگر ثبت شد، اما همگام‌سازی ابری با تأخیر مواجه شد.`
+      );
+      setPreviewFinance(null);
+      setTimeout(() => onImportComplete(), 1100);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در ذخیره کاربران امور مالی');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-4xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 relative max-h-[90vh] overflow-y-auto">
@@ -693,7 +766,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
             </h3>
             <p className="text-xs text-slate-500">
               {allowStaffTabs
-                ? 'بارگذاری مجزا برای دانشجویان، سراها و اتاق‌ها، سرپرستان، پرسنل تأسیسات، مشاوران و انبارداران'
+                ? 'بارگذاری مجزا برای دانشجویان، سراها و اتاق‌ها، سرپرستان، تأسیسات، مشاوران، انبارداران و امور مالی'
                 : 'بارگذاری اکسل مشخصات دانشجویان (با پشتیبانی از ستون‌های دلخواه) و سراهای خوابگاهی'}
             </p>
           </div>
@@ -702,7 +775,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
         {/* تب‌های انتخاب نوع فایل اکسل */}
         <div
           className={`grid gap-1.5 p-1.5 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-6 ${
-            allowStaffTabs ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6' : 'grid-cols-2'
+            allowStaffTabs ? 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-7' : 'grid-cols-2'
           }`}
         >
           <button
@@ -783,6 +856,19 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
               >
                 <Package className="w-3.5 h-3.5 shrink-0" />
                 <span>کاربران انبار</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => switchTab('finance')}
+                className={`py-2.5 px-2 text-[11px] font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tab === 'finance'
+                    ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <Wallet className="w-3.5 h-3.5 shrink-0" />
+                <span>امور مالی</span>
               </button>
             </>
           )}
@@ -1503,6 +1589,127 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                     className="px-6 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
                   >
                     تأیید و ثبت کاربران انبار در سامانه ابری
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ۷. محتوای تب کاربران امور مالی و حسابداری */}
+        {allowStaffTabs && tab === 'finance' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60">
+              <div>
+                <h4 className="text-xs font-bold text-emerald-950 dark:text-emerald-200">
+                  دانلود قالب اکسل ثبت گروهی کاربران امور مالی و حسابداری
+                </h4>
+                <p className="text-[11px] text-emerald-800 dark:text-emerald-400 mt-0.5">
+                  ستون‌ها: نام و نام خانوادگی، نام کاربری، کلمه عبور، شماره تماس، بخش / واحد، وضعیت، توضیحات
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={downloadFinanceTemplate}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>دانلود قالب اکسل امور مالی</span>
+              </button>
+            </div>
+
+            <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 rounded-3xl p-8 text-center transition">
+              <UploadCloud className="w-12 h-12 mx-auto text-emerald-600 mb-3" />
+              <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200 mb-1">
+                فایل اکسل کاربران امور مالی را انتخاب کنید
+              </h4>
+              <p className="text-xs text-slate-500 mb-4">فرمت‌های مجاز: .xlsx, .xls, .csv (نام کاربری تکراری بروزرسانی می‌شود)</p>
+              <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-md shadow-emerald-600/20">
+                <span>انتخاب فایل اکسل امور مالی</span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleFinanceFileSelect}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {loading && <div className="text-center text-xs text-emerald-600 font-bold">در حال پردازش فایل اکسل امور مالی...</div>}
+
+            {previewFinance && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <FileCheck className="w-5 h-5 text-emerald-600" />
+                    <span className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                      پیش‌نمایش: {previewFinance.list.length} کاربر امور مالی آماده ثبت
+                    </span>
+                  </div>
+                  {previewFinance.skippedRows > 0 && (
+                    <span className="text-[11px] text-amber-600 font-semibold">
+                      ({previewFinance.skippedRows} ردیف خالی نادیده گرفته شد)
+                    </span>
+                  )}
+                </div>
+
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-60">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold sticky top-0">
+                      <tr>
+                        <th className="p-2.5">ردیف</th>
+                        <th className="p-2.5">نام و نام خانوادگی</th>
+                        <th className="p-2.5">نام کاربری</th>
+                        <th className="p-2.5">کلمه عبور</th>
+                        <th className="p-2.5">شماره تماس</th>
+                        <th className="p-2.5">بخش / واحد</th>
+                        <th className="p-2.5">وضعیت</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {previewFinance.list.map((fin, i) => (
+                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-2.5">{i + 1}</td>
+                          <td className="p-2.5 font-bold">{fin.fullName}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{fin.username}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{fin.password}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{fin.mobile || fin.phone}</td>
+                          <td className="p-2.5 text-slate-600 dark:text-slate-300">{fin.department || '-'}</td>
+                          <td className="p-2.5">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                fin.status === 'active'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {fin.status === 'active' ? 'فعال' : 'غیرفعال'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={replaceMode}
+                      onChange={(e) => setReplaceMode(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                    />
+                    <span>جایگزینی کامل لیست کاربران امور مالی قبلی</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={handleSaveFinance}
+                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                  >
+                    تأیید و ثبت کاربران امور مالی در سامانه ابری
                   </button>
                 </div>
               </div>

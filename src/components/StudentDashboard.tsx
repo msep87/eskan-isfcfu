@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { Student, Dormitory, Room, Bed, Announcement, RoomWarning, AppSettings, StudentEvaluation } from '../types';
 import { Storage } from '../utils/storage';
+import {
+  computeStudentFinancialInfo,
+  FINANCIAL_STATUS_LABELS,
+  PAYMENT_METHOD_LABELS,
+} from '../utils/financeUtils';
 import { RoommatesCard } from './RoommatesCard';
 import { VisualBedPicker } from './VisualBedPicker';
 import { StudentProfileModal } from './StudentProfileModal';
@@ -30,6 +35,7 @@ import {
   HeartHandshake,
   Award,
   MessageSquareWarning,
+  Wallet,
 } from 'lucide-react';
 
 interface StudentDashboardProps {
@@ -106,6 +112,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   const canSecondaryEdit = Boolean(settings.studentSecondaryEditEnabled);
   const canStudentEditProfile = !student.isProfileCompleted || canSecondaryEdit;
+
+  const myFinanceRecord = Storage.getStudentFinances().find(
+    (f) => f.studentId === student.studentId
+  );
+  const myFinancialInfo = computeStudentFinancialInfo(student, myFinanceRecord);
 
   return (
     <div className="space-y-6">
@@ -613,6 +624,101 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* کارت وضعیت مالی، کسورات قانونی حقوق و بدهی */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
+                    وضعیت مالی، کسورات قانونی و بدهی خوابگاه
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    مطابق ضوابط دانشگاه فرهنگیان (۴۵٪ دانشجویان خوابگاهی / ۲۵٪ ترددی غیرخوابگاهی)
+                  </p>
+                </div>
+              </div>
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-extrabold border self-start sm:self-auto ${
+                  myFinancialInfo.financialStatus === 'debtor'
+                    ? 'bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800'
+                    : myFinancialInfo.financialStatus === 'settled'
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                    : 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
+                }`}
+              >
+                {FINANCIAL_STATUS_LABELS[myFinancialInfo.financialStatus]}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs">
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block">
+                  نرخ کسر از حقوق دریافتی
+                </span>
+                <div className="text-xl font-black text-teal-700 dark:text-teal-300 mt-1 tabular-nums">
+                  {myFinancialInfo.deductionRate}٪ حقوق
+                </div>
+                <span className="text-[11px] text-slate-500 mt-0.5 block">
+                  {myFinancialInfo.isDormResident ? 'دانشجوی خوابگاهی' : 'ترددی (غیرخوابگاهی)'}
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block">
+                  نحوه پرداخت قانونی
+                </span>
+                <div className="text-xs font-extrabold text-slate-800 dark:text-slate-100 mt-1.5 leading-relaxed">
+                  {PAYMENT_METHOD_LABELS[myFinancialInfo.paymentMethod]}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block">
+                  میزان بدهی ثبت‌شده
+                </span>
+                <div
+                  className={`text-xl font-black mt-1 tabular-nums ${
+                    myFinancialInfo.debtAmount > 0
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : 'text-emerald-700 dark:text-emerald-400'
+                  }`}
+                >
+                  {myFinancialInfo.debtAmount.toLocaleString('fa-IR')}{' '}
+                  <span className="text-xs font-bold">ریال</span>
+                </div>
+                {myFinancialInfo.paidAmount > 0 && (
+                  <span className="text-[11px] text-slate-500 mt-0.5 block tabular-nums">
+                    مبلغ پرداختی: {myFinancialInfo.paidAmount.toLocaleString('fa-IR')} ریال
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {myFinancialInfo.paymentMethod === 'in_person_accounting' && (
+              <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200">
+                توجه: با توجه به ثبت محل سکونت خارج از استان اصفهان، لازم است جهت پرداخت و تسویه مبالغ مربوطه به واحد امور مالی و حسابداری مراجعه فرمایید.
+              </div>
+            )}
+
+            {(myFinancialInfo.documentNumber || myFinancialInfo.fiscalNote) && (
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 space-y-1">
+                {myFinancialInfo.documentNumber && (
+                  <div>
+                    <strong>شماره سند / فیش:</strong> <span className="font-mono">{myFinancialInfo.documentNumber}</span>
+                  </div>
+                )}
+                {myFinancialInfo.fiscalNote && (
+                  <div>
+                    <strong>توضیحات امور مالی:</strong> {myFinancialInfo.fiscalNote}
+                  </div>
+                )}
               </div>
             )}
           </div>

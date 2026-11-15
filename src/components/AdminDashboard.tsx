@@ -20,6 +20,7 @@ import {
   ActivityLog,
   StudentEvaluation,
   WarehouseStaff,
+  FinanceStaff,
   HomeNoteItem,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
@@ -133,7 +134,7 @@ interface AdminDashboardProps {
   onOpenAppearance: () => void;
   onOpenChangePassword: () => void;
   onUpdateSettings: (newSettings: AppSettings) => void;
-  onOpenUserGuide?: (role: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'student') => void;
+  onOpenUserGuide?: (role: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'student') => void;
   cloudSyncTick?: number;
 }
 
@@ -209,12 +210,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [shiftDayFilter, setShiftDayFilter] = useState('all');
   const [shiftFeedback, setShiftFeedback] = useState<string | null>(null);
 
-  // فهرست پرسنل انبار
+  // فهرست پرسنل انبار و امور مالی
   const [warehouseStaffList, setWarehouseStaffList] = useState<WarehouseStaff[]>(Storage.getWarehouseStaff());
+  const [financeStaffList, setFinanceStaffList] = useState<FinanceStaff[]>(Storage.getFinanceStaff());
 
   const handleUsersRefresh = () => {
     setCounselorsList(Storage.getCounselors());
     setWarehouseStaffList(Storage.getWarehouseStaff());
+    setFinanceStaffList(Storage.getFinanceStaff());
     onRefreshData();
   };
 
@@ -229,6 +232,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setActivityLogs(Storage.getActivityLogs());
     setStudentEvaluations(Storage.getStudentEvaluations());
     setWarehouseStaffList(Storage.getWarehouseStaff());
+    setFinanceStaffList(Storage.getFinanceStaff());
   }, [cloudSyncTick]);
 
   // فرم ثبت شیفت دستی جدید توسط مدیر
@@ -252,6 +256,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStudentEvaluations(Storage.getStudentEvaluations());
     setCounselorsList(Storage.getCounselors());
     setWarehouseStaffList(Storage.getWarehouseStaff());
+    setFinanceStaffList(Storage.getFinanceStaff());
   }, [students, warnings, announcements, rooms, beds, mainTab, cartableSubTab]);
 
   // وضعیت‌های مدیریت تأسیسات در پنل مدیر کل
@@ -1817,7 +1822,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <Users className="w-4 h-4 text-teal-600" />
           <span>مدیریت کاربران سامانه</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
-            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + counselorsList.length}
+            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + counselorsList.length + financeStaffList.length}
           </span>
         </button>
 
@@ -1951,6 +1956,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           maintenanceStaff={campusStaff}
           warehouseStaff={warehouseStaffList}
           counselors={counselorsList}
+          financeStaff={financeStaffList}
           onRefreshData={handleUsersRefresh}
           onOpenExcelModal={onOpenExcelModal}
           onOpenReports={onOpenReports}
@@ -4879,6 +4885,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           maintenance: 'تأسیسات',
           warehouse: 'مسئول انبار',
           counselor: 'مشاور',
+          finance: 'امور مالی و حسابداری',
           system: 'سیستم / مهمان',
         };
         const categoryLabelMap: Record<string, string> = {
@@ -4889,6 +4896,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           staff: 'پرسنل و کاربران',
           maintenance: 'امور تأسیسات',
           warehouse: 'انبار و تجهیزات',
+          finance: 'امور مالی و کسورات',
           warning_eval: 'تذکر، اخطار و ارزیابی',
           settings: 'تنظیمات و اطلاعیه‌ها',
           backup: 'پشتیبان و بازنشانی',
@@ -5161,6 +5169,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { key: 'maintenance' as const, label: `تأسیسات (${campusStaff.length})` },
                 { key: 'warehouse' as const, label: `انبار (${warehouseStaffList.length})` },
                 { key: 'counselors' as const, label: `مشاوران (${counselorsList.length})` },
+                { key: 'finance' as const, label: `امور مالی (${financeStaffList.length})` },
               ].map((item) => (
                 <button
                   key={item.key}

@@ -11,6 +11,8 @@ import {
   MaintenanceStaff,
   MaintenanceTask,
   WarehouseStaff,
+  FinanceStaff,
+  StudentFinancialRecord,
   InventoryItem,
   WarehouseRequest,
   SupervisorShiftSchedule,
@@ -98,4 +100,11 @@ export const INITIAL_ACTIVITY_LOGS: ActivityLog[] = [];
 
 // تذکرات، اخطارها و نمرات ارزیابی فردی و اتاق دانشجویان (کاملاً خالی)
 export const INITIAL_STUDENT_EVALUATIONS: StudentEvaluation[] = [];
+
+// کاربران امور مالی و حسابداری (کاملاً خالی)
+export const INITIAL_FINANCE_STAFF: FinanceStaff[] = [];
+
+// سوابق مالی، بدهی و کسورات دانشجویان (کاملاً خالی)
+export const INITIAL_STUDENT_FINANCES: StudentFinancialRecord[] = [];
+
 

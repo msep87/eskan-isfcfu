@@ -18,6 +18,8 @@ import {
   CounselorStaff,
   CounselorShiftSchedule,
   CounselorShiftReport,
+  FinanceStaff,
+  StudentFinancialRecord,
 } from './types';
 import { Storage, initializeStorageIfNeeded } from './utils/storage';
 import { Navbar } from './components/Navbar';
@@ -33,6 +35,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { MaintenanceDashboard } from './components/MaintenanceDashboard';
 import { WarehouseDashboard } from './components/WarehouseDashboard';
 import { CounselorDashboard } from './components/CounselorDashboard';
+import { FinanceDashboard } from './components/FinanceDashboard';
 import { AboutModal } from './components/AboutModal';
 import { UserGuideModal } from './components/UserGuideModal';
 import { AiDormAssistant } from './components/AiDormAssistant';
@@ -79,6 +82,8 @@ export default function App() {
   const [maintenanceStaff, setMaintenanceStaff] = useState<MaintenanceStaff[]>(Storage.getMaintenanceStaff());
   const [maintenanceTasks, setMaintenanceTasks] = useState<MaintenanceTask[]>(Storage.getMaintenanceTasks());
   const [warehouseStaff, setWarehouseStaff] = useState<WarehouseStaff[]>(Storage.getWarehouseStaff());
+  const [financeStaff, setFinanceStaff] = useState<FinanceStaff[]>(Storage.getFinanceStaff());
+  const [studentFinances, setStudentFinances] = useState<StudentFinancialRecord[]>(Storage.getStudentFinances());
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(Storage.getInventoryItems());
   const [warehouseRequests, setWarehouseRequests] = useState<WarehouseRequest[]>(Storage.getWarehouseRequests());
 
@@ -100,6 +105,8 @@ export default function App() {
     setMaintenanceStaff(Storage.getMaintenanceStaff());
     setMaintenanceTasks(Storage.getMaintenanceTasks());
     setWarehouseStaff(Storage.getWarehouseStaff());
+    setFinanceStaff(Storage.getFinanceStaff());
+    setStudentFinances(Storage.getStudentFinances());
     setInventoryItems(Storage.getInventoryItems());
     setWarehouseRequests(Storage.getWarehouseRequests());
 
@@ -123,6 +130,11 @@ export default function App() {
       const refreshedStaff = Storage.getWarehouseStaff().find((w) => w.id === user.staff.id);
       if (refreshedStaff) {
         setCurrentUser({ role: 'warehouse', staff: refreshedStaff });
+      }
+    } else if (user && user.role === 'finance') {
+      const refreshedFin = Storage.getFinanceStaff().find((f) => f.id === user.staff.id);
+      if (refreshedFin) {
+        setCurrentUser({ role: 'finance', staff: refreshedFin });
       }
     } else if (user && user.role === 'counselor') {
       const refreshedCns = Storage.getCounselors().find((c) => c.id === user.counselor.id);
@@ -294,7 +306,9 @@ export default function App() {
         messages={messages}
         onOpenAppearance={() => setIsAppearanceModalOpen(true)}
         onOpenReports={() => {
-          if (currentUser && currentUser.role !== 'student') setIsReportsModalOpen(true);
+          if (currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance') {
+            setIsReportsModalOpen(true);
+          }
         }}
         onOpenMessages={() => setIsMessagesModalOpen(true)}
         onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
@@ -650,6 +664,22 @@ export default function App() {
           />
         )}
 
+        {/* ۸. در صورتی که کاربر امور مالی و حسابداری است */}
+        {currentUser?.role === 'finance' && (
+          <FinanceDashboard
+            staff={currentUser.staff}
+            dorms={dorms}
+            rooms={rooms}
+            beds={beds}
+            students={students}
+            studentFinances={studentFinances}
+            messages={messages}
+            onRefreshData={refreshAllData}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onOpenUserGuide={(r) => handleOpenUserGuide(r || 'finance')}
+          />
+        )}
+
       </main>
 
       {/* فوتر سایت */}
@@ -731,7 +761,7 @@ export default function App() {
         />
       )}
 
-      {currentUser && currentUser.role !== 'student' && (
+      {currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance' && (
         <ReportsView
           isOpen={isReportsModalOpen}
           onClose={() => setIsReportsModalOpen(false)}

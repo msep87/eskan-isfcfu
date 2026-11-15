@@ -12,6 +12,9 @@ import {
   MaintenanceStaff,
   MaintenanceTask,
   WarehouseStaff,
+  FinanceStaff,
+  StudentFinancialRecord,
+  StudentFinancialStatus,
   InventoryItem,
   WarehouseRequest,
   SupervisorShiftSchedule,
@@ -34,6 +37,8 @@ import {
   INITIAL_MAINTENANCE_STAFF,
   INITIAL_MAINTENANCE_TASKS,
   INITIAL_WAREHOUSE_STAFF,
+  INITIAL_FINANCE_STAFF,
+  INITIAL_STUDENT_FINANCES,
   INITIAL_INVENTORY_ITEMS,
   INITIAL_WAREHOUSE_REQUESTS,
   INITIAL_SHIFT_SCHEDULES,
@@ -62,6 +67,8 @@ const STORAGE_KEYS = {
   MAINTENANCE_STAFF: 'farhangian_dorm_maintenance_staff_prod',
   MAINTENANCE_TASKS: 'farhangian_dorm_maintenance_tasks_prod',
   WAREHOUSE_STAFF: 'farhangian_dorm_warehouse_staff_prod',
+  FINANCE_STAFF: 'farhangian_dorm_finance_staff_prod',
+  STUDENT_FINANCES: 'farhangian_dorm_student_finances_prod',
   INVENTORY_ITEMS: 'farhangian_dorm_inventory_items_prod',
   WAREHOUSE_REQUESTS: 'farhangian_dorm_warehouse_requests_prod',
   SHIFT_SCHEDULES: 'farhangian_dorm_shift_schedules_prod',
@@ -129,6 +136,12 @@ export function initializeStorageIfNeeded(): void {
   }
   if (!localStorage.getItem(STORAGE_KEYS.STUDENT_EVALUATIONS)) {
     localStorage.setItem(STORAGE_KEYS.STUDENT_EVALUATIONS, JSON.stringify(INITIAL_STUDENT_EVALUATIONS));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.FINANCE_STAFF)) {
+    localStorage.setItem(STORAGE_KEYS.FINANCE_STAFF, JSON.stringify(INITIAL_FINANCE_STAFF));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.STUDENT_FINANCES)) {
+    localStorage.setItem(STORAGE_KEYS.STUDENT_FINANCES, JSON.stringify(INITIAL_STUDENT_FINANCES));
   }
 
   if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
@@ -1211,7 +1224,7 @@ export const Storage = {
 
   // تطبیق و اتصال دسته‌جمعی عکس‌های پرسنل و کادر بر اساس نام/کد کاربری
   batchAssignStaffPhotos: (
-    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor',
+    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance',
     photoMap: Record<string, string>
   ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     let matchedCount = 0;
@@ -1305,6 +1318,25 @@ export const Storage = {
           if (ref) Storage.setCurrentUser({ role: 'counselor', counselor: ref });
         }
       }
+    } else if (role === 'finance') {
+      const list = Storage.getFinanceStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setFinanceStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'finance') {
+          const ref = list.find((f) => f.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'finance', staff: ref });
+        }
+      }
     }
 
     if (matchedCount > 0 && saved) {
@@ -1313,6 +1345,7 @@ export const Storage = {
         maintenance: 'پرسنل تأسیسات',
         warehouse: 'پرسنل انبار',
         counselor: 'مشاوران',
+        finance: 'امور مالی و حسابداری',
       };
       Storage.addActivityLog({
         category: 'staff',
@@ -1394,7 +1427,7 @@ export const Storage = {
     messageId: string,
     reply: {
       senderName: string;
-      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor';
+      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance';
       content: string;
       date: string;
     }
@@ -1526,6 +1559,8 @@ export const Storage = {
       counselorReports: Storage.getCounselorReports(),
       activityLogs: Storage.getActivityLogs(),
       studentEvaluations: Storage.getStudentEvaluations(),
+      financeStaff: Storage.getFinanceStaff(),
+      studentFinances: Storage.getStudentFinances(),
       exportedAt: new Date().toISOString(),
       appName: 'سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
     };
@@ -1565,6 +1600,8 @@ export const Storage = {
         if (data.counselorReports) Storage.setCounselorReports(data.counselorReports);
         if (data.activityLogs) Storage.setActivityLogs(data.activityLogs);
         if (data.studentEvaluations) Storage.setStudentEvaluations(data.studentEvaluations);
+        if (data.financeStaff) Storage.setFinanceStaff(data.financeStaff);
+        if (data.studentFinances) Storage.setStudentFinances(data.studentFinances);
         Storage.addActivityLog({
           category: 'backup',
           action: 'بازیابی نسخه پشتیبان JSON',
@@ -1804,7 +1841,7 @@ export const Storage = {
 
   // تغییر کلمه عبور برای تمام نقش‌ها
   changePassword: (
-    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor',
+    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance',
     userId: string,
     currentPasswordInput: string,
     newPasswordInput: string
@@ -1920,6 +1957,26 @@ export const Storage = {
       return { success: true, message: 'کلمه عبور مسئول انبار با موفقیت تغییر یافت.' };
     }
 
+    if (role === 'finance') {
+      const staffList = Storage.getFinanceStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) {
+        return { success: false, message: 'کاربر امور مالی و حسابداری یافت نشد.' };
+      }
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی امور مالی اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setFinanceStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور امور مالی',
+        details: `کلمه عبور کارشناس امور مالی ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور کارشناس امور مالی با موفقیت تغییر یافت.' };
+    }
+
     if (role === 'student') {
       const students = Storage.getStudents();
       const st = students.find((s) => s.studentId === userId);
@@ -1945,7 +2002,7 @@ export const Storage = {
 
   // تغییر یا ریست مستقیم رمز عبور کاربران توسط مدیر کل (بدون نیاز به رمز قبلی)
   adminResetUserPassword: (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance',
     idOrStudentId: string,
     newPasswordInput: string
   ): { success: boolean; message: string } => {
@@ -2055,6 +2112,25 @@ export const Storage = {
       };
     }
 
+    if (role === 'finance') {
+      const list = Storage.getFinanceStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر امور مالی یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setFinanceStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز امور مالی توسط مدیر',
+        details: `کلمه عبور کاربر امور مالی ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور کاربر امور مالی «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
     return { success: false, message: 'نقش کاربری معتبر نیست.' };
   },
 
@@ -2110,6 +2186,193 @@ export const Storage = {
     const filtered = list.filter((s) => s.id !== id);
     Storage.setWarehouseStaff(filtered);
     return { success: true, message: 'کاربر انبار با موفقیت حذف گردید.' };
+  },
+
+  // -------------------------------------------------------------
+  // متدهای مدیریت کاربران امور مالی و حسابداری و سوابق مالی دانشجویان
+  // -------------------------------------------------------------
+  getFinanceStaff: (): FinanceStaff[] => get(STORAGE_KEYS.FINANCE_STAFF, INITIAL_FINANCE_STAFF),
+  setFinanceStaff: (staff: FinanceStaff[]) => set(STORAGE_KEYS.FINANCE_STAFF, staff),
+
+  addFinanceStaff: (
+    staffData: Omit<FinanceStaff, 'id'>
+  ): { success: boolean; message: string; staff?: FinanceStaff } => {
+    const list = Storage.getFinanceStaff();
+    const cleanUsername = staffData.username.trim().toLowerCase();
+    if (list.some((s) => s.username.toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کاربر امور مالی دیگری ثبت شده است.' };
+    }
+    const newStaff: FinanceStaff = {
+      ...staffData,
+      id: `fin_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      username: cleanUsername,
+      role: 'finance',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setFinanceStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کاربر امور مالی',
+      details: `کاربر امور مالی و حسابداری «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کاربر امور مالی «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateFinanceStaff: (
+    id: string,
+    updates: Partial<FinanceStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getFinanceStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر امور مالی یافت نشد.' };
+    if (updates.username) {
+      const cleanU = updates.username.trim().toLowerCase();
+      if (list.some((f) => f.id !== id && f.username.trim().toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر امور مالی دیگری ثبت شده است.' };
+      }
+    }
+    list[idx] = { ...list[idx], ...updates };
+    Storage.setFinanceStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'finance' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'finance', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کاربر امور مالی با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteFinanceStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getFinanceStaff();
+    const target = list.find((s) => s.id === id);
+    const filtered = list.filter((s) => s.id !== id);
+    Storage.setFinanceStaff(filtered);
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کاربر امور مالی',
+        details: `حساب کاربری امور مالی «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کاربر امور مالی با موفقیت حذف گردید.' };
+  },
+
+  getStudentFinances: (): StudentFinancialRecord[] =>
+    get<StudentFinancialRecord[]>(STORAGE_KEYS.STUDENT_FINANCES, INITIAL_STUDENT_FINANCES),
+
+  setStudentFinances: (records: StudentFinancialRecord[]): boolean =>
+    set(STORAGE_KEYS.STUDENT_FINANCES, records),
+
+  upsertStudentFinance: (
+    record: Omit<StudentFinancialRecord, 'updatedAt'>
+  ): StudentFinancialRecord => {
+    const list = Storage.getStudentFinances();
+    const nowStr =
+      new Date().toLocaleDateString('fa-IR') +
+      ' - ' +
+      new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+    const fullRecord: StudentFinancialRecord = {
+      ...record,
+      updatedAt: nowStr,
+    };
+    const idx = list.findIndex((r) => r.studentId === record.studentId);
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...fullRecord };
+    } else {
+      list.unshift(fullRecord);
+    }
+    Storage.setStudentFinances(list);
+
+    const st = Storage.getStudents().find((s) => s.studentId === record.studentId);
+    Storage.addActivityLog({
+      category: 'finance',
+      action: 'بروزرسانی وضعیت مالی دانشجو',
+      details: `وضعیت مالی ${st ? st.fullName : record.studentId} (${record.studentId}) ثبت شد. بدهی: ${Number(record.debtAmount || 0).toLocaleString('fa-IR')} ریال`,
+      targetName: st ? `${st.fullName} (${st.studentId})` : record.studentId,
+    });
+
+    return fullRecord;
+  },
+
+  batchUpdateStudentDebtsFromExcel: (
+    rows: Array<{
+      studentId?: string;
+      nationalId?: string;
+      debtAmount: number;
+      paidAmount?: number;
+      financialStatus?: StudentFinancialStatus;
+      fiscalNote?: string;
+      documentNumber?: string;
+    }>,
+    actorName: string
+  ): { matchedCount: number; unmatchedKeys: string[] } => {
+    const students = Storage.getStudents();
+    const currentList = Storage.getStudentFinances();
+    const map = new Map<string, StudentFinancialRecord>();
+    currentList.forEach((rec) => map.set(rec.studentId, rec));
+
+    const nowStr =
+      new Date().toLocaleDateString('fa-IR') +
+      ' - ' +
+      new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+
+    let matchedCount = 0;
+    const unmatchedKeys: string[] = [];
+
+    rows.forEach((row) => {
+      const sidKey = normalizeLookupKey(row.studentId);
+      const nidKey = normalizeLookupKey(row.nationalId);
+
+      const matchedStudent =
+        (sidKey && students.find((s) => normalizeLookupKey(s.studentId) === sidKey)) ||
+        (nidKey && students.find((s) => normalizeLookupKey(s.nationalId) === nidKey));
+
+      if (!matchedStudent) {
+        const missingLabel = (row.studentId || row.nationalId || 'نامشخص').trim();
+        unmatchedKeys.push(missingLabel);
+        return;
+      }
+
+      const prev = map.get(matchedStudent.studentId);
+      const debt = Math.max(0, Number(row.debtAmount) || 0);
+      const paid = row.paidAmount !== undefined ? Math.max(0, Number(row.paidAmount) || 0) : prev?.paidAmount;
+
+      const resolvedStatus: StudentFinancialStatus =
+        row.financialStatus ||
+        (debt > 0 ? 'debtor' : prev?.financialStatus === 'debtor' ? 'settled' : prev?.financialStatus || 'settled');
+
+      map.set(matchedStudent.studentId, {
+        ...(prev || {}),
+        studentId: matchedStudent.studentId,
+        debtAmount: debt,
+        paidAmount: paid,
+        financialStatus: resolvedStatus,
+        fiscalNote: row.fiscalNote !== undefined ? row.fiscalNote : prev?.fiscalNote,
+        documentNumber: row.documentNumber !== undefined ? row.documentNumber : prev?.documentNumber,
+        updatedAt: nowStr,
+        updatedBy: actorName,
+      });
+      matchedCount++;
+    });
+
+    if (matchedCount > 0) {
+      Storage.setStudentFinances(Array.from(map.values()));
+      Storage.addActivityLog({
+        category: 'finance',
+        action: 'بارگذاری گروهی اکسل بدهی دانشجویان',
+        details: `میزان بدهی و وضعیت مالی ${matchedCount} دانشجو از طریق فایل اکسل توسط امور مالی ثبت و همگام‌سازی شد.`,
+        targetName: `${matchedCount} دانشجو`,
+      });
+    }
+
+    return { matchedCount, unmatchedKeys };
   },
 
   // -------------------------------------------------------------
@@ -2709,6 +2972,10 @@ export const Storage = {
         actorName = currentUser.counselor.fullName;
         actorRole = 'counselor';
         actorUsername = currentUser.counselor.username;
+      } else if (currentUser.role === 'finance') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'finance';
+        actorUsername = currentUser.staff.username;
       }
     }
 
@@ -2985,7 +3252,7 @@ export const Storage = {
   },
 
   uploadPhotosToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance',
     items: Array<{ userId: string; dataUrl: string }>
   ): Promise<{
     supported: boolean;
@@ -3070,7 +3337,7 @@ export const Storage = {
   },
 
   uploadSinglePhotoToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance',
     userId: string,
     dataUrl: string
   ): Promise<{ supported: boolean; ok: boolean; url: string; errorMessage?: string }> => {

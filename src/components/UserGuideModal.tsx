@@ -28,6 +28,8 @@ import {
   Bed,
   Users,
   FileText,
+  Wallet,
+  HeartHandshake,
 } from 'lucide-react';
 import {
   ROLE_GUIDES,
@@ -79,6 +81,10 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         return <Wrench className="w-5 h-5 text-amber-600 dark:text-amber-400" />;
       case 'warehouse':
         return <Layers className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />;
+      case 'counselor':
+        return <HeartHandshake className="w-5 h-5 text-rose-600 dark:text-rose-400" />;
+      case 'finance':
+        return <Wallet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />;
       case 'student':
         return <GraduationCap className="w-5 h-5 text-blue-600 dark:text-blue-400" />;
     }
@@ -135,7 +141,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
           </div>
 
           {/* تب‌های انتخاب نقش با استایل مشخص */}
-          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 mt-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mt-5">
             {(
               [
                 { id: 'admin', label: 'مدیر کل پردیس', role: 'admin' as UserRoleType },
@@ -143,6 +149,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                 { id: 'counselor', label: 'مشاور و روانشناس', role: 'counselor' as UserRoleType },
                 { id: 'maintenance', label: 'تأسیسات و فنی', role: 'maintenance' as UserRoleType },
                 { id: 'warehouse', label: 'انبار و تجهیزات', role: 'warehouse' as UserRoleType },
+                { id: 'finance', label: 'امور مالی و حسابداری', role: 'finance' as UserRoleType },
                 { id: 'student', label: 'دانشجومعلم', role: 'student' as UserRoleType },
               ] as const
             ).map((tab) => {

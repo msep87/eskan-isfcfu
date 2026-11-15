@@ -8,6 +8,7 @@ import {
   MaintenanceStaff,
   WarehouseStaff,
   CounselorStaff,
+  FinanceStaff,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
@@ -52,6 +53,7 @@ import {
   ArrowUp,
   ArrowDown,
   FileText,
+  Wallet,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -59,7 +61,8 @@ export type UserCategoryKey =
   | 'supervisors'
   | 'maintenance'
   | 'warehouse'
-  | 'counselors';
+  | 'counselors'
+  | 'finance';
 
 interface AdminUsersPanelProps {
   activeCategory: UserCategoryKey;
@@ -72,6 +75,7 @@ interface AdminUsersPanelProps {
   maintenanceStaff: MaintenanceStaff[];
   warehouseStaff: WarehouseStaff[];
   counselors: CounselorStaff[];
+  financeStaff: FinanceStaff[];
   onRefreshData: () => void;
   onOpenExcelModal: (tab: ExcelImportTab) => void;
   onOpenReports: () => void;
@@ -86,7 +90,7 @@ interface AdminUsersPanelProps {
   onToggleStudentSecondaryEdit?: () => void;
 }
 
-type StaffRole = 'supervisor' | 'maintenance' | 'warehouse' | 'counselor';
+type StaffRole = 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance';
 type StudentSortKey =
   | 'default'
   | 'lastName'
@@ -107,6 +111,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   maintenanceStaff,
   warehouseStaff,
   counselors,
+  financeStaff,
   onRefreshData,
   onOpenExcelModal,
   onOpenReports,
@@ -157,6 +162,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const [formPassword, setFormPassword] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formSpecialty, setFormSpecialty] = useState('');
+  const [formDepartment, setFormDepartment] = useState('');
   const [formOfficeLocation, setFormOfficeLocation] = useState('');
   const [formNotes, setFormNotes] = useState('');
   const [formActive, setFormActive] = useState(true);
@@ -238,6 +244,12 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         }
       } else if (role === 'counselor') {
         const res = Storage.updateCounselor(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
+      } else if (role === 'finance') {
+        const res = Storage.updateFinanceStaff(id, { photoUrl: finalUrl });
         if (!res.success) {
           showToast('error', res.message);
           return;
@@ -324,6 +336,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             ? maintenanceStaff
             : targetRole === 'warehouse'
             ? warehouseStaff
+            : targetRole === 'finance'
+            ? financeStaff
             : counselors;
         const found = pool.find((u) => normKey(u.username) === nk || normKey(u.id) === nk);
         if (found) {
@@ -745,6 +759,23 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     });
   }, [counselors, staffQuery, staffDormFilter, staffStatusFilter]);
 
+  const filteredFinance = useMemo(() => {
+    const q = norm(staffQuery);
+    return financeStaff.filter((fin) => {
+      const isActive = fin.status !== 'inactive' && fin.isActive !== false;
+      if (staffStatusFilter === 'active' && !isActive) return false;
+      if (staffStatusFilter === 'inactive' && isActive) return false;
+
+      if (q) {
+        const txt = `${norm(fin.fullName)} ${norm(fin.username)} ${norm(fin.mobile || fin.phone)} ${norm(
+          fin.department
+        )} ${norm(fin.notes)}`;
+        if (!txt.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [financeStaff, staffQuery, staffStatusFilter]);
+
   // باز کردن مدال افزودن کاربر پرسنل
   const openAddStaffModal = (role: StaffRole) => {
     setStaffModalRole(role);
@@ -754,6 +785,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     setFormPassword('');
     setFormPhone('');
     setFormSpecialty('');
+    setFormDepartment(role === 'finance' ? 'واحد امور مالی و حسابداری' : '');
     setFormOfficeLocation('');
     setFormNotes('');
     setFormActive(true);
@@ -770,7 +802,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   };
 
   // باز کردن مدال ویرایش کاربر پرسنل
-  const openEditStaffModal = (role: StaffRole, user: Supervisor | MaintenanceStaff | WarehouseStaff | CounselorStaff) => {
+  const openEditStaffModal = (role: StaffRole, user: Supervisor | MaintenanceStaff | WarehouseStaff | CounselorStaff | FinanceStaff) => {
     setStaffModalRole(role);
     setEditingStaffId(user.id);
     setFormFullName(user.fullName || '');
@@ -809,6 +841,11 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormActive(cns.status !== 'inactive' && cns.isActive !== false);
       const rawIds = cns.assignedDormIds || [];
       setFormDormIds(rawIds.length === 0 || rawIds.includes('all') ? dorms.map((d) => d.id) : rawIds);
+    } else if (role === 'finance') {
+      const fin = user as FinanceStaff;
+      setFormDepartment(fin.department || 'واحد امور مالی و حسابداری');
+      setFormNotes(fin.notes || '');
+      setFormActive(fin.status !== 'inactive' && fin.isActive !== false);
     }
 
     setStaffModalOpen(true);
@@ -1022,6 +1059,45 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         });
         showToast('success', `مشاور «${cleanName}» با موفقیت ثبت شد.`);
       }
+    } else if (staffModalRole === 'finance') {
+      if (editingStaffId) {
+        const res = Storage.updateFinanceStaff(editingStaffId, {
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'واحد امور مالی و حسابداری',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      } else {
+        const res = Storage.addFinanceStaff({
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'واحد امور مالی و حسابداری',
+          role: 'finance',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      }
     }
 
     await Storage.waitForPendingCloudSync();
@@ -1080,6 +1156,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     } else if (deleteTarget.role === 'counselor') {
       Storage.deleteCounselor(deleteTarget.id);
       showToast('success', `مشاور «${deleteTarget.fullName}» حذف گردید.`);
+    } else if (deleteTarget.role === 'finance') {
+      const res = Storage.deleteFinanceStaff(deleteTarget.id);
+      showToast('success', res.message);
     }
     setDeleteTarget(null);
     onRefreshData();
@@ -1131,6 +1210,15 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       activeBg: 'bg-rose-600 text-white border-rose-600 shadow-lg shadow-rose-600/25',
       badgeBg: 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300',
     },
+    {
+      key: 'finance' as const,
+      title: 'امور مالی و حسابداری',
+      subtitle: 'کارشناسان مالی، کسورات، اکسل بدهی و پیام',
+      count: financeStaff.length,
+      icon: Wallet,
+      activeBg: 'bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-600/25',
+      badgeBg: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+    },
   ];
 
   const roleLabels: Record<StaffRole, string> = {
@@ -1138,6 +1226,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     maintenance: 'کارشناس تأسیسات',
     warehouse: 'کاربر انبار و کارپردازی',
     counselor: 'کارشناس مشاوره و روانشناسی',
+    finance: 'کارشناس امور مالی و حسابداری',
   };
 
   return (
@@ -1166,13 +1255,14 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 supervisors.length +
                 maintenanceStaff.length +
                 warehouseStaff.length +
-                counselors.length}
+                counselors.length +
+                financeStaff.length}
             </span>
           </div>
         </div>
 
         {/* دکمه‌های تفکیکی انتخاب نوع کاربر */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-5 pt-5 border-t border-white/15">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mt-5 pt-5 border-t border-white/15">
           {roleCategories.map((cat) => {
             const Icon = cat.icon;
             const isActive = activeCategory === cat.key;
@@ -1932,6 +2022,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 {activeCategory === 'maintenance' && <Wrench className="w-5 h-5" />}
                 {activeCategory === 'warehouse' && <Package className="w-5 h-5" />}
                 {activeCategory === 'counselors' && <HeartHandshake className="w-5 h-5" />}
+                {activeCategory === 'finance' && <Wallet className="w-5 h-5 text-emerald-600" />}
               </div>
               <div>
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
@@ -1939,6 +2030,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'maintenance' && `مدیریت پرسنل تأسیسات و فنی (${filteredMaintenance.length} از ${maintenanceStaff.length})`}
                   {activeCategory === 'warehouse' && `مدیریت کاربران انبار و کارپردازی (${filteredWarehouse.length} از ${warehouseStaff.length})`}
                   {activeCategory === 'counselors' && `مدیریت مشاوران و روانشناسان (${filteredCounselors.length} از ${counselors.length})`}
+                  {activeCategory === 'finance' && `مدیریت کاربران امور مالی و حسابداری (${filteredFinance.length} از ${financeStaff.length})`}
                 </h3>
                 <p className="text-xs text-slate-400">
                   مشاهده، جستجوی پیشرفته، ویرایش مشخصات، تغییر یا ریست رمز عبور و ورود تکی یا گروهی با فایل اکسل
@@ -1957,6 +2049,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       ? 'maintenance'
                       : activeCategory === 'warehouse'
                       ? 'warehouse'
+                      : activeCategory === 'finance'
+                      ? 'finance'
                       : 'counselor'
                   )
                 }
@@ -1968,6 +2062,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'maintenance' && 'افزودن تکنسین جدید'}
                   {activeCategory === 'warehouse' && 'افزودن کاربر انبار جدید'}
                   {activeCategory === 'counselors' && 'افزودن مشاور جدید'}
+                  {activeCategory === 'finance' && 'افزودن کاربر امور مالی جدید'}
                 </span>
               </button>
 
@@ -1981,6 +2076,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       ? 'maintenance'
                       : activeCategory === 'warehouse'
                       ? 'warehouse'
+                      : activeCategory === 'finance'
+                      ? 'finance'
                       : 'counselors'
                   )
                 }
@@ -1998,6 +2095,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     ? 'maintenance'
                     : activeCategory === 'warehouse'
                     ? 'warehouse'
+                    : activeCategory === 'finance'
+                    ? 'finance'
                     : 'counselor';
                 return (
                   <>
@@ -2058,7 +2157,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
               <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
             </div>
 
-            {activeCategory !== 'warehouse' && (
+            {activeCategory !== 'warehouse' && activeCategory !== 'finance' && (
               <div className="flex items-center gap-1.5">
                 <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <select
@@ -2100,8 +2199,12 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   <th className="p-3">نام کاربری</th>
                   <th className="p-3">رمز عبور</th>
                   <th className="p-3">شماره تماس</th>
-                  {activeCategory !== 'warehouse' && <th className="p-3">محدوده سرا / تخصص</th>}
-                  {activeCategory === 'warehouse' && <th className="p-3">سمت / توضیحات</th>}
+                  {activeCategory !== 'warehouse' && activeCategory !== 'finance' && (
+                    <th className="p-3">محدوده سرا / تخصص</th>
+                  )}
+                  {(activeCategory === 'warehouse' || activeCategory === 'finance') && (
+                    <th className="p-3">بخش / سمت و توضیحات</th>
+                  )}
                   {activeCategory !== 'supervisors' && <th className="p-3">وضعیت</th>}
                   <th className="p-3 text-center">عملیات مدیریت</th>
                 </tr>
@@ -2703,6 +2806,148 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       );
                     })
                   ))}
+
+                {activeCategory === 'finance' &&
+                  (filteredFinance.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-slate-400">
+                        هیچ کاربر امور مالی با مشخصات جستجوشده یافت نشد. برای ثبت کاربر از دکمه «افزودن کاربر امور مالی جدید» یا «ثبت گروهی با اکسل» استفاده کنید.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredFinance.map((fin) => {
+                      const isActive = fin.status !== 'inactive' && fin.isActive !== false;
+                      const passKey = `fin_${fin.id}`;
+                      const isShown = revealedPasswords[passKey];
+
+                      return (
+                        <tr key={fin.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {fin.photoUrl ? (
+                                <img
+                                  src={fin.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-emerald-200 dark:border-emerald-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-emerald-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(fin.fullName || 'م').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{fin.fullName}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
+                            {fin.username}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                {isShown ? fin.password : '••••••'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => toggleRevealPassword(passKey)}
+                                className="p-1 text-slate-400 hover:text-emerald-600 cursor-pointer"
+                                title={isShown ? 'مخفی کردن رمز' : 'نمایش رمز'}
+                              >
+                                {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono" dir="ltr">
+                            {fin.mobile || fin.phone || '-'}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-semibold text-emerald-700 dark:text-emerald-300">
+                              {fin.department || 'واحد امور مالی و حسابداری'}
+                            </div>
+                            {fin.notes && <div className="text-[11px] text-slate-400">{fin.notes}</div>}
+                          </td>
+                          <td className="p-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextStatus = isActive ? 'inactive' : 'active';
+                                Storage.updateFinanceStaff(fin.id, {
+                                  status: nextStatus,
+                                  isActive: nextStatus === 'active',
+                                });
+                                onRefreshData();
+                              }}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                                isActive
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                              }`}
+                            >
+                              {isActive ? 'فعال' : 'غیرفعال'}
+                            </button>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <label
+                                className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                title="بارگذاری یا تغییر عکس کاربر امور مالی"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('finance', fin.id, fin.fullName, e, fin.username)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => openEditStaffModal('finance', fin)}
+                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                                title="ویرایش مشخصات کاربر امور مالی"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPasswordError('');
+                                  setNewPasswordInput('');
+                                  setPasswordModalTarget({
+                                    role: 'finance',
+                                    id: fin.id,
+                                    fullName: fin.fullName,
+                                    usernameOrCode: fin.username,
+                                    defaultResetValue: '123456',
+                                    defaultResetLabel: 'ریست فوری به 123456',
+                                  });
+                                }}
+                                className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                                title="تغییر یا ریست رمز عبور"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({
+                                    role: 'finance',
+                                    id: fin.id,
+                                    fullName: fin.fullName,
+                                  })
+                                }
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                                title="حذف کاربر امور مالی"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ))}
               </tbody>
             </table>
           </div>
@@ -2873,23 +3118,43 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   </div>
                 )}
 
-                {staffModalRole === 'warehouse' && (
-                  <div className="sm:col-span-2">
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      سمت / توضیحات (اختیاری)
-                    </label>
-                    <input
-                      type="text"
-                      value={formNotes}
-                      onChange={(e) => setFormNotes(e.target.value)}
-                      placeholder="مسئول انبار مرکزی / کارپرداز..."
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
-                    />
-                  </div>
+                {(staffModalRole === 'warehouse' || staffModalRole === 'finance') && (
+                  <>
+                    {staffModalRole === 'finance' && (
+                      <div className="sm:col-span-2">
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          بخش / واحد مالی
+                        </label>
+                        <input
+                          type="text"
+                          value={formDepartment}
+                          onChange={(e) => setFormDepartment(e.target.value)}
+                          placeholder="واحد امور مالی و حسابداری پردیس"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
+                        />
+                      </div>
+                    )}
+                    <div className="sm:col-span-2">
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        سمت / توضیحات (اختیاری)
+                      </label>
+                      <input
+                        type="text"
+                        value={formNotes}
+                        onChange={(e) => setFormNotes(e.target.value)}
+                        placeholder={
+                          staffModalRole === 'finance'
+                            ? 'کارشناس بررسی کسورات ۴۵٪ و ۲۵٪ / حسابدار...'
+                            : 'مسئول انبار مرکزی / کارپرداز...'
+                        }
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
+                      />
+                    </div>
+                  </>
                 )}
               </div>
 
-              {staffModalRole !== 'warehouse' && dorms.length > 0 && (
+              {staffModalRole !== 'warehouse' && staffModalRole !== 'finance' && dorms.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="font-bold text-slate-700 dark:text-slate-300">

@@ -20,7 +20,7 @@ interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (user: NonNullable<CurrentUser>) => void;
-  onOpenUserGuide?: (role?: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'student') => void;
+  onOpenUserGuide?: (role?: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'student') => void;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({
@@ -29,7 +29,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onLoginSuccess,
   onOpenUserGuide,
 }) => {
-  const [tab, setTab] = useState<'student' | 'supervisor' | 'counselor' | 'maintenance' | 'warehouse' | 'admin'>('student');
+  const [tab, setTab] = useState<'student' | 'supervisor' | 'counselor' | 'maintenance' | 'warehouse' | 'finance' | 'admin'>('student');
 
   // فرم دانشجو
   const [studentId, setStudentId] = useState('');
@@ -273,6 +273,54 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         });
         setErrorMsg('نام کاربری یا کلمه عبور مسئول انبار اشتباه است.');
       }
+    } else if (tab === 'finance') {
+      const staffList = Storage.getFinanceStaff();
+      const cleanU = toEnglishDigits(username.trim()).toLowerCase();
+      const cleanP = toEnglishDigits(password.trim());
+      const fin = staffList.find(
+        (s) =>
+          toEnglishDigits(s.username.trim()).toLowerCase() === cleanU &&
+          toEnglishDigits(s.password.trim()) === cleanP
+      );
+      if (fin) {
+        if (fin.status === 'inactive' || fin.isActive === false) {
+          Storage.addActivityLog({
+            category: 'auth',
+            action: 'تلاش ورود حساب غیرفعال امور مالی',
+            details: `کارشناس امور مالی ${fin.fullName} (${fin.username}) با حساب غیرفعال تلاش به ورود کرد.`,
+            targetName: fin.fullName,
+            severity: 'warning',
+            actorName: fin.fullName,
+            actorRole: 'finance',
+            actorUsername: fin.username,
+          });
+          setErrorMsg('حساب کاربری امور مالی غیرفعال است. لطفاً با مدیر سامانه تماس بگیرید.');
+          return;
+        }
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'ورود موفق کارشناس امور مالی',
+          details: `کارشناس امور مالی ${fin.fullName} (${fin.username}) وارد سامانه شد.`,
+          targetName: fin.fullName,
+          actorName: fin.fullName,
+          actorRole: 'finance',
+          actorUsername: fin.username,
+        });
+        onLoginSuccess({ role: 'finance', staff: fin });
+        onClose();
+      } else {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'تلاش ناموفق ورود امور مالی',
+          details: `تلاش ناموفق ورود امور مالی با نام کاربری «${cleanU || '-'}» ثبت شد.`,
+          targetName: cleanU || '-',
+          severity: 'warning',
+          actorName: 'کاربر مهمان',
+          actorRole: 'system',
+          actorUsername: cleanU,
+        });
+        setErrorMsg('نام کاربری یا کلمه عبور امور مالی اشتباه است.');
+      }
     } else if (tab === 'admin') {
       const currentAdminPass = toEnglishDigits(String(Storage.getSettings().adminPassword || '261').trim());
       const cleanAdminUser = toEnglishDigits(username.trim()).toLowerCase();
@@ -325,7 +373,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         </div>
 
         {/* تب‌های انتخاب نقش */}
-        <div className="grid grid-cols-3 sm:grid-cols-6 p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-6 gap-1">
+        <div className="grid grid-cols-3 sm:grid-cols-4 p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-6 gap-1">
           <button
             onClick={() => {
               setTab('student');
@@ -393,6 +441,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </button>
           <button
             onClick={() => {
+              setTab('finance');
+              setErrorMsg('');
+            }}
+            className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
+              tab === 'finance'
+                ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+            }`}
+          >
+            امور مالی
+          </button>
+          <button
+            onClick={() => {
               setTab('admin');
               setErrorMsg('');
             }}
@@ -453,8 +514,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </form>
         )}
 
-        {/* فرم سرپرست، مشاور، تأسیسات، انبار و مدیر */}
-        {(tab === 'supervisor' || tab === 'counselor' || tab === 'admin' || tab === 'maintenance' || tab === 'warehouse') && (
+        {/* فرم سرپرست، مشاور، تأسیسات، انبار، امور مالی و مدیر */}
+        {(tab === 'supervisor' || tab === 'counselor' || tab === 'admin' || tab === 'maintenance' || tab === 'warehouse' || tab === 'finance') && (
           <form onSubmit={handleStaffLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -469,6 +530,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     ? 'نام کاربری کارشناس مشاور'
                     : tab === 'warehouse'
                     ? 'نام کاربری مسئول انبار و کارپردازی'
+                    : tab === 'finance'
+                    ? 'نام کاربری امور مالی و حسابداری'
                     : tab === 'maintenance'
                     ? 'نام کاربری تکنسین تأسیسات'
                     : tab === 'supervisor'
@@ -501,6 +564,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'
                   : tab === 'warehouse'
                   ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-600/25'
+                  : tab === 'finance'
+                  ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'
                   : tab === 'maintenance'
                   ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/25'
                   : 'bg-teal-600 hover:bg-teal-700 shadow-teal-600/25'
@@ -514,6 +579,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 ? 'ورود به کارتابل امور تأسیسات و فنی'
                 : tab === 'warehouse'
                 ? 'ورود به سامانه انبار و کارپردازی'
+                : tab === 'finance'
+                ? 'ورود به کارتابل امور مالی و حسابداری'
                 : 'ورود مدیر کل سامانه'}
             </button>
           </form>
