@@ -28,6 +28,27 @@ export function extractStudentLastName(fullName?: string): string {
   return tokens.length > 1 ? tokens[tokens.length - 1] : clean;
 }
 
+const roomsLookupCache = new WeakMap<Room[], Map<string, Room>>();
+const dormsLookupCache = new WeakMap<Dormitory[], Map<string, Dormitory>>();
+
+function getRoomLookup(rooms: Room[]): Map<string, Room> {
+  let cached = roomsLookupCache.get(rooms);
+  if (!cached) {
+    cached = new Map(rooms.map((rm) => [rm.id, rm]));
+    roomsLookupCache.set(rooms, cached);
+  }
+  return cached;
+}
+
+function getDormLookup(dorms: Dormitory[]): Map<string, Dormitory> {
+  let cached = dormsLookupCache.get(dorms);
+  if (!cached) {
+    cached = new Map(dorms.map((dm) => [dm.id, dm]));
+    dormsLookupCache.set(dorms, cached);
+  }
+  return cached;
+}
+
 export function compareStudents(
   a: Student,
   b: Student,
@@ -106,8 +127,10 @@ export function compareStudents(
   }
 
   if (sortBy === 'roomName') {
-    const rA = rooms.find((rm) => rm.id === a.assignedRoomId);
-    const rB = rooms.find((rm) => rm.id === b.assignedRoomId);
+    const roomLookup = getRoomLookup(rooms);
+    const dormLookup = getDormLookup(dorms);
+    const rA = a.assignedRoomId ? roomLookup.get(a.assignedRoomId) : undefined;
+    const rB = b.assignedRoomId ? roomLookup.get(b.assignedRoomId) : undefined;
     const roomA = toEnglishDigits(rA?.roomNumber || a.assignedRoomNumber || '').trim();
     const roomB = toEnglishDigits(rB?.roomNumber || b.assignedRoomNumber || '').trim();
 
@@ -120,8 +143,8 @@ export function compareStudents(
     if (!hasRoomA) return 1;
     if (!hasRoomB) return -1;
 
-    const dA = dorms.find((dm) => dm.id === a.assignedDormId)?.name || a.assignedDormName || '';
-    const dB = dorms.find((dm) => dm.id === b.assignedDormId)?.name || b.assignedDormName || '';
+    const dA = (a.assignedDormId ? dormLookup.get(a.assignedDormId)?.name : undefined) || a.assignedDormName || '';
+    const dB = (b.assignedDormId ? dormLookup.get(b.assignedDormId)?.name : undefined) || b.assignedDormName || '';
     const cmpRoom = roomA.localeCompare(roomB, 'fa', { numeric: true });
     if (cmpRoom !== 0) return cmpRoom * dirFactor;
     const cmpDorm = dA.localeCompare(dB, 'fa', { numeric: true });

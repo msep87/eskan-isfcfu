@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AppSettings, Dormitory, Room, Bed, Student } from '../types';
 import { Storage } from '../utils/storage';
 import {
@@ -140,12 +140,32 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
 
   const allVisitReports = Storage.getVisitReports();
 
+  const roomById = useMemo(() => new Map(rooms.map((r) => [r.id, r])), [rooms]);
+  const studentById = useMemo(() => new Map(students.map((s) => [s.studentId, s])), [students]);
+  const bedsByRoomId = useMemo(() => {
+    const map = new Map<string, Bed[]>();
+    beds.forEach((b) => {
+      const list = map.get(b.roomId);
+      if (list) list.push(b);
+      else map.set(b.roomId, [b]);
+    });
+    return map;
+  }, [beds]);
+  const visitCountByRoomId = useMemo(() => {
+    const map = new Map<string, number>();
+    allVisitReports.forEach((v) => {
+      if (v.roomId) map.set(v.roomId, (map.get(v.roomId) || 0) + 1);
+    });
+    return map;
+  }, [allVisitReports]);
+
   const currentDorm = dorms.find((d) => d.id === selectedDormId) || dorms[0];
-  const dormRooms = rooms.filter((r) => r.dormId === selectedDormId);
+  const dormRooms = useMemo(() => rooms.filter((r) => r.dormId === selectedDormId), [rooms, selectedDormId]);
 
   // لیست دانشجویان فاقد اسکان
-  const unassignedStudents = students.filter(
-    (s) => !s.assignedBedId || s.assignmentStatus === 'none'
+  const unassignedStudents = useMemo(
+    () => students.filter((s) => !s.assignedBedId || s.assignmentStatus === 'none'),
+    [students]
   );
 
   const filteredUnassignedStudents = unassignedStudents.filter((s) => {
@@ -165,7 +185,10 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
   });
 
   // تخت‌های خالی این سرا برای جابجایی
-  const vacantBedsInDorm = beds.filter((b) => b.dormId === selectedDormId && !b.studentId);
+  const vacantBedsInDorm = useMemo(
+    () => beds.filter((b) => b.dormId === selectedDormId && !b.studentId),
+    [beds, selectedDormId]
+  );
 
   // حذف دانشجو از اتاق (آزادسازی تخت)
   const handleEvictStudent = (st: Student) => {
@@ -422,11 +445,11 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
       {/* لیست اتاق‌ها و ساکنین با اکشن‌های سرپرستی */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {filteredRooms.map((room) => {
-          const roomBeds = beds.filter((b) => b.roomId === room.id);
+          const roomBeds = bedsByRoomId.get(room.id) || [];
           const roomStudents = roomBeds
             .map((b) => ({
               bed: b,
-              student: students.find((s) => s.studentId === b.studentId),
+              student: b.studentId ? studentById.get(b.studentId) : undefined,
             }))
             .filter((item): item is { bed: Bed; student: Student } => Boolean(item.student));
 
@@ -555,7 +578,7 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
               {(() => {
                 const discScore = room.disciplineScore ?? 100;
                 const cleanScore = room.cleanlinessScore ?? 100;
-                const roomVisitsCount = allVisitReports.filter((v) => v.roomId === room.id).length;
+                const roomVisitsCount = visitCountByRoomId.get(room.id) || 0;
                 const scoreBadgeCls = (val: number) =>
                   val >= 85
                     ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
@@ -858,7 +881,7 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                 >
                   <option value="">-- یک تخت خالی انتخاب کنید --</option>
                   {vacantBedsInDorm.map((b) => {
-                    const r = rooms.find((rm) => rm.id === b.roomId);
+                    const r = roomById.get(b.roomId);
                     return (
                       <option key={b.id} value={b.id}>
                         اتاق {r?.roomNumber} - {b.label}

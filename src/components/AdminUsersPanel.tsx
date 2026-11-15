@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Student,
   Dormitory,
@@ -13,6 +13,7 @@ import {
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
+import { compareStudents } from '../utils/studentSearchSort';
 import { ExcelImportTab } from './ExcelImportModal';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 import {
@@ -201,9 +202,18 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     fullName: string;
   } | null>(null);
 
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   const showToast = (type: 'success' | 'error', message: string) => {
     setFeedback({ type, message });
-    setTimeout(() => setFeedback(null), 4000);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setFeedback(null), 4000);
   };
 
   // تغییر/افزودن فوری عکس یک کاربر (تکی) از ردیف جدول با ارسال به فضای ابری
@@ -486,6 +496,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     return Array.from(set).sort();
   }, [students]);
 
+  const dormLookupMap = useMemo(() => new Map(dorms.map((dm) => [dm.id, dm])), [dorms]);
+  const roomLookupMap = useMemo(() => new Map(rooms.map((rm) => [rm.id, rm])), [rooms]);
+  const bedLookupMap = useMemo(() => new Map(beds.map((bd) => [bd.id, bd])), [beds]);
+
   // فیلتر پیشرفته دانشجویان
   const filteredStudents = useMemo(() => {
     const q = norm(stQuery);
@@ -528,7 +542,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       }
 
       if (roomQ) {
-        const r = rooms.find((rm) => rm.id === st.assignedRoomId);
+        const r = st.assignedRoomId ? roomLookupMap.get(st.assignedRoomId) : undefined;
         const roomNumberStr = norm(r?.roomNumber || st.assignedRoomNumber);
         if (!roomNumberStr.includes(roomQ)) return false;
       }
@@ -550,7 +564,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     });
   }, [
     students,
-    rooms,
+    roomLookupMap,
     stQuery,
     stFieldFilter,
     stEntryFilter,
@@ -561,89 +575,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     stLocationFilter,
   ]);
 
-  const extractLastName = (fullName?: string): string => {
-    const clean = (fullName || '').trim();
-    if (!clean) return '';
-    if (clean.includes('،') || clean.includes(',')) {
-      return clean.split(/[،,]/)[0].trim();
-    }
-    const tokens = clean.split(/\s+/).filter(Boolean);
-    return tokens.length > 1 ? tokens[tokens.length - 1] : clean;
-  };
-
   const sortedStudents = useMemo(() => {
     if (stSortBy === 'default') return filteredStudents;
-
-    const dirFactor = stSortDir === 'asc' ? 1 : -1;
     const list = [...filteredStudents];
-
-    list.sort((a, b) => {
-      if (stSortBy === 'lastName') {
-        const lastA = extractLastName(a.fullName);
-        const lastB = extractLastName(b.fullName);
-        const cmpLast = lastA.localeCompare(lastB, 'fa', { numeric: true });
-        if (cmpLast !== 0) return cmpLast * dirFactor;
-        return (a.fullName || '').localeCompare(b.fullName || '', 'fa', { numeric: true }) * dirFactor;
-      }
-
-      if (stSortBy === 'fullName') {
-        return (
-          (a.fullName || '').trim().localeCompare((b.fullName || '').trim(), 'fa', { numeric: true }) *
-          dirFactor
-        );
-      }
-
-      if (stSortBy === 'studentId') {
-        const idA = toEnglishDigits(a.studentId || '').trim();
-        const idB = toEnglishDigits(b.studentId || '').trim();
-        return idA.localeCompare(idB, 'en', { numeric: true }) * dirFactor;
-      }
-
-      if (stSortBy === 'fieldOfStudy') {
-        const fA = (a.fieldOfStudy || '').trim();
-        const fB = (b.fieldOfStudy || '').trim();
-        const cmp = fA.localeCompare(fB, 'fa', { numeric: true });
-        if (cmp !== 0) return cmp * dirFactor;
-        return extractLastName(a.fullName).localeCompare(extractLastName(b.fullName), 'fa') * dirFactor;
-      }
-
-      if (stSortBy === 'entryTerm') {
-        const eA = toEnglishDigits(a.entryTerm || '').trim();
-        const eB = toEnglishDigits(b.entryTerm || '').trim();
-        const cmp = eA.localeCompare(eB, 'en', { numeric: true });
-        if (cmp !== 0) return cmp * dirFactor;
-        return toEnglishDigits(a.studentId || '').localeCompare(toEnglishDigits(b.studentId || ''), 'en', {
-          numeric: true,
-        }) * dirFactor;
-      }
-
-      if (stSortBy === 'roomName') {
-        const rA = rooms.find((rm) => rm.id === a.assignedRoomId);
-        const rB = rooms.find((rm) => rm.id === b.assignedRoomId);
-        const roomA = toEnglishDigits(rA?.roomNumber || a.assignedRoomNumber || '').trim();
-        const roomB = toEnglishDigits(rB?.roomNumber || b.assignedRoomNumber || '').trim();
-
-        const hasRoomA = Boolean(roomA && a.assignmentStatus !== 'none');
-        const hasRoomB = Boolean(roomB && b.assignmentStatus !== 'none');
-
-        if (!hasRoomA && !hasRoomB) {
-          return extractLastName(a.fullName).localeCompare(extractLastName(b.fullName), 'fa');
-        }
-        if (!hasRoomA) return 1;
-        if (!hasRoomB) return -1;
-
-        const dA = dorms.find((dm) => dm.id === a.assignedDormId)?.name || a.assignedDormName || '';
-        const dB = dorms.find((dm) => dm.id === b.assignedDormId)?.name || b.assignedDormName || '';
-        const cmpRoom = roomA.localeCompare(roomB, 'fa', { numeric: true });
-        if (cmpRoom !== 0) return cmpRoom * dirFactor;
-        const cmpDorm = dA.localeCompare(dB, 'fa', { numeric: true });
-        if (cmpDorm !== 0) return cmpDorm * dirFactor;
-        return extractLastName(a.fullName).localeCompare(extractLastName(b.fullName), 'fa');
-      }
-
-      return 0;
-    });
-
+    list.sort((a, b) => compareStudents(a, b, stSortBy, stSortDir, rooms, dorms));
     return list;
   }, [filteredStudents, stSortBy, stSortDir, rooms, dorms]);
 
@@ -1887,9 +1822,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {sortedStudents.map((st) => {
-                    const d = dorms.find((dm) => dm.id === st.assignedDormId);
-                    const r = rooms.find((rm) => rm.id === st.assignedRoomId);
-                    const b = beds.find((bd) => bd.id === st.assignedBedId);
+                    const d = st.assignedDormId ? dormLookupMap.get(st.assignedDormId) : undefined;
+                    const r = st.assignedRoomId ? roomLookupMap.get(st.assignedRoomId) : undefined;
+                    const b = st.assignedBedId ? bedLookupMap.get(st.assignedBedId) : undefined;
                     const passKey = `student_${st.studentId}`;
                     const isShown = revealedPasswords[passKey];
 

@@ -11,6 +11,7 @@ import {
   exportCounselorShiftScheduleToExcel,
   exportCounselorReportsToExcel,
 } from '../utils/excelUtils';
+import { escapeHtml } from '../utils/sanitizeHtml';
 import {
   HeartHandshake,
   Calendar,
@@ -226,10 +227,11 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
 
   // چاپ گزارش شیفت (بدون نیاز به popup / window.open)
   const handlePrintReport = (report: CounselorShiftReport) => {
+    const formatMultiline = (val: string) => escapeHtml(val).replace(/\r?\n/g, '<br />');
     const html = `
       <html dir="rtl" lang="fa">
       <head>
-        <title>گزارش شیفت مشاوره - ${report.reportCode}</title>
+        <title>گزارش شیفت مشاوره - ${escapeHtml(report.reportCode)}</title>
         <style>
           body { font-family: system-ui, Tahoma, sans-serif; padding: 24px; direction: rtl; }
           .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 20px; }
@@ -243,23 +245,23 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
         <div class="header">
           <h2>دانشگاه فرهنگیان - اداره بهداشت و مشاوره روانشناختی</h2>
           <h3>برگ گزارش رسمی شیفت و فعالیت‌های مشاوره سراها</h3>
-          <p>کد پیگیری گزارش: <strong>${report.reportCode}</strong> | تاریخ ثبت: ${report.createdAt}</p>
+          <p>کد پیگیری گزارش: <strong>${escapeHtml(report.reportCode)}</strong> | تاریخ ثبت: ${escapeHtml(report.createdAt)}</p>
         </div>
-        <div class="field"><span class="title">نام و عنوان مشاور:</span> ${report.counselorName}</div>
-        <div class="field"><span class="title">مرکز / سرای دانشجویی:</span> ${report.dormName || 'مرکز مشاوره مرکزی'}</div>
-        <div class="field"><span class="title">تاریخ و ساعت شیفت:</span> ${report.shiftDate} (${report.shiftTimeWindow || '-'})</div>
-        <div class="field"><span class="title">تعداد مراجعین دانشجو:</span> ${report.totalSessionsCount} نفر</div>
-        <div class="field"><span class="title">موارد اضطراری / مداخله فوری:</span> ${report.urgentCasesCount || 0} مورد</div>
-        <div class="field"><span class="title">حوزه‌های مشاوره:</span> ${(report.caseCategories || []).join('، ')}</div>
+        <div class="field"><span class="title">نام و عنوان مشاور:</span> ${escapeHtml(report.counselorName)}</div>
+        <div class="field"><span class="title">مرکز / سرای دانشجویی:</span> ${escapeHtml(report.dormName || 'مرکز مشاوره مرکزی')}</div>
+        <div class="field"><span class="title">تاریخ و ساعت شیفت:</span> ${escapeHtml(report.shiftDate)} (${escapeHtml(report.shiftTimeWindow || '-')})</div>
+        <div class="field"><span class="title">تعداد مراجعین دانشجو:</span> ${Number(report.totalSessionsCount || 0)} نفر</div>
+        <div class="field"><span class="title">موارد اضطراری / مداخله فوری:</span> ${Number(report.urgentCasesCount || 0)} مورد</div>
+        <div class="field"><span class="title">حوزه‌های مشاوره:</span> ${escapeHtml((report.caseCategories || []).join('، '))}</div>
         <div class="box">
           <div class="title">شرح اقدامات و مشاوره‌های ارائه‌شده:</div>
-          <p>${report.interventionsSummary}</p>
+          <p>${formatMultiline(report.interventionsSummary || '')}</p>
         </div>
         ${
           report.urgentReferralDetails
             ? `<div class="box" style="border-color: #fca5a5; background: #fff5f5;">
                 <div class="title" style="color: #b91c1c;">ارجاعات فوری و پیگیری‌های بحران:</div>
-                <p>${report.urgentReferralDetails}</p>
+                <p>${formatMultiline(report.urgentReferralDetails)}</p>
               </div>`
             : ''
         }
@@ -267,12 +269,12 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
           report.recommendationsToAdmin
             ? `<div class="box">
                 <div class="title">پیشنهادات و توصیه‌ها به اداره سراها و مسئولین:</div>
-                <p>${report.recommendationsToAdmin}</p>
+                <p>${formatMultiline(report.recommendationsToAdmin)}</p>
               </div>`
             : ''
         }
         <div class="footer">
-          <p>امضای دیجیتال مشاور مرکز: <strong>${report.counselorName}</strong></p>
+          <p>امضای دیجیتال مشاور مرکز: <strong>${escapeHtml(report.counselorName)}</strong></p>
         </div>
       </body>
       </html>

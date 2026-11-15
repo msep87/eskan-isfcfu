@@ -294,6 +294,10 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
     return Array.from(set).sort();
   }, [students]);
 
+  const roomLookupMap = useMemo(() => new Map(rooms.map((rm) => [rm.id, rm])), [rooms]);
+  const dormLookupMap = useMemo(() => new Map(dorms.map((dm) => [dm.id, dm])), [dorms]);
+  const bedLookupMap = useMemo(() => new Map(beds.map((bd) => [bd.id, bd])), [beds]);
+
   const filteredTabStudents = useMemo(() => {
     const q = normSearchText(stQuery);
     const nameQ = normSearchText(stNameFilter);
@@ -303,8 +307,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
     const roomQ = normSearchText(stRoomFilter);
 
     return students.filter((st) => {
-      const r = rooms.find((rm) => rm.id === st.assignedRoomId);
-      const d = dorms.find((dm) => dm.id === st.assignedDormId);
+      const r = st.assignedRoomId ? roomLookupMap.get(st.assignedRoomId) : undefined;
+      const d = st.assignedDormId ? dormLookupMap.get(st.assignedDormId) : undefined;
       const roomNum = r?.roomNumber || st.assignedRoomNumber || '';
       const dormTitle = d?.name || st.assignedDormName || '';
 
@@ -380,8 +384,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
     });
   }, [
     students,
-    rooms,
-    dorms,
+    roomLookupMap,
+    dormLookupMap,
     myAssignedDormIds,
     stQuery,
     stNameFilter,
@@ -861,8 +865,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
 
           <div className="space-y-2.5">
             {pendingStudentsInMyDorm.map((st) => {
-              const room = rooms.find((r) => r.id === st.assignedRoomId);
-              const bed = beds.find((b) => b.id === st.assignedBedId);
+              const room = st.assignedRoomId ? roomLookupMap.get(st.assignedRoomId) : undefined;
+              const bed = st.assignedBedId ? bedLookupMap.get(st.assignedBedId) : undefined;
 
               return (
                 <div

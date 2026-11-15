@@ -786,6 +786,7 @@ export default function App() {
           rooms={rooms}
           beds={beds}
           students={students}
+          cloudSyncTick={cloudSyncTick}
         />
       )}
 

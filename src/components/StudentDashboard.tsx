@@ -267,7 +267,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   <Phone className="w-3.5 h-3.5 text-cyan-200" />
                   همراه: <span dir="ltr">{student.mobile}</span>
                 </span>
-                {student.previousScore && (
+                {typeof student.previousScore === 'number' && !Number.isNaN(student.previousScore) && (
                   <span className="bg-teal-800/50 px-2 py-0.5 rounded-lg border border-teal-500/30">
                     امتیاز انضباطی: {student.previousScore}
                   </span>

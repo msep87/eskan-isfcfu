@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { Student } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
+import { toEnglishDigits } from '../utils/excelUtils';
 import {
   User,
   Upload,
@@ -158,18 +159,20 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
     }
 
     // اعتبارسنجی دقیق فیلدهای الزامی پرونده دانشجو
-    const cleanMobile = (formData.mobile || '').replace(/\D/g, '');
+    const cleanMobile = toEnglishDigits(formData.mobile || '').replace(/\D/g, '');
     if (!cleanMobile || cleanMobile.length < 10) {
       setValidationError('شماره تلفن همراه معتبر دانشجو الزامی است (مثال: 09131234567).');
       return;
     }
 
-    if (!formData.emergencyPhone || formData.emergencyPhone.trim().length < 8) {
+    const cleanEmergency = toEnglishDigits(formData.emergencyPhone || '').replace(/\D/g, '');
+    if (!cleanEmergency || cleanEmergency.length < 8) {
       setValidationError('شماره تماس اضطراری جهت موارد ضروری و پزشکی الزامی می‌باشد.');
       return;
     }
 
-    if (!formData.parentPhone || formData.parentPhone.trim().length < 8) {
+    const cleanParentPhone = toEnglishDigits(formData.parentPhone || '').replace(/\D/g, '');
+    if (!cleanParentPhone || cleanParentPhone.length < 8) {
       setValidationError('شماره تماس والدین / ولی دانشجو الزامی است.');
       return;
     }

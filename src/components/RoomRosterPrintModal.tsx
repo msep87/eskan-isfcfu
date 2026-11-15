@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, Bed, Dormitory, Room, Student } from '../types';
 import { toEnglishDigits } from '../utils/excelUtils';
+import { isSafeMediaUrl } from '../utils/sanitizeHtml';
 import {
   Building2,
   Check,
@@ -340,7 +341,7 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
                   const initials = escapeHtml((st.fullName || 'د').trim().slice(0, 1));
                   const bgColor = escapeHtml(st.avatarColor || '#0d9488');
                   const photoBlock = fields.photo
-                    ? st.photoUrl
+                    ? st.photoUrl && isSafeMediaUrl(st.photoUrl)
                       ? `<div class="photo-wrap ${isRepresentative ? 'rep-photo' : ''}">
                            <img src="${escapeHtml(st.photoUrl)}" alt="${escapeHtml(st.fullName)}" />
                          </div>`
@@ -436,7 +437,7 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
             <header class="sheet-header">
               <div class="header-right">
                 ${
-                  logoUrl
+                  logoUrl && isSafeMediaUrl(logoUrl)
                     ? `<img src="${escapeHtml(logoUrl)}" alt="نشان" class="uni-logo" />`
                     : `<div class="uni-badge">سرا</div>`
                 }

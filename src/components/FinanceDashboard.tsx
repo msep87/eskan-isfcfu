@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bed,
   Dormitory,
@@ -123,9 +123,18 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   } | null>(null);
   const [isUploadingDebtExcel, setIsUploadingDebtExcel] = useState(false);
 
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   const showToast = (type: 'success' | 'error', text: string) => {
     setToast({ type, text });
-    setTimeout(() => setToast(null), 4500);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 4500);
   };
 
   const financeMap = useMemo(() => {
@@ -144,9 +153,12 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
 
   // ساخت ردیف‌های مجاز و پردازش‌شده (صرفاً با ۱۰ فیلد مجاز دانشجو + داده‌های مالی)
   const enrichedRows = useMemo(() => {
+    const dormMap = new Map(dorms.map((d) => [d.id, d]));
+    const roomMap = new Map(rooms.map((r) => [r.id, r]));
+
     return students.map((st) => {
-      const dorm = dorms.find((d) => d.id === st.assignedDormId);
-      const room = rooms.find((r) => r.id === st.assignedRoomId);
+      const dorm = st.assignedDormId ? dormMap.get(st.assignedDormId) : undefined;
+      const room = st.assignedRoomId ? roomMap.get(st.assignedRoomId) : undefined;
       const rec = financeMap.get(st.studentId);
       const fin = computeStudentFinancialInfo(st, rec);
       const dormName = dorm?.name || st.assignedDormName || '';
@@ -526,6 +538,15 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const previewMatches = useMemo(() => {
     if (!debtExcelPreview) return { matched: [], unmatched: [] as ParsedStudentDebtRow[] };
     const normKey = (v?: string) => toEnglishDigits(String(v ?? '')).trim().toLowerCase();
+    const studentBySid = new Map<string, Student>();
+    const studentByNid = new Map<string, Student>();
+    students.forEach((s) => {
+      const sk = normKey(s.studentId);
+      const nk = normKey(s.nationalId);
+      if (sk && !studentBySid.has(sk)) studentBySid.set(sk, s);
+      if (nk && !studentByNid.has(nk)) studentByNid.set(nk, s);
+    });
+
     const matched: Array<{
       row: ParsedStudentDebtRow;
       student: Student;
@@ -537,9 +558,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     debtExcelPreview.rows.forEach((row) => {
       const sk = normKey(row.studentId);
       const nk = normKey(row.nationalId);
-      const found =
-        (sk && students.find((s) => normKey(s.studentId) === sk)) ||
-        (nk && students.find((s) => normKey(s.nationalId) === nk));
+      const found = (sk && studentBySid.get(sk)) || (nk && studentByNid.get(nk));
       if (found) {
         matched.push({
           row,

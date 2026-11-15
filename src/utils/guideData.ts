@@ -5,6 +5,8 @@
  * طراحی و تدوین: دکتر محمد سپیانی (m.sep87@gmail.com)
  */
 
+import { escapeHtml } from './sanitizeHtml';
+
 export type UserRoleType = 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'student';
 
 export interface GuideStep {
@@ -771,7 +773,7 @@ export function generatePrintableRoleGuideHtml(role: UserRoleType): void {
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <title>${guide.title} - دانشگاه فرهنگیان</title>
+  <title>${escapeHtml(guide.title)} - دانشگاه فرهنگیان</title>
   <style>
     @page {
       size: A4;
@@ -881,13 +883,13 @@ export function generatePrintableRoleGuideHtml(role: UserRoleType): void {
 <body>
   <div class="print-header">
     <div>
-      <span class="badge">دانشگاه فرهنگیان استان اصفهان • سال تحصیلی ${academicYear}</span>
-      <h1>${guide.title}</h1>
-      <p>${guide.audienceDescription}</p>
+      <span class="badge">دانشگاه فرهنگیان استان اصفهان • سال تحصیلی ${escapeHtml(academicYear)}</span>
+      <h1>${escapeHtml(guide.title)}</h1>
+      <p>${escapeHtml(guide.audienceDescription)}</p>
     </div>
     <div style="text-align: left; font-size: 8.5pt; color: #64748b;">
-      تاریخ صدور: ${currentDate}<br>
-      ورود پیش‌فرض: ${guide.defaultLoginHint}
+      تاریخ صدور: ${escapeHtml(currentDate)}<br>
+      ورود پیش‌فرض: ${escapeHtml(guide.defaultLoginHint)}
     </div>
   </div>
 
@@ -899,7 +901,7 @@ export function generatePrintableRoleGuideHtml(role: UserRoleType): void {
 
   <h2 class="section-title">شرح وظایف و امکانات محوری در سامانه</h2>
   <ul>
-    ${guide.coreResponsibilities.map((r) => `<li>${r}</li>`).join('')}
+    ${guide.coreResponsibilities.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}
   </ul>
 
   <h2 class="section-title">راهنمای گام‌به‌گام و روش انجام کارها</h2>
@@ -907,13 +909,13 @@ export function generatePrintableRoleGuideHtml(role: UserRoleType): void {
     .map(
       (s, idx) => `
     <div class="step-card">
-      <span class="phase">${s.phase}</span>
-      <h3>${idx + 1}. ${s.title}</h3>
-      <p style="margin: 4px 0 8px 0; font-size: 9pt; color: #334155;">${s.summary}</p>
+      <span class="phase">${escapeHtml(s.phase)}</span>
+      <h3>${idx + 1}. ${escapeHtml(s.title)}</h3>
+      <p style="margin: 4px 0 8px 0; font-size: 9pt; color: #334155;">${escapeHtml(s.summary)}</p>
       
       <strong>مراحل اجرایی:</strong>
       <ol>
-        ${s.instructions.map((ins) => `<li>${ins}</li>`).join('')}
+        ${s.instructions.map((ins) => `<li>${escapeHtml(ins)}</li>`).join('')}
       </ol>
 
       ${
@@ -922,7 +924,7 @@ export function generatePrintableRoleGuideHtml(role: UserRoleType): void {
         <div class="tips">
           <strong>نکات مهم و تجربی:</strong>
           <ul>
-            ${s.proTips.map((tip) => `<li>${tip}</li>`).join('')}
+            ${s.proTips.map((tip) => `<li>${escapeHtml(tip)}</li>`).join('')}
           </ul>
         </div>
       `
@@ -938,8 +940,8 @@ export function generatePrintableRoleGuideHtml(role: UserRoleType): void {
     .map(
       (q) => `
     <div style="margin-bottom: 10px; font-size: 9pt;">
-      <strong style="color: #0f766e;">سؤال: ${q.question}</strong>
-      <p style="margin: 2px 0 0 0; color: #334155;">پاسخ: ${q.answer}</p>
+      <strong style="color: #0f766e;">سؤال: ${escapeHtml(q.question)}</strong>
+      <p style="margin: 2px 0 0 0; color: #334155;">پاسخ: ${escapeHtml(q.answer)}</p>
     </div>
   `
     )

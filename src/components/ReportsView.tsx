@@ -64,6 +64,7 @@ interface ReportsViewProps {
   rooms: Room[];
   beds: Bed[];
   students: Student[];
+  cloudSyncTick?: number;
 }
 
 export const ReportsView: React.FC<ReportsViewProps> = ({
@@ -73,6 +74,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   rooms,
   beds,
   students,
+  cloudSyncTick = 0,
 }) => {
   const [tab, setTab] = useState<'analytics' | 'domains' | 'vacant' | 'provinces' | 'majors' | 'health'>('analytics');
   const [analyticsDormFilter, setAnalyticsDormFilter] = useState<string>('all');
@@ -90,70 +92,112 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const dormsMap = useMemo(() => new Map(dorms.map((d) => [d.id, d.name])), [dorms]);
+  const dormObjMap = useMemo(() => new Map(dorms.map((d) => [d.id, d])), [dorms]);
   const roomsMap = useMemo(() => new Map(rooms.map((r) => [r.id, `اتاق ${r.roomNumber}`])), [rooms]);
+  const roomObjMap = useMemo(() => new Map(rooms.map((r) => [r.id, r])), [rooms]);
+
+  const bedsByDormMap = useMemo(() => {
+    const map = new Map<string, Bed[]>();
+    beds.forEach((b) => {
+      const arr = map.get(b.dormId);
+      if (arr) arr.push(b);
+      else map.set(b.dormId, [b]);
+    });
+    return map;
+  }, [beds]);
+
+  const bedsByRoomMap = useMemo(() => {
+    const map = new Map<string, Bed[]>();
+    beds.forEach((b) => {
+      const arr = map.get(b.roomId);
+      if (arr) arr.push(b);
+      else map.set(b.roomId, [b]);
+    });
+    return map;
+  }, [beds]);
+
+  const roomsByDormMap = useMemo(() => {
+    const map = new Map<string, Room[]>();
+    rooms.forEach((r) => {
+      const arr = map.get(r.dormId);
+      if (arr) arr.push(r);
+      else map.set(r.dormId, [r]);
+    });
+    return map;
+  }, [rooms]);
 
   // تهیه لیست تخت‌های خالی
-  const vacantBedsList = beds
-    .filter((b) => !b.studentId)
-    .filter((b) => (selectedDormFilter === 'all' ? true : b.dormId === selectedDormFilter))
-    .filter((b) => (selectedTierFilter === 'all' ? true : b.tier === selectedTierFilter))
-    .map((b) => {
-      const r = rooms.find((room) => room.id === b.roomId);
-      const d = dorms.find((dorm) => dorm.id === b.dormId);
-      return {
-        bedId: b.id,
-        bedLabel: b.label,
-        tier: b.tier,
-        bunkNumber: b.bunkNumber,
-        roomNumber: r?.roomNumber || '-',
-        floor: r?.floor ?? 1,
-        roomCapacity: r?.capacity || 4,
-        dormName: d?.name || '-',
-        campus: d?.campus || '-',
-        allowedFields: r?.allowedFields?.join('، ') || 'آزاد برای همه',
-      };
-    });
+  const vacantBedsList = useMemo(() => {
+    return beds
+      .filter((b) => !b.studentId)
+      .filter((b) => (selectedDormFilter === 'all' ? true : b.dormId === selectedDormFilter))
+      .filter((b) => (selectedTierFilter === 'all' ? true : b.tier === selectedTierFilter))
+      .map((b) => {
+        const r = roomObjMap.get(b.roomId);
+        const d = dormObjMap.get(b.dormId);
+        return {
+          bedId: b.id,
+          bedLabel: b.label,
+          tier: b.tier,
+          bunkNumber: b.bunkNumber,
+          roomNumber: r?.roomNumber || '-',
+          floor: r?.floor ?? 1,
+          roomCapacity: r?.capacity || 4,
+          dormName: d?.name || '-',
+          campus: d?.campus || '-',
+          allowedFields: r?.allowedFields?.join('، ') || 'آزاد برای همه',
+        };
+      });
+  }, [beds, selectedDormFilter, selectedTierFilter, roomObjMap, dormObjMap]);
 
   // آمار استانی دانشجویان
-  const provinceCounts: Record<string, number> = {};
-  students.forEach((s) => {
-    const prov = s.province || 'نامشخص';
-    provinceCounts[prov] = (provinceCounts[prov] || 0) + 1;
-  });
-  const sortedProvinces = Object.entries(provinceCounts).sort((a, b) => b[1] - a[1]);
+  const sortedProvinces = useMemo(() => {
+    const provinceCounts: Record<string, number> = {};
+    students.forEach((s) => {
+      const prov = s.province || 'نامشخص';
+      provinceCounts[prov] = (provinceCounts[prov] || 0) + 1;
+    });
+    return Object.entries(provinceCounts).sort((a, b) => b[1] - a[1]);
+  }, [students]);
 
   // آمار رشته‌ها
-  const majorCounts: Record<string, number> = {};
-  students.forEach((s) => {
-    const maj = s.fieldOfStudy || 'سایر';
-    majorCounts[maj] = (majorCounts[maj] || 0) + 1;
-  });
-  const sortedMajors = Object.entries(majorCounts).sort((a, b) => b[1] - a[1]);
+  const sortedMajors = useMemo(() => {
+    const majorCounts: Record<string, number> = {};
+    students.forEach((s) => {
+      const maj = s.fieldOfStudy || 'سایر';
+      majorCounts[maj] = (majorCounts[maj] || 0) + 1;
+    });
+    return Object.entries(majorCounts).sort((a, b) => b[1] - a[1]);
+  }, [students]);
 
   // استخراج فیلدهای سلامت و گروه‌های خونی
-  const bloodGroups: Record<string, number> = {};
-  const specialConditions: { name: string; condition: string; dorm: string; room: string; phone: string }[] = [];
+  const { bloodGroups, specialConditions } = useMemo(() => {
+    const bgMap: Record<string, number> = {};
+    const conditions: { name: string; condition: string; dorm: string; room: string; phone: string }[] = [];
 
-  students.forEach((s) => {
-    const custom = s.customFields || {};
-    const bg = String(custom['گروه خونی'] || 'ثبت نشده').trim();
-    if (bg && bg !== 'ثبت نشده') {
-      bloodGroups[bg] = (bloodGroups[bg] || 0) + 1;
-    }
+    students.forEach((s) => {
+      const custom = s.customFields || {};
+      const bg = String(custom['گروه خونی'] || 'ثبت نشده').trim();
+      if (bg && bg !== 'ثبت نشده') {
+        bgMap[bg] = (bgMap[bg] || 0) + 1;
+      }
 
-    const illness = String(custom['بیماری خاص'] || '').trim();
-    if (illness && illness !== 'ندارد' && illness !== '-' && illness !== 'خیر') {
-      const dormName = s.assignedDormId ? dormsMap.get(s.assignedDormId) || 'خوابگاه' : 'فاقد خوابگاه';
-      const roomNum = s.assignedRoomId ? roomsMap.get(s.assignedRoomId) || '-' : '-';
-      specialConditions.push({
-        name: s.fullName,
-        condition: illness,
-        dorm: dormName,
-        room: roomNum,
-        phone: s.mobile,
-      });
-    }
-  });
+      const illness = String(custom['بیماری خاص'] || '').trim();
+      if (illness && illness !== 'ندارد' && illness !== '-' && illness !== 'خیر') {
+        const dormName = s.assignedDormId ? dormsMap.get(s.assignedDormId) || 'خوابگاه' : 'فاقد خوابگاه';
+        const roomNum = s.assignedRoomId ? roomsMap.get(s.assignedRoomId) || '-' : '-';
+        conditions.push({
+          name: s.fullName,
+          condition: illness,
+          dorm: dormName,
+          room: roomNum,
+          phone: s.mobile,
+        });
+      }
+    });
+
+    return { bloodGroups: bgMap, specialConditions: conditions };
+  }, [students, dormsMap, roomsMap]);
 
   const handleExportVacant = () => {
     exportVacantBedsToExcel(vacantBedsList);
@@ -169,14 +213,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   // محاسبه داده‌های تحلیل آماری نمودارهای Recharts
   const dormAnalyticsData = useMemo(() => {
+    const assignedCountByDorm = new Map<string, number>();
+    students.forEach((s) => {
+      if (s.assignedDormId && s.assignmentStatus !== 'none') {
+        assignedCountByDorm.set(s.assignedDormId, (assignedCountByDorm.get(s.assignedDormId) || 0) + 1);
+      }
+    });
+
     return dorms.map((d, index) => {
-      const dRooms = rooms.filter((r) => r.dormId === d.id);
-      const dBeds = beds.filter((b) => b.dormId === d.id);
+      const dRooms = roomsByDormMap.get(d.id) || [];
+      const dBeds = bedsByDormMap.get(d.id) || [];
       const occupiedBeds = dBeds.filter((b) => Boolean(b.studentId)).length;
       const vacantBeds = Math.max(0, dBeds.length - occupiedBeds);
-      const assignedStudents = students.filter(
-        (s) => s.assignedDormId === d.id && s.assignmentStatus !== 'none'
-      ).length;
+      const assignedStudents = assignedCountByDorm.get(d.id) || 0;
       const studentCount = Math.max(assignedStudents, occupiedBeds);
       const totalCap = dBeds.length;
       const occupancyPercent = totalCap > 0 ? Math.round((occupiedBeds / totalCap) * 100) : 0;
@@ -195,7 +244,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         color: ANALYTICS_COLORS[index % ANALYTICS_COLORS.length],
       };
     });
-  }, [dorms, rooms, beds, students]);
+  }, [dorms, roomsByDormMap, bedsByDormMap, students]);
 
   const unassignedStudentCount = useMemo(
     () => students.filter((s) => !s.assignedBedId || s.assignmentStatus === 'none').length,
@@ -224,10 +273,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const targetRooms =
       analyticsDormFilter === 'all'
         ? rooms
-        : rooms.filter((r) => r.dormId === analyticsDormFilter);
+        : roomsByDormMap.get(analyticsDormFilter) || [];
 
     return targetRooms.map((r) => {
-      const rBeds = beds.filter((b) => b.roomId === r.id);
+      const rBeds = bedsByRoomMap.get(r.id) || [];
       const occupied = rBeds.filter((b) => Boolean(b.studentId)).length;
       const vacant = Math.max(0, rBeds.length - occupied);
       const dormName = dormsMap.get(r.dormId) || 'سرا';
@@ -243,19 +292,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         occupancyPercent: rBeds.length > 0 ? Math.round((occupied / rBeds.length) * 100) : 0,
       };
     });
-  }, [rooms, beds, analyticsDormFilter, dormsMap]);
+  }, [rooms, roomsByDormMap, bedsByRoomMap, analyticsDormFilter, dormsMap]);
 
   const overallCapacityStats = useMemo(() => {
     const relevantBeds =
       analyticsDormFilter === 'all'
         ? beds
-        : beds.filter((b) => b.dormId === analyticsDormFilter);
+        : bedsByDormMap.get(analyticsDormFilter) || [];
     const total = relevantBeds.length;
     const occupied = relevantBeds.filter((b) => Boolean(b.studentId)).length;
     const vacant = Math.max(0, total - occupied);
     const rate = total > 0 ? Math.round((occupied / total) * 100) : 0;
     return { total, occupied, vacant, rate };
-  }, [beds, analyticsDormFilter]);
+  }, [beds, bedsByDormMap, analyticsDormFilter]);
 
   const capacityStatusPieData = useMemo(
     () =>
@@ -267,9 +316,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   );
 
   // بارگذاری داده‌های زنده حوزه‌ها
-  const maintenanceTasks = useMemo(() => Storage.getMaintenanceTasks(), [isOpen, tab]);
-  const warehouseRequests = useMemo(() => Storage.getWarehouseRequests(), [isOpen, tab]);
-  const messagesList = useMemo(() => Storage.getMessages(), [isOpen, tab]);
+  const maintenanceTasks = useMemo(() => Storage.getMaintenanceTasks(), [isOpen, tab, cloudSyncTick]);
+  const warehouseRequests = useMemo(() => Storage.getWarehouseRequests(), [isOpen, tab, cloudSyncTick]);
+  const messagesList = useMemo(() => Storage.getMessages(), [isOpen, tab, cloudSyncTick]);
 
   // ساختار منسجم کارهای ارجاعی به تمامی حوزه‌ها
   interface UnifiedWorkItem {

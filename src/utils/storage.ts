@@ -98,123 +98,159 @@ const STORAGE_KEYS = {
 };
 
 
-// مقداردهی اولیه پایگاه داده درون‌مرورگر
-export function initializeStorageIfNeeded(): void {
-  if (!localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(INITIAL_SETTINGS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.DORMITORIES)) {
-    localStorage.setItem(STORAGE_KEYS.DORMITORIES, JSON.stringify(INITIAL_DORMITORIES));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.SUPERVISORS)) {
-    localStorage.setItem(STORAGE_KEYS.SUPERVISORS, JSON.stringify(INITIAL_SUPERVISORS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.WARNINGS)) {
-    localStorage.setItem(STORAGE_KEYS.WARNINGS, JSON.stringify(INITIAL_WARNINGS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.ANNOUNCEMENTS)) {
-    localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(INITIAL_ANNOUNCEMENTS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.MESSAGES)) {
-    localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(INITIAL_MESSAGES));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.MAINTENANCE_STAFF)) {
-    localStorage.setItem(STORAGE_KEYS.MAINTENANCE_STAFF, JSON.stringify(INITIAL_MAINTENANCE_STAFF));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.MAINTENANCE_TASKS)) {
-    localStorage.setItem(STORAGE_KEYS.MAINTENANCE_TASKS, JSON.stringify(INITIAL_MAINTENANCE_TASKS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.WAREHOUSE_STAFF)) {
-    localStorage.setItem(STORAGE_KEYS.WAREHOUSE_STAFF, JSON.stringify(INITIAL_WAREHOUSE_STAFF));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.INVENTORY_ITEMS)) {
-    localStorage.setItem(STORAGE_KEYS.INVENTORY_ITEMS, JSON.stringify(INITIAL_INVENTORY_ITEMS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.WAREHOUSE_REQUESTS)) {
-    localStorage.setItem(STORAGE_KEYS.WAREHOUSE_REQUESTS, JSON.stringify(INITIAL_WAREHOUSE_REQUESTS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.SHIFT_SCHEDULES)) {
-    localStorage.setItem(STORAGE_KEYS.SHIFT_SCHEDULES, JSON.stringify(INITIAL_SHIFT_SCHEDULES));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.SHIFT_REPORTS)) {
-    localStorage.setItem(STORAGE_KEYS.SHIFT_REPORTS, JSON.stringify(INITIAL_SHIFT_REPORTS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.COUNSELORS)) {
-    localStorage.setItem(STORAGE_KEYS.COUNSELORS, JSON.stringify(INITIAL_COUNSELORS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.COUNSELOR_SHIFTS)) {
-    localStorage.setItem(STORAGE_KEYS.COUNSELOR_SHIFTS, JSON.stringify(INITIAL_COUNSELOR_SHIFTS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.COUNSELOR_REPORTS)) {
-    localStorage.setItem(STORAGE_KEYS.COUNSELOR_REPORTS, JSON.stringify(INITIAL_COUNSELOR_REPORTS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.ACTIVITY_LOGS)) {
-    localStorage.setItem(STORAGE_KEYS.ACTIVITY_LOGS, JSON.stringify(INITIAL_ACTIVITY_LOGS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.STUDENT_EVALUATIONS)) {
-    localStorage.setItem(STORAGE_KEYS.STUDENT_EVALUATIONS, JSON.stringify(INITIAL_STUDENT_EVALUATIONS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.FINANCE_STAFF)) {
-    localStorage.setItem(STORAGE_KEYS.FINANCE_STAFF, JSON.stringify(INITIAL_FINANCE_STAFF));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.PROCUREMENT_STAFF)) {
-    localStorage.setItem(STORAGE_KEYS.PROCUREMENT_STAFF, JSON.stringify(INITIAL_PROCUREMENT_STAFF));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.STUDENT_FINANCES)) {
-    localStorage.setItem(STORAGE_KEYS.STUDENT_FINANCES, JSON.stringify(INITIAL_STUDENT_FINANCES));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.INVENTORY_TRANSACTIONS)) {
-    localStorage.setItem(STORAGE_KEYS.INVENTORY_TRANSACTIONS, JSON.stringify(INITIAL_INVENTORY_TRANSACTIONS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.PROCUREMENT_REQUESTS)) {
-    localStorage.setItem(STORAGE_KEYS.PROCUREMENT_REQUESTS, JSON.stringify(INITIAL_PROCUREMENT_REQUESTS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.GUEST_REQUESTS)) {
-    localStorage.setItem(STORAGE_KEYS.GUEST_REQUESTS, JSON.stringify(INITIAL_GUEST_REQUESTS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.VISIT_REPORTS)) {
-    localStorage.setItem(STORAGE_KEYS.VISIT_REPORTS, JSON.stringify(INITIAL_VISIT_REPORTS));
-  }
+let uniqueIdSeq = 0;
+function makeUniqueId(prefix: string): string {
+  uniqueIdSeq = (uniqueIdSeq + 1) % 1000000;
+  return `${prefix}_${Date.now()}_${uniqueIdSeq}_${Math.random().toString(36).substring(2, 6)}`;
+}
 
-  if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
-    const { rooms, beds } = generateInitialRoomsAndBeds();
+// کش درون‌حافظه برای حذف JSON.parse تکراری در حجم بالای داده (با کپی ایمن برای جلوگیری از تداخل ارجاع)
+const parsedCache = new Map<string, unknown>();
 
-    // همگام‌سازی تخت‌های رزرو شده دانشجویان اولیه
-    INITIAL_STUDENTS.forEach((st) => {
-      if (st.assignedBedId) {
-        const foundBed = beds.find((b) => b.id === st.assignedBedId);
-        if (foundBed) {
-          foundBed.studentId = st.studentId;
-        }
-      }
-    });
-
-    localStorage.setItem(STORAGE_KEYS.ROOMS, JSON.stringify(rooms));
-    localStorage.setItem(STORAGE_KEYS.BEDS, JSON.stringify(beds));
+function cloneValue<T>(val: T): T {
+  if (val === null || typeof val !== 'object') return val;
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(val);
+    } catch {
+      // ادامه به روش JSON در صورت وجود مقدار غیرقابل کلون
+    }
   }
+  return JSON.parse(JSON.stringify(val)) as T;
+}
 
-  if (!localStorage.getItem(STORAGE_KEYS.STUDENTS)) {
-    localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(INITIAL_STUDENTS));
+function safeLocalStorageSet(key: string, serialized: string, parsedValue?: unknown): boolean {
+  try {
+    localStorage.setItem(key, serialized);
+    if (parsedValue !== undefined) {
+      parsedCache.set(key, cloneValue(parsedValue));
+    } else {
+      parsedCache.delete(key);
+    }
+    return true;
+  } catch (e) {
+    console.warn(`Failed to write ${key} to localStorage (quota or access):`, e);
+    if (parsedValue !== undefined) {
+      parsedCache.set(key, cloneValue(parsedValue));
+    }
+    return false;
   }
 }
 
-// مدیریت زمان و وضعیت همگام‌سازی ابری برای جلوگیری از تداخل نوشتن و خواندن
+function setIfMissing(key: string, defaultValue: unknown): void {
+  try {
+    if (!localStorage.getItem(key)) {
+      safeLocalStorageSet(key, JSON.stringify(defaultValue), defaultValue);
+    }
+  } catch (e) {
+    console.warn(`Failed checking/initializing ${key} in localStorage:`, e);
+  }
+}
+
+// همگام‌سازی کش حافظه در صورت تغییر داده‌ها در تب دیگر مرورگر
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('storage', (ev) => {
+    if (ev.key === null) {
+      parsedCache.clear();
+    } else {
+      parsedCache.delete(ev.key);
+    }
+  });
+}
+
+// مقداردهی اولیه پایگاه داده درون‌مرورگر
+export function initializeStorageIfNeeded(): void {
+  setIfMissing(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
+  setIfMissing(STORAGE_KEYS.DORMITORIES, INITIAL_DORMITORIES);
+  setIfMissing(STORAGE_KEYS.SUPERVISORS, INITIAL_SUPERVISORS);
+  setIfMissing(STORAGE_KEYS.WARNINGS, INITIAL_WARNINGS);
+  setIfMissing(STORAGE_KEYS.ANNOUNCEMENTS, INITIAL_ANNOUNCEMENTS);
+  setIfMissing(STORAGE_KEYS.MESSAGES, INITIAL_MESSAGES);
+  setIfMissing(STORAGE_KEYS.MAINTENANCE_STAFF, INITIAL_MAINTENANCE_STAFF);
+  setIfMissing(STORAGE_KEYS.MAINTENANCE_TASKS, INITIAL_MAINTENANCE_TASKS);
+  setIfMissing(STORAGE_KEYS.WAREHOUSE_STAFF, INITIAL_WAREHOUSE_STAFF);
+  setIfMissing(STORAGE_KEYS.INVENTORY_ITEMS, INITIAL_INVENTORY_ITEMS);
+  setIfMissing(STORAGE_KEYS.WAREHOUSE_REQUESTS, INITIAL_WAREHOUSE_REQUESTS);
+  setIfMissing(STORAGE_KEYS.SHIFT_SCHEDULES, INITIAL_SHIFT_SCHEDULES);
+  setIfMissing(STORAGE_KEYS.SHIFT_REPORTS, INITIAL_SHIFT_REPORTS);
+  setIfMissing(STORAGE_KEYS.COUNSELORS, INITIAL_COUNSELORS);
+  setIfMissing(STORAGE_KEYS.COUNSELOR_SHIFTS, INITIAL_COUNSELOR_SHIFTS);
+  setIfMissing(STORAGE_KEYS.COUNSELOR_REPORTS, INITIAL_COUNSELOR_REPORTS);
+  setIfMissing(STORAGE_KEYS.ACTIVITY_LOGS, INITIAL_ACTIVITY_LOGS);
+  setIfMissing(STORAGE_KEYS.STUDENT_EVALUATIONS, INITIAL_STUDENT_EVALUATIONS);
+  setIfMissing(STORAGE_KEYS.FINANCE_STAFF, INITIAL_FINANCE_STAFF);
+  setIfMissing(STORAGE_KEYS.PROCUREMENT_STAFF, INITIAL_PROCUREMENT_STAFF);
+  setIfMissing(STORAGE_KEYS.STUDENT_FINANCES, INITIAL_STUDENT_FINANCES);
+  setIfMissing(STORAGE_KEYS.INVENTORY_TRANSACTIONS, INITIAL_INVENTORY_TRANSACTIONS);
+  setIfMissing(STORAGE_KEYS.PROCUREMENT_REQUESTS, INITIAL_PROCUREMENT_REQUESTS);
+  setIfMissing(STORAGE_KEYS.GUEST_REQUESTS, INITIAL_GUEST_REQUESTS);
+  setIfMissing(STORAGE_KEYS.VISIT_REPORTS, INITIAL_VISIT_REPORTS);
+
+  try {
+    if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
+      const { rooms, beds } = generateInitialRoomsAndBeds();
+      const bedById = new Map(beds.map((b) => [b.id, b]));
+
+      // همگام‌سازی تخت‌های رزرو شده دانشجویان اولیه
+      INITIAL_STUDENTS.forEach((st) => {
+        if (st.assignedBedId) {
+          const foundBed = bedById.get(st.assignedBedId);
+          if (foundBed) {
+            foundBed.studentId = st.studentId;
+          }
+        }
+      });
+
+      safeLocalStorageSet(STORAGE_KEYS.ROOMS, JSON.stringify(rooms), rooms);
+      safeLocalStorageSet(STORAGE_KEYS.BEDS, JSON.stringify(beds), beds);
+    }
+  } catch (e) {
+    console.warn('Failed initializing rooms/beds:', e);
+  }
+
+  setIfMissing(STORAGE_KEYS.STUDENTS, INITIAL_STUDENTS);
+}
+
+// مدیریت زمان و وضعیت همگام‌سازی ابری با تجمیع نوشتن‌های پیاپی برای سرعت بیشتر و جلوگیری از تداخل
 const keyWriteTimestamps: Record<string, number> = {};
 const pendingCloudRequests: Record<string, Promise<boolean> | undefined> = {};
+const pendingCloudTimers: Record<string, ReturnType<typeof setTimeout> | undefined> = {};
+const pendingCloudValues: Record<string, unknown> = {};
 let activeSyncPromise: Promise<boolean> | null = null;
 const SYNCABLE_KEYS = Object.values(STORAGE_KEYS).filter((k) => k !== STORAGE_KEYS.CURRENT_USER);
+const CLOUD_SYNC_DEBOUNCE_MS = 120;
 
-function pushKeyToCloud<T>(key: string, value: T): void {
-  if (key === STORAGE_KEYS.CURRENT_USER) return;
+function flushKeyToCloud(key: string, keepalive = false): void {
+  const timer = pendingCloudTimers[key];
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    delete pendingCloudTimers[key];
+  }
+  if (!(key in pendingCloudValues)) return;
+
+  const value = pendingCloudValues[key];
+  delete pendingCloudValues[key];
   keyWriteTimestamps[key] = Date.now();
 
   if (typeof fetch !== 'function') return;
 
-  const reqPromise = fetch(`${API_BASE_URL}/sync`, {
+  let bodyStr: string;
+  try {
+    bodyStr = JSON.stringify({ key, value });
+  } catch {
+    return;
+  }
+
+  const reqOptions: RequestInit = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, value }),
-  })
+    body: bodyStr,
+  };
+  if (keepalive && bodyStr.length < 60000) {
+    reqOptions.keepalive = true;
+  }
+
+  const reqPromise = fetch(`${API_BASE_URL}/sync`, reqOptions)
     .then((res) => {
       if (!res.ok) {
         console.warn(`Cloud sync POST non-OK (${res.status}) for key ${key}`);
@@ -233,6 +269,36 @@ function pushKeyToCloud<T>(key: string, value: T): void {
     });
 
   pendingCloudRequests[key] = reqPromise;
+}
+
+function flushAllPendingCloudTimers(keepalive = false): void {
+  const keys = Object.keys(pendingCloudValues);
+  keys.forEach((k) => flushKeyToCloud(k, keepalive));
+}
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('beforeunload', () => {
+    flushAllPendingCloudTimers(true);
+  });
+}
+
+function pushKeyToCloud<T>(key: string, value: T): void {
+  if (key === STORAGE_KEYS.CURRENT_USER) return;
+  keyWriteTimestamps[key] = Date.now();
+  pendingCloudValues[key] = value;
+
+  if (typeof fetch !== 'function') {
+    delete pendingCloudValues[key];
+    return;
+  }
+
+  const prevTimer = pendingCloudTimers[key];
+  if (prevTimer !== undefined) {
+    clearTimeout(prevTimer);
+  }
+  pendingCloudTimers[key] = setTimeout(() => {
+    flushKeyToCloud(key);
+  }, CLOUD_SYNC_DEBOUNCE_MS);
 }
 
 function normalizeLookupKey(raw: string | number | null | undefined): string {
@@ -324,23 +390,30 @@ function normalizeStudentRecord(raw: Record<string, unknown>): Student {
   };
 }
 
-// تابع کمکی برای خواندن از localStorage
+// تابع کمکی برای خواندن از کش حافظه و localStorage
 function get<T>(key: string, defaultValue: T): T {
   try {
+    if (parsedCache.has(key)) {
+      return cloneValue(parsedCache.get(key) as T);
+    }
     const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : defaultValue;
+    if (!item) return defaultValue;
+    const parsed = JSON.parse(item) as T;
+    parsedCache.set(key, cloneValue(parsed));
+    return parsed;
   } catch (e) {
     console.error(`Error reading ${key} from localStorage`, e);
     return defaultValue;
   }
 }
 
-// تابع کمکی برای نوشتن در localStorage و ارسال غیرهمگام به سرور ابری
+// تابع کمکی برای نوشتن در localStorage و ارسال غیرهمگام تجمیع‌شده به سرور ابری
 function set<T>(key: string, value: T): boolean {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    const serialized = JSON.stringify(value);
+    const written = safeLocalStorageSet(key, serialized, value);
     pushKeyToCloud(key, value);
-    return true;
+    return written;
   } catch (e) {
     console.error(`Error writing ${key} to localStorage`, e);
     return false;
@@ -536,16 +609,51 @@ export const Storage = {
     return { success: true, message: `سرای «${dorm.name}» با موفقیت افزوده شد.` };
   },
 
-  // حذف سرا و کلیه اتاق‌ها، تخت‌ها و آزادسازی اسکان دانشجویان
+  // حذف سرا و کلیه اتاق‌ها، تخت‌ها و آزادسازی اسکان دانشجویان به صورت یکجا
   deleteDormitory: (dormId: string): { success: boolean; message: string } => {
     const dorms = Storage.getDormitories();
     if (dorms.length <= 1) {
       return { success: false, message: 'حداقل یک سرا باید در سامانه باقی بماند و امکان حذف همه سراها وجود ندارد.' };
     }
     const targetDorm = dorms.find((d) => d.id === dormId);
-    const rooms = Storage.getRooms().filter((r) => r.dormId === dormId);
-    rooms.forEach((r) => Storage.deleteRoom(r.id));
+    const rooms = Storage.getRooms();
+    const beds = Storage.getBeds();
+    const students = Storage.getStudents();
+
+    const deletedRoomIds = new Set(rooms.filter((r) => r.dormId === dormId).map((r) => r.id));
+    const affectedStudentIds = new Set<string>();
+    beds.forEach((b) => {
+      if ((b.dormId === dormId || deletedRoomIds.has(b.roomId)) && b.studentId) {
+        affectedStudentIds.add(b.studentId);
+      }
+    });
+
+    let stChanged = false;
+    students.forEach((st) => {
+      if (
+        affectedStudentIds.has(st.studentId) ||
+        st.assignedDormId === dormId ||
+        (st.assignedRoomId && deletedRoomIds.has(st.assignedRoomId))
+      ) {
+        st.assignedDormId = undefined;
+        st.assignedDormName = undefined;
+        st.assignedRoomId = undefined;
+        st.assignedRoomNumber = undefined;
+        st.assignedBedId = undefined;
+        st.assignmentStatus = 'none';
+        stChanged = true;
+      }
+    });
+
+    const updatedBeds = beds.filter((b) => b.dormId !== dormId && !deletedRoomIds.has(b.roomId));
+    const updatedRooms = rooms.filter((r) => r.dormId !== dormId);
     const updatedDorms = dorms.filter((d) => d.id !== dormId);
+
+    if (stChanged) {
+      Storage.setStudents(students);
+    }
+    Storage.setBeds(updatedBeds);
+    Storage.setRooms(updatedRooms);
     Storage.setDormitories(updatedDorms);
     Storage.addActivityLog({
       category: 'dorm_structure',
@@ -862,23 +970,33 @@ export const Storage = {
       return { success: false, message: 'اتاق مورد نظر یافت نشد.' };
     }
 
-    // آزادسازی دانشجویان ساکن در این اتاق
+    const occupantIds = new Set<string>();
     beds.forEach((b) => {
       if (b.roomId === roomId && b.studentId) {
-        const st = students.find((s) => s.studentId === b.studentId);
-        if (st) {
-          st.assignedDormId = undefined;
-          st.assignedRoomId = undefined;
-          st.assignedBedId = undefined;
-          st.assignmentStatus = 'none';
-        }
+        occupantIds.add(b.studentId);
+      }
+    });
+
+    // آزادسازی دانشجویان ساکن در این اتاق
+    let stChanged = false;
+    students.forEach((st) => {
+      if (occupantIds.has(st.studentId) || st.assignedRoomId === roomId) {
+        st.assignedDormId = undefined;
+        st.assignedDormName = undefined;
+        st.assignedRoomId = undefined;
+        st.assignedRoomNumber = undefined;
+        st.assignedBedId = undefined;
+        st.assignmentStatus = 'none';
+        stChanged = true;
       }
     });
 
     const updatedBeds = beds.filter((b) => b.roomId !== roomId);
     const updatedRooms = rooms.filter((r) => r.id !== roomId);
 
-    Storage.setStudents(students);
+    if (stChanged) {
+      Storage.setStudents(students);
+    }
     Storage.setBeds(updatedBeds);
     Storage.setRooms(updatedRooms);
 
@@ -900,6 +1018,7 @@ export const Storage = {
     const beds = Storage.getBeds();
     const students = Storage.getStudents();
     const rooms = Storage.getRooms();
+    const dorms = Storage.getDormitories();
 
     const targetBed = beds.find((b) => b.id === bedId);
     if (!targetBed) {
@@ -917,6 +1036,7 @@ export const Storage = {
 
     const student = students[studentIndex];
     const room = rooms.find((r) => r.id === targetBed.roomId);
+    const dorm = dorms.find((d) => d.id === targetBed.dormId);
 
     // بررسی سهمیه رشته
     if (room?.allowedFields && room.allowedFields.length > 0) {
@@ -947,7 +1067,9 @@ export const Storage = {
     targetBed.assignmentStatus = finalStatus;
 
     student.assignedDormId = targetBed.dormId;
+    student.assignedDormName = dorm?.name;
     student.assignedRoomId = targetBed.roomId;
+    student.assignedRoomNumber = room?.roomNumber;
     student.assignedBedId = targetBed.id;
     student.assignmentStatus = finalStatus;
 
@@ -1006,7 +1128,7 @@ export const Storage = {
     // ارسال پیام تأیید قطعی به دانشجو
     const messages = Storage.getMessages();
     messages.unshift({
-      id: `msg_sys_confirm_${Date.now()}`,
+      id: makeUniqueId('msg_sys_confirm'),
       senderId: 'supervisor',
       senderName: 'سرپرستی و اداره سراهای دانشجویی',
       senderRole: 'supervisor',
@@ -1055,7 +1177,7 @@ export const Storage = {
         }
         const room = rooms.find((r) => r.id === s.assignedRoomId);
         messages.unshift({
-          id: `msg_sys_bulk_confirm_${Date.now()}_${s.studentId}`,
+          id: makeUniqueId(`msg_sys_bulk_${s.studentId}`),
           senderId: dormId ? 'supervisor' : 'admin',
           senderName: dormId ? 'سرپرستی سراهای دانشجویی' : 'مدیریت کل سراهای دانشگاه فرهنگیان',
           senderRole: dormId ? 'supervisor' : 'admin',
@@ -1114,14 +1236,16 @@ export const Storage = {
     }
 
     student.assignedDormId = undefined;
+    student.assignedDormName = undefined;
     student.assignedRoomId = undefined;
+    student.assignedRoomNumber = undefined;
     student.assignedBedId = undefined;
     student.assignmentStatus = 'none';
 
     // پیام به دانشجو
     const messages = Storage.getMessages();
     messages.unshift({
-      id: `msg_sys_reject_${Date.now()}`,
+      id: makeUniqueId('msg_sys_reject'),
       senderId: 'supervisor',
       senderName: 'سرپرستی سراهای دانشجویی',
       senderRole: 'supervisor',
@@ -1169,7 +1293,9 @@ export const Storage = {
     const student = students.find((s) => s.studentId === studentId);
     if (student) {
       student.assignedDormId = undefined;
+      student.assignedDormName = undefined;
       student.assignedRoomId = undefined;
+      student.assignedRoomNumber = undefined;
       student.assignedBedId = undefined;
       student.assignmentStatus = 'none';
     }
@@ -1206,7 +1332,7 @@ export const Storage = {
       const messages = Storage.getMessages();
       const student = Storage.getStudents().find((s) => s.studentId === studentId);
       messages.unshift({
-        id: `msg_sys_${Date.now()}`,
+        id: makeUniqueId('msg_sys_move'),
         senderId: 'supervisor',
         senderName: 'سرپرستی سراهای دانشجویی',
         senderRole: 'supervisor',
@@ -1229,15 +1355,19 @@ export const Storage = {
     photoMap: Record<string, string>
   ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     const students = Storage.getStudents();
+    const studentByNormId = new Map<string, Student>();
+    students.forEach((s) => {
+      const key = normalizeLookupKey(s.studentId);
+      if (key && !studentByNormId.has(key)) studentByNormId.set(key, s);
+    });
+
     let matchedCount = 0;
     const unmatchedKeys: string[] = [];
 
     Object.entries(photoMap).forEach(([studentIdKey, photoDataUrl]) => {
       const cleanKey = normalizeLookupKey(studentIdKey);
       const digitMatch = cleanKey.match(/\d+/)?.[0] || cleanKey;
-      const st =
-        students.find((s) => normalizeLookupKey(s.studentId) === cleanKey) ||
-        students.find((s) => normalizeLookupKey(s.studentId) === digitMatch);
+      const st = studentByNormId.get(cleanKey) || studentByNormId.get(digitMatch);
       if (st) {
         st.photoUrl = photoDataUrl;
         matchedCount++;
@@ -1450,7 +1580,7 @@ export const Storage = {
     const warnings = Storage.getWarnings();
     const newWarning: RoomWarning = {
       ...warning,
-      id: `warn_${Date.now()}`,
+      id: makeUniqueId('warn'),
     };
     warnings.unshift(newWarning);
     Storage.setWarnings(warnings);
@@ -1485,7 +1615,7 @@ export const Storage = {
     const messages = Storage.getMessages();
     const newMsg: Message = {
       ...message,
-      id: `msg_${Date.now()}`,
+      id: makeUniqueId('msg'),
       status: 'pending',
       replies: [],
     };
@@ -1509,7 +1639,7 @@ export const Storage = {
     if (msg) {
       msg.replies.push({
         ...reply,
-        id: `rep_${Date.now()}`,
+        id: makeUniqueId('rep'),
       });
       msg.status = 'answered';
       Storage.setMessages(messages);
@@ -1659,6 +1789,17 @@ export const Storage = {
         return m;
       });
       if (msgChanged) Storage.setMessages(nextMsgs);
+
+      const mTasks = Storage.getMaintenanceTasks();
+      let taskChanged = false;
+      const nextTasks = mTasks.map((t) => {
+        if (t.sourceStudentId === studentId) {
+          taskChanged = true;
+          return { ...t, sourceStudentId: nextStudentId };
+        }
+        return t;
+      });
+      if (taskChanged) Storage.setMaintenanceTasks(nextTasks);
     }
 
     Storage.addActivityLog({
@@ -1756,48 +1897,65 @@ export const Storage = {
     URL.revokeObjectURL(url);
   },
 
-  // بازیابی نسخه پشتیبان از فایل JSON
+  // بازیابی نسخه پشتیبان از فایل JSON (همراه با اعتبارسنجی ساختار و حذف کلیدهای مخرب)
   importBackupJson: (jsonString: string): boolean => {
     try {
-      const data = JSON.parse(jsonString);
-      if (data.students && data.rooms && data.beds) {
-        if (data.settings) Storage.setSettings(data.settings);
-        if (data.dormitories) Storage.setDormitories(data.dormitories);
-        if (data.rooms) Storage.setRooms(data.rooms);
-        if (data.beds) Storage.setBeds(data.beds);
-        if (data.students) Storage.setStudents(data.students);
-        if (data.supervisors) Storage.setSupervisors(data.supervisors);
-        if (data.warnings) Storage.setWarnings(data.warnings);
-        if (data.announcements) Storage.setAnnouncements(data.announcements);
-        if (data.messages) Storage.setMessages(data.messages);
-        if (data.maintenanceStaff) Storage.setMaintenanceStaff(data.maintenanceStaff);
-        if (data.maintenanceTasks) Storage.setMaintenanceTasks(data.maintenanceTasks);
-        if (data.warehouseStaff) Storage.setWarehouseStaff(data.warehouseStaff);
-        if (data.inventoryItems) set(STORAGE_KEYS.INVENTORY_ITEMS, data.inventoryItems);
-        if (data.inventoryTransactions) Storage.setInventoryTransactions(data.inventoryTransactions);
-        if (data.warehouseRequests) Storage.setWarehouseRequests(data.warehouseRequests);
-        if (data.procurementStaff) Storage.setProcurementStaff(data.procurementStaff);
-        if (data.procurementRequests) Storage.setProcurementRequests(data.procurementRequests);
-        if (data.shiftSchedules) Storage.setShiftSchedules(data.shiftSchedules);
-        if (data.shiftReports) Storage.setShiftReports(data.shiftReports);
-        if (data.counselors) Storage.setCounselors(data.counselors);
-        if (data.counselorShifts) Storage.setCounselorShifts(data.counselorShifts);
-        if (data.counselorReports) Storage.setCounselorReports(data.counselorReports);
-        if (data.activityLogs) Storage.setActivityLogs(data.activityLogs);
-        if (data.studentEvaluations) Storage.setStudentEvaluations(data.studentEvaluations);
-        if (data.financeStaff) Storage.setFinanceStaff(data.financeStaff);
-        if (data.studentFinances) Storage.setStudentFinances(data.studentFinances);
-        if (data.guestRequests) Storage.setGuestRequests(data.guestRequests);
-        if (data.visitReports) Storage.setVisitReports(data.visitReports);
-        Storage.addActivityLog({
-          category: 'backup',
-          action: 'بازیابی نسخه پشتیبان JSON',
-          details: 'فایل پشتیبان اطلاعات سامانه با موفقیت بازیابی شد.',
-          severity: 'warning',
-        });
-        return true;
+      const data = JSON.parse(jsonString, (key, value) =>
+        key === '__proto__' || key === 'constructor' || key === 'prototype' ? undefined : value
+      );
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        Array.isArray(data) ||
+        !Array.isArray(data.students) ||
+        !Array.isArray(data.rooms) ||
+        !Array.isArray(data.beds)
+      ) {
+        return false;
       }
-      return false;
+
+      if (data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings)) {
+        Storage.setSettings(data.settings);
+      }
+      if (Array.isArray(data.dormitories)) Storage.setDormitories(data.dormitories);
+      Storage.setRooms(data.rooms);
+      Storage.setBeds(data.beds);
+      Storage.setStudents(
+        data.students
+          .filter((s: unknown): s is Record<string, unknown> => Boolean(s && typeof s === 'object'))
+          .map((s: Record<string, unknown>) => normalizeStudentRecord(s))
+      );
+      if (Array.isArray(data.supervisors)) Storage.setSupervisors(data.supervisors);
+      if (Array.isArray(data.warnings)) Storage.setWarnings(data.warnings);
+      if (Array.isArray(data.announcements)) Storage.setAnnouncements(data.announcements);
+      if (Array.isArray(data.messages)) Storage.setMessages(data.messages);
+      if (Array.isArray(data.maintenanceStaff)) Storage.setMaintenanceStaff(data.maintenanceStaff);
+      if (Array.isArray(data.maintenanceTasks)) Storage.setMaintenanceTasks(data.maintenanceTasks);
+      if (Array.isArray(data.warehouseStaff)) Storage.setWarehouseStaff(data.warehouseStaff);
+      if (Array.isArray(data.inventoryItems)) set(STORAGE_KEYS.INVENTORY_ITEMS, data.inventoryItems);
+      if (Array.isArray(data.inventoryTransactions)) Storage.setInventoryTransactions(data.inventoryTransactions);
+      if (Array.isArray(data.warehouseRequests)) Storage.setWarehouseRequests(data.warehouseRequests);
+      if (Array.isArray(data.procurementStaff)) Storage.setProcurementStaff(data.procurementStaff);
+      if (Array.isArray(data.procurementRequests)) Storage.setProcurementRequests(data.procurementRequests);
+      if (Array.isArray(data.shiftSchedules)) Storage.setShiftSchedules(data.shiftSchedules);
+      if (Array.isArray(data.shiftReports)) Storage.setShiftReports(data.shiftReports);
+      if (Array.isArray(data.counselors)) Storage.setCounselors(data.counselors);
+      if (Array.isArray(data.counselorShifts)) Storage.setCounselorShifts(data.counselorShifts);
+      if (Array.isArray(data.counselorReports)) Storage.setCounselorReports(data.counselorReports);
+      if (Array.isArray(data.activityLogs)) Storage.setActivityLogs(data.activityLogs);
+      if (Array.isArray(data.studentEvaluations)) Storage.setStudentEvaluations(data.studentEvaluations);
+      if (Array.isArray(data.financeStaff)) Storage.setFinanceStaff(data.financeStaff);
+      if (Array.isArray(data.studentFinances)) Storage.setStudentFinances(data.studentFinances);
+      if (Array.isArray(data.guestRequests)) Storage.setGuestRequests(data.guestRequests);
+      if (Array.isArray(data.visitReports)) Storage.setVisitReports(data.visitReports);
+
+      Storage.addActivityLog({
+        category: 'backup',
+        action: 'بازیابی نسخه پشتیبان JSON',
+        details: 'فایل پشتیبان اطلاعات سامانه با موفقیت بازیابی شد.',
+        severity: 'warning',
+      });
+      return true;
     } catch (e) {
       console.error('Failed to restore backup', e);
       return false;
@@ -1919,7 +2077,7 @@ export const Storage = {
       if (msg) {
         msg.status = 'answered';
         msg.replies.push({
-          id: `rep_done_${Date.now()}`,
+          id: makeUniqueId('rep_done'),
           senderName: `${tasks[idx].assignedToStaffName || 'واحد تأسیسات سرا'}`,
           senderRole: 'maintenance',
           content: `عملیات رفع نقص با کد رهگیری «${tasks[idx].trackingCode}» انجام و تکمیل گردید.${updates.technicianNotes ? ` گزارش کار: ${updates.technicianNotes}` : ''}`,
@@ -2003,7 +2161,7 @@ export const Storage = {
     if (msg) {
       msg.status = 'in_progress';
       msg.replies.push({
-        id: `rep_auto_maint_${Date.now()}`,
+        id: makeUniqueId('rep_auto_maint'),
         senderName: `${taskData.createdByName} (${taskData.createdByRole === 'admin' ? 'مدیریت کل' : 'سرپرست سرا'})`,
         senderRole: taskData.createdByRole,
         content: `این گزارش بررسی و با کد رهگیری «${trackingCode}» مستقیماً به واحد تأسیسات و تعمیرات سرا ارجاع داده شد.${taskData.assignedToStaffName ? ` کارشناس فنی محول شده: ${taskData.assignedToStaffName}` : ' در انتظار اعزام تکنسین.'}`,
@@ -2024,6 +2182,13 @@ export const Storage = {
 
   // بازنشانی به داده‌های اولیه و همگام‌سازی با دیتابیس ابری
   resetToDefaults: () => {
+    Object.keys(pendingCloudTimers).forEach((k) => {
+      const t = pendingCloudTimers[k];
+      if (t !== undefined) clearTimeout(t);
+      delete pendingCloudTimers[k];
+      delete pendingCloudValues[k];
+    });
+    parsedCache.clear();
     localStorage.clear();
     initializeStorageIfNeeded();
     Storage.addActivityLog({
@@ -2558,6 +2723,15 @@ export const Storage = {
     actorName: string
   ): { matchedCount: number; unmatchedKeys: string[] } => {
     const students = Storage.getStudents();
+    const studentBySid = new Map<string, Student>();
+    const studentByNid = new Map<string, Student>();
+    students.forEach((s) => {
+      const sk = normalizeLookupKey(s.studentId);
+      const nk = normalizeLookupKey(s.nationalId);
+      if (sk && !studentBySid.has(sk)) studentBySid.set(sk, s);
+      if (nk && !studentByNid.has(nk)) studentByNid.set(nk, s);
+    });
+
     const currentList = Storage.getStudentFinances();
     const map = new Map<string, StudentFinancialRecord>();
     currentList.forEach((rec) => map.set(rec.studentId, rec));
@@ -2575,8 +2749,8 @@ export const Storage = {
       const nidKey = normalizeLookupKey(row.nationalId);
 
       const matchedStudent =
-        (sidKey && students.find((s) => normalizeLookupKey(s.studentId) === sidKey)) ||
-        (nidKey && students.find((s) => normalizeLookupKey(s.nationalId) === nidKey));
+        (sidKey && studentBySid.get(sidKey)) ||
+        (nidKey && studentByNid.get(nidKey));
 
       if (!matchedStudent) {
         const missingLabel = (row.studentId || row.nationalId || 'نامشخص').trim();
@@ -4849,7 +5023,7 @@ export const Storage = {
 
       const lastLocalWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
       if (Date.now() - lastLocalWrite > 5000 && cleanStudents.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(cleanStudents));
+        safeLocalStorageSet(STORAGE_KEYS.STUDENTS, JSON.stringify(cleanStudents), cleanStudents);
       }
       return cleanStudents;
     } catch (err) {
@@ -4891,12 +5065,7 @@ export const Storage = {
 
       const rawReturned = ((data as { student?: Record<string, unknown> })?.student ||
         newStudent) as Record<string, unknown>;
-      const { _id, __v, createdAt, updatedAt, ...cleanObj } = rawReturned;
-      void _id;
-      void __v;
-      void createdAt;
-      void updatedAt;
-      const savedStudent = cleanObj as unknown as Student;
+      const savedStudent = normalizeStudentRecord(rawReturned);
 
       const updatedStudents = [savedStudent, ...currentStudents];
       set(STORAGE_KEYS.STUDENTS, updatedStudents);
@@ -5029,6 +5198,7 @@ export const Storage = {
   },
 
   waitForPendingCloudSync: async (): Promise<{ success: boolean; failedKeys: string[] }> => {
+    flushAllPendingCloudTimers(false);
     const entries = Object.entries(pendingCloudRequests).filter(
       (entry): entry is [string, Promise<boolean>] => Boolean(entry[1])
     );
@@ -5044,6 +5214,7 @@ export const Storage = {
 
   syncAllToCloud: async (): Promise<boolean> => {
     try {
+      flushAllPendingCloudTimers(false);
       const posts = SYNCABLE_KEYS.map(async (key) => {
         const raw = localStorage.getItem(key);
         if (!raw) return true;
@@ -5090,12 +5261,12 @@ export const Storage = {
             for (const [key, val] of Object.entries(cloudMap)) {
               if (!SYNCABLE_KEYS.includes(key)) continue;
               if (val === undefined || val === null) continue;
-              if (pendingCloudRequests[key]) continue;
+              if (pendingCloudRequests[key] || pendingCloudTimers[key] !== undefined) continue;
               const lastLocalWrite = keyWriteTimestamps[key] || 0;
               if (Date.now() - lastLocalWrite < 5000) continue;
               const serialized = JSON.stringify(val);
               if (localStorage.getItem(key) !== serialized) {
-                localStorage.setItem(key, serialized);
+                safeLocalStorageSet(key, serialized, val);
                 hasRemoteChanges = true;
               }
             }
@@ -5106,7 +5277,11 @@ export const Storage = {
           const rawStudents = await studentsResult.value.json();
           if (Array.isArray(rawStudents)) {
             const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
-            if (!pendingCloudRequests[STORAGE_KEYS.STUDENTS] && Date.now() - lastStudentWrite >= 5000) {
+            if (
+              !pendingCloudRequests[STORAGE_KEYS.STUDENTS] &&
+              pendingCloudTimers[STORAGE_KEYS.STUDENTS] === undefined &&
+              Date.now() - lastStudentWrite >= 5000
+            ) {
               const cleanStudents: Student[] = rawStudents.map((item: Record<string, unknown>) =>
                 normalizeStudentRecord(item)
               );
@@ -5115,7 +5290,7 @@ export const Storage = {
               if (!Array.isArray(cloudSyncStudents) && cleanStudents.length > 0) {
                 const serializedStudents = JSON.stringify(cleanStudents);
                 if (localStorage.getItem(STORAGE_KEYS.STUDENTS) !== serializedStudents) {
-                  localStorage.setItem(STORAGE_KEYS.STUDENTS, serializedStudents);
+                  safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, cleanStudents);
                   hasRemoteChanges = true;
                 }
               }
