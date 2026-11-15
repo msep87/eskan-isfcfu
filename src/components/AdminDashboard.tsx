@@ -22,7 +22,7 @@ import {
   WarehouseStaff,
   HomeNoteItem,
 } from '../types';
-import { Storage } from '../utils/storage';
+import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { ExcelImportTab } from './ExcelImportModal';
 import {
   exportShiftScheduleToExcel,
@@ -467,20 +467,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setIsAddStudentModalOpen(true);
   };
 
-  const handleAdminStudentPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAdminStudentPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      setStFormError('حجم تصویر پرسنلی نباید بیشتر از ۳ مگابایت باشد.');
+    if (file.size > 5 * 1024 * 1024) {
+      setStFormError('حجم فایل عکس نباید بیشتر از ۵ مگابایت باشد.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const base64 = ev.target?.result as string;
-      if (base64) setStFormPhotoUrl(base64);
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressAvatarImageFile(file);
+      setStFormPhotoUrl(compressed);
+      setStFormError(null);
+    } catch (err) {
+      setStFormError(err instanceof Error ? err.message : 'خطا در پردازش تصویر انتخاب شده.');
+    }
   };
 
   const handleSaveStudentSubmit = async (e: React.FormEvent) => {
@@ -488,6 +489,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!stFormFullName.trim() || !stFormStudentId.trim() || !stFormNationalId.trim()) {
       setStFormError('لطفاً نام و نام خانوادگی، شماره دانشجویی و کد ملی را تکمیل فرمایید.');
       return;
+    }
+
+    const targetStudentId = (editingStudent ? editingStudent.studentId : stFormStudentId).trim();
+    let resolvedPhotoUrl = stFormPhotoUrl || undefined;
+    let photoCloudWarning = '';
+
+    if (resolvedPhotoUrl && resolvedPhotoUrl.startsWith('data:image/')) {
+      setApprovalFeedback({ type: 'success', message: '⏳ در حال بارگذاری تصویر پرسنلی در دیتابیس ابری...' });
+      const cloudPhotoRes = await Storage.uploadSinglePhotoToCloud(
+        'student',
+        targetStudentId,
+        resolvedPhotoUrl
+      );
+      if (cloudPhotoRes.supported && cloudPhotoRes.ok) {
+        resolvedPhotoUrl = cloudPhotoRes.url;
+      } else if (cloudPhotoRes.supported && !cloudPhotoRes.ok) {
+        setApprovalFeedback(null);
+        setStFormError(cloudPhotoRes.errorMessage || 'خطا در بارگذاری ابری تصویر پرسنلی.');
+        return;
+      } else {
+        photoCloudWarning =
+          ' (توجه: مسیر /api/photos/batch در server.js فعال نیست؛ عکس به صورت موقت ذخیره شد.)';
+      }
     }
 
     if (editingStudent) {
@@ -504,7 +528,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         city: stFormCity.trim(),
         postalAddress: stFormPostalAddress.trim(),
         birthDate: stFormBirthDate.trim() || '1382/01/01',
-        photoUrl: stFormPhotoUrl || undefined,
+        photoUrl: resolvedPhotoUrl,
         isProfileCompleted: stFormProfileCompleted,
       });
       setApprovalFeedback({ type: 'success', message: '⏳ در حال همگام‌سازی ویرایش در دیتابیس ابری...' });
@@ -512,12 +536,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setApprovalFeedback({
         type: syncRes.success ? 'success' : 'error',
         message: syncRes.success
-          ? res.message
+          ? `${res.message}${photoCloudWarning}`
           : `${res.message} (هشدار: همگام‌سازی با سرور ابری با خطا مواجه شد.)`,
       });
     } else {
       const newSt: Student = {
-        studentId: stFormStudentId.trim(),
+        studentId: targetStudentId,
         nationalId: stFormNationalId.trim(),
         fullName: stFormFullName.trim(),
         fieldOfStudy: stFormField.trim(),
@@ -535,7 +559,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         previousDorm: '',
         previousRoom: '',
         previousScore: 100,
-        photoUrl: stFormPhotoUrl || undefined,
+        photoUrl: resolvedPhotoUrl,
         isProfileCompleted: stFormProfileCompleted,
         assignmentStatus: 'none',
       };
@@ -547,12 +571,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         return;
       }
       await Storage.waitForPendingCloudSync();
-      setApprovalFeedback({ type: 'success', message: res.message });
+      setApprovalFeedback({ type: 'success', message: `${res.message}${photoCloudWarning}` });
     }
 
     setIsAddStudentModalOpen(false);
     onRefreshData();
-    setTimeout(() => setApprovalFeedback(null), 3500);
+    setTimeout(() => setApprovalFeedback(null), 4000);
   };
 
   const handleDeleteStudent = (st: Student) => {
@@ -928,108 +952,136 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onRefreshData();
   };
 
-  // پردازش پوشه عکس‌های دانشجویان بر اساس شماره دانشجویی
+  // پردازش پوشه عکس‌های دانشجویان بر اساس شماره دانشجویی و بارگذاری ابری
   const handleBatchPhotosUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    setBatchPhotoStatus({
-      type: 'loading',
-      text: `در حال خواندن و استخراج ${files.length} فایل عکس... لطفاً چند لحظه شکیبا باشید.`,
-    });
-
-    const photoMap: Record<string, string> = {};
     const imageFiles = Array.from(files).filter(
       (f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp)$/i.test(f.name)
     );
+    e.target.value = '';
 
     if (imageFiles.length === 0) {
       setBatchPhotoStatus({ type: 'error', text: 'هیچ فایل تصویری در پوشه انتخاب شده یافت نشد.' });
       return;
     }
 
-    const compressImageDataUrl = (rawUrl: string): Promise<string> => {
-      return new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-          const maxDim = 480;
-          let { width, height } = img;
-          if (width > maxDim || height > maxDim) {
-            if (width >= height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
-            }
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve(rawUrl);
-            return;
-          }
-          ctx.drawImage(img, 0, 0, width, height);
-          try {
-            resolve(canvas.toDataURL('image/jpeg', 0.78));
-          } catch {
-            resolve(rawUrl);
-          }
-        };
-        img.onerror = () => resolve(rawUrl);
-        img.src = rawUrl;
-      });
-    };
-
-    const promises = imageFiles.map((file) => {
-      return new Promise<void>((resolve) => {
-        const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
-        const match = baseName.match(/\d+/);
-        const studentId = match ? match[0] : baseName.trim();
-
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-          const dataUrl = event.target?.result as string;
-          if (dataUrl && studentId) {
-            photoMap[studentId] = await compressImageDataUrl(dataUrl);
-          }
-          resolve();
-        };
-        reader.onerror = () => resolve();
-        reader.readAsDataURL(file);
-      });
+    setBatchPhotoStatus({
+      type: 'loading',
+      text: `در حال بررسی تطبیق ${imageFiles.length} فایل عکس با فهرست دانشجویان...`,
     });
 
-    await Promise.all(promises);
+    const normalizeCode = (raw: string) =>
+      raw
+        .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+        .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+        .trim()
+        .toLowerCase();
 
-    const result = Storage.batchAssignStudentPhotos(photoMap);
-    const syncRes = await Storage.waitForPendingCloudSync();
-    onRefreshData();
+    const currentStudents = Storage.getStudents();
+    const unmatchedKeys: string[] = [];
+    const matchedEntries: Array<{ studentId: string; file: File }> = [];
 
-    if (result.matchedCount > 0) {
-      setBatchPhotoStatus({
-        type: syncRes.success ? 'success' : 'error',
-        text: syncRes.success
-          ? `تعداد ${result.matchedCount} عکس با موفقیت در پرونده دانشجویان و دیتابیس ابری ذخیره شد. (کل فایل‌های خوانده شده: ${result.totalProcessed})`
-          : `تعداد ${result.matchedCount} عکس در مرورگر ثبت شد، اما همگام‌سازی ابری با خطا مواجه شد (ممکن است حجم کل تصاویر زیاد باشد).`,
-        details:
-          result.unmatchedKeys.length > 0
-            ? result.unmatchedKeys.map(
-                (k) => `فایل با شناسه «${k}» در فهرست دانشجویان موجود یافت نشد.`
-              )
-            : undefined,
-      });
-    } else {
-      setBatchPhotoStatus({
-        type: 'error',
-        text: `هیچ عکسی با شماره دانشجویی تطابق پیدا نکرد. لطفاً نام فایل‌ها را بررسی فرمایید (مثال: 4021001.jpg).`,
-        details: result.unmatchedKeys.slice(0, 8),
-      });
+    for (const file of imageFiles) {
+      const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
+      const cleanBase = normalizeCode(baseName);
+      const digitMatch = cleanBase.match(/\d+/)?.[0] || cleanBase;
+
+      const found =
+        currentStudents.find((s) => normalizeCode(s.studentId) === cleanBase) ||
+        currentStudents.find((s) => normalizeCode(s.studentId) === digitMatch);
+
+      if (found) {
+        matchedEntries.push({ studentId: found.studentId.trim(), file });
+      } else {
+        unmatchedKeys.push(baseName.trim());
+      }
     }
 
-    e.target.value = '';
+    if (matchedEntries.length === 0) {
+      setBatchPhotoStatus({
+        type: 'error',
+        text: 'هیچ عکسی با شماره دانشجویی تطابق پیدا نکرد. لطفاً نام فایل‌ها را بررسی فرمایید (مثال: 4021001.jpg).',
+        details: unmatchedKeys.slice(0, 8),
+      });
+      return;
+    }
+
+    setBatchPhotoStatus({
+      type: 'loading',
+      text: `در حال بهینه‌سازی و بارگذاری ابری ${matchedEntries.length} تصویر منطبق‌شده... لطفاً شکیبا باشید.`,
+    });
+
+    const compressedMap: Record<string, string> = {};
+    const cloudItems: Array<{ userId: string; dataUrl: string }> = [];
+
+    for (const entry of matchedEntries) {
+      try {
+        const dataUrl = await compressAvatarImageFile(entry.file);
+        compressedMap[entry.studentId] = dataUrl;
+        cloudItems.push({ userId: entry.studentId, dataUrl });
+      } catch {
+        // فایل تصویر خراب نادیده گرفته می‌شود
+      }
+    }
+
+    const cloudRes = await Storage.uploadPhotosToCloud('student', cloudItems);
+
+    if (cloudRes.supported && cloudRes.ok) {
+      const urlPhotoMap: Record<string, string> = {};
+      matchedEntries.forEach((entry) => {
+        const u = cloudRes.urls[entry.studentId];
+        if (u) urlPhotoMap[entry.studentId] = u;
+      });
+
+      const result = Storage.batchAssignStudentPhotos(urlPhotoMap);
+      const syncRes = await Storage.waitForPendingCloudSync();
+      onRefreshData();
+
+      setBatchPhotoStatus({
+        type: result.saved && syncRes.success ? 'success' : 'error',
+        text: !result.saved
+          ? 'ذخیره‌سازی آدرس تصاویر در حافظه مرورگر با خطا مواجه شد.'
+          : syncRes.success
+          ? `تعداد ${result.matchedCount} عکس با موفقیت در دیتابیس ابری (MongoDB) ذخیره شد و در همه سیستم‌ها قابل مشاهده است.`
+          : 'عکس‌ها در سرور ذخیره شدند اما همگام‌سازی لیست دانشجویان با خطا مواجه شد.',
+        details:
+          unmatchedKeys.length > 0
+            ? unmatchedKeys.map((k) => `فایل با شناسه «${k}» در فهرست دانشجویان موجود یافت نشد.`)
+            : undefined,
+      });
+      return;
+    }
+
+    if (!cloudRes.supported) {
+      const result = Storage.batchAssignStudentPhotos(compressedMap);
+      await Storage.waitForPendingCloudSync();
+      onRefreshData();
+
+      setBatchPhotoStatus({
+        type: 'error',
+        text: !result.saved
+          ? 'مسیر ذخیره ابری عکس‌ها (/api/photos/batch) در سرور khabgah-api فعال نیست و حافظه مرورگر نیز ظرفیت ذخیره مستقیم تصاویر را ندارد. لطفاً فایل server.js بک‌اند را بروزرسانی کنید.'
+          : `هشدار: ${result.matchedCount} عکس فقط در مرورگر فعلی ثبت شد و برای مشاهده در سیستم‌های دیگر باید فایل جدید server.js (شامل /api/photos/batch) را در بک‌اند khabgah-api جایگزین کنید.`,
+        details:
+          unmatchedKeys.length > 0
+            ? unmatchedKeys.map((k) => `فایل با شناسه «${k}» در فهرست دانشجویان موجود یافت نشد.`)
+            : undefined,
+      });
+      return;
+    }
+
+    setBatchPhotoStatus({
+      type: 'error',
+      text:
+        cloudRes.errorMessage ||
+        'بارگذاری تصاویر در فضای ابری با خطا مواجه شد. لطفاً اتصال اینترنت و وضعیت سرور khabgah-api را بررسی کنید.',
+      details:
+        unmatchedKeys.length > 0
+          ? unmatchedKeys.map((k) => `فایل با شناسه «${k}» در فهرست دانشجویان موجود یافت نشد.`)
+          : undefined,
+    });
   };
 
   const handleSaveSettings = (e: React.FormEvent) => {

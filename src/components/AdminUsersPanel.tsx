@@ -9,7 +9,7 @@ import {
   WarehouseStaff,
   CounselorStaff,
 } from '../types';
-import { Storage } from '../utils/storage';
+import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import { ExcelImportTab } from './ExcelImportModal';
 import {
@@ -175,60 +175,13 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     setTimeout(() => setFeedback(null), 4000);
   };
 
-  // فشرده‌سازی و بهینه‌سازی عکس پرسنلی پیش از ذخیره در مرورگر و سرور ابری
-  const compressUserPhotoFile = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(new Error('خطا در خواندن فایل تصویر.'));
-      reader.onload = (ev) => {
-        const rawUrl = ev.target?.result as string;
-        if (!rawUrl) {
-          reject(new Error('فایل تصویر معتبر نیست.'));
-          return;
-        }
-        const img = new Image();
-        img.onerror = () => reject(new Error('فرمت فایل تصویر پشتیبانی نمی‌شود.'));
-        img.onload = () => {
-          const maxDim = 360;
-          let { width, height } = img;
-          if (width > maxDim || height > maxDim) {
-            if (width >= height) {
-              height = Math.max(1, Math.round((height * maxDim) / width));
-              width = maxDim;
-            } else {
-              width = Math.max(1, Math.round((width * maxDim) / height));
-              height = maxDim;
-            }
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve(rawUrl);
-            return;
-          }
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, width, height);
-          ctx.drawImage(img, 0, 0, width, height);
-          try {
-            resolve(canvas.toDataURL('image/jpeg', 0.78));
-          } catch {
-            resolve(rawUrl);
-          }
-        };
-        img.src = rawUrl;
-      };
-      reader.readAsDataURL(file);
-    });
-  };
-
-  // تغییر/افزودن فوری عکس یک کاربر (تکی) از ردیف جدول
+  // تغییر/افزودن فوری عکس یک کاربر (تکی) از ردیف جدول با ارسال به فضای ابری
   const handleQuickSinglePhotoUpload = async (
     role: 'student' | StaffRole,
     id: string,
     fullName: string,
-    e: React.ChangeEvent<HTMLInputElement>
+    e: React.ChangeEvent<HTMLInputElement>,
+    cloudPhotoKey?: string
   ) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -238,24 +191,55 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       return;
     }
     try {
-      const compressed = await compressUserPhotoFile(file);
+      const compressed = await compressAvatarImageFile(file);
+      const targetKey = (cloudPhotoKey || id).trim();
+      const cloudRes = await Storage.uploadSinglePhotoToCloud(role, targetKey, compressed);
+      const finalUrl = cloudRes.supported && cloudRes.ok ? cloudRes.url : compressed;
+
       if (role === 'student') {
-        Storage.updateStudentAdmin(id, { photoUrl: compressed });
-        showToast('success', `تصویر پرسنلی دانشجو «${fullName}» با موفقیت ثبت شد.`);
+        Storage.updateStudentAdmin(id, { photoUrl: finalUrl });
       } else if (role === 'supervisor') {
-        const res = Storage.updateSupervisor(id, { photoUrl: compressed });
-        showToast(res.success ? 'success' : 'error', res.success ? `عکس سرپرست «${fullName}» ثبت شد.` : res.message);
+        const res = Storage.updateSupervisor(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
       } else if (role === 'maintenance') {
-        const res = Storage.updateMaintenanceStaff(id, { photoUrl: compressed });
-        showToast(res.success ? 'success' : 'error', res.success ? `عکس کارشناس «${fullName}» ثبت شد.` : res.message);
+        const res = Storage.updateMaintenanceStaff(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
       } else if (role === 'warehouse') {
-        const res = Storage.updateWarehouseStaff(id, { photoUrl: compressed });
-        showToast(res.success ? 'success' : 'error', res.success ? `عکس کاربر انبار «${fullName}» ثبت شد.` : res.message);
+        const res = Storage.updateWarehouseStaff(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
       } else if (role === 'counselor') {
-        const res = Storage.updateCounselor(id, { photoUrl: compressed });
-        showToast(res.success ? 'success' : 'error', res.success ? `عکس مشاور «${fullName}» ثبت شد.` : res.message);
+        const res = Storage.updateCounselor(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
       }
+
+      const syncRes = await Storage.waitForPendingCloudSync();
       onRefreshData();
+
+      if (!cloudRes.supported) {
+        showToast(
+          'error',
+          `عکس «${fullName}» فعلاً فقط در این مرورگر ثبت شد؛ برای نمایش در سیستم‌های دیگر، فایل جدید server.js را در بک‌اند khabgah-api قرار دهید.`
+        );
+      } else if (!cloudRes.ok || !syncRes.success) {
+        showToast(
+          'error',
+          cloudRes.errorMessage || `عکس «${fullName}» در مرورگر ثبت شد اما همگام‌سازی ابری با خطا مواجه گردید.`
+        );
+      } else {
+        showToast('success', `تصویر «${fullName}» با موفقیت در فضای ابری ذخیره و همگام‌سازی شد.`);
+      }
     } catch (err) {
       showToast('error', err instanceof Error ? err.message : 'خطا در پردازش تصویر.');
     }
@@ -284,57 +268,151 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
 
     setBatchPhotoStatus({
       type: 'loading',
-      text: `در حال خواندن، بهینه‌سازی و تطبیق ${imageFiles.length} فایل تصویر... لطفاً شکیبا باشید.`,
+      text: `در حال خواندن و تطبیق ${imageFiles.length} فایل تصویر با لیست کاربران...`,
     });
 
-    const photoMap: Record<string, string> = {};
+    const normKey = (v: string) => toEnglishDigits(v).trim().toLowerCase();
+    const matchedEntries: Array<{
+      lookupKey: string;
+      cloudUserId: string;
+      file: File;
+    }> = [];
+    const unmatchedKeys: string[] = [];
+
     for (const file of imageFiles) {
       const dotIdx = file.name.lastIndexOf('.');
       const rawBase = dotIdx > 0 ? file.name.substring(0, dotIdx) : file.name;
       const cleanBase = toEnglishDigits(rawBase).trim();
       const key =
-        targetRole === 'student'
-          ? cleanBase.match(/\d+/)?.[0] || cleanBase
-          : cleanBase;
+        targetRole === 'student' ? cleanBase.match(/\d+/)?.[0] || cleanBase : cleanBase;
       if (!key) continue;
-      try {
-        photoMap[key] = await compressUserPhotoFile(file);
-      } catch {
-        // فایل خراب نادیده گرفته می‌شود
+
+      if (targetRole === 'student') {
+        const nk = normKey(key);
+        const found = students.find((s) => normKey(s.studentId) === nk);
+        if (found) {
+          matchedEntries.push({ lookupKey: found.studentId, cloudUserId: found.studentId, file });
+        } else {
+          unmatchedKeys.push(rawBase.trim());
+        }
+      } else {
+        const nk = normKey(key);
+        const pool: Array<{ id: string; username: string }> =
+          targetRole === 'supervisor'
+            ? supervisors
+            : targetRole === 'maintenance'
+            ? maintenanceStaff
+            : targetRole === 'warehouse'
+            ? warehouseStaff
+            : counselors;
+        const found = pool.find((u) => normKey(u.username) === nk || normKey(u.id) === nk);
+        if (found) {
+          matchedEntries.push({
+            lookupKey: found.username || found.id,
+            cloudUserId: (found.username || found.id).trim(),
+            file,
+          });
+        } else {
+          unmatchedKeys.push(rawBase.trim());
+        }
       }
     }
-
-    const result =
-      targetRole === 'student'
-        ? Storage.batchAssignStudentPhotos(photoMap)
-        : Storage.batchAssignStaffPhotos(targetRole, photoMap);
-
-    const syncRes = await Storage.waitForPendingCloudSync();
-    onRefreshData();
 
     const identifierHint =
       targetRole === 'student' ? 'شماره دانشجویی' : 'نام/کد کاربری';
 
-    if (result.matchedCount > 0 && result.saved) {
-      setBatchPhotoStatus({
-        type: syncRes.success ? 'success' : 'error',
-        text: syncRes.success
-          ? `تعداد ${result.matchedCount} عکس از ${result.totalProcessed} تصویر بر اساس ${identifierHint} با موفقیت متصل و در دیتابیس ابری ذخیره شد.`
-          : `تعداد ${result.matchedCount} عکس در مرورگر ثبت شد، اما همگام‌سازی ابری با خطا مواجه شد (ممکن است مجموع حجم تصاویر زیاد باشد).`,
-        unmatchedKeys: result.unmatchedKeys.slice(0, 12),
-      });
-    } else if (result.matchedCount > 0 && !result.saved) {
+    if (matchedEntries.length === 0) {
       setBatchPhotoStatus({
         type: 'error',
-        text: 'حافظه ذخیره‌سازی مرورگر برای ذخیره این تعداد تصویر کافی نیست. لطفاً تصاویر را در دسته‌های کوچک‌تر بارگذاری کنید.',
+        text: `هیچ‌یک از ${imageFiles.length} تصویر با ${identifierHint} کاربران موجود مطابقت نداشت.`,
+        unmatchedKeys: unmatchedKeys.slice(0, 12),
       });
-    } else {
-      setBatchPhotoStatus({
-        type: 'error',
-        text: `هیچ‌یک از ${result.totalProcessed} تصویر با ${identifierHint} کاربران موجود مطابقت نداشت.`,
-        unmatchedKeys: result.unmatchedKeys.slice(0, 12),
-      });
+      return;
     }
+
+    setBatchPhotoStatus({
+      type: 'loading',
+      text: `در حال بهینه‌سازی و بارگذاری ابری ${matchedEntries.length} تصویر منطبق‌شده... لطفاً شکیبا باشید.`,
+    });
+
+    const compressedMap: Record<string, string> = {};
+    const cloudItems: Array<{ userId: string; dataUrl: string }> = [];
+    for (const entry of matchedEntries) {
+      try {
+        const dataUrl = await compressAvatarImageFile(entry.file);
+        compressedMap[entry.lookupKey] = dataUrl;
+        cloudItems.push({ userId: entry.cloudUserId, dataUrl });
+      } catch {
+        // فایل تصویر خراب نادیده گرفته می‌شود
+      }
+    }
+
+    const cloudRes = await Storage.uploadPhotosToCloud(targetRole, cloudItems);
+
+    if (cloudRes.supported && cloudRes.ok) {
+      const urlPhotoMap: Record<string, string> = {};
+      matchedEntries.forEach((entry) => {
+        const u = cloudRes.urls[entry.cloudUserId];
+        if (u) urlPhotoMap[entry.lookupKey] = u;
+      });
+
+      const result =
+        targetRole === 'student'
+          ? Storage.batchAssignStudentPhotos(urlPhotoMap)
+          : Storage.batchAssignStaffPhotos(targetRole, urlPhotoMap);
+
+      const syncRes = await Storage.waitForPendingCloudSync();
+      onRefreshData();
+
+      if (!result.saved) {
+        setBatchPhotoStatus({
+          type: 'error',
+          text: 'ذخیره‌سازی آدرس تصاویر در حافظه مرورگر با خطا مواجه شد.',
+        });
+      } else {
+        setBatchPhotoStatus({
+          type: syncRes.success ? 'success' : 'error',
+          text: syncRes.success
+            ? `تعداد ${result.matchedCount} عکس با موفقیت در دیتابیس ابری (MongoDB) ذخیره شد و در همه سیستم‌ها قابل مشاهده است.`
+            : `عکس‌ها در سرور ذخیره شدند اما همگام‌سازی لیست با خطا مواجه شد.`,
+          unmatchedKeys: unmatchedKeys.slice(0, 12),
+        });
+      }
+      return;
+    }
+
+    if (!cloudRes.supported) {
+      // سرور بک‌اند هنوز مسیر /api/photos/batch را ندارد: تلاش برای ذخیره موقت محلی با هشدار صریح
+      const result =
+        targetRole === 'student'
+          ? Storage.batchAssignStudentPhotos(compressedMap)
+          : Storage.batchAssignStaffPhotos(targetRole, compressedMap);
+      const syncRes = await Storage.waitForPendingCloudSync();
+      onRefreshData();
+
+      if (!result.saved) {
+        setBatchPhotoStatus({
+          type: 'error',
+          text: 'مسیر ذخیره ابری عکس‌ها (/api/photos/batch) در سرور khabgah-api فعال نیست و حافظه مرورگر نیز ظرفیت ذخیره مستقیم این تصاویر را ندارد. لطفاً فایل server.js بک‌اند را بروزرسانی کنید.',
+          unmatchedKeys: unmatchedKeys.slice(0, 12),
+        });
+      } else {
+        setBatchPhotoStatus({
+          type: syncRes.success ? 'error' : 'error',
+          text: `هشدار: ${result.matchedCount} عکس فقط در مرورگر فعلی ثبت شد و برای مشاهده در سیستم‌های دیگر باید فایل جدید server.js (شامل /api/photos/batch) را در بک‌اند khabgah-api جایگزین کنید.`,
+          unmatchedKeys: unmatchedKeys.slice(0, 12),
+        });
+      }
+      return;
+    }
+
+    setBatchPhotoStatus({
+      type: 'error',
+      text:
+        cloudRes.errorMessage ||
+        'بارگذاری تصاویر در فضای ابری با خطا مواجه شد. لطفاً اتصال اینترنت و وضعیت سرور khabgah-api را بررسی کنید.',
+      unmatchedKeys: unmatchedKeys.slice(0, 12),
+    });
   };
 
   const toggleRevealPassword = (key: string) => {
@@ -618,7 +696,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       return;
     }
     try {
-      const compressed = await compressUserPhotoFile(file);
+      const compressed = await compressAvatarImageFile(file);
       setFormPhotoUrl(compressed);
       setFormError('');
     } catch (err) {
@@ -626,7 +704,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     }
   };
 
-  const handleSaveStaffModal = (e: React.FormEvent) => {
+  const handleSaveStaffModal = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
 
@@ -640,6 +718,18 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       return;
     }
 
+    let resolvedPhotoUrl = formPhotoUrl;
+    if (resolvedPhotoUrl && resolvedPhotoUrl.startsWith('data:image/')) {
+      const cloudRes = await Storage.uploadSinglePhotoToCloud(
+        staffModalRole,
+        cleanUser,
+        resolvedPhotoUrl
+      );
+      if (cloudRes.supported && cloudRes.ok) {
+        resolvedPhotoUrl = cloudRes.url;
+      }
+    }
+
     if (staffModalRole === 'supervisor') {
       const dormIds = formDormIds.length > 0 ? formDormIds : dorms[0]?.id ? [dorms[0].id] : ['all'];
       if (editingStaffId) {
@@ -648,7 +738,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           username: cleanUser,
           password: cleanPass,
           phone: cleanPhone,
-          photoUrl: formPhotoUrl || undefined,
+          photoUrl: resolvedPhotoUrl || undefined,
           assignedDormIds: dormIds,
           assignedDormId: dormIds[0] || 'all',
         });
@@ -669,7 +759,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           username: cleanUser,
           password: cleanPass,
           phone: cleanPhone,
-          photoUrl: formPhotoUrl || undefined,
+          photoUrl: resolvedPhotoUrl || undefined,
           assignedDormId: dormIds[0] || 'all',
           assignedDormIds: dormIds,
           role: 'supervisor',
@@ -687,7 +777,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
-          photoUrl: formPhotoUrl || undefined,
+          photoUrl: resolvedPhotoUrl || undefined,
           specialty: spec,
           coveredDormIds: dormIds,
           assignedDormIds: dormIds,
@@ -707,7 +797,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
-          photoUrl: formPhotoUrl || undefined,
+          photoUrl: resolvedPhotoUrl || undefined,
           specialty: spec,
           coveredDormIds: dormIds,
           assignedDormIds: dormIds,
@@ -730,7 +820,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
-          photoUrl: formPhotoUrl || undefined,
+          photoUrl: resolvedPhotoUrl || undefined,
           status: formActive ? 'active' : 'inactive',
           isActive: formActive,
           notes: formNotes.trim() || undefined,
@@ -747,7 +837,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
-          photoUrl: formPhotoUrl || undefined,
+          photoUrl: resolvedPhotoUrl || undefined,
           role: 'warehouse',
           status: formActive ? 'active' : 'inactive',
           isActive: formActive,
@@ -769,7 +859,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
-          photoUrl: formPhotoUrl || undefined,
+          photoUrl: resolvedPhotoUrl || undefined,
           specialty: spec,
           officeLocation: formOfficeLocation.trim() || 'مرکز مشاوره پردیس',
           assignedDormIds: dormIds,
@@ -794,7 +884,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           password: cleanPass,
           phone: cleanPhone,
           mobile: cleanPhone,
-          photoUrl: formPhotoUrl || undefined,
+          photoUrl: resolvedPhotoUrl || undefined,
           specialty: spec,
           officeLocation: formOfficeLocation.trim() || 'مرکز مشاوره پردیس',
           assignedDormIds: dormIds,
@@ -807,6 +897,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       }
     }
 
+    await Storage.waitForPendingCloudSync();
     setStaffModalOpen(false);
     onRefreshData();
   };
@@ -1843,7 +1934,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                                   type="file"
                                   accept="image/*"
                                   onChange={(e) =>
-                                    handleQuickSinglePhotoUpload('supervisor', sup.id, sup.fullName, e)
+                                    handleQuickSinglePhotoUpload('supervisor', sup.id, sup.fullName, e, sup.username)
                                   }
                                   className="hidden"
                                 />
@@ -2003,7 +2094,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                                   type="file"
                                   accept="image/*"
                                   onChange={(e) =>
-                                    handleQuickSinglePhotoUpload('maintenance', tech.id, tech.fullName, e)
+                                    handleQuickSinglePhotoUpload('maintenance', tech.id, tech.fullName, e, tech.username)
                                   }
                                   className="hidden"
                                 />
@@ -2140,7 +2231,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                                   type="file"
                                   accept="image/*"
                                   onChange={(e) =>
-                                    handleQuickSinglePhotoUpload('warehouse', wh.id, wh.fullName, e)
+                                    handleQuickSinglePhotoUpload('warehouse', wh.id, wh.fullName, e, wh.username)
                                   }
                                   className="hidden"
                                 />
@@ -2305,7 +2396,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                                   type="file"
                                   accept="image/*"
                                   onChange={(e) =>
-                                    handleQuickSinglePhotoUpload('counselor', cns.id, cns.fullName, e)
+                                    handleQuickSinglePhotoUpload('counselor', cns.id, cns.fullName, e, cns.username)
                                   }
                                   className="hidden"
                                 />

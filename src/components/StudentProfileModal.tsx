@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { Student } from '../types';
-import { Storage } from '../utils/storage';
+import { Storage, compressAvatarImageFile } from '../utils/storage';
 import {
   User,
   Upload,
@@ -60,6 +60,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   const [newCustomVal, setNewCustomVal] = useState('');
   const [photoPreview, setPhotoPreview] = useState(student.photoUrl || '');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [validationError, setValidationError] = useState('');
 
   useEffect(() => {
@@ -79,21 +80,22 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isReadOnly) return;
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 3 * 1024 * 1024) {
-        setValidationError('حجم تصویر نباید بیشتر از ۳ مگابایت باشد.');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
-        setPhotoPreview(base64);
-        setFormData((prev) => ({ ...prev, photoUrl: base64 }));
-      };
-      reader.readAsDataURL(file);
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setValidationError('حجم تصویر نباید بیشتر از ۵ مگابایت باشد.');
+      return;
+    }
+    try {
+      const compressed = await compressAvatarImageFile(file);
+      setPhotoPreview(compressed);
+      setFormData((prev) => ({ ...prev, photoUrl: compressed }));
+      setValidationError('');
+    } catch (err) {
+      setValidationError(err instanceof Error ? err.message : 'خطا در پردازش تصویر انتخاب شده.');
     }
   };
 
@@ -120,8 +122,9 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
     setValidationError('');
     if (isReadOnly) {
       setValidationError('دسترسی ویرایش ثانویه اطلاعات و تغییر عکس توسط مدیر سامانه بسته شده است.');
@@ -170,41 +173,62 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
       return;
     }
 
-    const updatedCustomFields = {
-      ...(formData.customFields || {}),
-      'گروه خونی': bloodGroup || 'ثبت نشده',
-      'بیماری خاص': specialCondition || 'ندارد',
-    };
-
-    const updated: Student = {
-      ...formData,
-      isProfileCompleted: true,
-      customFields: updatedCustomFields,
-      photoUrl: photoPreview || formData.photoUrl,
-    };
-
-    const result = Storage.updateStudentProfile(student.studentId, updated);
-    if (!result.success) {
-      setValidationError(result.message);
-      return;
-    }
-    onProfileUpdated(updated);
-    setSaveSuccess(true);
-
+    setIsSaving(true);
     try {
-      confetti({
-        particleCount: 50,
-        spread: 60,
-        origin: { y: 0.7 },
-      });
-    } catch {
-      // ignore
-    }
+      let resolvedPhotoUrl = photoPreview || formData.photoUrl;
+      if (resolvedPhotoUrl && resolvedPhotoUrl.startsWith('data:image/')) {
+        const cloudPhotoRes = await Storage.uploadSinglePhotoToCloud(
+          'student',
+          student.studentId,
+          resolvedPhotoUrl
+        );
+        if (cloudPhotoRes.supported && cloudPhotoRes.ok) {
+          resolvedPhotoUrl = cloudPhotoRes.url;
+        } else if (cloudPhotoRes.supported && !cloudPhotoRes.ok) {
+          setValidationError(cloudPhotoRes.errorMessage || 'خطا در بارگذاری تصویر در فضای ابری.');
+          return;
+        }
+      }
 
-    setTimeout(() => {
-      setSaveSuccess(false);
-      onClose();
-    }, 1200);
+      const updatedCustomFields = {
+        ...(formData.customFields || {}),
+        'گروه خونی': bloodGroup || 'ثبت نشده',
+        'بیماری خاص': specialCondition || 'ندارد',
+      };
+
+      const updated: Student = {
+        ...formData,
+        isProfileCompleted: true,
+        customFields: updatedCustomFields,
+        photoUrl: resolvedPhotoUrl,
+      };
+
+      const result = Storage.updateStudentProfile(student.studentId, updated);
+      if (!result.success) {
+        setValidationError(result.message);
+        return;
+      }
+      await Storage.waitForPendingCloudSync();
+      onProfileUpdated(updated);
+      setSaveSuccess(true);
+
+      try {
+        confetti({
+          particleCount: 50,
+          spread: 60,
+          origin: { y: 0.7 },
+        });
+      } catch {
+        // ignore
+      }
+
+      setTimeout(() => {
+        setSaveSuccess(false);
+        onClose();
+      }, 1200);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -731,10 +755,17 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
             {!isReadOnly && (
               <button
                 type="submit"
-                className="flex-1 py-3.5 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-teal-600/25 transition cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.01]"
+                disabled={isSaving}
+                className="flex-1 py-3.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white rounded-2xl font-black text-sm shadow-xl shadow-teal-600/25 transition cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.01]"
               >
                 <Save className="w-4 h-4" />
-                <span>{isFirstLoginForce ? 'تکمیل اطلاعات و فعال‌سازی حساب کاربری' : 'ذخیره تغییرات پرونده'}</span>
+                <span>
+                  {isSaving
+                    ? 'در حال ذخیره و همگام‌سازی ابری...'
+                    : isFirstLoginForce
+                    ? 'تکمیل اطلاعات و فعال‌سازی حساب کاربری'
+                    : 'ذخیره تغییرات پرونده'}
+                </span>
               </button>
             )}
             {!isFirstLoginForce && (

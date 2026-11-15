@@ -198,6 +198,56 @@ function normalizeLookupKey(raw: string | number | null | undefined): string {
     .toLowerCase();
 }
 
+export function compressAvatarImageFile(
+  file: File,
+  maxDim = 360,
+  quality = 0.78
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('خطا در خواندن فایل تصویر.'));
+    reader.onload = (ev) => {
+      const rawUrl = ev.target?.result as string;
+      if (!rawUrl) {
+        reject(new Error('فایل تصویر معتبر نیست.'));
+        return;
+      }
+      const img = new Image();
+      img.onerror = () => reject(new Error('فرمت فایل تصویر پشتیبانی نمی‌شود.'));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width >= height) {
+            height = Math.max(1, Math.round((height * maxDim) / width));
+            width = maxDim;
+          } else {
+            width = Math.max(1, Math.round((width * maxDim) / height));
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(rawUrl);
+          return;
+        }
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        try {
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch {
+          resolve(rawUrl);
+        }
+      };
+      img.src = rawUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function normalizeStudentRecord(raw: Record<string, unknown>): Student {
   const { _id, __v, createdAt, updatedAt, ...rest } = raw;
   void _id;
@@ -2934,6 +2984,108 @@ export const Storage = {
     }
   },
 
+  uploadPhotosToCloud: async (
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor',
+    items: Array<{ userId: string; dataUrl: string }>
+  ): Promise<{
+    supported: boolean;
+    ok: boolean;
+    urls: Record<string, string>;
+    errorMessage?: string;
+  }> => {
+    const validItems = items.filter((it) => it.userId && it.dataUrl);
+    if (validItems.length === 0) {
+      return { supported: true, ok: true, urls: {} };
+    }
+
+    const urls: Record<string, string> = {};
+    const chunkSize = 20;
+
+    for (let i = 0; i < validItems.length; i += chunkSize) {
+      const chunk = validItems.slice(i, i + chunkSize).map((it) => ({
+        role,
+        userId: it.userId.trim(),
+        dataUrl: it.dataUrl,
+      }));
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      try {
+        const res = await fetch(`${API_BASE_URL}/photos/batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: chunk }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (res.status === 404 || res.status === 405) {
+          return {
+            supported: false,
+            ok: false,
+            urls: {},
+            errorMessage:
+              'مسیر ذخیره ابری عکس‌ها (/api/photos/batch) در بک‌اند khabgah-api فعال نیست.',
+          };
+        }
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          return {
+            supported: true,
+            ok: false,
+            urls,
+            errorMessage: `خطای سرور ابری (${res.status}): ${errText || 'خطا در ذخیره عکس‌ها'}`,
+          };
+        }
+
+        const data = (await res.json().catch(() => ({}))) as {
+          urls?: Record<string, string>;
+        };
+        if (data?.urls && typeof data.urls === 'object') {
+          Object.assign(urls, data.urls);
+        } else {
+          const ts = Date.now();
+          chunk.forEach((c) => {
+            urls[c.userId] = `${API_BASE_URL}/photo/${encodeURIComponent(role)}/${encodeURIComponent(
+              c.userId
+            )}?v=${ts}`;
+          });
+        }
+      } catch (err) {
+        clearTimeout(timeoutId);
+        return {
+          supported: true,
+          ok: false,
+          urls,
+          errorMessage:
+            err instanceof Error && err.name === 'AbortError'
+              ? 'زمان اتصال به سرور ابری برای بارگذاری عکس‌ها به پایان رسید.'
+              : 'عدم امکان اتصال به سرور ابری (khabgah-api) هنگام بارگذاری عکس‌ها.',
+        };
+      }
+    }
+
+    return { supported: true, ok: true, urls };
+  },
+
+  uploadSinglePhotoToCloud: async (
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor',
+    userId: string,
+    dataUrl: string
+  ): Promise<{ supported: boolean; ok: boolean; url: string; errorMessage?: string }> => {
+    if (!dataUrl || !dataUrl.startsWith('data:image/')) {
+      return { supported: true, ok: true, url: dataUrl };
+    }
+    const res = await Storage.uploadPhotosToCloud(role, [{ userId, dataUrl }]);
+    return {
+      supported: res.supported,
+      ok: res.ok,
+      url: res.urls[userId.trim()] || dataUrl,
+      errorMessage: res.errorMessage,
+    };
+  },
+
   waitForPendingCloudSync: async (): Promise<{ success: boolean; failedKeys: string[] }> => {
     const entries = Object.entries(pendingCloudRequests).filter(
       (entry): entry is [string, Promise<boolean>] => Boolean(entry[1])
@@ -2977,7 +3129,7 @@ export const Storage = {
 
     activeSyncPromise = (async () => {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
 
       try {
         const [syncResult, studentsResult] = await Promise.allSettled([
