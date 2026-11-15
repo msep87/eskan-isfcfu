@@ -43,6 +43,7 @@ import { VisualBedPicker } from './VisualBedPicker';
 import { RoomWarningModal } from './RoomWarningModal';
 import { DormIdCardModal } from './DormIdCardModal';
 import { StudentEvaluationModal } from './StudentEvaluationModal';
+import { RoomRosterPrintModal } from './RoomRosterPrintModal';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { AdminUsersPanel, UserCategoryKey } from './AdminUsersPanel';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
@@ -250,6 +251,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [cartableSubTab, setCartableSubTab] = useState<'manager' | 'visual_picker' | 'warnings' | 'structure'>('manager');
   const [selectedCartableDormId, setSelectedCartableDormId] = useState<string>('all');
   const [isAdminWarningModalOpen, setIsAdminWarningModalOpen] = useState(false);
+  const [isAdminRoomPrintModalOpen, setIsAdminRoomPrintModalOpen] = useState(false);
 
   useEffect(() => {
     setActivityLogs(Storage.getActivityLogs());
@@ -2052,7 +2054,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               {/* اکشن‌های سریع سرپرستی برای مدیر */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAdminRoomPrintModalOpen(true)}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/25 cursor-pointer"
+                  title="چاپ لیست تصویری دانشجویان اتاق‌ها در قطع A4 یا A5 با قابلیت انتخاب فیلدها و اتاق‌ها"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>چاپ لیست دانشجویان اتاق‌ها (A4 / A5)</span>
+                </button>
                 <button
                   onClick={() => setIsAdminWarningModalOpen(true)}
                   className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-rose-600/20 cursor-pointer"
@@ -2133,6 +2144,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               rooms={rooms}
               beds={beds}
               students={students}
+              settings={settings}
               onDataChanged={onRefreshData}
               supervisorDormId={selectedCartableDormId}
               actorName="مدیریت کل امور سراها"
@@ -7067,6 +7079,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* مدال جامع چاپ لیست دانشجویان اتاق‌ها برای مدیر */}
+      <RoomRosterPrintModal
+        isOpen={isAdminRoomPrintModalOpen}
+        onClose={() => setIsAdminRoomPrintModalOpen(false)}
+        dorms={dorms}
+        rooms={rooms}
+        beds={beds}
+        students={students}
+        settings={settings}
+        initialDormId={selectedCartableDormId}
+        actorTitle="مدیریت کل امور سراهای دانشجویی"
+      />
 
     </div>
   );

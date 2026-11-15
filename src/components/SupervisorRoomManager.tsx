@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Dormitory, Room, Bed, Student } from '../types';
+import { AppSettings, Dormitory, Room, Bed, Student } from '../types';
 import { Storage } from '../utils/storage';
 import {
   Users,
@@ -21,14 +21,17 @@ import {
   Edit3,
   Save,
   Crown,
+  Printer,
 } from 'lucide-react';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
+import { RoomRosterPrintModal } from './RoomRosterPrintModal';
 
 interface SupervisorRoomManagerProps {
   dorms: Dormitory[];
   rooms: Room[];
   beds: Bed[];
   students: Student[];
+  settings?: AppSettings;
   onDataChanged: () => void;
   supervisorDormId?: string;
   actorName?: string;
@@ -41,6 +44,7 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
   rooms,
   beds,
   students,
+  settings,
   onDataChanged,
   supervisorDormId,
   actorName = 'سرپرست / مدیر سرا',
@@ -93,6 +97,12 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
   const [editRoomNumberInput, setEditRoomNumberInput] = useState('');
   const [editRoomFloorInput, setEditRoomFloorInput] = useState(1);
   const [editRoomError, setEditRoomError] = useState<string | null>(null);
+
+  // مدال چاپ لیست ساکنین اتاق (A4 / A5)
+  const [printModalConfig, setPrintModalConfig] = useState<{
+    isOpen: boolean;
+    roomIds?: string[];
+  }>({ isOpen: false });
 
   const currentDorm = dorms.find((d) => d.id === selectedDormId) || dorms[0];
   const dormRooms = rooms.filter((r) => r.dormId === selectedDormId);
@@ -271,7 +281,16 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
             ))}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setPrintModalConfig({ isOpen: true })}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="چاپ لیست ساکنین یک، چند یا همه اتاق‌ها در قطع A4 یا A5"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>چاپ لیست اتاق‌ها (A4 / A5)</span>
+            </button>
             <button
               onClick={() => setIsCreateRoomModalOpen(true)}
               className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
@@ -363,6 +382,15 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                       <span>نماینده پیش‌فرض (نفر اول): {effectiveRepStudent?.fullName}</span>
                     </span>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => setPrintModalConfig({ isOpen: true, roomIds: [room.id] })}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                    title="چاپ لیست ساکنین این اتاق (A4 / A5)"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>چاپ لیست اتاق</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -997,6 +1025,20 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
           />
         );
       })()}
+
+      {/* مدال چاپ لیست ساکنین اتاق‌ها (A4 / A5) */}
+      <RoomRosterPrintModal
+        isOpen={printModalConfig.isOpen}
+        onClose={() => setPrintModalConfig({ isOpen: false })}
+        dorms={dorms}
+        rooms={rooms}
+        beds={beds}
+        students={students}
+        settings={settings}
+        initialDormId={selectedDormId || supervisorDormId || 'all'}
+        initialRoomIds={printModalConfig.roomIds}
+        actorTitle={actorName}
+      />
 
     </div>
   );

@@ -24,8 +24,12 @@ import {
   parseStudentDebtExcel,
   toEnglishDigits,
 } from '../utils/excelUtils';
+import { compareStudents, normSearchText, StudentSortKey } from '../utils/studentSearchSort';
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   BookOpen,
   Building2,
   Calculator,
@@ -35,13 +39,13 @@ import {
   Download,
   Edit3,
   FileSpreadsheet,
-  Filter,
   Landmark,
   MessageSquare,
   RotateCcw,
   Save,
   Search,
   Send,
+  SlidersHorizontal,
   UploadCloud,
   Users,
   Wallet,
@@ -74,12 +78,22 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  // جستجو و فیلترهای کارتابل مالی
+  // جستجو و فیلترهای پیشرفته کارتابل مالی
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [nameFilter, setNameFilter] = useState('');
+  const [studentIdFilter, setStudentIdFilter] = useState('');
+  const [nationalIdFilter, setNationalIdFilter] = useState('');
+  const [locationFilter, setLocationFilter] = useState('');
+  const [fieldFilter, setFieldFilter] = useState<string>('all');
+  const [entryFilter, setEntryFilter] = useState<string>('all');
+  const [roomFilter, setRoomFilter] = useState<string>('');
   const [residenceFilter, setResidenceFilter] = useState<'dorm_only' | 'all' | 'commuter'>('dorm_only');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<'all' | PaymentMethod>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | StudentFinancialStatus>('all');
   const [dormFilter, setDormFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<StudentSortKey>('default');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
 
   // پیام بازخورد
@@ -185,8 +199,29 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     };
   }, [enrichedRows]);
 
+  const uniqueFields = useMemo(() => {
+    const set = new Set<string>();
+    students.forEach((s) => {
+      if (s.fieldOfStudy?.trim()) set.add(s.fieldOfStudy.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'fa'));
+  }, [students]);
+
+  const uniqueEntryTerms = useMemo(() => {
+    const set = new Set<string>();
+    students.forEach((s) => {
+      if (s.entryTerm?.trim()) set.add(s.entryTerm.trim());
+    });
+    return Array.from(set).sort();
+  }, [students]);
+
   const filteredRows = useMemo(() => {
-    const q = toEnglishDigits(searchQuery.trim().toLowerCase());
+    const q = normSearchText(searchQuery);
+    const nameQ = normSearchText(nameFilter);
+    const sidQ = normSearchText(studentIdFilter);
+    const nidQ = normSearchText(nationalIdFilter);
+    const locQ = normSearchText(locationFilter);
+    const roomQ = normSearchText(roomFilter);
 
     return enrichedRows.filter(({ student: st, dormName, roomNumber, fin }) => {
       if (residenceFilter === 'dorm_only' && !fin.isDormResident) return false;
@@ -194,6 +229,34 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
 
       if (dormFilter !== 'all') {
         if (st.assignedDormId !== dormFilter) return false;
+      }
+
+      if (fieldFilter !== 'all' && (st.fieldOfStudy || '').trim() !== fieldFilter) {
+        return false;
+      }
+
+      if (entryFilter !== 'all' && (st.entryTerm || '').trim() !== entryFilter) {
+        return false;
+      }
+
+      if (roomQ && !normSearchText(`${dormName} ${roomNumber}`).includes(roomQ)) {
+        return false;
+      }
+
+      if (nameQ && !normSearchText(`${st.fullName} ${st.fatherName || ''}`).includes(nameQ)) {
+        return false;
+      }
+
+      if (sidQ && !normSearchText(st.studentId).includes(sidQ)) {
+        return false;
+      }
+
+      if (nidQ && !normSearchText(st.nationalId).includes(nidQ)) {
+        return false;
+      }
+
+      if (locQ && !normSearchText(`${st.province || ''} ${st.city || ''}`).includes(locQ)) {
+        return false;
       }
 
       if (paymentMethodFilter !== 'all' && fin.paymentMethod !== paymentMethodFilter) {
@@ -205,7 +268,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
       }
 
       if (q) {
-        const hay = toEnglishDigits(
+        const hay = normSearchText(
           [
             st.studentId,
             st.nationalId,
@@ -213,33 +276,108 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
             st.fatherName,
             st.fieldOfStudy,
             st.entryTerm,
+            st.province,
+            st.city,
             dormName,
             roomNumber,
           ]
             .filter(Boolean)
             .join(' ')
-            .toLowerCase()
         );
         if (!hay.includes(q)) return false;
       }
 
       return true;
     });
-  }, [enrichedRows, residenceFilter, dormFilter, paymentMethodFilter, statusFilter, searchQuery]);
+  }, [
+    enrichedRows,
+    residenceFilter,
+    dormFilter,
+    fieldFilter,
+    entryFilter,
+    roomFilter,
+    nameFilter,
+    studentIdFilter,
+    nationalIdFilter,
+    locationFilter,
+    paymentMethodFilter,
+    statusFilter,
+    searchQuery,
+  ]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const sortedRows = useMemo(() => {
+    if (sortBy === 'default') return filteredRows;
+    const list = [...filteredRows];
+    list.sort((a, b) =>
+      compareStudents(
+        a.student,
+        b.student,
+        sortBy,
+        sortDir,
+        rooms,
+        dorms,
+        (id) => financeMap.get(id)?.debtAmount ?? 0
+      )
+    );
+    return list;
+  }, [filteredRows, sortBy, sortDir, rooms, dorms, financeMap]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const paginatedRows = useMemo(() => {
     const start = (safePage - 1) * PAGE_SIZE;
-    return filteredRows.slice(start, start + PAGE_SIZE);
-  }, [filteredRows, safePage]);
+    return sortedRows.slice(start, start + PAGE_SIZE);
+  }, [sortedRows, safePage]);
+
+  const toggleSort = (key: Exclude<StudentSortKey, 'default'>) => {
+    if (sortBy === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(key);
+      setSortDir('asc');
+    }
+    setCurrentPage(1);
+  };
+
+  const renderSortIcon = (key: Exclude<StudentSortKey, 'default'>) => {
+    if (sortBy !== key) return <ArrowUpDown className="w-3.5 h-3.5 opacity-45 shrink-0" />;
+    return sortDir === 'asc' ? (
+      <ArrowUp className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+    ) : (
+      <ArrowDown className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+    );
+  };
+
+  const hasActiveFilters =
+    Boolean(searchQuery.trim()) ||
+    Boolean(nameFilter.trim()) ||
+    Boolean(studentIdFilter.trim()) ||
+    Boolean(nationalIdFilter.trim()) ||
+    Boolean(locationFilter.trim()) ||
+    fieldFilter !== 'all' ||
+    entryFilter !== 'all' ||
+    Boolean(roomFilter.trim()) ||
+    residenceFilter !== 'dorm_only' ||
+    paymentMethodFilter !== 'all' ||
+    statusFilter !== 'all' ||
+    dormFilter !== 'all' ||
+    sortBy !== 'default';
 
   const resetFilters = () => {
     setSearchQuery('');
+    setNameFilter('');
+    setStudentIdFilter('');
+    setNationalIdFilter('');
+    setLocationFilter('');
+    setFieldFilter('all');
+    setEntryFilter('all');
+    setRoomFilter('');
     setResidenceFilter('dorm_only');
     setPaymentMethodFilter('all');
     setStatusFilter('all');
     setDormFilter('all');
+    setSortBy('default');
+    setSortDir('asc');
     setCurrentPage(1);
   };
 
@@ -682,88 +820,420 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
           </button>
         </div>
 
-        {/* کادر جستجو و فیلترهای سریع */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
-          <div className="relative lg:col-span-2">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
-              }}
-              placeholder="جستجو بر اساس کد دانشجویی، کد ملی، نام، نام پدر، رشته یا اتاق..."
-              className="w-full pr-9 pl-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-teal-500"
-            />
-            <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
-          </div>
+        {/* کادر جستجوی فوری و فیلترهای پیشرفته و مرتب‌سازی */}
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder="جستجوی فوری بر اساس نام و نام خانوادگی، کد ملی، کد دانشجویی، شهر و استان، رشته، ورودی یا اتاق..."
+                className="w-full pr-9 pl-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-teal-500"
+              />
+              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+            </div>
 
-          <div className="flex items-center gap-1.5">
-            <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <select
-              value={dormFilter}
-              onChange={(e) => {
-                setDormFilter(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
+            <button
+              type="button"
+              onClick={() => setShowAdvancedFilters((v) => !v)}
+              className={`px-3.5 py-2.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                showAdvancedFilters
+                  ? 'bg-teal-600 text-white border-teal-600'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600'
+              }`}
             >
-              <option value="all">همه سراها</option>
-              {dorms.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+              <SlidersHorizontal className="w-4 h-4" />
+              <span>فیلترهای پیشرفته</span>
+            </button>
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="px-3.5 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-bold hover:bg-rose-100 transition flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>پاک کردن فیلترها</span>
+              </button>
+            )}
           </div>
 
-          <select
-            value={paymentMethodFilter}
-            onChange={(e) => {
-              setPaymentMethodFilter(e.target.value as 'all' | PaymentMethod);
-              setCurrentPage(1);
-            }}
-            className="px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
-          >
-            <option value="all">همه روش‌های پرداخت</option>
-            <option value="auto_payroll">درون استانی (کسر خودکار)</option>
-            <option value="in_person_accounting">خارج از استان (مراجعه به حسابداری)</option>
-          </select>
+          {showAdvancedFilters && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-slate-200/70 dark:border-slate-700/70 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  نام و نام خانوادگی:
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثلاً محمدی یا علی"
+                  value={nameFilter}
+                  onChange={(e) => {
+                    setNameFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                />
+              </div>
 
-          <select
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value as 'all' | StudentFinancialStatus);
-              setCurrentPage(1);
-            }}
-            className="px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
-          >
-            <option value="all">همه وضعیت‌های مالی</option>
-            <option value="debtor">بدهکار</option>
-            <option value="pending_payment">در انتظار مراجعه به حسابداری</option>
-            <option value="auto_deducting">کسر خودکار از حقوق</option>
-            <option value="settled">تسویه شده</option>
-            <option value="unreviewed">نیازمند بررسی مالی</option>
-          </select>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  کد دانشجویی:
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثلاً 4021..."
+                  value={studentIdFilter}
+                  onChange={(e) => {
+                    setStudentIdFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  dir="ltr"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-right font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  کد ملی:
+                </label>
+                <input
+                  type="text"
+                  placeholder="شماره ملی دانشجو"
+                  value={nationalIdFilter}
+                  onChange={(e) => {
+                    setNationalIdFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  dir="ltr"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-right font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  شهر یا استان:
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثلاً اصفهان، کاشان، تهران..."
+                  value={locationFilter}
+                  onChange={(e) => {
+                    setLocationFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  رشته تحصیلی:
+                </label>
+                <select
+                  value={fieldFilter}
+                  onChange={(e) => {
+                    setFieldFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                >
+                  <option value="all">همه رشته‌ها ({uniqueFields.length})</option>
+                  {uniqueFields.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  دوره / سال ورودی:
+                </label>
+                <select
+                  value={entryFilter}
+                  onChange={(e) => {
+                    setEntryFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                >
+                  <option value="all">همه ورودی‌ها ({uniqueEntryTerms.length})</option>
+                  {uniqueEntryTerms.map((term) => (
+                    <option key={term} value={term}>
+                      ورودی {term}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    سرای محل اسکان:
+                  </label>
+                  <select
+                    value={dormFilter}
+                    onChange={(e) => {
+                      setDormFilter(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                  >
+                    <option value="all">همه سراها</option>
+                    {dorms.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    نام / شماره اتاق:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثلاً ۱۰۱"
+                    value={roomFilter}
+                    onChange={(e) => {
+                      setRoomFilter(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    ضابطه پرداخت:
+                  </label>
+                  <select
+                    value={paymentMethodFilter}
+                    onChange={(e) => {
+                      setPaymentMethodFilter(e.target.value as 'all' | PaymentMethod);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                  >
+                    <option value="all">همه روش‌ها</option>
+                    <option value="auto_payroll">درون استانی</option>
+                    <option value="in_person_accounting">خارج از استان</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    وضعیت مالی:
+                  </label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => {
+                      setStatusFilter(e.target.value as 'all' | StudentFinancialStatus);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                  >
+                    <option value="all">همه وضعیت‌ها</option>
+                    <option value="debtor">بدهکار</option>
+                    <option value="pending_payment">مراجعه حضوری</option>
+                    <option value="auto_deducting">کسر خودکار</option>
+                    <option value="settled">تسویه شده</option>
+                    <option value="unreviewed">نیازمند بررسی</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* کنترل‌های مرتب‌سازی کارتابل امور مالی */}
+              <div className="sm:col-span-2 lg:col-span-4 flex flex-wrap items-center justify-between gap-2.5 pt-2.5 mt-1 border-t border-slate-200/70 dark:border-slate-700/70">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
+                    <ArrowUpDown className="w-3.5 h-3.5 text-teal-600" />
+                    <span>مرتب‌سازی بر اساس:</span>
+                  </span>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => {
+                      setSortBy(e.target.value as StudentSortKey);
+                      setCurrentPage(1);
+                    }}
+                    className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-bold"
+                  >
+                    <option value="default">ترتیب پیش‌فرض ثبت</option>
+                    <option value="lastName">نام خانوادگی</option>
+                    <option value="fullName">نام و نام خانوادگی (کامل)</option>
+                    <option value="studentId">کد دانشجویی</option>
+                    <option value="nationalId">کد ملی</option>
+                    <option value="fieldOfStudy">رشته تحصیلی</option>
+                    <option value="entryTerm">سال / ترم ورودی</option>
+                    <option value="roomName">نام / شماره اتاق</option>
+                    <option value="cityProvince">استان و شهر</option>
+                    <option value="debtAmount">میزان بدهی</option>
+                  </select>
+
+                  {sortBy !== 'default' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+                        setCurrentPage(1);
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-teal-300 dark:border-teal-700 bg-teal-50 dark:bg-teal-950/50 text-teal-800 dark:text-teal-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer hover:bg-teal-100 dark:hover:bg-teal-900/50 transition"
+                    >
+                      {sortDir === 'asc' ? (
+                        <>
+                          <ArrowUp className="w-3.5 h-3.5" />
+                          <span>صعودی (الف←ی / کم←زیاد)</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowDown className="w-3.5 h-3.5" />
+                          <span>نزولی (ی←الف / زیاد←کم)</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 tabular-nums">
+                  نتایج یافت‌شده: {sortedRows.length.toLocaleString('fa-IR')} دانشجو
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* جدول ساده و خلوت اطلاعات مجاز دانشجویان برای امور مالی */}
         {paginatedRows.length === 0 ? (
-          <div className="p-10 text-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-400">
-            هیچ دانشجویی مطابق فیلترهای انتخابی یافت نشد.
+          <div className="p-10 text-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-400 space-y-2">
+            <p>هیچ دانشجویی مطابق فیلترهای انتخابی یافت نشد.</p>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="px-3 py-1.5 rounded-xl bg-teal-600 text-white font-bold cursor-pointer"
+              >
+                بازنشانی فیلترها
+              </button>
+            )}
           </div>
         ) : (
           <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
                 <tr>
-                  <th className="p-3">مشخصات دانشجو (نام / نام پدر)</th>
-                  <th className="p-3">کد دانشجویی و کد ملی</th>
-                  <th className="p-3">رشته و ورودی</th>
-                  <th className="p-3">وضعیت اسکان و نام اتاق</th>
+                  <th className="p-3">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort('lastName')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس نام خانوادگی"
+                      >
+                        <span>مشخصات دانشجو (نام / نام پدر)</span>
+                        {renderSortIcon('lastName')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleSort('lastName')}
+                        className={`text-[10px] px-1.5 py-0.5 rounded border cursor-pointer transition ${
+                          sortBy === 'lastName'
+                            ? 'bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-700'
+                            : 'bg-white dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                        }`}
+                      >
+                        فامیلی
+                      </button>
+                    </div>
+                  </th>
+                  <th className="p-3">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort('studentId')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس کد دانشجویی"
+                      >
+                        <span>کد دانشجویی</span>
+                        {renderSortIcon('studentId')}
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-600">/</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleSort('nationalId')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس کد ملی"
+                      >
+                        <span>کد ملی</span>
+                        {renderSortIcon('nationalId')}
+                      </button>
+                    </div>
+                  </th>
+                  <th className="p-3">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort('fieldOfStudy')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس رشته تحصیلی"
+                      >
+                        <span>رشته</span>
+                        {renderSortIcon('fieldOfStudy')}
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-600">/</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleSort('entryTerm')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس ورودی"
+                      >
+                        <span>ورودی</span>
+                        {renderSortIcon('entryTerm')}
+                      </button>
+                    </div>
+                  </th>
+                  <th className="p-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleSort('roomName')}
+                      className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                      title="مرتب‌سازی بر اساس نام / شماره اتاق"
+                    >
+                      <span>وضعیت اسکان و نام اتاق</span>
+                      {renderSortIcon('roomName')}
+                    </button>
+                  </th>
                   <th className="p-3">اسکان سال قبل</th>
-                  <th className="p-3">نرخ کسر و نحوه پرداخت</th>
-                  <th className="p-3">بدهی و وضعیت مالی</th>
+                  <th className="p-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleSort('cityProvince')}
+                      className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                      title="مرتب‌سازی بر اساس استان و شهر"
+                    >
+                      <span>نرخ کسر و نحوه پرداخت</span>
+                      {renderSortIcon('cityProvince')}
+                    </button>
+                  </th>
+                  <th className="p-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleSort('debtAmount')}
+                      className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                      title="مرتب‌سازی بر اساس میزان بدهی"
+                    >
+                      <span>بدهی و وضعیت مالی</span>
+                      {renderSortIcon('debtAmount')}
+                    </button>
+                  </th>
                   <th className="p-3 text-center">عملیات</th>
                 </tr>
               </thead>
@@ -923,8 +1393,8 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
           <div className="flex items-center justify-between pt-2 text-xs text-slate-600 dark:text-slate-400">
             <span className="tabular-nums">
               نمایش {((safePage - 1) * PAGE_SIZE + 1).toLocaleString('fa-IR')} تا{' '}
-              {Math.min(safePage * PAGE_SIZE, filteredRows.length).toLocaleString('fa-IR')} از{' '}
-              {filteredRows.length.toLocaleString('fa-IR')} دانشجو
+              {Math.min(safePage * PAGE_SIZE, sortedRows.length).toLocaleString('fa-IR')} از{' '}
+              {sortedRows.length.toLocaleString('fa-IR')} دانشجو
             </span>
             <div className="flex items-center gap-2">
               <button

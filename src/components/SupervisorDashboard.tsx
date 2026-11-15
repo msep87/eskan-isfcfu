@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Supervisor,
   Dormitory,
@@ -16,11 +16,13 @@ import {
 } from '../types';
 import { Storage } from '../utils/storage';
 import { exportShiftReportsToExcel } from '../utils/excelUtils';
+import { compareStudents, normSearchText, StudentSortKey } from '../utils/studentSearchSort';
 import { SupervisorRoomManager } from './SupervisorRoomManager';
 import { VisualBedPicker } from './VisualBedPicker';
 import { RoomWarningModal } from './RoomWarningModal';
 import { DormIdCardModal } from './DormIdCardModal';
 import { StudentEvaluationModal } from './StudentEvaluationModal';
+import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
 import {
@@ -60,6 +62,11 @@ import {
   BookOpen,
   Printer,
   Award,
+  SlidersHorizontal,
+  RotateCcw,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 
 interface SupervisorDashboardProps {
@@ -130,6 +137,23 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   const [newAnnPriority, setNewAnnPriority] = useState<Announcement['priority']>('normal');
   const [newAnnImage, setNewAnnImage] = useState<string | null>(null);
   const [viewCardStudent, setViewCardStudent] = useState<Student | null>(null);
+  const [profileModalStudentId, setProfileModalStudentId] = useState<string | null>(null);
+
+  // جستجوی پیشرفته و مرتب‌سازی تب فهرست دانشجویان
+  const [showAdvancedStudentFilters, setShowAdvancedStudentFilters] = useState(true);
+  const [stQuery, setStQuery] = useState('');
+  const [stNameFilter, setStNameFilter] = useState('');
+  const [stNationalIdFilter, setStNationalIdFilter] = useState('');
+  const [stStudentIdFilter, setStStudentIdFilter] = useState('');
+  const [stLocationFilter, setStLocationFilter] = useState('');
+  const [stFieldFilter, setStFieldFilter] = useState('all');
+  const [stEntryFilter, setStEntryFilter] = useState('all');
+  const [stDormFilter, setStDormFilter] = useState('all');
+  const [stRoomFilter, setStRoomFilter] = useState('');
+  const [stAssignFilter, setStAssignFilter] = useState<'all' | 'confirmed' | 'temporary' | 'none'>('all');
+  const [stProfileFilter, setStProfileFilter] = useState<'all' | 'completed' | 'incomplete'>('all');
+  const [stSortBy, setStSortBy] = useState<StudentSortKey>('default');
+  const [stSortDir, setStSortDir] = useState<'asc' | 'desc'>('asc');
 
   // فرم ثبت مستقیم خرابی تأسیسات توسط سرپرست
   const [isAddMaintenanceModalOpen, setIsAddMaintenanceModalOpen] = useState(false);
@@ -242,6 +266,179 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   const occupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
 
   const currentDorm = dorms.find((d) => d.id === selectedDormId) || myDorms[0] || dorms[0];
+
+  const uniqueStudentFields = useMemo(() => {
+    const set = new Set<string>();
+    students.forEach((s) => {
+      if (s.fieldOfStudy?.trim()) set.add(s.fieldOfStudy.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'fa'));
+  }, [students]);
+
+  const uniqueStudentEntryTerms = useMemo(() => {
+    const set = new Set<string>();
+    students.forEach((s) => {
+      if (s.entryTerm?.trim()) set.add(s.entryTerm.trim());
+    });
+    return Array.from(set).sort();
+  }, [students]);
+
+  const filteredTabStudents = useMemo(() => {
+    const q = normSearchText(stQuery);
+    const nameQ = normSearchText(stNameFilter);
+    const nidQ = normSearchText(stNationalIdFilter);
+    const sidQ = normSearchText(stStudentIdFilter);
+    const locQ = normSearchText(stLocationFilter);
+    const roomQ = normSearchText(stRoomFilter);
+
+    return students.filter((st) => {
+      const r = rooms.find((rm) => rm.id === st.assignedRoomId);
+      const d = dorms.find((dm) => dm.id === st.assignedDormId);
+      const roomNum = r?.roomNumber || st.assignedRoomNumber || '';
+      const dormTitle = d?.name || st.assignedDormName || '';
+
+      if (q) {
+        const haystack = [
+          st.fullName,
+          st.studentId,
+          st.nationalId,
+          st.fatherName,
+          st.fieldOfStudy,
+          st.entryTerm,
+          st.mobile,
+          st.phone,
+          st.emergencyPhone,
+          st.parentPhone,
+          st.province,
+          st.city,
+          st.postalAddress,
+          dormTitle,
+          roomNum,
+        ]
+          .map(normSearchText)
+          .join(' ');
+        if (!haystack.includes(q)) return false;
+      }
+
+      if (nameQ && !normSearchText(`${st.fullName} ${st.fatherName || ''}`).includes(nameQ)) {
+        return false;
+      }
+
+      if (nidQ && !normSearchText(st.nationalId).includes(nidQ)) {
+        return false;
+      }
+
+      if (sidQ && !normSearchText(st.studentId).includes(sidQ)) {
+        return false;
+      }
+
+      if (locQ) {
+        const locStr = normSearchText(`${st.province || ''} ${st.city || ''} ${st.postalAddress || ''}`);
+        if (!locStr.includes(locQ)) return false;
+      }
+
+      if (stFieldFilter !== 'all' && (st.fieldOfStudy || '').trim() !== stFieldFilter) {
+        return false;
+      }
+
+      if (stEntryFilter !== 'all' && (st.entryTerm || '').trim() !== stEntryFilter) {
+        return false;
+      }
+
+      if (stDormFilter === 'my_dorms') {
+        if (!st.assignedDormId || !myAssignedDormIds.includes(st.assignedDormId)) return false;
+      } else if (stDormFilter === 'unassigned') {
+        if (st.assignedBedId && st.assignmentStatus !== 'none') return false;
+      } else if (stDormFilter !== 'all') {
+        if (st.assignedDormId !== stDormFilter) return false;
+      }
+
+      if (roomQ && !normSearchText(roomNum).includes(roomQ)) {
+        return false;
+      }
+
+      if (stAssignFilter !== 'all') {
+        const status = st.assignedBedId ? st.assignmentStatus || 'temporary' : 'none';
+        if (status !== stAssignFilter) return false;
+      }
+
+      if (stProfileFilter === 'completed' && !st.isProfileCompleted) return false;
+      if (stProfileFilter === 'incomplete' && st.isProfileCompleted) return false;
+
+      return true;
+    });
+  }, [
+    students,
+    rooms,
+    dorms,
+    myAssignedDormIds,
+    stQuery,
+    stNameFilter,
+    stNationalIdFilter,
+    stStudentIdFilter,
+    stLocationFilter,
+    stFieldFilter,
+    stEntryFilter,
+    stDormFilter,
+    stRoomFilter,
+    stAssignFilter,
+    stProfileFilter,
+  ]);
+
+  const sortedTabStudents = useMemo(() => {
+    if (stSortBy === 'default') return filteredTabStudents;
+    const list = [...filteredTabStudents];
+    list.sort((a, b) => compareStudents(a, b, stSortBy, stSortDir, rooms, dorms));
+    return list;
+  }, [filteredTabStudents, stSortBy, stSortDir, rooms, dorms]);
+
+  const toggleSupStudentSort = (key: Exclude<StudentSortKey, 'default' | 'debtAmount'>) => {
+    if (stSortBy === key) {
+      setStSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setStSortBy(key);
+      setStSortDir('asc');
+    }
+  };
+
+  const renderSupSortIcon = (key: Exclude<StudentSortKey, 'default' | 'debtAmount'>) => {
+    if (stSortBy !== key) return <ArrowUpDown className="w-3.5 h-3.5 opacity-45 shrink-0" />;
+    return stSortDir === 'asc' ? (
+      <ArrowUp className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+    ) : (
+      <ArrowDown className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+    );
+  };
+
+  const hasActiveSupStudentFilters =
+    Boolean(stQuery.trim()) ||
+    Boolean(stNameFilter.trim()) ||
+    Boolean(stNationalIdFilter.trim()) ||
+    Boolean(stStudentIdFilter.trim()) ||
+    Boolean(stLocationFilter.trim()) ||
+    stFieldFilter !== 'all' ||
+    stEntryFilter !== 'all' ||
+    stDormFilter !== 'all' ||
+    Boolean(stRoomFilter.trim()) ||
+    stAssignFilter !== 'all' ||
+    stProfileFilter !== 'all' ||
+    stSortBy !== 'default';
+
+  const resetSupStudentFilters = () => {
+    setStQuery('');
+    setStNameFilter('');
+    setStNationalIdFilter('');
+    setStStudentIdFilter('');
+    setStLocationFilter('');
+    setStFieldFilter('all');
+    setStEntryFilter('all');
+    setStDormFilter('all');
+    setStRoomFilter('');
+    setStAssignFilter('all');
+    setStProfileFilter('all');
+    setStSortBy('default');
+    setStSortDir('asc');
+  };
 
   // دانشجویان با تخصیص موقت در این خوابگاه
   const pendingStudentsInMyDorm = students.filter(
@@ -929,6 +1126,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           rooms={rooms}
           beds={beds}
           students={students}
+          settings={settings}
           onDataChanged={onRefreshData}
           supervisorDormId={selectedDormId}
           actorName={supervisor.fullName}
@@ -1199,99 +1397,499 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
       )}
 
       {activeTab === 'students' && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
-              <Users className="w-5 h-5 text-teal-600" />
-              <span>فهرست کامل دانشجومعلمان و مشخصات تماس اضطراری</span>
-            </h3>
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-teal-600" />
+                <span>
+                  فهرست دانشجومعلمان و مشخصات تماس اضطراری ({sortedTabStudents.length} از {students.length} دانشجو)
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                جستجوی پیشرفته بر اساس نام و نام خانوادگی، کد ملی، کد دانشجویی، شهر و استان، رشته، ورودی، سرا و اتاق
+              </p>
+            </div>
             <button
+              type="button"
               onClick={onOpenReports}
-              className="text-xs text-teal-600 font-bold hover:underline"
+              className="text-xs text-teal-600 dark:text-teal-400 font-bold hover:underline cursor-pointer self-start sm:self-auto"
             >
               مشاهده گزارش و خروجی اکسل
             </button>
           </div>
 
-          <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
-            <table className="w-full text-right text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold">
-                <tr>
-                  <th className="p-3">کد دانشجویی</th>
-                  <th className="p-3">نام و نام خانوادگی</th>
-                  <th className="p-3">رشته</th>
-                  <th className="p-3">ورودی</th>
-                  <th className="p-3">وضعیت پرونده</th>
-                  <th className="p-3">اتاق/تخت</th>
-                  <th className="p-3">شماره همراه</th>
-                  <th className="p-3">شماره اضطراری</th>
-                  <th className="p-3">شهر سکونت</th>
-                  <th className="p-3 text-center">کارت هویت</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {students.map((st) => {
-                  const r = rooms.find((rm) => rm.id === st.assignedRoomId);
-                  const b = beds.find((bd) => bd.id === st.assignedBedId);
+          {/* پنل جستجوی پیشرفته و مرتب‌سازی دانشجویان */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="جستجوی فوری در نام و نام خانوادگی، کد ملی، کد دانشجویی، شهر و استان، رشته، ورودی یا تماس..."
+                  value={stQuery}
+                  onChange={(e) => setStQuery(e.target.value)}
+                  className="w-full px-4 py-2.5 pr-9 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-medium focus:ring-2 focus:ring-teal-500"
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+              </div>
 
-                  return (
-                    <tr key={st.studentId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="p-3 font-bold">{st.studentId}</td>
-                      <td className="p-3 font-semibold text-slate-800 dark:text-slate-100">{st.fullName}</td>
-                      <td className="p-3">{st.fieldOfStudy}</td>
-                      <td className="p-3">{st.entryTerm}</td>
-                      <td className="p-3">
-                        {st.isProfileCompleted ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                            <CheckCircle className="w-3 h-3 text-emerald-600" />
-                            تکمیل شده
-                          </span>
+              <button
+                type="button"
+                onClick={() => setShowAdvancedStudentFilters((v) => !v)}
+                className={`px-3.5 py-2.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                  showAdvancedStudentFilters
+                    ? 'bg-teal-600 text-white border-teal-600'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600'
+                }`}
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                <span>فیلترهای پیشرفته</span>
+              </button>
+
+              {hasActiveSupStudentFilters && (
+                <button
+                  type="button"
+                  onClick={resetSupStudentFilters}
+                  className="px-3.5 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-bold hover:bg-rose-100 transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>پاک کردن فیلترها</span>
+                </button>
+              )}
+            </div>
+
+            {showAdvancedStudentFilters && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-slate-200/70 dark:border-slate-700/70 text-xs">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    نام و نام خانوادگی:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثلاً رضایی یا علی"
+                    value={stNameFilter}
+                    onChange={(e) => setStNameFilter(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    کد دانشجویی:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثلاً 4021..."
+                    value={stStudentIdFilter}
+                    onChange={(e) => setStStudentIdFilter(e.target.value)}
+                    dir="ltr"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-right font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    کد ملی:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="شماره ملی دانشجو"
+                    value={stNationalIdFilter}
+                    onChange={(e) => setStNationalIdFilter(e.target.value)}
+                    dir="ltr"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-right font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    استان و شهر سکونت:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثلاً اصفهان، کاشان، شهرضا..."
+                    value={stLocationFilter}
+                    onChange={(e) => setStLocationFilter(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    رشته تحصیلی:
+                  </label>
+                  <select
+                    value={stFieldFilter}
+                    onChange={(e) => setStFieldFilter(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                  >
+                    <option value="all">همه رشته‌ها ({uniqueStudentFields.length})</option>
+                    {uniqueStudentFields.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    دوره / سال ورودی:
+                  </label>
+                  <select
+                    value={stEntryFilter}
+                    onChange={(e) => setStEntryFilter(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                  >
+                    <option value="all">همه ورودی‌ها ({uniqueStudentEntryTerms.length})</option>
+                    {uniqueStudentEntryTerms.map((term) => (
+                      <option key={term} value={term}>
+                        ورودی {term}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    سرای محل اسکان:
+                  </label>
+                  <select
+                    value={stDormFilter}
+                    onChange={(e) => setStDormFilter(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                  >
+                    <option value="all">همه سراها و فاقد اسکان</option>
+                    {myDorms.length > 0 && <option value="my_dorms">فقط سراهای تحت نظارت من</option>}
+                    <option value="unassigned">فقط دانشجویان فاقد اسکان</option>
+                    {dorms.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                      شماره اتاق:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="مثلاً ۱۰۱"
+                      value={stRoomFilter}
+                      onChange={(e) => setStRoomFilter(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                      وضعیت اسکان:
+                    </label>
+                    <select
+                      value={stAssignFilter}
+                      onChange={(e) => setStAssignFilter(e.target.value as any)}
+                      className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs"
+                    >
+                      <option value="all">همه</option>
+                      <option value="confirmed">قطعی</option>
+                      <option value="temporary">موقت</option>
+                      <option value="none">فاقد اتاق</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* کنترل‌های مرتب‌سازی و وضعیت پرونده */}
+                <div className="sm:col-span-2 lg:col-span-4 flex flex-wrap items-center justify-between gap-2.5 pt-2.5 mt-1 border-t border-slate-200/70 dark:border-slate-700/70">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
+                      <ArrowUpDown className="w-3.5 h-3.5 text-teal-600" />
+                      <span>مرتب‌سازی بر اساس:</span>
+                    </span>
+                    <select
+                      value={stSortBy}
+                      onChange={(e) => setStSortBy(e.target.value as StudentSortKey)}
+                      className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-bold"
+                    >
+                      <option value="default">ترتیب پیش‌فرض ثبت</option>
+                      <option value="lastName">نام خانوادگی</option>
+                      <option value="fullName">نام و نام خانوادگی (کامل)</option>
+                      <option value="studentId">کد دانشجویی</option>
+                      <option value="nationalId">کد ملی</option>
+                      <option value="fieldOfStudy">رشته تحصیلی</option>
+                      <option value="entryTerm">سال / ترم ورودی</option>
+                      <option value="roomName">نام / شماره اتاق</option>
+                      <option value="cityProvince">استان و شهر سکونت</option>
+                    </select>
+
+                    {stSortBy !== 'default' && (
+                      <button
+                        type="button"
+                        onClick={() => setStSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                        className="px-3 py-1.5 rounded-xl border border-teal-300 dark:border-teal-700 bg-teal-50 dark:bg-teal-950/50 text-teal-800 dark:text-teal-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer hover:bg-teal-100 dark:hover:bg-teal-900/50 transition"
+                      >
+                        {stSortDir === 'asc' ? (
+                          <>
+                            <ArrowUp className="w-3.5 h-3.5" />
+                            <span>صعودی (الف←ی / کم←زیاد)</span>
+                          </>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
-                            <AlertTriangle className="w-3 h-3 text-rose-600" />
-                            ناقص (در انتظار تکمیل)
-                          </span>
+                          <>
+                            <ArrowDown className="w-3.5 h-3.5" />
+                            <span>نزولی (ی←الف / زیاد←کم)</span>
+                          </>
                         )}
-                      </td>
-                      <td className="p-3">
-                        {r && b ? (
-                          <span className="text-teal-600 font-bold">
-                            اتاق {r.roomNumber} ({b.tier === 'lower' ? 'پایین' : 'بالا'})
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">فاقد اتاق</span>
-                        )}
-                      </td>
-                      <td className="p-3" dir="ltr">{st.mobile}</td>
-                      <td className="p-3 text-rose-600" dir="ltr">{st.emergencyPhone || '-'}</td>
-                      <td className="p-3">{st.province} - {st.city}</td>
-                      <td className="p-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => {
-                              setEvalTargetStudent(st);
-                              setIsStudentEvalModalOpen(true);
-                            }}
-                            className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 hover:bg-purple-100 border border-purple-200 dark:border-purple-800 transition cursor-pointer"
-                            title="ثبت تذکر، اخطار یا نمره ارزیابی دانشجو"
-                          >
-                            <Award className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => setViewCardStudent(st)}
-                            className="p-1.5 rounded-lg bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 hover:bg-teal-100 border border-teal-200 dark:border-teal-800 transition cursor-pointer"
-                            title="مشاهده و چاپ کارت شناسایی و اسکان سرا"
-                          >
-                            <QrCode className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </button>
+                    )}
+
+                    <select
+                      value={stProfileFilter}
+                      onChange={(e) => setStProfileFilter(e.target.value as any)}
+                      className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-semibold"
+                    >
+                      <option value="all">همه پرونده‌ها</option>
+                      <option value="completed">پرونده تکمیل‌شده</option>
+                      <option value="incomplete">پرونده ناقص</option>
+                    </select>
+                  </div>
+
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    نکته: با کلیک بر روی <strong className="text-teal-700 dark:text-teal-300">نام هر دانشجو</strong>، فرم کامل اطلاعات، عکس، اخطار، تذکر، پیام و ارزیابی باز می‌شود.
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
+
+          {sortedTabStudents.length === 0 ? (
+            <div className="p-10 text-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-400 space-y-2">
+              <p>هیچ دانشجویی با معیارهای جستجوی انتخاب‌شده یافت نشد.</p>
+              {hasActiveSupStudentFilters && (
+                <button
+                  type="button"
+                  onClick={resetSupStudentFilters}
+                  className="px-3 py-1.5 rounded-xl bg-teal-600 text-white font-bold cursor-pointer"
+                >
+                  نمایش همه دانشجویان
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
+              <table className="w-full text-right text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                  <tr>
+                    <th className="p-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSupStudentSort('studentId')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس کد دانشجویی"
+                      >
+                        <span>کد دانشجویی</span>
+                        {renderSupSortIcon('studentId')}
+                      </button>
+                    </th>
+                    <th className="p-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => toggleSupStudentSort('lastName')}
+                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                          title="مرتب‌سازی بر اساس نام خانوادگی"
+                        >
+                          <span>نام و نام خانوادگی</span>
+                          {renderSupSortIcon('lastName')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleSupStudentSort('lastName')}
+                          className={`text-[10px] px-1.5 py-0.5 rounded border cursor-pointer transition ${
+                            stSortBy === 'lastName'
+                              ? 'bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-700'
+                              : 'bg-white dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                          }`}
+                        >
+                          فامیلی
+                        </button>
+                      </div>
+                    </th>
+                    <th className="p-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSupStudentSort('nationalId')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس کد ملی"
+                      >
+                        <span>کد ملی</span>
+                        {renderSupSortIcon('nationalId')}
+                      </button>
+                    </th>
+                    <th className="p-3">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => toggleSupStudentSort('fieldOfStudy')}
+                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                          title="مرتب‌سازی بر اساس رشته تحصیلی"
+                        >
+                          <span>رشته</span>
+                          {renderSupSortIcon('fieldOfStudy')}
+                        </button>
+                        <span className="text-slate-300 dark:text-slate-600">/</span>
+                        <button
+                          type="button"
+                          onClick={() => toggleSupStudentSort('entryTerm')}
+                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                          title="مرتب‌سازی بر اساس سال/ترم ورودی"
+                        >
+                          <span>ورودی</span>
+                          {renderSupSortIcon('entryTerm')}
+                        </button>
+                      </div>
+                    </th>
+                    <th className="p-3">وضعیت پرونده</th>
+                    <th className="p-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSupStudentSort('roomName')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس نام / شماره اتاق"
+                      >
+                        <span>سرا و اتاق/تخت</span>
+                        {renderSupSortIcon('roomName')}
+                      </button>
+                    </th>
+                    <th className="p-3">شماره همراه</th>
+                    <th className="p-3">شماره اضطراری</th>
+                    <th className="p-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSupStudentSort('cityProvince')}
+                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                        title="مرتب‌سازی بر اساس استان و شهر سکونت"
+                      >
+                        <span>استان و شهر</span>
+                        {renderSupSortIcon('cityProvince')}
+                      </button>
+                    </th>
+                    <th className="p-3 text-center">عملیات / کارت</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {sortedTabStudents.map((st) => {
+                    const d = dorms.find((dm) => dm.id === st.assignedDormId);
+                    const r = rooms.find((rm) => rm.id === st.assignedRoomId);
+                    const b = beds.find((bd) => bd.id === st.assignedBedId);
+
+                    return (
+                      <tr key={st.studentId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="p-3 font-bold font-mono tabular-nums">{st.studentId}</td>
+                        <td className="p-3">
+                          <div className="flex items-center gap-2">
+                            {st.photoUrl ? (
+                              <img
+                                src={st.photoUrl}
+                                alt={st.fullName}
+                                className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                              />
+                            ) : (
+                              <div
+                                className="w-8 h-8 rounded-full text-white text-[11px] font-bold flex items-center justify-center shrink-0"
+                                style={{ backgroundColor: st.avatarColor || '#0d9488' }}
+                              >
+                                {(st.fullName || 'د').slice(0, 1)}
+                              </div>
+                            )}
+                            <div>
+                              <button
+                                type="button"
+                                onClick={() => setProfileModalStudentId(st.studentId)}
+                                className="font-bold text-slate-900 dark:text-slate-100 hover:text-teal-600 dark:hover:text-teal-400 hover:underline text-right cursor-pointer"
+                                title="مشاهده پرونده کامل، اخطار، تذکر، پیام و ارزیابی"
+                              >
+                                {st.fullName}
+                              </button>
+                              {st.fatherName && (
+                                <div className="text-[10px] text-slate-400">فرزند {st.fatherName}</div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3 font-mono tabular-nums text-slate-600 dark:text-slate-300">
+                          {st.nationalId || '-'}
+                        </td>
+                        <td className="p-3">
+                          <div className="font-semibold text-slate-800 dark:text-slate-200">
+                            {st.fieldOfStudy || '-'}
+                          </div>
+                          <div className="text-[11px] text-slate-400">ورودی {st.entryTerm || '-'}</div>
+                        </td>
+                        <td className="p-3">
+                          {st.isProfileCompleted ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                              <CheckCircle className="w-3 h-3 text-emerald-600" />
+                              تکمیل شده
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                              <AlertTriangle className="w-3 h-3 text-rose-600" />
+                              ناقص
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {r && b ? (
+                            <div>
+                              <div className="text-teal-600 dark:text-teal-400 font-bold">
+                                اتاق {r.roomNumber} ({b.tier === 'lower' ? 'پایین' : 'بالا'})
+                              </div>
+                              {d && <div className="text-[10px] text-slate-400">{d.name}</div>}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">فاقد اتاق</span>
+                          )}
+                        </td>
+                        <td className="p-3 font-mono tabular-nums" dir="ltr">
+                          {st.mobile || '-'}
+                        </td>
+                        <td className="p-3 text-rose-600 font-mono tabular-nums" dir="ltr">
+                          {st.emergencyPhone || '-'}
+                        </td>
+                        <td className="p-3">
+                          {[st.province, st.city].filter(Boolean).join(' - ') || '-'}
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEvalTargetStudent(st);
+                                setIsStudentEvalModalOpen(true);
+                              }}
+                              className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 hover:bg-purple-100 border border-purple-200 dark:border-purple-800 transition cursor-pointer"
+                              title="ثبت تذکر، اخطار یا نمره ارزیابی دانشجو"
+                            >
+                              <Award className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setViewCardStudent(st)}
+                              className="p-1.5 rounded-lg bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 hover:bg-teal-100 border border-teal-200 dark:border-teal-800 transition cursor-pointer"
+                              title="مشاهده و چاپ کارت شناسایی و اسکان سرا"
+                            >
+                              <QrCode className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -2376,6 +2974,54 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           settings={settings}
         />
       )}
+
+      {/* مدال پرونده کامل دانشجو با کلیک روی نام */}
+      {(() => {
+        const profileStudent = profileModalStudentId
+          ? students.find((s) => s.studentId === profileModalStudentId) || null
+          : null;
+        const profileDorm = profileStudent?.assignedDormId
+          ? dorms.find((dm) => dm.id === profileStudent.assignedDormId) || null
+          : null;
+        const profileRoom = profileStudent?.assignedRoomId
+          ? rooms.find((rm) => rm.id === profileStudent.assignedRoomId) || null
+          : null;
+        const profileBed = profileStudent?.assignedBedId
+          ? beds.find((bd) => bd.id === profileStudent.assignedBedId) || null
+          : null;
+        const roomOccs = profileRoom
+          ? beds
+              .filter((bd) => bd.roomId === profileRoom.id && bd.studentId)
+              .map((bd) => students.find((s) => s.studentId === bd.studentId))
+              .filter((s): s is Student => Boolean(s))
+          : [];
+        const hasExplicitRep = Boolean(
+          profileRoom?.representativeStudentId &&
+            roomOccs.some((s) => s.studentId === profileRoom.representativeStudentId)
+        );
+        const effectiveRepId = hasExplicitRep
+          ? profileRoom?.representativeStudentId
+          : roomOccs[0]?.studentId;
+        const isProfileRep = Boolean(profileStudent && effectiveRepId === profileStudent.studentId);
+        const isProfileDefaultRep = Boolean(isProfileRep && !hasExplicitRep);
+
+        return (
+          <StudentRoomProfileModal
+            isOpen={Boolean(profileStudent)}
+            onClose={() => setProfileModalStudentId(null)}
+            student={profileStudent}
+            dorm={profileDorm}
+            room={profileRoom}
+            bed={profileBed}
+            isRoomRepresentative={isProfileRep}
+            isDefaultRepresentative={isProfileDefaultRep}
+            actorName={supervisor.fullName}
+            actorRole="supervisor"
+            actorId={supervisor.id}
+            onDataChanged={onRefreshData}
+          />
+        );
+      })()}
 
     </div>
   );
