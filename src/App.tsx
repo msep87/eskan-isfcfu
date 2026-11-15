@@ -34,6 +34,7 @@ import { SupervisorDashboard } from './components/SupervisorDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
 import { MaintenanceDashboard } from './components/MaintenanceDashboard';
 import { WarehouseDashboard } from './components/WarehouseDashboard';
+import { ProcurementDashboard } from './components/ProcurementDashboard';
 import { CounselorDashboard } from './components/CounselorDashboard';
 import { FinanceDashboard } from './components/FinanceDashboard';
 import { AboutModal } from './components/AboutModal';
@@ -130,6 +131,11 @@ export default function App() {
       const refreshedStaff = Storage.getWarehouseStaff().find((w) => w.id === user.staff.id);
       if (refreshedStaff) {
         setCurrentUser({ role: 'warehouse', staff: refreshedStaff });
+      }
+    } else if (user && user.role === 'procurement') {
+      const refreshedProc = Storage.getProcurementStaff().find((p) => p.id === user.staff.id);
+      if (refreshedProc) {
+        setCurrentUser({ role: 'procurement', staff: refreshedProc });
       }
     } else if (user && user.role === 'finance') {
       const refreshedFin = Storage.getFinanceStaff().find((f) => f.id === user.staff.id);
@@ -639,7 +645,7 @@ export default function App() {
           />
         )}
 
-        {/* ۶. در صورتی که کاربر انبار و کارپردازی تجهیزات سراها است */}
+        {/* ۶. در صورتی که کاربر انبار تجهیزات سراها است */}
         {currentUser?.role === 'warehouse' && (
           <WarehouseDashboard
             staff={currentUser.staff}
@@ -647,6 +653,17 @@ export default function App() {
             onRefreshData={refreshAllData}
             onOpenMessages={() => setIsMessagesModalOpen(true)}
             onOpenUserGuide={(r) => handleOpenUserGuide(r || 'warehouse')}
+          />
+        )}
+
+        {/* ۶-ب. در صورتی که کاربر کارپرداز و خرید است */}
+        {currentUser?.role === 'procurement' && (
+          <ProcurementDashboard
+            staff={currentUser.staff}
+            dorms={dorms}
+            onRefreshData={refreshAllData}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onOpenUserGuide={(r) => handleOpenUserGuide(r || 'procurement')}
           />
         )}
 

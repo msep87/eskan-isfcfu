@@ -10,6 +10,7 @@ import { RoommatesCard } from './RoommatesCard';
 import { VisualBedPicker } from './VisualBedPicker';
 import { StudentProfileModal } from './StudentProfileModal';
 import { DormIdCardModal } from './DormIdCardModal';
+import { StudentGuestRequestPanel } from './StudentGuestRequestPanel';
 import { RichTextDisplay } from './RichTextEditor';
 import {
   User,
@@ -36,6 +37,7 @@ import {
   Award,
   MessageSquareWarning,
   Wallet,
+  UserPlus,
 } from 'lucide-react';
 
 interface StudentDashboardProps {
@@ -66,7 +68,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onOpenUserGuide,
 }) => {
   // تب‌های داشبورد
-  const [activeTab, setActiveTab] = useState<'overview' | 'picker'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest'>('overview');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isIdCardModalOpen, setIsIdCardModalOpen] = useState(false);
 
@@ -118,6 +120,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   );
   const myFinancialInfo = computeStudentFinancialInfo(student, myFinanceRecord);
 
+  const myGuestRequests = Storage.getGuestRequests().filter(
+    (g) => g.studentId === student.studentId
+  );
+  const pendingGuestCount = myGuestRequests.filter((g) => g.status === 'pending_supervisor').length;
+  const approvedAwaitingDocsGuests = myGuestRequests.filter(
+    (g) => g.status === 'approved' && !g.documentsSubmittedToSupervisor
+  );
+
   return (
     <div className="space-y-6">
 
@@ -152,6 +162,31 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             className="px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl text-xs font-black transition shrink-0 shadow-md shadow-rose-600/30 cursor-pointer hover:scale-105"
           >
             تکمیل فوری پرونده و فعال‌سازی
+          </button>
+        </div>
+      )}
+
+      {/* بنر موافقت سرپرست با درخواست مهمان و یادآوری مراجعه و تحویل مدارک */}
+      {approvedAwaitingDocsGuests.length > 0 && (
+        <div className="p-4 sm:p-5 rounded-3xl bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-400 dark:border-emerald-700 text-emerald-950 dark:text-emerald-100 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md">
+          <div className="flex items-center gap-3 text-center sm:text-right">
+            <div className="p-3 rounded-2xl bg-emerald-600 text-white shrink-0 shadow-sm">
+              <CheckCircle className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="font-black text-sm">
+                با درخواست مهمان شما موافقت شد ({approvedAwaitingDocsGuests.length} مورد)
+              </div>
+              <div className="text-xs text-emerald-800 dark:text-emerald-200 mt-1 leading-relaxed">
+                جهت پذیرش مهمان ({approvedAwaitingDocsGuests.map((g) => g.guestFullName).join('، ')}) به دفتر سرپرستی سرا مراجعه نموده و مدارک هویتی/دانشجویی را تحویل دهید.
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('guest')}
+            className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black transition shrink-0 shadow-sm cursor-pointer"
+          >
+            مشاهده جزئیات درخواست مهمان
           </button>
         </div>
       )}
@@ -395,6 +430,28 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               بسته توسط مدیر
             </span>
           ) : null}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('guest')}
+          className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+            activeTab === 'guest'
+              ? 'bg-indigo-600 text-white shadow-indigo-600/20'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <UserPlus className="w-4 h-4 text-indigo-500" />
+          <span>درخواست موافقت با مهمان</span>
+          {pendingGuestCount > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black">
+              {pendingGuestCount} در انتظار
+            </span>
+          )}
+          {approvedAwaitingDocsGuests.length > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-black">
+              موافقت شده
+            </span>
+          )}
         </button>
 
         <button
@@ -785,6 +842,16 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             />
           </div>
         )
+      )}
+
+      {activeTab === 'guest' && (
+        <StudentGuestRequestPanel
+          student={student}
+          dorm={studentDorm}
+          room={studentRoom}
+          roommatesCount={roommates.length}
+          onDataChanged={onRefreshData}
+        />
       )}
 
       {/* مدال کارت شناسایی و مجوز اسکان سرا */}

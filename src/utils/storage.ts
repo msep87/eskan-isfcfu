@@ -13,10 +13,14 @@ import {
   MaintenanceTask,
   WarehouseStaff,
   FinanceStaff,
+  ProcurementStaff,
   StudentFinancialRecord,
   StudentFinancialStatus,
   InventoryItem,
+  InventoryTransaction,
   WarehouseRequest,
+  ProcurementRequest,
+  ProcurementRequestStatus,
   SupervisorShiftSchedule,
   ShiftLogReport,
   CounselorStaff,
@@ -25,6 +29,8 @@ import {
   ActivityLog,
   ActivityLogCategory,
   StudentEvaluation,
+  GuestRequest,
+  GuestEligibilityType,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -38,9 +44,12 @@ import {
   INITIAL_MAINTENANCE_TASKS,
   INITIAL_WAREHOUSE_STAFF,
   INITIAL_FINANCE_STAFF,
+  INITIAL_PROCUREMENT_STAFF,
   INITIAL_STUDENT_FINANCES,
   INITIAL_INVENTORY_ITEMS,
+  INITIAL_INVENTORY_TRANSACTIONS,
   INITIAL_WAREHOUSE_REQUESTS,
+  INITIAL_PROCUREMENT_REQUESTS,
   INITIAL_SHIFT_SCHEDULES,
   INITIAL_SHIFT_REPORTS,
   INITIAL_COUNSELORS,
@@ -48,6 +57,7 @@ import {
   INITIAL_COUNSELOR_REPORTS,
   INITIAL_ACTIVITY_LOGS,
   INITIAL_STUDENT_EVALUATIONS,
+  INITIAL_GUEST_REQUESTS,
   generateInitialRoomsAndBeds,
 } from './sampleData';
 
@@ -68,9 +78,12 @@ const STORAGE_KEYS = {
   MAINTENANCE_TASKS: 'farhangian_dorm_maintenance_tasks_prod',
   WAREHOUSE_STAFF: 'farhangian_dorm_warehouse_staff_prod',
   FINANCE_STAFF: 'farhangian_dorm_finance_staff_prod',
+  PROCUREMENT_STAFF: 'farhangian_dorm_procurement_staff_prod',
   STUDENT_FINANCES: 'farhangian_dorm_student_finances_prod',
   INVENTORY_ITEMS: 'farhangian_dorm_inventory_items_prod',
+  INVENTORY_TRANSACTIONS: 'farhangian_dorm_inventory_transactions_prod',
   WAREHOUSE_REQUESTS: 'farhangian_dorm_warehouse_requests_prod',
+  PROCUREMENT_REQUESTS: 'farhangian_dorm_procurement_requests_prod',
   SHIFT_SCHEDULES: 'farhangian_dorm_shift_schedules_prod',
   SHIFT_REPORTS: 'farhangian_dorm_shift_reports_prod',
   COUNSELORS: 'farhangian_dorm_counselors_prod',
@@ -78,6 +91,7 @@ const STORAGE_KEYS = {
   COUNSELOR_REPORTS: 'farhangian_dorm_counselor_reports_prod',
   ACTIVITY_LOGS: 'farhangian_dorm_activity_logs_prod',
   STUDENT_EVALUATIONS: 'farhangian_dorm_student_evaluations_prod',
+  GUEST_REQUESTS: 'farhangian_dorm_guest_requests_prod',
 };
 
 
@@ -140,8 +154,20 @@ export function initializeStorageIfNeeded(): void {
   if (!localStorage.getItem(STORAGE_KEYS.FINANCE_STAFF)) {
     localStorage.setItem(STORAGE_KEYS.FINANCE_STAFF, JSON.stringify(INITIAL_FINANCE_STAFF));
   }
+  if (!localStorage.getItem(STORAGE_KEYS.PROCUREMENT_STAFF)) {
+    localStorage.setItem(STORAGE_KEYS.PROCUREMENT_STAFF, JSON.stringify(INITIAL_PROCUREMENT_STAFF));
+  }
   if (!localStorage.getItem(STORAGE_KEYS.STUDENT_FINANCES)) {
     localStorage.setItem(STORAGE_KEYS.STUDENT_FINANCES, JSON.stringify(INITIAL_STUDENT_FINANCES));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.INVENTORY_TRANSACTIONS)) {
+    localStorage.setItem(STORAGE_KEYS.INVENTORY_TRANSACTIONS, JSON.stringify(INITIAL_INVENTORY_TRANSACTIONS));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.PROCUREMENT_REQUESTS)) {
+    localStorage.setItem(STORAGE_KEYS.PROCUREMENT_REQUESTS, JSON.stringify(INITIAL_PROCUREMENT_REQUESTS));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.GUEST_REQUESTS)) {
+    localStorage.setItem(STORAGE_KEYS.GUEST_REQUESTS, JSON.stringify(INITIAL_GUEST_REQUESTS));
   }
 
   if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
@@ -1224,7 +1250,7 @@ export const Storage = {
 
   // تطبیق و اتصال دسته‌جمعی عکس‌های پرسنل و کادر بر اساس نام/کد کاربری
   batchAssignStaffPhotos: (
-    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance',
+    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement',
     photoMap: Record<string, string>
   ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     let matchedCount = 0;
@@ -1337,6 +1363,25 @@ export const Storage = {
           if (ref) Storage.setCurrentUser({ role: 'finance', staff: ref });
         }
       }
+    } else if (role === 'procurement') {
+      const list = Storage.getProcurementStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setProcurementStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'procurement') {
+          const ref = list.find((p) => p.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'procurement', staff: ref });
+        }
+      }
     }
 
     if (matchedCount > 0 && saved) {
@@ -1346,6 +1391,7 @@ export const Storage = {
         warehouse: 'پرسنل انبار',
         counselor: 'مشاوران',
         finance: 'امور مالی و حسابداری',
+        procurement: 'کارپرداز و خرید',
       };
       Storage.addActivityLog({
         category: 'staff',
@@ -1427,7 +1473,7 @@ export const Storage = {
     messageId: string,
     reply: {
       senderName: string;
-      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance';
+      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement';
       content: string;
       date: string;
     }
@@ -1551,7 +1597,10 @@ export const Storage = {
       maintenanceTasks: Storage.getMaintenanceTasks(),
       warehouseStaff: Storage.getWarehouseStaff(),
       inventoryItems: Storage.getInventoryItems(),
+      inventoryTransactions: Storage.getInventoryTransactions(),
       warehouseRequests: Storage.getWarehouseRequests(),
+      procurementStaff: Storage.getProcurementStaff(),
+      procurementRequests: Storage.getProcurementRequests(),
       shiftSchedules: Storage.getShiftSchedules(),
       shiftReports: Storage.getShiftReports(),
       counselors: Storage.getCounselors(),
@@ -1561,6 +1610,7 @@ export const Storage = {
       studentEvaluations: Storage.getStudentEvaluations(),
       financeStaff: Storage.getFinanceStaff(),
       studentFinances: Storage.getStudentFinances(),
+      guestRequests: Storage.getGuestRequests(),
       exportedAt: new Date().toISOString(),
       appName: 'سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
     };
@@ -1591,8 +1641,11 @@ export const Storage = {
         if (data.maintenanceStaff) Storage.setMaintenanceStaff(data.maintenanceStaff);
         if (data.maintenanceTasks) Storage.setMaintenanceTasks(data.maintenanceTasks);
         if (data.warehouseStaff) Storage.setWarehouseStaff(data.warehouseStaff);
-        if (data.inventoryItems) Storage.setInventoryItems(data.inventoryItems);
+        if (data.inventoryItems) set(STORAGE_KEYS.INVENTORY_ITEMS, data.inventoryItems);
+        if (data.inventoryTransactions) Storage.setInventoryTransactions(data.inventoryTransactions);
         if (data.warehouseRequests) Storage.setWarehouseRequests(data.warehouseRequests);
+        if (data.procurementStaff) Storage.setProcurementStaff(data.procurementStaff);
+        if (data.procurementRequests) Storage.setProcurementRequests(data.procurementRequests);
         if (data.shiftSchedules) Storage.setShiftSchedules(data.shiftSchedules);
         if (data.shiftReports) Storage.setShiftReports(data.shiftReports);
         if (data.counselors) Storage.setCounselors(data.counselors);
@@ -1602,6 +1655,7 @@ export const Storage = {
         if (data.studentEvaluations) Storage.setStudentEvaluations(data.studentEvaluations);
         if (data.financeStaff) Storage.setFinanceStaff(data.financeStaff);
         if (data.studentFinances) Storage.setStudentFinances(data.studentFinances);
+        if (data.guestRequests) Storage.setGuestRequests(data.guestRequests);
         Storage.addActivityLog({
           category: 'backup',
           action: 'بازیابی نسخه پشتیبان JSON',
@@ -1841,7 +1895,7 @@ export const Storage = {
 
   // تغییر کلمه عبور برای تمام نقش‌ها
   changePassword: (
-    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance',
+    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement',
     userId: string,
     currentPasswordInput: string,
     newPasswordInput: string
@@ -1977,6 +2031,26 @@ export const Storage = {
       return { success: true, message: 'کلمه عبور کارشناس امور مالی با موفقیت تغییر یافت.' };
     }
 
+    if (role === 'procurement') {
+      const staffList = Storage.getProcurementStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) {
+        return { success: false, message: 'کاربر کارپرداز یافت نشد.' };
+      }
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی کارپرداز اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setProcurementStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور کارپرداز',
+        details: `کلمه عبور کارپرداز ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور کارپرداز با موفقیت تغییر یافت.' };
+    }
+
     if (role === 'student') {
       const students = Storage.getStudents();
       const st = students.find((s) => s.studentId === userId);
@@ -2002,7 +2076,7 @@ export const Storage = {
 
   // تغییر یا ریست مستقیم رمز عبور کاربران توسط مدیر کل (بدون نیاز به رمز قبلی)
   adminResetUserPassword: (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement',
     idOrStudentId: string,
     newPasswordInput: string
   ): { success: boolean; message: string } => {
@@ -2128,6 +2202,25 @@ export const Storage = {
       return {
         success: true,
         message: `رمز عبور کاربر امور مالی «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'procurement') {
+      const list = Storage.getProcurementStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر کارپرداز یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setProcurementStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز کارپرداز توسط مدیر',
+        details: `کلمه عبور کارپرداز ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور کارپرداز «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
       };
     }
 
@@ -2376,18 +2469,110 @@ export const Storage = {
   },
 
   // -------------------------------------------------------------
+  // متدهای مدیریت کاربران کارپردازی و خرید (Procurement Staff)
+  // -------------------------------------------------------------
+  getProcurementStaff: (): ProcurementStaff[] => get(STORAGE_KEYS.PROCUREMENT_STAFF, INITIAL_PROCUREMENT_STAFF),
+  setProcurementStaff: (staff: ProcurementStaff[]) => set(STORAGE_KEYS.PROCUREMENT_STAFF, staff),
+
+  addProcurementStaff: (
+    staffData: Omit<ProcurementStaff, 'id'>
+  ): { success: boolean; message: string; staff?: ProcurementStaff } => {
+    const list = Storage.getProcurementStaff();
+    const cleanUsername = staffData.username.trim().toLowerCase();
+    if (list.some((s) => s.username.toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کارپرداز دیگری ثبت شده است.' };
+    }
+    const newStaff: ProcurementStaff = {
+      ...staffData,
+      id: `proc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      username: cleanUsername,
+      role: 'procurement',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setProcurementStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کاربر کارپرداز',
+      details: `کاربر کارپردازی و خرید «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کارپرداز «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateProcurementStaff: (
+    id: string,
+    updates: Partial<ProcurementStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getProcurementStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر کارپرداز یافت نشد.' };
+    if (updates.username) {
+      const cleanU = updates.username.trim().toLowerCase();
+      if (list.some((p) => p.id !== id && p.username.trim().toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کارپرداز دیگری ثبت شده است.' };
+      }
+    }
+    list[idx] = { ...list[idx], ...updates };
+    Storage.setProcurementStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'procurement' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'procurement', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کاربر کارپرداز با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteProcurementStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getProcurementStaff();
+    const target = list.find((s) => s.id === id);
+    const filtered = list.filter((s) => s.id !== id);
+    Storage.setProcurementStaff(filtered);
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کاربر کارپرداز',
+        details: `حساب کاربری کارپرداز «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کاربر کارپرداز با موفقیت حذف گردید.' };
+  },
+
+  // -------------------------------------------------------------
   // متدهای مدیریت موجودی کالاها و تجهیزات انبار (Inventory)
+  // نکته امنیتی: به جز کاربر انبار، هیچ نقشی مجاز به تغییر لیست یا موجودی انبار نیست
   // -------------------------------------------------------------
   getInventoryItems: (): InventoryItem[] => get(STORAGE_KEYS.INVENTORY_ITEMS, INITIAL_INVENTORY_ITEMS),
-  setInventoryItems: (items: InventoryItem[]) => set(STORAGE_KEYS.INVENTORY_ITEMS, items),
+  setInventoryItems: (items: InventoryItem[]) => {
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role !== 'warehouse') {
+      return false;
+    }
+    return set(STORAGE_KEYS.INVENTORY_ITEMS, items);
+  },
+
+  getInventoryTransactions: (): InventoryTransaction[] =>
+    get<InventoryTransaction[]>(STORAGE_KEYS.INVENTORY_TRANSACTIONS, INITIAL_INVENTORY_TRANSACTIONS),
+  setInventoryTransactions: (txs: InventoryTransaction[]) => set(STORAGE_KEYS.INVENTORY_TRANSACTIONS, txs),
 
   addInventoryItem: (
-    itemData: Omit<InventoryItem, 'id'>
-  ): { success: boolean; message: string; item: InventoryItem } => {
+    itemData: Omit<InventoryItem, 'id'>,
+    actor?: { id: string; name: string }
+  ): { success: boolean; message: string; item?: InventoryItem } => {
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role !== 'warehouse') {
+      return { success: false, message: 'فقط کاربر انبار مجاز به ثبت یا تغییر موجودی کالاهای انبار است.' };
+    }
     const items = Storage.getInventoryItems();
     const cleanCode = itemData.code.trim().toUpperCase();
     if (items.some((i) => i.code.toUpperCase() === cleanCode)) {
-      return { success: false, message: 'کد کالای وارد شده قبلاً در سامانه انبار ثبت شده است.', item: items[0] };
+      return { success: false, message: 'کد کالای وارد شده قبلاً در سامانه انبار ثبت شده است.' };
     }
     const newItem: InventoryItem = {
       ...itemData,
@@ -2396,7 +2581,39 @@ export const Storage = {
       lastRestockedDate: itemData.lastRestockedDate || new Date().toLocaleDateString('fa-IR'),
     };
     items.unshift(newItem);
-    Storage.setInventoryItems(items);
+    set(STORAGE_KEYS.INVENTORY_ITEMS, items);
+
+    if (newItem.quantity > 0) {
+      const now = new Date();
+      const txs = Storage.getInventoryTransactions();
+      txs.unshift({
+        id: `itx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        inventoryItemId: newItem.id,
+        itemCode: newItem.code,
+        itemName: newItem.name,
+        unit: newItem.unit,
+        type: 'in',
+        quantity: newItem.quantity,
+        previousQuantity: 0,
+        newQuantity: newItem.quantity,
+        unitPrice: newItem.unitPrice,
+        totalValue: newItem.quantity * (newItem.unitPrice || 0),
+        reason: 'موجودی اولیه هنگام تعریف کالا در انبار',
+        actorId: actor?.id || (cu?.role === 'warehouse' ? cu.staff.id : 'warehouse'),
+        actorName: actor?.name || (cu?.role === 'warehouse' ? cu.staff.fullName : 'مسئول انبار'),
+        date: `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}`,
+        timestamp: now.toISOString(),
+      });
+      Storage.setInventoryTransactions(txs.slice(0, 1000));
+    }
+
+    Storage.addActivityLog({
+      category: 'warehouse',
+      action: 'ثبت کالای جدید در انبار',
+      details: `کالای «${newItem.name}» (${newItem.code}) با موجودی ${newItem.quantity} ${newItem.unit} ثبت شد.`,
+      targetName: newItem.name,
+    });
+
     return {
       success: true,
       message: `کالای «${newItem.name}» با موفقیت در انبار ثبت گردید.`,
@@ -2408,19 +2625,301 @@ export const Storage = {
     id: string,
     updates: Partial<InventoryItem>
   ): { success: boolean; message: string } => {
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role !== 'warehouse') {
+      return { success: false, message: 'فقط کاربر انبار مجاز به ویرایش مشخصات یا موجودی کالاهای انبار است.' };
+    }
     const items = Storage.getInventoryItems();
     const idx = items.findIndex((i) => i.id === id);
     if (idx === -1) return { success: false, message: 'کالای مورد نظر در انبار یافت نشد.' };
-    items[idx] = { ...items[idx], ...updates };
-    Storage.setInventoryItems(items);
+
+    const prevItem = items[idx];
+    const cleanCode = updates.code !== undefined ? updates.code.trim().toUpperCase() : prevItem.code;
+    if (cleanCode !== prevItem.code && items.some((i) => i.id !== id && i.code.toUpperCase() === cleanCode)) {
+      return { success: false, message: 'کد کالای وارد شده برای کالای دیگری ثبت شده است.' };
+    }
+
+    const updatedItem: InventoryItem = {
+      ...prevItem,
+      ...updates,
+      code: cleanCode,
+    };
+
+    // اگر مقدار موجودی مستقیماً در ویرایش تغییر کرده باشد، تراکنش تعدیل ثبت کن
+    if (updates.quantity !== undefined && updates.quantity !== prevItem.quantity) {
+      const diff = updates.quantity - prevItem.quantity;
+      const now = new Date();
+      const txs = Storage.getInventoryTransactions();
+      txs.unshift({
+        id: `itx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        inventoryItemId: updatedItem.id,
+        itemCode: updatedItem.code,
+        itemName: updatedItem.name,
+        unit: updatedItem.unit,
+        type: diff >= 0 ? 'in' : 'out',
+        quantity: Math.abs(diff),
+        previousQuantity: prevItem.quantity,
+        newQuantity: updates.quantity,
+        unitPrice: updatedItem.unitPrice,
+        totalValue: Math.abs(diff) * (updatedItem.unitPrice || 0),
+        reason: 'ویرایش و تعدیل مستقیم موجودی کالا توسط مسئول انبار',
+        actorId: cu?.role === 'warehouse' ? cu.staff.id : 'warehouse',
+        actorName: cu?.role === 'warehouse' ? cu.staff.fullName : 'مسئول انبار',
+        date: `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}`,
+        timestamp: now.toISOString(),
+      });
+      Storage.setInventoryTransactions(txs.slice(0, 1000));
+    }
+
+    items[idx] = updatedItem;
+    set(STORAGE_KEYS.INVENTORY_ITEMS, items);
     return { success: true, message: 'مشخصات و موجودی کالا در انبار بروزرسانی گردید.' };
   },
 
   deleteInventoryItem: (id: string): { success: boolean; message: string } => {
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role !== 'warehouse') {
+      return { success: false, message: 'فقط کاربر انبار مجاز به حذف کالا از فهرست انبار است.' };
+    }
     const items = Storage.getInventoryItems();
+    const target = items.find((i) => i.id === id);
     const filtered = items.filter((i) => i.id !== id);
-    Storage.setInventoryItems(filtered);
+    set(STORAGE_KEYS.INVENTORY_ITEMS, filtered);
+    if (target) {
+      Storage.addActivityLog({
+        category: 'warehouse',
+        action: 'حذف کالا از انبار',
+        details: `کالای «${target.name}» (${target.code}) توسط مسئول انبار حذف شد.`,
+        targetName: target.name,
+        severity: 'warning',
+      });
+    }
     return { success: true, message: 'کالا از فهرست انبار حذف گردید.' };
+  },
+
+  // ثبت ورودی یا خروجی موجودی کالا توسط مسئول انبار
+  adjustInventoryStock: (
+    itemId: string,
+    payload: {
+      type: 'in' | 'out';
+      quantity: number;
+      unitPrice?: number;
+      reason: string;
+      referenceCode?: string;
+      dormName?: string;
+      actorId: string;
+      actorName: string;
+    }
+  ): { success: boolean; message: string; item?: InventoryItem } => {
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role !== 'warehouse') {
+      return { success: false, message: 'فقط کاربر انبار مجاز به ثبت ورودی و خروجی کالاهای انبار است.' };
+    }
+    const qty = Number(payload.quantity);
+    if (!qty || qty <= 0) {
+      return { success: false, message: 'مقدار ورودی یا خروجی باید عددی بزرگ‌تر از صفر باشد.' };
+    }
+    const items = Storage.getInventoryItems();
+    const idx = items.findIndex((i) => i.id === itemId);
+    if (idx === -1) {
+      return { success: false, message: 'کالای مورد نظر در انبار یافت نشد.' };
+    }
+    const item = items[idx];
+    const prevQty = Number(item.quantity) || 0;
+    if (payload.type === 'out' && qty > prevQty) {
+      return {
+        success: false,
+        message: `موجودی فعلی (${prevQty.toLocaleString('fa-IR')} ${item.unit}) کمتر از مقدار خروجی درخواستی است.`,
+      };
+    }
+
+    const newQty = payload.type === 'in' ? prevQty + qty : Math.max(0, prevQty - qty);
+    const effectivePrice =
+      payload.unitPrice !== undefined && payload.unitPrice >= 0 ? payload.unitPrice : item.unitPrice;
+    const now = new Date();
+    const dateStr = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    items[idx] = {
+      ...item,
+      quantity: newQty,
+      unitPrice: effectivePrice,
+      lastRestockedDate: payload.type === 'in' ? now.toLocaleDateString('fa-IR') : item.lastRestockedDate,
+    };
+    set(STORAGE_KEYS.INVENTORY_ITEMS, items);
+
+    const txs = Storage.getInventoryTransactions();
+    txs.unshift({
+      id: `itx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      inventoryItemId: item.id,
+      itemCode: item.code,
+      itemName: item.name,
+      unit: item.unit,
+      type: payload.type,
+      quantity: qty,
+      previousQuantity: prevQty,
+      newQuantity: newQty,
+      unitPrice: effectivePrice,
+      totalValue: qty * (effectivePrice || 0),
+      reason: payload.reason.trim() || (payload.type === 'in' ? 'ورود کالا به انبار' : 'خروج کالا از انبار'),
+      referenceCode: payload.referenceCode?.trim() || undefined,
+      dormName: payload.dormName?.trim() || undefined,
+      actorId: payload.actorId,
+      actorName: payload.actorName,
+      date: dateStr,
+      timestamp: now.toISOString(),
+    });
+    Storage.setInventoryTransactions(txs.slice(0, 1000));
+
+    Storage.addActivityLog({
+      category: 'warehouse',
+      action: payload.type === 'in' ? 'ثبت ورودی کالا به انبار' : 'ثبت خروجی کالا از انبار',
+      details: `${payload.type === 'in' ? 'ورود' : 'خروج'} ${qty} ${item.unit} از «${item.name}» (${item.code}) | موجودی جدید: ${newQty} ${item.unit} | بابت: ${payload.reason}`,
+      targetName: item.name,
+    });
+
+    return {
+      success: true,
+      message: `${payload.type === 'in' ? 'ورودی' : 'خروجی'} ${qty.toLocaleString('fa-IR')} ${item.unit} «${item.name}» ثبت شد. موجودی جدید: ${newQty.toLocaleString('fa-IR')} ${item.unit}`,
+      item: items[idx],
+    };
+  },
+
+  // ورود دسته‌جمعی یا اکسل لیست مواد و وسایل انبار (فقط کاربر انبار)
+  bulkImportInventoryItems: (
+    rows: Array<Omit<InventoryItem, 'id'>>,
+    actor: { id: string; name: string },
+    mode: 'merge' | 'add_stock' = 'add_stock'
+  ): { success: boolean; message: string; addedCount: number; updatedCount: number } => {
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role !== 'warehouse') {
+      return {
+        success: false,
+        message: 'فقط کاربر انبار مجاز به وارد کردن یا تغییر لیست کالاهای انبار است.',
+        addedCount: 0,
+        updatedCount: 0,
+      };
+    }
+
+    const items = Storage.getInventoryItems();
+    const txs = Storage.getInventoryTransactions();
+    const now = new Date();
+    const dateStr = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    let addedCount = 0;
+    let updatedCount = 0;
+
+    rows.forEach((raw, rIdx) => {
+      const cleanName = (raw.name || '').trim();
+      if (!cleanName) return;
+
+      const cleanCode = (raw.code || '').trim().toUpperCase() || `INV-${Date.now().toString().slice(-4)}-${rIdx + 1}`;
+      const existingIdx = items.findIndex(
+        (i) => i.code.toUpperCase() === cleanCode || i.name.trim() === cleanName
+      );
+      const qty = Math.max(0, Number(raw.quantity) || 0);
+      const unitPrice = Math.max(0, Number(raw.unitPrice) || 0);
+
+      if (existingIdx !== -1) {
+        const prev = items[existingIdx];
+        const prevQty = Number(prev.quantity) || 0;
+        const newQty = mode === 'add_stock' ? prevQty + qty : qty;
+        items[existingIdx] = {
+          ...prev,
+          name: cleanName,
+          category: raw.category || prev.category,
+          categoryLabel: raw.categoryLabel || prev.categoryLabel,
+          quantity: newQty,
+          unit: raw.unit?.trim() || prev.unit,
+          minStockLevel: raw.minStockLevel ?? prev.minStockLevel,
+          unitPrice: unitPrice > 0 ? unitPrice : prev.unitPrice,
+          location: raw.location?.trim() || prev.location,
+          lastRestockedDate: now.toLocaleDateString('fa-IR'),
+        };
+        if (newQty !== prevQty) {
+          txs.unshift({
+            id: `itx_${Date.now()}_${rIdx}_${Math.random().toString(36).substring(2, 5)}`,
+            inventoryItemId: prev.id,
+            itemCode: prev.code,
+            itemName: cleanName,
+            unit: items[existingIdx].unit,
+            type: newQty >= prevQty ? 'in' : 'out',
+            quantity: Math.abs(newQty - prevQty),
+            previousQuantity: prevQty,
+            newQuantity: newQty,
+            unitPrice: items[existingIdx].unitPrice,
+            totalValue: Math.abs(newQty - prevQty) * (items[existingIdx].unitPrice || 0),
+            reason:
+              mode === 'add_stock'
+                ? 'ورود گروهی / بروزرسانی لیست موجودی انبار'
+                : 'تنظیم گروهی موجودی انبار از فایل لیست',
+            actorId: actor.id,
+            actorName: actor.name,
+            date: dateStr,
+            timestamp: now.toISOString(),
+          });
+        }
+        updatedCount++;
+      } else {
+        const newItem: InventoryItem = {
+          id: `item_${Date.now()}_${rIdx}_${Math.random().toString(36).substring(2, 6)}`,
+          code: cleanCode,
+          name: cleanName,
+          category: raw.category || 'general',
+          categoryLabel: raw.categoryLabel,
+          quantity: qty,
+          unit: raw.unit?.trim() || 'عدد',
+          minStockLevel: Math.max(0, Number(raw.minStockLevel) || 2),
+          unitPrice,
+          location: raw.location?.trim() || 'انبار مرکزی',
+          lastRestockedDate: now.toLocaleDateString('fa-IR'),
+        };
+        items.unshift(newItem);
+        if (qty > 0) {
+          txs.unshift({
+            id: `itx_${Date.now()}_${rIdx}_${Math.random().toString(36).substring(2, 5)}`,
+            inventoryItemId: newItem.id,
+            itemCode: newItem.code,
+            itemName: newItem.name,
+            unit: newItem.unit,
+            type: 'in',
+            quantity: qty,
+            previousQuantity: 0,
+            newQuantity: qty,
+            unitPrice,
+            totalValue: qty * unitPrice,
+            reason: 'ورود اولیه از طریق ثبت لیست گروهی انبار',
+            actorId: actor.id,
+            actorName: actor.name,
+            date: dateStr,
+            timestamp: now.toISOString(),
+          });
+        }
+        addedCount++;
+      }
+    });
+
+    set(STORAGE_KEYS.INVENTORY_ITEMS, items);
+    Storage.setInventoryTransactions(txs.slice(0, 1000));
+
+    Storage.addActivityLog({
+      category: 'warehouse',
+      action: 'ورود گروهی لیست مواد و اقلام انبار',
+      details: `${addedCount} کالای جدید اضافه و ${updatedCount} کالا بروزرسانی شد.`,
+      targetName: `${addedCount + updatedCount} قلم کالا`,
+    });
+
+    return {
+      success: true,
+      message: `عملیات لیست انبار با موفقیت انجام شد: ${addedCount} کالای جدید ثبت و ${updatedCount} کالا بروزرسانی گردید.`,
+      addedCount,
+      updatedCount,
+    };
   },
 
   // -------------------------------------------------------------
@@ -2571,13 +3070,39 @@ export const Storage = {
       new Date().toLocaleDateString('fa-IR') + ' - ' + new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
     if (data.warehouseNotes) req.warehouseNotes = data.warehouseNotes;
 
-    // کسر خودکار موجودی از جدول انبار
+    // کسر خودکار موجودی از جدول انبار و ثبت تراکنش خروجی
     if (req.inventoryItemId) {
       const inventory = Storage.getInventoryItems();
       const itemIdx = inventory.findIndex((i) => i.id === req.inventoryItemId);
       if (itemIdx !== -1) {
-        inventory[itemIdx].quantity = Math.max(0, inventory[itemIdx].quantity - data.issuedQuantity);
-        Storage.setInventoryItems(inventory);
+        const prevQty = Number(inventory[itemIdx].quantity) || 0;
+        const newQty = Math.max(0, prevQty - data.issuedQuantity);
+        inventory[itemIdx].quantity = newQty;
+        set(STORAGE_KEYS.INVENTORY_ITEMS, inventory);
+
+        const now = new Date();
+        const txs = Storage.getInventoryTransactions();
+        txs.unshift({
+          id: `itx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          inventoryItemId: inventory[itemIdx].id,
+          itemCode: inventory[itemIdx].code,
+          itemName: inventory[itemIdx].name,
+          unit: inventory[itemIdx].unit,
+          type: 'out',
+          quantity: data.issuedQuantity,
+          previousQuantity: prevQty,
+          newQuantity: newQty,
+          unitPrice: data.unitPrice,
+          totalValue: totalCost,
+          reason: `تحویل با حواله انبار ${req.requestCode}${req.dormName ? ` (${req.dormName})` : ''}`,
+          referenceCode: req.requestCode,
+          dormName: req.dormName,
+          actorId: data.warehouseStaffId,
+          actorName: data.warehouseStaffName,
+          date: `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}`,
+          timestamp: now.toISOString(),
+        });
+        Storage.setInventoryTransactions(txs.slice(0, 1000));
       }
     }
 
@@ -2609,6 +3134,414 @@ export const Storage = {
     return {
       success: true,
       message: `حواله با کد «${req.requestCode}» صادر گردید، موجودی انبار کسر شد و هزینه به مأموریت پیوند داده شد.`,
+    };
+  },
+
+  // -------------------------------------------------------------
+  // متدهای ارجاع خرید از انبار به کارپرداز و تأیید انتقال به انبار
+  // -------------------------------------------------------------
+  getProcurementRequests: (): ProcurementRequest[] =>
+    get<ProcurementRequest[]>(STORAGE_KEYS.PROCUREMENT_REQUESTS, INITIAL_PROCUREMENT_REQUESTS),
+  setProcurementRequests: (reqs: ProcurementRequest[]) => set(STORAGE_KEYS.PROCUREMENT_REQUESTS, reqs),
+
+  createProcurementRequest: (data: {
+    warehouseRequestId?: string;
+    inventoryItemId?: string;
+    itemTitle: string;
+    itemCode?: string;
+    category?: InventoryItem['category'];
+    requestedQuantity: number;
+    unit: string;
+    urgency: 'normal' | 'urgent' | 'emergency';
+    reason?: string;
+    dormId?: string;
+    dormName?: string;
+    referredByStaffId: string;
+    referredByStaffName: string;
+    assignedProcurementId?: string;
+    assignedProcurementName?: string;
+  }): { success: boolean; message: string; procurementRequest?: ProcurementRequest } => {
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role !== 'warehouse') {
+      return { success: false, message: 'فقط مسئول انبار مجاز به ارجاع کسری کالا به کارپرداز است.' };
+    }
+    const list = Storage.getProcurementRequests();
+    const codeNum = list.length + 101;
+    const trackingCode = `P-${codeNum}`;
+    const now = new Date();
+    const nowStr = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    let warehouseRequestCode: string | undefined;
+    if (data.warehouseRequestId) {
+      const wReqs = Storage.getWarehouseRequests();
+      const wIdx = wReqs.findIndex((r) => r.id === data.warehouseRequestId);
+      if (wIdx !== -1) {
+        warehouseRequestCode = wReqs[wIdx].requestCode;
+      }
+    }
+
+    const newProc: ProcurementRequest = {
+      id: `preq_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      trackingCode,
+      warehouseRequestId: data.warehouseRequestId,
+      warehouseRequestCode,
+      inventoryItemId: data.inventoryItemId,
+      itemTitle: data.itemTitle.trim(),
+      itemCode: data.itemCode?.trim(),
+      category: data.category || 'general',
+      requestedQuantity: Math.max(1, Number(data.requestedQuantity) || 1),
+      unit: data.unit.trim() || 'عدد',
+      urgency: data.urgency || 'normal',
+      reason: data.reason?.trim() || 'عدم موجودی در انبار - ارجاع جهت خرید',
+      dormId: data.dormId,
+      dormName: data.dormName,
+      referredByStaffId: data.referredByStaffId,
+      referredByStaffName: data.referredByStaffName,
+      referredAt: nowStr,
+      assignedProcurementId: data.assignedProcurementId,
+      assignedProcurementName: data.assignedProcurementName,
+      status: 'pending_purchase',
+      deliveryStatus: 'not_delivered',
+    };
+
+    list.unshift(newProc);
+    Storage.setProcurementRequests(list);
+
+    if (data.warehouseRequestId) {
+      const wReqs = Storage.getWarehouseRequests();
+      const wIdx = wReqs.findIndex((r) => r.id === data.warehouseRequestId);
+      if (wIdx !== -1) {
+        wReqs[wIdx].status = 'referred_to_procurement';
+        wReqs[wIdx].procurementRequestId = newProc.id;
+        wReqs[wIdx].procurementTrackingCode = trackingCode;
+        wReqs[wIdx].referredToProcurementAt = nowStr;
+        wReqs[wIdx].warehouseNotes =
+          (wReqs[wIdx].warehouseNotes ? wReqs[wIdx].warehouseNotes + ' | ' : '') +
+          `به دلیل کسری موجودی با کد ${trackingCode} به کارپرداز ارجاع شد.`;
+        Storage.setWarehouseRequests(wReqs);
+      }
+    }
+
+    Storage.addActivityLog({
+      category: 'procurement',
+      action: 'ارجاع کسری کالا از انبار به کارپرداز',
+      details: `درخواست خرید «${newProc.itemTitle}» (${newProc.requestedQuantity} ${newProc.unit}) با کد ${trackingCode} به کارپرداز ارجاع شد.`,
+      targetName: trackingCode,
+    });
+
+    return {
+      success: true,
+      message: `درخواست خرید با کد رهگیری «${trackingCode}» به کارتابل کارپرداز ارجاع گردید.`,
+      procurementRequest: newProc,
+    };
+  },
+
+  updateProcurementPurchase: (
+    procurementId: string,
+    payload: {
+      status: ProcurementRequestStatus;
+      purchasedQuantity?: number;
+      purchasedItemCount?: number;
+      unitPrice?: number;
+      totalPrice?: number;
+      supplierName?: string;
+      invoiceNumber?: string;
+      purchaseDate?: string;
+      procurementNotes?: string;
+      deliveryStatus: 'not_delivered' | 'delivered';
+      actorId: string;
+      actorName: string;
+    }
+  ): { success: boolean; message: string; request?: ProcurementRequest } => {
+    const list = Storage.getProcurementRequests();
+    const idx = list.findIndex((p) => p.id === procurementId);
+    if (idx === -1) {
+      return { success: false, message: 'درخواست خرید مورد نظر یافت نشد.' };
+    }
+    const existing = list[idx];
+    if (existing.status === 'warehouse_confirmed' || existing.warehouseConfirmed) {
+      return {
+        success: false,
+        message: 'این خرید قبلاً توسط مسئول انبار تأیید و به موجودی انبار منتقل شده و قابل تغییر نیست.',
+      };
+    }
+
+    const now = new Date();
+    const nowStr = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const isDelivered = payload.deliveryStatus === 'delivered';
+    const nextStatus: ProcurementRequestStatus = isDelivered
+      ? 'delivered_to_warehouse'
+      : payload.status === 'delivered_to_warehouse'
+      ? 'purchased'
+      : payload.status;
+
+    const purchasedQty =
+      payload.purchasedQuantity !== undefined
+        ? Math.max(0, Number(payload.purchasedQuantity) || 0)
+        : existing.purchasedQuantity;
+    const unitPrice =
+      payload.unitPrice !== undefined ? Math.max(0, Number(payload.unitPrice) || 0) : existing.unitPrice;
+    const computedTotal =
+      payload.totalPrice !== undefined
+        ? Math.max(0, Number(payload.totalPrice) || 0)
+        : purchasedQty !== undefined && unitPrice !== undefined
+        ? purchasedQty * unitPrice
+        : existing.totalPrice;
+
+    const updated: ProcurementRequest = {
+      ...existing,
+      status: nextStatus,
+      purchasedQuantity: purchasedQty,
+      purchasedItemCount:
+        payload.purchasedItemCount !== undefined
+          ? Math.max(0, Number(payload.purchasedItemCount) || 0)
+          : existing.purchasedItemCount,
+      unitPrice,
+      totalPrice: computedTotal,
+      supplierName: payload.supplierName !== undefined ? payload.supplierName.trim() : existing.supplierName,
+      invoiceNumber: payload.invoiceNumber !== undefined ? payload.invoiceNumber.trim() : existing.invoiceNumber,
+      purchaseDate:
+        payload.purchaseDate !== undefined
+          ? payload.purchaseDate.trim()
+          : existing.purchaseDate || now.toLocaleDateString('fa-IR'),
+      procurementNotes:
+        payload.procurementNotes !== undefined ? payload.procurementNotes.trim() : existing.procurementNotes,
+      deliveryStatus: payload.deliveryStatus,
+      deliveredAt: isDelivered ? existing.deliveredAt || nowStr : undefined,
+      updatedByProcurementId: payload.actorId,
+      updatedByProcurementName: payload.actorName,
+      updatedAt: nowStr,
+    };
+
+    list[idx] = updated;
+    Storage.setProcurementRequests(list);
+
+    Storage.addActivityLog({
+      category: 'procurement',
+      action: isDelivered ? 'ثبت خرید و تحویل به انبار توسط کارپرداز' : 'بروزرسانی وضعیت خرید کارپرداز',
+      details: `درخواست خرید ${updated.trackingCode} («${updated.itemTitle}») توسط کارپرداز ${payload.actorName} بروزرسانی شد. وضعیت تحویل: ${isDelivered ? 'تحویل به انبار (در انتظار تأیید انبار)' : 'عدم تحویل'}.`,
+      targetName: updated.trackingCode,
+    });
+
+    return {
+      success: true,
+      message: isDelivered
+        ? `اطلاعات خرید و تحویل «${updated.trackingCode}» ثبت شد و جهت تأیید و ورود به موجودی به کارتابل مسئول انبار ارسال گردید.`
+        : `وضعیت خرید «${updated.trackingCode}» با موفقیت بروزرسانی شد.`,
+      request: updated,
+    };
+  },
+
+  confirmProcurementDeliveryToWarehouse: (
+    procurementId: string,
+    payload: {
+      warehouseStaffId: string;
+      warehouseStaffName: string;
+      targetInventoryItemId?: string;
+      newItemCode?: string;
+      newItemCategory?: InventoryItem['category'];
+      newItemLocation?: string;
+      newItemMinStock?: number;
+      confirmedQuantity?: number;
+      unitPrice?: number;
+      confirmNotes?: string;
+    }
+  ): { success: boolean; message: string; inventoryItem?: InventoryItem } => {
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role !== 'warehouse') {
+      return {
+        success: false,
+        message: 'فقط کاربر انبار مجاز به تأیید تحویل کالا و انتقال آن به موجودی انبار است.',
+      };
+    }
+
+    const list = Storage.getProcurementRequests();
+    const idx = list.findIndex((p) => p.id === procurementId);
+    if (idx === -1) {
+      return { success: false, message: 'سفارش خرید کارپرداز یافت نشد.' };
+    }
+    const req = list[idx];
+    if (req.warehouseConfirmed || req.status === 'warehouse_confirmed') {
+      return { success: false, message: 'این خرید قبلاً تأیید و به موجودی انبار منتقل شده است.' };
+    }
+    if (req.deliveryStatus !== 'delivered') {
+      return { success: false, message: 'کارپرداز هنوز وضعیت «تحویل به انبار» را برای این خرید ثبت نکرده است.' };
+    }
+
+    const qtyToStock = Math.max(
+      1,
+      Number(payload.confirmedQuantity ?? req.purchasedQuantity ?? req.requestedQuantity) || 1
+    );
+    const effectivePrice =
+      payload.unitPrice !== undefined && payload.unitPrice >= 0
+        ? payload.unitPrice
+        : req.unitPrice || 0;
+
+    const now = new Date();
+    const nowStr = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const inventory = Storage.getInventoryItems();
+    const matchedId = payload.targetInventoryItemId || req.inventoryItemId;
+    let invIdx = matchedId ? inventory.findIndex((i) => i.id === matchedId) : -1;
+    if (invIdx === -1 && req.itemCode) {
+      invIdx = inventory.findIndex((i) => i.code.toUpperCase() === req.itemCode!.toUpperCase());
+    }
+    if (invIdx === -1) {
+      invIdx = inventory.findIndex((i) => i.name.trim() === req.itemTitle.trim());
+    }
+
+    let stockedItem: InventoryItem;
+    let prevQty = 0;
+
+    if (invIdx !== -1) {
+      prevQty = Number(inventory[invIdx].quantity) || 0;
+      inventory[invIdx] = {
+        ...inventory[invIdx],
+        quantity: prevQty + qtyToStock,
+        unitPrice: effectivePrice > 0 ? effectivePrice : inventory[invIdx].unitPrice,
+        lastRestockedDate: now.toLocaleDateString('fa-IR'),
+      };
+      stockedItem = inventory[invIdx];
+    } else {
+      const cat = payload.newItemCategory || req.category || 'general';
+      const catLabels: Record<InventoryItem['category'], string> = {
+        plumbing: 'تأسیسات و لوله‌کشی',
+        electrical: 'برق و روشنایی',
+        carpentry: 'نجاری و قفل',
+        cleaning: 'بهداشت و نظافت',
+        general: 'تجهیزات عمومی',
+      };
+      const baseCode = (payload.newItemCode || req.itemCode || '').trim().toUpperCase();
+      const uniqueCode =
+        baseCode && !inventory.some((i) => i.code.toUpperCase() === baseCode)
+          ? baseCode
+          : `PRC-${req.trackingCode.replace(/[^A-Za-z0-9]/g, '')}-${Date.now().toString().slice(-3)}`;
+
+      stockedItem = {
+        id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        code: uniqueCode,
+        name: req.itemTitle,
+        category: cat,
+        categoryLabel: catLabels[cat],
+        quantity: qtyToStock,
+        unit: req.unit || 'عدد',
+        minStockLevel: Math.max(0, Number(payload.newItemMinStock ?? 2)),
+        unitPrice: effectivePrice,
+        location: payload.newItemLocation?.trim() || 'انبار مرکزی',
+        lastRestockedDate: now.toLocaleDateString('fa-IR'),
+      };
+      inventory.unshift(stockedItem);
+    }
+
+    set(STORAGE_KEYS.INVENTORY_ITEMS, inventory);
+
+    // ثبت تراکنش ورودی انبار
+    const txs = Storage.getInventoryTransactions();
+    txs.unshift({
+      id: `itx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      inventoryItemId: stockedItem.id,
+      itemCode: stockedItem.code,
+      itemName: stockedItem.name,
+      unit: stockedItem.unit,
+      type: 'in',
+      quantity: qtyToStock,
+      previousQuantity: prevQty,
+      newQuantity: stockedItem.quantity,
+      unitPrice: effectivePrice,
+      totalValue: qtyToStock * effectivePrice,
+      reason: `تحویل خرید کارپرداز (${req.updatedByProcurementName || req.assignedProcurementName || 'واحد کارپردازی'})${req.invoiceNumber ? ` - فاکتور ${req.invoiceNumber}` : ''}`,
+      referenceCode: req.trackingCode,
+      dormName: req.dormName,
+      actorId: payload.warehouseStaffId,
+      actorName: payload.warehouseStaffName,
+      date: nowStr,
+      timestamp: now.toISOString(),
+    });
+    Storage.setInventoryTransactions(txs.slice(0, 1000));
+
+    // بروزرسانی پرونده خرید کارپردازی
+    list[idx] = {
+      ...req,
+      status: 'warehouse_confirmed',
+      warehouseConfirmed: true,
+      warehouseConfirmedBy: payload.warehouseStaffName,
+      warehouseConfirmedAt: nowStr,
+      warehouseConfirmNotes: payload.confirmNotes?.trim(),
+      transferredInventoryItemId: stockedItem.id,
+    };
+    Storage.setProcurementRequests(list);
+
+    // بازگرداندن حواله متصل‌شده به صف آماده تحویل انبار
+    if (req.warehouseRequestId) {
+      const wReqs = Storage.getWarehouseRequests();
+      const wIdx = wReqs.findIndex((r) => r.id === req.warehouseRequestId);
+      if (wIdx !== -1 && wReqs[wIdx].status === 'referred_to_procurement') {
+        wReqs[wIdx].status = 'pending_warehouse';
+        wReqs[wIdx].inventoryItemId = stockedItem.id;
+        wReqs[wIdx].unitPrice = effectivePrice > 0 ? effectivePrice : wReqs[wIdx].unitPrice;
+        wReqs[wIdx].warehouseNotes =
+          (wReqs[wIdx].warehouseNotes ? wReqs[wIdx].warehouseNotes + ' | ' : '') +
+          `خرید (${req.trackingCode}) تحویل انبار و تأیید شد؛ آماده صدور حواله.`;
+        Storage.setWarehouseRequests(wReqs);
+      }
+    }
+
+    Storage.addActivityLog({
+      category: 'warehouse',
+      action: 'تأیید تحویل کارپرداز و انتقال به موجودی انبار',
+      details: `خرید ${req.trackingCode} («${stockedItem.name}» به مقدار ${qtyToStock} ${stockedItem.unit}) توسط مسئول انبار تأیید و به موجودی انبار منتقل شد.`,
+      targetName: stockedItem.name,
+    });
+
+    return {
+      success: true,
+      message: `تحویل خرید «${req.trackingCode}» تأیید شد و ${qtyToStock.toLocaleString('fa-IR')} ${stockedItem.unit} به موجودی کالای «${stockedItem.name}» در انبار منتقل گردید.`,
+      inventoryItem: stockedItem,
+    };
+  },
+
+  rejectProcurementDeliveryByWarehouse: (
+    procurementId: string,
+    reason: string,
+    warehouseStaffName: string
+  ): { success: boolean; message: string } => {
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role !== 'warehouse') {
+      return { success: false, message: 'فقط کاربر انبار مجاز به رد تحویل خرید است.' };
+    }
+    const list = Storage.getProcurementRequests();
+    const idx = list.findIndex((p) => p.id === procurementId);
+    if (idx === -1) return { success: false, message: 'سفارش خرید یافت نشد.' };
+
+    list[idx] = {
+      ...list[idx],
+      status: 'purchased',
+      deliveryStatus: 'not_delivered',
+      deliveredAt: undefined,
+      warehouseConfirmed: false,
+      warehouseConfirmNotes: `عدم تأیید تحویل توسط انبار (${warehouseStaffName}): ${reason || 'مغایرت کالا یا تعداد'}`,
+    };
+    Storage.setProcurementRequests(list);
+    Storage.addActivityLog({
+      category: 'warehouse',
+      action: 'عدم تأیید تحویل کارپرداز توسط انبار',
+      details: `تحویل سفارش ${list[idx].trackingCode} توسط مسئول انبار رد شد. علت: ${reason}`,
+      targetName: list[idx].trackingCode,
+      severity: 'warning',
+    });
+    return {
+      success: true,
+      message: `تحویل سفارش ${list[idx].trackingCode} تأیید نشد و به کارتابل کارپرداز بازگردانده شد.`,
     };
   },
 
@@ -2976,6 +3909,10 @@ export const Storage = {
         actorName = currentUser.staff.fullName;
         actorRole = 'finance';
         actorUsername = currentUser.staff.username;
+      } else if (currentUser.role === 'procurement') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'procurement';
+        actorUsername = currentUser.staff.username;
       }
     }
 
@@ -3151,6 +4088,332 @@ export const Storage = {
   },
 
   // -------------------------------------------------------------
+  // درخواست‌های موافقت با مهمان دانشجو (ارسال به سرپرست و پیگیری تحویل مدارک)
+  // -------------------------------------------------------------
+  getGuestRequests: (): GuestRequest[] => {
+    return get<GuestRequest[]>(STORAGE_KEYS.GUEST_REQUESTS, INITIAL_GUEST_REQUESTS);
+  },
+
+  setGuestRequests: (items: GuestRequest[]): void => {
+    set(STORAGE_KEYS.GUEST_REQUESTS, items);
+  },
+
+  createGuestRequest: (payload: {
+    studentId: string;
+    eligibilityType: GuestEligibilityType;
+    relationshipToStudent: string;
+    guestFullName: string;
+    guestNationalId: string;
+    guestFatherName: string;
+    guestPhone: string;
+    guestProvince: string;
+    guestCity: string;
+    guestStudentId?: string;
+    guestUniversityName?: string;
+    guestFieldOfStudy?: string;
+    stayDuration: string;
+    arrivalDate: string;
+    arrivalTime: string;
+    departureDate: string;
+    departureTime: string;
+    visitReason?: string;
+    fullResponsibilityAccepted: boolean;
+    noSelfFoodAccepted: boolean;
+    roommatesConsentConfirmed: boolean;
+  }): { success: boolean; message: string; request?: GuestRequest } => {
+    const students = Storage.getStudents();
+    const dorms = Storage.getDormitories();
+    const rooms = Storage.getRooms();
+
+    const student = students.find((s) => s.studentId === payload.studentId);
+    if (!student) {
+      return { success: false, message: 'اطلاعات دانشجو در سامانه یافت نشد.' };
+    }
+    if (!student.isProfileCompleted) {
+      return { success: false, message: 'ابتدا باید فرم پرونده اسکان خود را تکمیل نمایید.' };
+    }
+    if (!student.assignedDormId || !student.assignedRoomId) {
+      return {
+        success: false,
+        message: 'ثبت درخواست مهمان تنها برای دانشجویان دارای اتاق و سرای تخصیص‌یافته امکان‌پذیر است.',
+      };
+    }
+
+    // شرط قطعی احراز مهمان
+    if (
+      payload.eligibilityType !== 'first_degree_relative' &&
+      payload.eligibilityType !== 'other_province_farhangian'
+    ) {
+      return {
+        success: false,
+        message:
+          'طبق مقررات، مهمان حتماً باید از اقوام درجه یک دانشجو یا دانشجوی دانشگاه فرهنگیان استان دیگری باشد. در غیر این صورت امکان درخواست وجود ندارد.',
+      };
+    }
+
+    const normProvince = payload.guestProvince.replace(/ي/g, 'ی').replace(/ك/g, 'ک').trim();
+    if (payload.eligibilityType === 'other_province_farhangian') {
+      if (!normProvince || normProvince.includes('اصفهان')) {
+        return {
+          success: false,
+          message:
+            'در حالت دانشجوی دانشگاه فرهنگیان، مهمان باید از استانی غیراز استان اصفهان باشد. برای استان اصفهان امکان ثبت درخواست وجود ندارد.',
+        };
+      }
+      if (!payload.guestStudentId?.trim() || !payload.guestUniversityName?.trim()) {
+        return {
+          success: false,
+          message: 'برای مهمان دانشجوی فرهنگیان استان دیگر، وارد کردن کد دانشجویی و نام پردیس/دانشگاه مبدأ الزامی است.',
+        };
+      }
+    }
+
+    if (
+      !payload.fullResponsibilityAccepted ||
+      !payload.noSelfFoodAccepted ||
+      !payload.roommatesConsentConfirmed
+    ) {
+      return {
+        success: false,
+        message:
+          'تأیید هر سه تعهد الزامی (مسئولیت کامل مهمان، عدم تعلق غذای سلف و رضایت ساکنین اتاق) جهت ثبت درخواست ضروری است.',
+      };
+    }
+
+    const cleanGuestName = payload.guestFullName.trim();
+    const cleanNationalId = payload.guestNationalId.trim();
+    const cleanFather = payload.guestFatherName.trim();
+    const cleanPhone = payload.guestPhone.trim();
+    const cleanRelation = payload.relationshipToStudent.trim();
+
+    if (!cleanGuestName || !cleanNationalId || !cleanFather || !cleanPhone || !cleanRelation) {
+      return {
+        success: false,
+        message: 'لطفاً تمامی مشخصات هویتی و نسبت مهمان را به صورت کامل وارد نمایید.',
+      };
+    }
+
+    if (
+      !payload.stayDuration.trim() ||
+      !payload.arrivalDate.trim() ||
+      !payload.arrivalTime.trim() ||
+      !payload.departureDate.trim() ||
+      !payload.departureTime.trim()
+    ) {
+      return {
+        success: false,
+        message: 'تعیین مدت اقامت و تاریخ و زمان دقیق ورود و خروج مهمان الزامی است.',
+      };
+    }
+
+    const dorm = dorms.find((d) => d.id === student.assignedDormId);
+    const room = rooms.find((r) => r.id === student.assignedRoomId);
+    const requests = Storage.getGuestRequests();
+
+    const now = new Date();
+    const dateStr = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const newReq: GuestRequest = {
+      id: `guest_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      trackingCode: `G-${101 + requests.length}`,
+      studentId: student.studentId,
+      studentName: student.fullName,
+      studentNationalId: student.nationalId,
+      studentPhone: student.mobile || student.phone || '-',
+      dormId: student.assignedDormId,
+      dormName: dorm?.name || student.assignedDormName || 'سرای دانشجویی',
+      roomId: student.assignedRoomId,
+      roomNumber: room?.roomNumber || student.assignedRoomNumber || '-',
+      eligibilityType: payload.eligibilityType,
+      relationshipToStudent: cleanRelation,
+      guestFullName: cleanGuestName,
+      guestNationalId: cleanNationalId,
+      guestFatherName: cleanFather,
+      guestPhone: cleanPhone,
+      guestProvince: normProvince || payload.guestProvince.trim(),
+      guestCity: payload.guestCity.trim(),
+      guestStudentId: payload.guestStudentId?.trim() || undefined,
+      guestUniversityName: payload.guestUniversityName?.trim() || undefined,
+      guestFieldOfStudy: payload.guestFieldOfStudy?.trim() || undefined,
+      stayDuration: payload.stayDuration.trim(),
+      arrivalDate: payload.arrivalDate.trim(),
+      arrivalTime: payload.arrivalTime.trim(),
+      departureDate: payload.departureDate.trim(),
+      departureTime: payload.departureTime.trim(),
+      visitReason: payload.visitReason?.trim() || undefined,
+      fullResponsibilityAccepted: true,
+      noSelfFoodAccepted: true,
+      roommatesConsentConfirmed: true,
+      status: 'pending_supervisor',
+      createdAt: dateStr,
+      documentsSubmittedToSupervisor: false,
+    };
+
+    requests.unshift(newReq);
+    Storage.setGuestRequests(requests);
+
+    Storage.addActivityLog({
+      category: 'guest',
+      action: 'ثبت درخواست موافقت با مهمان',
+      details: `درخواست مهمان (${newReq.trackingCode}) توسط ${student.fullName} برای «${newReq.guestFullName}» (${newReq.relationshipToStudent}) در ${newReq.dormName} اتاق ${newReq.roomNumber} به کارتابل سرپرستی ارسال شد.`,
+      targetName: `${newReq.guestFullName} (${newReq.trackingCode})`,
+      actorName: student.fullName,
+      actorRole: 'student',
+      actorUsername: student.studentId,
+    });
+
+    return {
+      success: true,
+      message: `درخواست مهمان با کد رهگیری ${newReq.trackingCode} ثبت و جهت بررسی و موافقت به کارتابل سرپرست سرا ارسال شد.`,
+      request: newReq,
+    };
+  },
+
+  approveGuestRequest: (
+    id: string,
+    supervisorName: string,
+    supervisorNotes?: string
+  ): { success: boolean; message: string } => {
+    const requests = Storage.getGuestRequests();
+    const target = requests.find((r) => r.id === id);
+    if (!target) {
+      return { success: false, message: 'درخواست مهمان یافت نشد.' };
+    }
+    const now = new Date();
+    const dateStr = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    target.status = 'approved';
+    target.reviewedBy = supervisorName;
+    target.reviewedAt = dateStr;
+    target.supervisorNotes =
+      supervisorNotes?.trim() ||
+      'درخواست مهمان مورد موافقت قرار گرفت. دانشجو می‌تواند با در دست داشتن مدارک شناسایی/دانشجویی به دفتر سرپرستی مراجعه و مدارک را تحویل دهد.';
+    target.rejectionReason = undefined;
+    Storage.setGuestRequests(requests);
+
+    Storage.addActivityLog({
+      category: 'guest',
+      action: 'موافقت سرپرست با درخواست مهمان',
+      details: `درخواست مهمان ${target.trackingCode} (${target.guestFullName}، مهمان ${target.studentName}) توسط ${supervisorName} تأیید شد.`,
+      targetName: `${target.studentName} (${target.trackingCode})`,
+      actorName: supervisorName,
+      actorRole: 'supervisor',
+    });
+
+    return {
+      success: true,
+      message: `با درخواست مهمان ${target.trackingCode} موافقت شد و پیام مراجعه جهت تحویل مدارک به سرپرستی برای دانشجو فعال گردید.`,
+    };
+  },
+
+  rejectGuestRequest: (
+    id: string,
+    supervisorName: string,
+    rejectionReason: string
+  ): { success: boolean; message: string } => {
+    const cleanReason = rejectionReason.trim();
+    if (!cleanReason) {
+      return { success: false, message: 'ذکر علت رد درخواست مهمان الزامی است.' };
+    }
+    const requests = Storage.getGuestRequests();
+    const target = requests.find((r) => r.id === id);
+    if (!target) {
+      return { success: false, message: 'درخواست مهمان یافت نشد.' };
+    }
+    const now = new Date();
+    const dateStr = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    target.status = 'rejected';
+    target.reviewedBy = supervisorName;
+    target.reviewedAt = dateStr;
+    target.rejectionReason = cleanReason;
+    Storage.setGuestRequests(requests);
+
+    Storage.addActivityLog({
+      category: 'guest',
+      action: 'رد درخواست مهمان توسط سرپرست',
+      details: `درخواست مهمان ${target.trackingCode} (${target.guestFullName}، مهمان ${target.studentName}) به علت «${cleanReason}» رد شد.`,
+      targetName: `${target.studentName} (${target.trackingCode})`,
+      severity: 'warning',
+      actorName: supervisorName,
+      actorRole: 'supervisor',
+    });
+
+    return {
+      success: true,
+      message: `درخواست مهمان ${target.trackingCode} با ثبت علت رد شد.`,
+    };
+  },
+
+  markGuestDocumentsSubmitted: (
+    id: string,
+    supervisorName: string,
+    submitted = true
+  ): { success: boolean; message: string } => {
+    const requests = Storage.getGuestRequests();
+    const target = requests.find((r) => r.id === id);
+    if (!target) {
+      return { success: false, message: 'درخواست مهمان یافت نشد.' };
+    }
+    const now = new Date();
+    const dateStr = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    target.documentsSubmittedToSupervisor = submitted;
+    target.documentsSubmittedAt = submitted ? dateStr : undefined;
+    Storage.setGuestRequests(requests);
+
+    Storage.addActivityLog({
+      category: 'guest',
+      action: submitted ? 'ثبت تحویل مدارک مهمان به سرپرستی' : 'لغو وضعیت تحویل مدارک مهمان',
+      details: `وضعیت تحویل مدارک برای درخواست ${target.trackingCode} (${target.guestFullName} - مهمان ${target.studentName}) توسط ${supervisorName} بروزرسانی شد.`,
+      targetName: `${target.guestFullName} (${target.trackingCode})`,
+      actorName: supervisorName,
+      actorRole: 'supervisor',
+    });
+
+    return {
+      success: true,
+      message: submitted
+        ? 'تحویل حضوری مدارک مهمان به دفتر سرپرستی ثبت شد.'
+        : 'وضعیت تحویل مدارک به حالت در انتظار بازگردانده شد.',
+    };
+  },
+
+  cancelGuestRequest: (id: string, studentId: string): { success: boolean; message: string } => {
+    const requests = Storage.getGuestRequests();
+    const target = requests.find((r) => r.id === id && r.studentId === studentId);
+    if (!target) {
+      return { success: false, message: 'درخواست مهمان یافت نشد.' };
+    }
+    if (target.status !== 'pending_supervisor') {
+      return { success: false, message: 'تنها درخواست‌های در انتظار بررسی سرپرست قابل لغو هستند.' };
+    }
+    target.status = 'cancelled';
+    Storage.setGuestRequests(requests);
+
+    Storage.addActivityLog({
+      category: 'guest',
+      action: 'لغو درخواست مهمان توسط دانشجو',
+      details: `دانشجو ${target.studentName} درخواست مهمان ${target.trackingCode} را لغو کرد.`,
+      targetName: `${target.guestFullName} (${target.trackingCode})`,
+      actorName: target.studentName,
+      actorRole: 'student',
+      actorUsername: studentId,
+    });
+
+    return { success: true, message: 'درخواست مهمان لغو شد.' };
+  },
+
+  // -------------------------------------------------------------
   // توابع همگام‌سازی دوطرفه با دیتابیس ابری MongoDB Atlas
   // -------------------------------------------------------------
   fetchStudentsFromDB: async (): Promise<Student[] | null> => {
@@ -3252,7 +4515,7 @@ export const Storage = {
   },
 
   uploadPhotosToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement',
     items: Array<{ userId: string; dataUrl: string }>
   ): Promise<{
     supported: boolean;
@@ -3337,7 +4600,7 @@ export const Storage = {
   },
 
   uploadSinglePhotoToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement',
     userId: string,
     dataUrl: string
   ): Promise<{ supported: boolean; ok: boolean; url: string; errorMessage?: string }> => {

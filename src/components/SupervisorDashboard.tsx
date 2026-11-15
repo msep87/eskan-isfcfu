@@ -23,6 +23,7 @@ import { RoomWarningModal } from './RoomWarningModal';
 import { DormIdCardModal } from './DormIdCardModal';
 import { StudentEvaluationModal } from './StudentEvaluationModal';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
+import { SupervisorGuestRequestsPanel } from './SupervisorGuestRequestsPanel';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
 import {
@@ -104,7 +105,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   onOpenExcelModal,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'announcements' | 'students' | 'maintenance' | 'warehouse' | 'shifts'>('manager');
+  const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'announcements' | 'students' | 'guest_requests' | 'maintenance' | 'warehouse' | 'shifts'>('manager');
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
   const [isStudentEvalModalOpen, setIsStudentEvalModalOpen] = useState(false);
   const [evalTargetStudent, setEvalTargetStudent] = useState<Student | null>(null);
@@ -138,6 +139,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   const [newAnnImage, setNewAnnImage] = useState<string | null>(null);
   const [viewCardStudent, setViewCardStudent] = useState<Student | null>(null);
   const [profileModalStudentId, setProfileModalStudentId] = useState<string | null>(null);
+  const [rejectWarehouseTarget, setRejectWarehouseTarget] = useState<{ id: string; code: string; title: string } | null>(null);
+  const [rejectWarehouseReason, setRejectWarehouseReason] = useState('');
 
   // جستجوی پیشرفته و مرتب‌سازی تب فهرست دانشجویان
   const [showAdvancedStudentFilters, setShowAdvancedStudentFilters] = useState(true);
@@ -1057,6 +1060,29 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           }`}
         >
           فهرست دانشجویان و تماس ضروری ({students.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('guest_requests')}
+          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer flex items-center gap-2 ${
+            activeTab === 'guest_requests'
+              ? 'bg-indigo-600 text-white shadow-md'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <UserPlus className="w-4 h-4 text-indigo-500" />
+          <span>درخواست‌های مهمان</span>
+          {Storage.getGuestRequests().filter(
+            (g) => activeDormIds.includes(g.dormId) && g.status === 'pending_supervisor'
+          ).length > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-600 text-white font-black animate-pulse">
+              {
+                Storage.getGuestRequests().filter(
+                  (g) => activeDormIds.includes(g.dormId) && g.status === 'pending_supervisor'
+                ).length
+              }
+            </span>
+          )}
         </button>
 
         <button
@@ -2179,12 +2205,13 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
             );
             const pendingSup = allReqs.filter((r) => r.status === 'pending_supervisor');
             const pendingWh = allReqs.filter((r) => r.status === 'pending_warehouse');
+            const referredProc = allReqs.filter((r) => r.status === 'referred_to_procurement');
             const issued = allReqs.filter((r) => r.status === 'issued');
             const totalCost = issued.reduce((sum, r) => sum + (r.totalCost || 0), 0);
 
             return (
               <>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 shadow-xs">
                     <span className="text-[11px] text-amber-600 block mb-1 font-bold">نیازمند تأیید سرپرست</span>
                     <span className="text-xl font-black text-amber-600">{pendingSup.length}</span>
@@ -2197,13 +2224,19 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                     <span className="text-[10px] text-slate-400 block mt-0.5">تأییدشده و در دست انباردار</span>
                   </div>
 
+                  <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-orange-200 dark:border-orange-900/40 shadow-xs">
+                    <span className="text-[11px] text-orange-600 block mb-1 font-bold">ارجاع به کارپرداز</span>
+                    <span className="text-xl font-black text-orange-600">{referredProc.length}</span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">در حال خرید و تأمین</span>
+                  </div>
+
                   <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-900/40 shadow-xs">
                     <span className="text-[11px] text-emerald-600 block mb-1 font-bold">تحویل‌شده و بسته</span>
                     <span className="text-xl font-black text-emerald-600">{issued.length}</span>
                     <span className="text-[10px] text-slate-400 block mt-0.5">اقلام دریافت‌شده سرا</span>
                   </div>
 
-                  <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+                  <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs col-span-2 sm:col-span-1">
                     <span className="text-[11px] text-slate-500 block mb-1 font-bold">هزینه فاکتور اقلام</span>
                     <span className="text-lg font-black text-slate-900 dark:text-white truncate">
                       {Number(totalCost).toLocaleString('fa-IR')} ریال
@@ -2225,6 +2258,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                     {allReqs.map((req) => {
                       const isPendingSup = req.status === 'pending_supervisor';
                       const isPendingWh = req.status === 'pending_warehouse';
+                      const isReferredProc = req.status === 'referred_to_procurement';
                       const isIssued = req.status === 'issued';
 
                       return (
@@ -2233,6 +2267,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                           className={`p-5 rounded-3xl bg-white dark:bg-slate-900 border transition shadow-xs flex flex-col justify-between ${
                             isPendingSup
                               ? 'border-amber-400 ring-2 ring-amber-400/20'
+                              : isReferredProc
+                              ? 'border-orange-300 dark:border-orange-800'
                               : isIssued
                               ? 'border-emerald-200 dark:border-emerald-900/60'
                               : 'border-slate-200 dark:border-slate-800'
@@ -2250,6 +2286,10 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                               ) : isPendingWh ? (
                                 <span className="text-[11px] px-2 py-0.5 rounded-xl bg-violet-100 text-violet-800 font-bold">
                                   ارجاع به انبار
+                                </span>
+                              ) : isReferredProc ? (
+                                <span className="text-[11px] px-2 py-0.5 rounded-xl bg-orange-100 text-orange-800 font-bold">
+                                  ارجاع به کارپرداز جهت خرید
                                 </span>
                               ) : isIssued ? (
                                 <span className="text-[11px] px-2 py-0.5 rounded-xl bg-emerald-100 text-emerald-800 font-bold">
@@ -2294,6 +2334,12 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                               </p>
                             )}
 
+                            {isReferredProc && (
+                              <div className="p-2.5 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 text-[11px] text-orange-800 dark:text-orange-200 mb-2">
+                                به‌دلیل کمبود موجودی در انبار، توسط مسئول انبار به کارپرداز ارجاع شد تا خریداری و تحویل انبار گردد.
+                              </div>
+                            )}
+
                             {isIssued && (
                               <div className="p-2 rounded-xl bg-emerald-50 text-xs text-emerald-900 mb-2">
                                 <div className="font-bold">تحویل قطعی: {req.issuedQuantity} {req.unit} به مبلغ {Number(req.totalCost || 0).toLocaleString('fa-IR')} ریال</div>
@@ -2320,11 +2366,12 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
 
                               <button
                                 onClick={() => {
-                                  const reason = prompt('علت عدم تأیید درخواست قطعه را بنویسید:');
-                                  if (reason) {
-                                    Storage.rejectWarehouseRequest(req.id, reason);
-                                    onRefreshData();
-                                  }
+                                  setRejectWarehouseReason('');
+                                  setRejectWarehouseTarget({
+                                    id: req.id,
+                                    code: req.requestCode,
+                                    title: req.itemTitle,
+                                  });
                                 }}
                                 className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold transition cursor-pointer"
                               >
@@ -2338,10 +2385,70 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                     })}
                   </div>
                 )}
+
+                {rejectWarehouseTarget && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                        <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                          رد درخواست قطعه {rejectWarehouseTarget.code}
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => setRejectWarehouseTarget(null)}
+                          className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-300">
+                        قلم درخواستی: <strong>{rejectWarehouseTarget.title}</strong>
+                      </p>
+                      <textarea
+                        rows={3}
+                        value={rejectWarehouseReason}
+                        onChange={(e) => setRejectWarehouseReason(e.target.value)}
+                        placeholder="علت عدم تأیید درخواست را وارد نمایید..."
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setRejectWarehouseTarget(null)}
+                          className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 cursor-pointer"
+                        >
+                          انصراف
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!rejectWarehouseReason.trim()) return;
+                            Storage.rejectWarehouseRequest(rejectWarehouseTarget.id, rejectWarehouseReason.trim());
+                            setRejectWarehouseTarget(null);
+                            onRefreshData();
+                          }}
+                          disabled={!rejectWarehouseReason.trim()}
+                          className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold cursor-pointer"
+                        >
+                          ثبت رد درخواست
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </>
             );
           })()}
         </div>
+      )}
+
+      {/* تب بررسی و موافقت با درخواست‌های مهمان دانشجویان */}
+      {activeTab === 'guest_requests' && (
+        <SupervisorGuestRequestsPanel
+          activeDormIds={activeDormIds}
+          actorName={supervisor.fullName}
+          onDataChanged={onRefreshData}
+        />
       )}
 
       {/* تب دفتر وقایع، شیفت‌بندی و گزارشات شیفت سرپرستی */}

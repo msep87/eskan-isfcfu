@@ -12,9 +12,12 @@ import {
   MaintenanceTask,
   WarehouseStaff,
   FinanceStaff,
+  ProcurementStaff,
   StudentFinancialRecord,
   InventoryItem,
+  InventoryTransaction,
   WarehouseRequest,
+  ProcurementRequest,
   SupervisorShiftSchedule,
   ShiftLogReport,
   CounselorStaff,
@@ -22,6 +25,7 @@ import {
   CounselorShiftReport,
   ActivityLog,
   StudentEvaluation,
+  GuestRequest,
 } from '../types';
 
 export const INITIAL_SETTINGS: AppSettings = {
@@ -107,4 +111,14 @@ export const INITIAL_FINANCE_STAFF: FinanceStaff[] = [];
 // سوابق مالی، بدهی و کسورات دانشجویان (کاملاً خالی)
 export const INITIAL_STUDENT_FINANCES: StudentFinancialRecord[] = [];
 
+// پرسنل کارپردازی و خرید (کاملاً خالی)
+export const INITIAL_PROCUREMENT_STAFF: ProcurementStaff[] = [];
 
+// ارجاعات و درخواست‌های خرید کارپردازی (کاملاً خالی)
+export const INITIAL_PROCUREMENT_REQUESTS: ProcurementRequest[] = [];
+
+// گردش ورودی و خروجی کالاهای انبار (کاملاً خالی)
+export const INITIAL_INVENTORY_TRANSACTIONS: InventoryTransaction[] = [];
+
+// درخواست‌های موافقت با مهمان دانشجویان (کاملاً خالی)
+export const INITIAL_GUEST_REQUESTS: GuestRequest[] = [];

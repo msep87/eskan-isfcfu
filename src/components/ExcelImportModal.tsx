@@ -14,6 +14,8 @@ import {
   downloadWarehouseTemplate,
   parseFinanceExcel,
   downloadFinanceTemplate,
+  parseProcurementExcel,
+  downloadProcurementTemplate,
   toEnglishDigits,
 } from '../utils/excelUtils';
 import { Storage } from '../utils/storage';
@@ -27,6 +29,7 @@ import {
   CounselorStaff,
   WarehouseStaff,
   FinanceStaff,
+  ProcurementStaff,
 } from '../types';
 import {
   FileSpreadsheet,
@@ -44,6 +47,7 @@ import {
   HeartHandshake,
   Package,
   Wallet,
+  ShoppingBag,
 } from 'lucide-react';
 
 export type ExcelImportTab =
@@ -53,6 +57,7 @@ export type ExcelImportTab =
   | 'maintenance'
   | 'counselors'
   | 'warehouse'
+  | 'procurement'
   | 'finance';
 
 interface ExcelImportModalProps {
@@ -111,6 +116,11 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
 
   const [previewFinance, setPreviewFinance] = useState<{
     list: FinanceStaff[];
+    skippedRows: number;
+  } | null>(null);
+
+  const [previewProcurement, setPreviewProcurement] = useState<{
+    list: ProcurementStaff[];
     skippedRows: number;
   } | null>(null);
 
@@ -277,6 +287,25 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
       setPreviewFinance({ list: res.staff, skippedRows: res.skippedRows });
     } catch (err: any) {
       setErrorMsg(err.message || 'خطا در بارگذاری فایل اکسل کاربران امور مالی');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleProcurementFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await parseProcurementExcel(file);
+      setPreviewProcurement({ list: res.staff, skippedRows: res.skippedRows });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در بارگذاری فایل اکسل کاربران کارپرداز');
     } finally {
       setLoading(false);
     }
@@ -746,6 +775,50 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
     }
   };
 
+  const handleSaveProcurement = async () => {
+    if (!previewProcurement) return;
+    setLoading(true);
+    setErrorMsg('');
+
+    try {
+      const incoming = previewProcurement.list;
+      if (replaceMode) {
+        Storage.setProcurementStaff(incoming);
+      } else {
+        const existing = Storage.getProcurementStaff();
+        const mergedMap = new Map<string, ProcurementStaff>();
+        existing.forEach((p) => mergedMap.set(p.username.trim().toLowerCase(), p));
+        incoming.forEach((p) => {
+          const key = p.username.trim().toLowerCase();
+          const prev = mergedMap.get(key);
+          mergedMap.set(key, prev ? { ...p, id: prev.id } : p);
+        });
+        Storage.setProcurementStaff(Array.from(mergedMap.values()));
+      }
+
+      const syncRes = await Storage.waitForPendingCloudSync();
+
+      Storage.addActivityLog({
+        category: 'excel',
+        action: replaceMode ? 'بارگذاری و جایگزینی اکسل پرسنل کارپرداز' : 'ثبت گروهی کاربران کارپرداز از اکسل',
+        details: `تعداد ${incoming.length} حساب کاربری کارپرداز و خرید از فایل اکسل ثبت شد.`,
+        targetName: `${incoming.length} کاربر کارپرداز`,
+      });
+
+      setSuccessMsg(
+        syncRes.success
+          ? `تعداد ${incoming.length} کاربر کارپرداز با موفقیت در دیتابیس ابری ثبت و همگام‌سازی شد.`
+          : `تعداد ${incoming.length} کاربر کارپرداز در مرورگر ثبت شد، اما همگام‌سازی ابری با تأخیر مواجه شد.`
+      );
+      setPreviewProcurement(null);
+      setTimeout(() => onImportComplete(), 1100);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در ذخیره کاربران کارپرداز');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-4xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 relative max-h-[90vh] overflow-y-auto">
@@ -766,7 +839,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
             </h3>
             <p className="text-xs text-slate-500">
               {allowStaffTabs
-                ? 'بارگذاری مجزا برای دانشجویان، سراها و اتاق‌ها، سرپرستان، تأسیسات، مشاوران، انبارداران و امور مالی'
+                ? 'بارگذاری مجزا برای دانشجویان، سراها و اتاق‌ها، سرپرستان، تأسیسات، مشاوران، انبارداران، کارپردازان و امور مالی'
                 : 'بارگذاری اکسل مشخصات دانشجویان (با پشتیبانی از ستون‌های دلخواه) و سراهای خوابگاهی'}
             </p>
           </div>
@@ -775,7 +848,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
         {/* تب‌های انتخاب نوع فایل اکسل */}
         <div
           className={`grid gap-1.5 p-1.5 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-6 ${
-            allowStaffTabs ? 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-7' : 'grid-cols-2'
+            allowStaffTabs ? 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-8' : 'grid-cols-2'
           }`}
         >
           <button
@@ -856,6 +929,19 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
               >
                 <Package className="w-3.5 h-3.5 shrink-0" />
                 <span>کاربران انبار</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => switchTab('procurement')}
+                className={`py-2.5 px-2 text-[11px] font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tab === 'procurement'
+                    ? 'bg-white dark:bg-slate-700 text-orange-700 dark:text-orange-300 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
+                <span>کاربران کارپرداز</span>
               </button>
 
               <button
@@ -1710,6 +1796,127 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                     className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
                   >
                     تأیید و ثبت کاربران امور مالی در سامانه ابری
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ۸. محتوای تب کاربران کارپرداز */}
+        {allowStaffTabs && tab === 'procurement' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-orange-50/70 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800/60">
+              <div>
+                <h4 className="text-xs font-bold text-orange-950 dark:text-orange-200">
+                  دانلود قالب اکسل ثبت گروهی کاربران کارپرداز و خرید
+                </h4>
+                <p className="text-[11px] text-orange-800 dark:text-orange-400 mt-0.5">
+                  ستون‌ها: نام و نام خانوادگی، نام کاربری، کلمه عبور، شماره تماس، بخش / واحد، وضعیت، توضیحات
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={downloadProcurementTemplate}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>دانلود قالب اکسل کارپرداز</span>
+              </button>
+            </div>
+
+            <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-orange-500 rounded-3xl p-8 text-center transition">
+              <UploadCloud className="w-12 h-12 mx-auto text-orange-600 mb-3" />
+              <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200 mb-1">
+                فایل اکسل کاربران کارپرداز را انتخاب کنید
+              </h4>
+              <p className="text-xs text-slate-500 mb-4">فرمت‌های مجاز: .xlsx, .xls, .csv (نام کاربری تکراری بروزرسانی می‌شود)</p>
+              <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-md shadow-orange-600/20">
+                <span>انتخاب فایل اکسل کارپرداز</span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleProcurementFileSelect}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {loading && <div className="text-center text-xs text-orange-600 font-bold">در حال پردازش فایل اکسل کارپرداز...</div>}
+
+            {previewProcurement && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <FileCheck className="w-5 h-5 text-emerald-600" />
+                    <span className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                      پیش‌نمایش: {previewProcurement.list.length} کاربر کارپرداز آماده ثبت
+                    </span>
+                  </div>
+                  {previewProcurement.skippedRows > 0 && (
+                    <span className="text-[11px] text-amber-600 font-semibold">
+                      ({previewProcurement.skippedRows} ردیف خالی نادیده گرفته شد)
+                    </span>
+                  )}
+                </div>
+
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-60">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold sticky top-0">
+                      <tr>
+                        <th className="p-2.5">ردیف</th>
+                        <th className="p-2.5">نام و نام خانوادگی</th>
+                        <th className="p-2.5">نام کاربری</th>
+                        <th className="p-2.5">کلمه عبور</th>
+                        <th className="p-2.5">شماره تماس</th>
+                        <th className="p-2.5">بخش / واحد</th>
+                        <th className="p-2.5">وضعیت</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {previewProcurement.list.map((proc, i) => (
+                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-2.5">{i + 1}</td>
+                          <td className="p-2.5 font-bold">{proc.fullName}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{proc.username}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{proc.password}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{proc.mobile || proc.phone}</td>
+                          <td className="p-2.5 text-slate-600 dark:text-slate-300">{proc.department || '-'}</td>
+                          <td className="p-2.5">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                proc.status === 'active'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {proc.status === 'active' ? 'فعال' : 'غیرفعال'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={replaceMode}
+                      onChange={(e) => setReplaceMode(e.target.checked)}
+                      className="rounded border-slate-300 text-orange-600 focus:ring-orange-500 w-4 h-4"
+                    />
+                    <span>جایگزینی کامل لیست کاربران کارپرداز قبلی</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={handleSaveProcurement}
+                    className="px-6 py-2.5 bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                  >
+                    تأیید و ثبت کاربران کارپرداز در سامانه ابری
                   </button>
                 </div>
               </div>

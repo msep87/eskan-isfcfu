@@ -10,8 +10,12 @@ import {
   CounselorStaff,
   WarehouseStaff,
   FinanceStaff,
+  ProcurementStaff,
+  InventoryItem,
+  InventoryTransaction,
   StudentFinancialRecord,
   StudentFinancialStatus,
+  GuestRequest,
 } from '../types';
 import {
   computeStudentFinancialInfo,
@@ -1072,6 +1076,7 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
     warehouse: 'مسئول انبار',
     counselor: 'کارشناس مشاور',
     finance: 'امور مالی و حسابداری',
+    procurement: 'کارپرداز و خرید',
     system: 'سیستم',
   };
 
@@ -1083,8 +1088,10 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
     staff: 'پرسنل و کاربران',
     maintenance: 'امور تأسیسات',
     warehouse: 'انبار و تجهیزات',
+    procurement: 'کارپردازی و خرید',
     finance: 'امور مالی و کسورات',
     warning_eval: 'تذکر، اخطار و ارزیابی',
+    guest: 'درخواست مهمان',
     settings: 'تنظیمات و اطلاعیه‌ها',
     backup: 'پشتیبان و بازنشانی',
     excel: 'ورود اطلاعات اکسل',
@@ -1808,7 +1815,305 @@ export function exportDormStudentsForFinanceExcel(
   XLSX.writeFile(wb, `گزارش_اکسل_مالی_دانشجویان_خوابگاهی_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
+// ۸. دانلود قالب اکسل کاربران کارپرداز
+export function downloadProcurementTemplate() {
+  const sampleRows = [
+    {
+      'نام و نام خانوادگی': 'رضا بهرامی',
+      'نام کاربری': 'bahrami_proc',
+      'کلمه عبور': '123456',
+      'شماره تماس': '09131234567',
+      'بخش / واحد': 'واحد کارپردازی و خرید مرکزی',
+      'وضعیت': 'فعال',
+      'توضیحات': 'مسئول خرید اقلام تأسیساتی و تجهیزات سراها',
+    },
+    {
+      'نام و نام خانوادگی': 'محسن کاظمی',
+      'نام کاربری': 'kazemi_proc',
+      'کلمه عبور': '123456',
+      'شماره تماس': '09137654321',
+      'بخش / واحد': 'واحد تدارکات پردیس',
+      'وضعیت': 'فعال',
+      'توضیحات': 'کارپرداز اقلام مصرفی و بهداشتی',
+    },
+  ];
+  const ws = XLSX.utils.json_to_sheet(sampleRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'کاربران کارپرداز');
+  XLSX.writeFile(wb, 'قالب_اکسل_ثبت_کاربران_کارپرداز.xlsx');
+}
 
+// خواندن و اعتبارسنجی فایل اکسل کاربران کارپرداز
+export async function parseProcurementExcel(
+  file: File
+): Promise<{ staff: ProcurementStaff[]; skippedRows: number }> {
+  const rows = await readExcelSheetRows(file);
+  const staff: ProcurementStaff[] = [];
+  let skippedRows = 0;
 
+  rows.forEach((row, idx) => {
+    const fullName = getExcelCell(row, ['نام و نام خانوادگی', 'نام و نام‌خانوادگی', 'نام کارپرداز', 'نام کامل', 'fullname', 'name']);
+    let username = toEnglishDigits(getExcelCell(row, ['نام کاربری', 'نام‌کاربری', 'کد کاربری', 'username', 'user'])).trim().toLowerCase();
+    const password = toEnglishDigits(getExcelCell(row, ['کلمه عبور', 'رمز عبور', 'رمز', 'password', 'pass'])).trim();
+    const phone = toEnglishDigits(getExcelCell(row, ['شماره تماس', 'شماره همراه', 'موبایل', 'تلفن', 'phone', 'mobile'])).trim();
+    const department = getExcelCell(row, ['بخش / واحد', 'بخش', 'واحد', 'سمت', 'department']);
+    const statusRaw = getExcelCell(row, ['وضعیت', 'وضعیت حساب', 'status']);
+    const notes = getExcelCell(row, ['توضیحات', 'یادداشت', 'notes']);
 
+    if (!fullName && !username) {
+      skippedRows++;
+      return;
+    }
+
+    if (!username) {
+      username = `proc_${Date.now()}_${idx + 1}`;
+    }
+
+    const status = parseExcelStaffStatus(statusRaw);
+
+    staff.push({
+      id: `proc_excel_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 5)}`,
+      fullName: fullName || username,
+      username,
+      password: password || phone || '123456',
+      phone: phone || '09130000000',
+      mobile: phone || '09130000000',
+      department: department || 'واحد کارپردازی و خرید',
+      role: 'procurement',
+      status,
+      isActive: status === 'active',
+      notes: notes || undefined,
+    });
+  });
+
+  if (staff.length === 0) {
+    throw new Error('هیچ سطر معتبری برای ثبت کاربر کارپرداز در فایل اکسل یافت نشد.');
+  }
+
+  return { staff, skippedRows };
+}
+
+// ۹. دانلود قالب اکسل لیست کالاها و وسایل انبار (اختصاصی کاربر انبار)
+export function downloadInventoryTemplate() {
+  const sampleRows = [
+    {
+      'کد کالا': 'PLM-101',
+      'نام کالا / قطعه': 'شیر اهرمی روشویی استاندارد',
+      'دسته‌بندی': 'لوله‌کشی',
+      'تعداد / موجودی': 25,
+      'واحد': 'عدد',
+      'حداقل موجودی هشدار': 5,
+      'قیمت واحد (ریال)': 4500000,
+      'محل نگهداری / قفسه': 'قفسه A1 - انبار مرکزی',
+    },
+    {
+      'کد کالا': 'ELC-204',
+      'نام کالا / قطعه': 'لامپ LED ۱۸ وات آفتابی',
+      'دسته‌بندی': 'برق',
+      'تعداد / موجودی': 60,
+      'واحد': 'عدد',
+      'حداقل موجودی هشدار': 15,
+      'قیمت واحد (ریال)': 850000,
+      'محل نگهداری / قفسه': 'قفسه B2 - تجهیزات برقی',
+    },
+    {
+      'کد کالا': 'CLN-301',
+      'نام کالا / قطعه': 'مایع ضدعفونی‌کننده و شوینده ۴ لیتری',
+      'دسته‌بندی': 'بهداشت',
+      'تعداد / موجودی': 30,
+      'واحد': 'گالن',
+      'حداقل موجودی هشدار': 8,
+      'قیمت واحد (ریال)': 1200000,
+      'محل نگهداری / قفسه': 'قفسه C1 - مواد بهداشتی',
+    },
+  ];
+  const ws = XLSX.utils.json_to_sheet(sampleRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'لیست کالاهای انبار');
+  XLSX.writeFile(wb, 'قالب_اکسل_ورود_لیست_مواد_و_وسایل_انبار.xlsx');
+}
+
+function mapExcelInventoryCategory(raw: string): InventoryItem['category'] {
+  const norm = normalizePersianText(raw).toLowerCase();
+  if (norm.includes('لوله') || norm.includes('مکانیک') || norm.includes('آب') || norm === 'plumbing') {
+    return 'plumbing';
+  }
+  if (norm.includes('برق') || norm.includes('روشنا') || norm === 'electrical') {
+    return 'electrical';
+  }
+  if (norm.includes('نجار') || norm.includes('چوب') || norm.includes('قفل') || norm.includes('در') || norm === 'carpentry') {
+    return 'carpentry';
+  }
+  if (norm.includes('بهداشت') || norm.includes('نظافت') || norm.includes('شویند') || norm === 'cleaning') {
+    return 'cleaning';
+  }
+  return 'general';
+}
+
+// خواندن و پردازش فایل اکسل لیست کالاهای انبار
+export async function parseInventoryExcel(
+  file: File
+): Promise<{ items: Array<Omit<InventoryItem, 'id'>>; skippedRows: number }> {
+  const rows = await readExcelSheetRows(file);
+  const items: Array<Omit<InventoryItem, 'id'>> = [];
+  let skippedRows = 0;
+
+  rows.forEach((row, idx) => {
+    const name = getExcelCell(row, ['نام کالا / قطعه', 'نام کالا', 'نام قطعه', 'نام وسیله', 'کالا', 'name', 'title']);
+    let code = toEnglishDigits(getExcelCell(row, ['کد کالا', 'کد قطعه', 'کد', 'code', 'sku'])).trim().toUpperCase();
+    const catRaw = getExcelCell(row, ['دسته‌بندی', 'دسته بندی', 'دسته', 'گروه', 'category']);
+    const qtyRaw = getExcelCell(row, ['تعداد / موجودی', 'موجودی', 'تعداد', 'مقدار', 'quantity', 'qty']);
+    const unit = getExcelCell(row, ['واحد', 'واحد شمارش', 'unit']) || 'عدد';
+    const minStockRaw = getExcelCell(row, ['حداقل موجودی هشدار', 'حداقل موجودی', 'نقطه سفارش', 'min_stock', 'min']);
+    const priceRaw = getExcelCell(row, ['قیمت واحد (ریال)', 'قیمت واحد', 'قیمت', 'unit_price', 'price']);
+    const location = getExcelCell(row, ['محل نگهداری / قفسه', 'محل نگهداری', 'قفسه', 'مکان', 'location']);
+
+    if (!name && !code) {
+      skippedRows++;
+      return;
+    }
+
+    if (!code) {
+      code = `INV-${Date.now().toString().slice(-4)}-${idx + 1}`;
+    }
+
+    const quantity = Math.max(0, parseAmountCell(qtyRaw));
+    const minStockLevel = Math.max(0, parseAmountCell(minStockRaw || '5'));
+    const unitPrice = Math.max(0, parseAmountCell(priceRaw));
+
+    items.push({
+      code,
+      name: name || code,
+      category: mapExcelInventoryCategory(catRaw),
+      quantity,
+      unit,
+      minStockLevel,
+      unitPrice,
+      location: location || 'انبار مرکزی',
+      lastRestockedDate: new Date().toLocaleDateString('fa-IR'),
+    });
+  });
+
+  if (items.length === 0) {
+    throw new Error('هیچ کالای معتبری در فایل اکسل یافت نشد.');
+  }
+
+  return { items, skippedRows };
+}
+
+// خروجی اکسل موجودی انبار و کاردکس ورودی/خروجی
+export function exportInventoryToExcel(
+  items: InventoryItem[],
+  transactions?: InventoryTransaction[]
+) {
+  const catLabelMap: Record<InventoryItem['category'], string> = {
+    plumbing: 'لوله‌کشی و تأسیسات آبی',
+    electrical: 'برق و روشنایی',
+    carpentry: 'نجاری، قفل و درودگری',
+    cleaning: 'بهداشتی و نظافتی',
+    general: 'عمومی و مصرفی',
+  };
+
+  const inventoryRows = items.map((item, idx) => ({
+    'ردیف': idx + 1,
+    'کد کالا': item.code,
+    'نام کالا / قطعه': item.name,
+    'دسته‌بندی': catLabelMap[item.category] || item.categoryLabel || item.category,
+    'موجودی فعلی': item.quantity,
+    'واحد': item.unit,
+    'حداقل موجودی هشدار': item.minStockLevel,
+    'وضعیت موجودی':
+      item.quantity === 0
+        ? 'ناموجود'
+        : item.quantity <= item.minStockLevel
+        ? 'کمبود موجودی (نیاز به خرید)'
+        : 'موجود و کافی',
+    'قیمت واحد (ریال)': item.unitPrice,
+    'ارزش کل موجودی (ریال)': item.quantity * item.unitPrice,
+    'محل نگهداری': item.location || '-',
+    'آخرین بروزرسانی': item.lastRestockedDate || '-',
+  }));
+
+  const wb = XLSX.utils.book_new();
+  const wsItems = XLSX.utils.json_to_sheet(inventoryRows);
+  XLSX.utils.book_append_sheet(wb, wsItems, 'موجودی انبار');
+
+  if (transactions && transactions.length > 0) {
+    const txTypeLabel = (t: InventoryTransaction['type']) =>
+      t === 'in' ? 'ورودی (+)' : t === 'out' ? 'خروجی (-)' : 'تعدیل موجودی';
+
+    const txRows = transactions.map((tx, idx) => ({
+      'ردیف': idx + 1,
+      'تاریخ': tx.date,
+      'نوع تراکنش': txTypeLabel(tx.type),
+      'کد کالا': tx.itemCode,
+      'نام کالا': tx.itemName,
+      'مقدار': tx.quantity,
+      'واحد': tx.unit,
+      'موجودی قبلی': tx.previousQuantity,
+      'موجودی جدید': tx.newQuantity,
+      'قیمت واحد (ریال)': tx.unitPrice || 0,
+      'ارزش تراکنش (ریال)': tx.totalValue || 0,
+      'علت / شرح': tx.reason,
+      'کد مرجع / سند': tx.referenceCode || '-',
+      'سرای مصرف‌کننده': tx.dormName || '-',
+      'ثبت‌کننده': tx.actorName,
+    }));
+    const wsTx = XLSX.utils.json_to_sheet(txRows);
+    XLSX.utils.book_append_sheet(wb, wsTx, 'کاردکس ورودی و خروجی');
+  }
+
+  XLSX.writeFile(wb, `گزارش_انبار_و_کاردکس_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// ۱۰. خروجی اکسل گزارش درخواست‌های مهمان دانشجویان
+export function exportGuestRequestsToExcel(requests: GuestRequest[]) {
+  const statusMap: Record<GuestRequest['status'], string> = {
+    pending_supervisor: 'در انتظار بررسی سرپرست',
+    approved: 'موافقت شده (مراجعه به سرپرستی)',
+    rejected: 'رد شده',
+    cancelled: 'لغو شده توسط دانشجو',
+  };
+
+  const eligibilityMap: Record<GuestRequest['eligibilityType'], string> = {
+    first_degree_relative: 'اقوام درجه یک دانشجو',
+    other_province_farhangian: 'دانشجوی فرهنگیان استان دیگر',
+    other_ineligible: 'غیرمشمول',
+  };
+
+  const rows = requests.map((r, idx) => ({
+    'ردیف': idx + 1,
+    'کد رهگیری': r.trackingCode,
+    'وضعیت': statusMap[r.status] || r.status,
+    'نام دانشجو': r.studentName,
+    'کد دانشجویی': r.studentId,
+    'کد ملی دانشجو': r.studentNationalId,
+    'همراه دانشجو': r.studentPhone || '-',
+    'سرا': r.dormName,
+    'اتاق': r.roomNumber,
+    'نام مهمان': r.guestFullName,
+    'کد ملی مهمان': r.guestNationalId,
+    'نام پدر مهمان': r.guestFatherName,
+    'همراه مهمان': r.guestPhone,
+    'استان / شهر مهمان': `${r.guestProvince}${r.guestCity ? ` - ${r.guestCity}` : ''}`,
+    'شرط احراز': eligibilityMap[r.eligibilityType] || r.eligibilityType,
+    'نسبت با دانشجو': r.relationshipToStudent,
+    'کد دانشجویی مهمان': r.guestStudentId || '-',
+    'پردیس/دانشگاه مبدأ مهمان': r.guestUniversityName || '-',
+    'رشته مهمان': r.guestFieldOfStudy || '-',
+    'مدت اقامت درخواستی': r.stayDuration,
+    'تاریخ و ساعت ورود': `${r.arrivalDate} - ${r.arrivalTime}`,
+    'تاریخ و ساعت خروج': `${r.departureDate} - ${r.departureTime}`,
+    'تعهد مسئولیت و عدم سلف و رضایت هم‌اتاقی':
+      r.fullResponsibilityAccepted && r.noSelfFoodAccepted && r.roommatesConsentConfirmed ? 'تایید کامل' : 'ناقص',
+    'تحویل مدارک به سرپرستی': r.documentsSubmittedToSupervisor ? `تحویل شده (${r.documentsSubmittedAt || ''})` : 'خیر',
+    'توضیحات سرپرست / علت رد': r.rejectionReason || r.supervisorNotes || '-',
+    'تاریخ ثبت': r.createdAt,
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'درخواست‌های مهمان');
+  XLSX.writeFile(wb, `گزارش_درخواست_مهمان_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
 

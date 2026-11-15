@@ -69,6 +69,18 @@ export const Navbar: React.FC<NavbarProps> = ({
         m.status !== 'answered'
       );
     }
+    if (currentUser?.role === 'warehouse') {
+      return (
+        (m.receiverType === 'warehouse' || m.senderRole === 'warehouse') &&
+        m.status !== 'answered'
+      );
+    }
+    if (currentUser?.role === 'procurement') {
+      return (
+        (m.receiverType === 'procurement' || m.senderRole === 'procurement') &&
+        m.status !== 'answered'
+      );
+    }
     return m.status === 'pending';
   }).length;
 
@@ -182,6 +194,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ? currentUser.technician.photoUrl
                       : currentUser.role === 'warehouse'
                       ? currentUser.staff.photoUrl
+                      : currentUser.role === 'procurement'
+                      ? currentUser.staff.photoUrl
                       : currentUser.role === 'finance'
                       ? currentUser.staff.photoUrl
                       : currentUser.role === 'counselor'
@@ -203,6 +217,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       {currentUser.role === 'counselor' && currentUser.counselor.fullName}
                       {currentUser.role === 'maintenance' && currentUser.technician.fullName}
                       {currentUser.role === 'warehouse' && currentUser.staff.fullName}
+                      {currentUser.role === 'procurement' && currentUser.staff.fullName}
                       {currentUser.role === 'finance' && currentUser.staff.fullName}
                       {currentUser.role === 'admin' && 'مدیر امور خوابگاه‌ها'}
                     </span>
@@ -218,7 +233,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                     )}
                     {currentUser.role === 'warehouse' && (
                       <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300 font-bold">
-                        انبار و کارپردازی
+                        مسئول انبار
+                      </span>
+                    )}
+                    {currentUser.role === 'procurement' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300 font-bold">
+                        کارپرداز و خرید
                       </span>
                     )}
                     {currentUser.role === 'finance' && (
@@ -244,6 +264,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentUser.role === 'counselor' && `مرکز مشاوره (${currentUser.counselor.specialty || 'سلامت روان'})`}
                     {currentUser.role === 'maintenance' && `امور تأسیسات (${currentUser.technician.specialty || 'تکنسین'})`}
                     {currentUser.role === 'warehouse' && 'مسئول انبار و تجهیزات'}
+                    {currentUser.role === 'procurement' && (currentUser.staff.department || 'واحد کارپردازی و خرید')}
                     {currentUser.role === 'finance' && (currentUser.staff.department || 'واحد امور مالی و حسابداری')}
                     {currentUser.role === 'admin' && 'مدیر کل سامانه'}
                   </div>

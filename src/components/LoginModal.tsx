@@ -20,7 +20,7 @@ interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (user: NonNullable<CurrentUser>) => void;
-  onOpenUserGuide?: (role?: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'student') => void;
+  onOpenUserGuide?: (role?: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'student') => void;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({
@@ -29,7 +29,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onLoginSuccess,
   onOpenUserGuide,
 }) => {
-  const [tab, setTab] = useState<'student' | 'supervisor' | 'counselor' | 'maintenance' | 'warehouse' | 'finance' | 'admin'>('student');
+  const [tab, setTab] = useState<'student' | 'supervisor' | 'counselor' | 'maintenance' | 'warehouse' | 'procurement' | 'finance' | 'admin'>('student');
 
   // فرم دانشجو
   const [studentId, setStudentId] = useState('');
@@ -273,6 +273,54 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         });
         setErrorMsg('نام کاربری یا کلمه عبور مسئول انبار اشتباه است.');
       }
+    } else if (tab === 'procurement') {
+      const staffList = Storage.getProcurementStaff();
+      const cleanU = toEnglishDigits(username.trim()).toLowerCase();
+      const cleanP = toEnglishDigits(password.trim());
+      const proc = staffList.find(
+        (s) =>
+          toEnglishDigits(s.username.trim()).toLowerCase() === cleanU &&
+          toEnglishDigits(s.password.trim()) === cleanP
+      );
+      if (proc) {
+        if (proc.status === 'inactive' || proc.isActive === false) {
+          Storage.addActivityLog({
+            category: 'auth',
+            action: 'تلاش ورود حساب غیرفعال کارپرداز',
+            details: `کارپرداز ${proc.fullName} (${proc.username}) با حساب غیرفعال تلاش به ورود کرد.`,
+            targetName: proc.fullName,
+            severity: 'warning',
+            actorName: proc.fullName,
+            actorRole: 'procurement',
+            actorUsername: proc.username,
+          });
+          setErrorMsg('حساب کاربری کارپرداز غیرفعال است. لطفاً با مدیر سامانه تماس بگیرید.');
+          return;
+        }
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'ورود موفق کارپرداز و خرید',
+          details: `کارپرداز ${proc.fullName} (${proc.username}) وارد سامانه شد.`,
+          targetName: proc.fullName,
+          actorName: proc.fullName,
+          actorRole: 'procurement',
+          actorUsername: proc.username,
+        });
+        onLoginSuccess({ role: 'procurement', staff: proc });
+        onClose();
+      } else {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'تلاش ناموفق ورود کارپرداز',
+          details: `تلاش ناموفق ورود کارپرداز با نام کاربری «${cleanU || '-'}» ثبت شد.`,
+          targetName: cleanU || '-',
+          severity: 'warning',
+          actorName: 'کاربر مهمان',
+          actorRole: 'system',
+          actorUsername: cleanU,
+        });
+        setErrorMsg('نام کاربری یا کلمه عبور کارپرداز اشتباه است.');
+      }
     } else if (tab === 'finance') {
       const staffList = Storage.getFinanceStaff();
       const cleanU = toEnglishDigits(username.trim()).toLowerCase();
@@ -441,6 +489,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </button>
           <button
             onClick={() => {
+              setTab('procurement');
+              setErrorMsg('');
+            }}
+            className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
+              tab === 'procurement'
+                ? 'bg-white dark:bg-slate-700 text-orange-700 dark:text-orange-300 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+            }`}
+          >
+            کارپرداز
+          </button>
+          <button
+            onClick={() => {
               setTab('finance');
               setErrorMsg('');
             }}
@@ -514,8 +575,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </form>
         )}
 
-        {/* فرم سرپرست، مشاور، تأسیسات، انبار، امور مالی و مدیر */}
-        {(tab === 'supervisor' || tab === 'counselor' || tab === 'admin' || tab === 'maintenance' || tab === 'warehouse' || tab === 'finance') && (
+        {/* فرم سرپرست، مشاور، تأسیسات، انبار، کارپرداز، امور مالی و مدیر */}
+        {(tab === 'supervisor' || tab === 'counselor' || tab === 'admin' || tab === 'maintenance' || tab === 'warehouse' || tab === 'procurement' || tab === 'finance') && (
           <form onSubmit={handleStaffLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -529,7 +590,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   tab === 'counselor'
                     ? 'نام کاربری کارشناس مشاور'
                     : tab === 'warehouse'
-                    ? 'نام کاربری مسئول انبار و کارپردازی'
+                    ? 'نام کاربری مسئول انبار'
+                    : tab === 'procurement'
+                    ? 'نام کاربری کارپرداز و خرید'
                     : tab === 'finance'
                     ? 'نام کاربری امور مالی و حسابداری'
                     : tab === 'maintenance'
@@ -564,6 +627,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'
                   : tab === 'warehouse'
                   ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-600/25'
+                  : tab === 'procurement'
+                  ? 'bg-orange-600 hover:bg-orange-700 shadow-orange-600/25'
                   : tab === 'finance'
                   ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'
                   : tab === 'maintenance'
@@ -578,7 +643,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 : tab === 'maintenance'
                 ? 'ورود به کارتابل امور تأسیسات و فنی'
                 : tab === 'warehouse'
-                ? 'ورود به سامانه انبار و کارپردازی'
+                ? 'ورود به سامانه مدیریت انبار'
+                : tab === 'procurement'
+                ? 'ورود به کارتابل کارپردازی و خرید'
                 : tab === 'finance'
                 ? 'ورود به کارتابل امور مالی و حسابداری'
                 : 'ورود مدیر کل سامانه'}

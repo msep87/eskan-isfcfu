@@ -372,6 +372,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         st = 'in_progress';
         stLabel = 'تأیید سرپرست / منتظر تحویل انبار';
         stColor = 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300';
+      } else if (w.status === 'referred_to_procurement') {
+        st = 'in_progress';
+        stLabel = 'ارجاع به کارپرداز جهت خرید';
+        stColor = 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/40 dark:text-orange-300';
       } else if (w.status === 'rejected') {
         st = 'rejected';
         stLabel = 'رد شده توسط سرپرست';

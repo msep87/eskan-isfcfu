@@ -109,7 +109,7 @@ export type MessageCategory =
 export interface MessageReply {
   id: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement';
   content: string;
   date: string;
 }
@@ -118,8 +118,8 @@ export interface Message {
   id: string;
   senderId: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance';
-  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'all';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement';
+  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'all';
   receiverId?: string;
   subject: string;
   content: string;
@@ -188,6 +188,21 @@ export interface FinanceStaff {
   notes?: string;
 }
 
+export interface ProcurementStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل کاربر کارپرداز
+  department?: string; // واحد کارپردازی و خرید
+  role: 'procurement';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
 export type StudentFinancialStatus =
   | 'auto_deducting'
   | 'pending_payment'
@@ -239,11 +254,14 @@ export interface WarehouseRequest {
   reason: string; // علت نیاز و محل مصرف
   urgency: 'normal' | 'urgent' | 'emergency';
   requestDate: string;
-  status: 'pending_supervisor' | 'pending_warehouse' | 'issued' | 'rejected';
+  status: 'pending_supervisor' | 'pending_warehouse' | 'referred_to_procurement' | 'issued' | 'rejected';
   supervisorApproved?: boolean;
   supervisorApprovedBy?: string;
   supervisorApprovedAt?: string;
   supervisorNotes?: string;
+  procurementRequestId?: string;
+  procurementTrackingCode?: string;
+  referredToProcurementAt?: string;
   issuedByStaffId?: string;
   issuedByStaffName?: string;
   issuedAt?: string;
@@ -251,6 +269,76 @@ export interface WarehouseRequest {
   unitPrice?: number;
   totalCost?: number;
   warehouseNotes?: string;
+}
+
+export type ProcurementRequestStatus =
+  | 'pending_purchase'
+  | 'purchasing'
+  | 'purchased'
+  | 'delivered_to_warehouse'
+  | 'warehouse_confirmed'
+  | 'cancelled';
+
+export interface ProcurementRequest {
+  id: string;
+  trackingCode: string; // کد رهگیری خرید مثلاً P-101
+  warehouseRequestId?: string; // پیوند به حواله یا درخواست انبار
+  warehouseRequestCode?: string;
+  inventoryItemId?: string; // پیوند به کالای موجود در انبار (در صورت شارژ مجدد)
+  itemTitle: string; // نام کالا یا قطعه جهت خرید
+  itemCode?: string;
+  category?: InventoryItem['category'];
+  requestedQuantity: number;
+  unit: string;
+  urgency: 'normal' | 'urgent' | 'emergency';
+  reason?: string;
+  dormId?: string;
+  dormName?: string;
+  referredByStaffId: string;
+  referredByStaffName: string;
+  referredAt: string;
+  assignedProcurementId?: string;
+  assignedProcurementName?: string;
+  status: ProcurementRequestStatus;
+  purchasedQuantity?: number; // مقدار خریداری‌شده (بر حسب واحد کالا)
+  purchasedItemCount?: number; // تعداد اقلام / بسته خریداری‌شده
+  unitPrice?: number; // قیمت واحد (ریال)
+  totalPrice?: number; // مبلغ کل خرید (ریال)
+  supplierName?: string; // نام فروشنده / فروشگاه
+  invoiceNumber?: string; // شماره فاکتور
+  purchaseDate?: string;
+  procurementNotes?: string;
+  deliveryStatus: 'not_delivered' | 'delivered';
+  deliveredAt?: string;
+  updatedByProcurementId?: string;
+  updatedByProcurementName?: string;
+  updatedAt?: string;
+  warehouseConfirmed?: boolean;
+  warehouseConfirmedBy?: string;
+  warehouseConfirmedAt?: string;
+  warehouseConfirmNotes?: string;
+  transferredInventoryItemId?: string;
+}
+
+export interface InventoryTransaction {
+  id: string;
+  inventoryItemId: string;
+  itemCode: string;
+  itemName: string;
+  unit: string;
+  type: 'in' | 'out' | 'adjustment';
+  quantity: number;
+  previousQuantity: number;
+  newQuantity: number;
+  unitPrice?: number;
+  totalValue?: number;
+  reason: string;
+  referenceCode?: string;
+  dormName?: string;
+  actorId: string;
+  actorName: string;
+  date: string;
+  timestamp: string;
 }
 
 export interface MaintenanceTask {
@@ -361,6 +449,7 @@ export type CurrentUser =
   | { role: 'warehouse'; staff: WarehouseStaff }
   | { role: 'counselor'; counselor: CounselorStaff }
   | { role: 'finance'; staff: FinanceStaff }
+  | { role: 'procurement'; staff: ProcurementStaff }
   | null;
 
 export type DayOfWeek = 'saturday' | 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
@@ -449,18 +538,82 @@ export type ActivityLogCategory =
   | 'staff'
   | 'maintenance'
   | 'warehouse'
+  | 'procurement'
   | 'finance'
   | 'warning_eval'
+  | 'guest'
   | 'settings'
   | 'backup'
   | 'excel';
+
+export type GuestEligibilityType =
+  | 'first_degree_relative'
+  | 'other_province_farhangian'
+  | 'other_ineligible';
+
+export type GuestRequestStatus =
+  | 'pending_supervisor'
+  | 'approved'
+  | 'rejected'
+  | 'cancelled';
+
+export interface GuestRequest {
+  id: string;
+  trackingCode: string; // مثلاً G-101
+  studentId: string;
+  studentName: string;
+  studentNationalId: string;
+  studentPhone: string;
+  dormId: string;
+  dormName: string;
+  roomId: string;
+  roomNumber: string;
+
+  // احراز شرط مجاز مهمان
+  eligibilityType: GuestEligibilityType;
+  relationshipToStudent: string; // مثلاً پدر، مادر، خواهر، برادر، دانشجوی فرهنگیان استان دیگر
+
+  // مشخصات کامل مهمان
+  guestFullName: string;
+  guestNationalId: string;
+  guestFatherName: string;
+  guestPhone: string;
+  guestProvince: string;
+  guestCity: string;
+  guestStudentId?: string;
+  guestUniversityName?: string;
+  guestFieldOfStudy?: string;
+
+  // مدت و زمان اقامت
+  stayDuration: string;
+  arrivalDate: string;
+  arrivalTime: string;
+  departureDate: string;
+  departureTime: string;
+  visitReason?: string;
+
+  // تعهدات اجباری دانشجو
+  fullResponsibilityAccepted: boolean;
+  noSelfFoodAccepted: boolean;
+  roommatesConsentConfirmed: boolean;
+
+  // گردش کار و تصمیم سرپرست
+  status: GuestRequestStatus;
+  createdAt: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  supervisorNotes?: string;
+  rejectionReason?: string;
+  documentsSubmittedToSupervisor?: boolean;
+  documentsSubmittedAt?: string;
+}
 
 export interface ActivityLog {
   id: string;
   timestamp: string; // ISO string برای مرتب‌سازی دقیق
   date: string; // تاریخ و ساعت شمسی خوانا
   actorName: string;
-  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'system';
+  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'system';
   actorUsername?: string;
   category: ActivityLogCategory;
   action: string;

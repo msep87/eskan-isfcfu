@@ -21,6 +21,11 @@ import {
   StudentEvaluation,
   WarehouseStaff,
   FinanceStaff,
+  ProcurementStaff,
+  InventoryItem,
+  InventoryTransaction,
+  WarehouseRequest,
+  ProcurementRequest,
   HomeNoteItem,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
@@ -35,6 +40,7 @@ import {
   importCounselorShiftScheduleFromExcel,
   exportCounselorReportsToExcel,
   exportActivityLogsToExcel,
+  exportInventoryToExcel,
   toEnglishDigits,
 } from '../utils/excelUtils';
 import { FarhangianEmblem } from './FarhangianEmblem';
@@ -44,6 +50,7 @@ import { RoomWarningModal } from './RoomWarningModal';
 import { DormIdCardModal } from './DormIdCardModal';
 import { StudentEvaluationModal } from './StudentEvaluationModal';
 import { RoomRosterPrintModal } from './RoomRosterPrintModal';
+import { SupervisorGuestRequestsPanel } from './SupervisorGuestRequestsPanel';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { AdminUsersPanel, UserCategoryKey } from './AdminUsersPanel';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
@@ -135,7 +142,7 @@ interface AdminDashboardProps {
   onOpenAppearance: () => void;
   onOpenChangePassword: () => void;
   onUpdateSettings: (newSettings: AppSettings) => void;
-  onOpenUserGuide?: (role: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'student') => void;
+  onOpenUserGuide?: (role: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'student') => void;
   cloudSyncTick?: number;
 }
 
@@ -160,8 +167,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   cloudSyncTick = 0,
 }) => {
   // تب‌های اصلی داشبورد مدیر
-  const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'shifts' | 'counseling' | 'activity_log' | 'settings'>('cartable');
+  const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'warehouse' | 'shifts' | 'counseling' | 'activity_log' | 'settings'>('cartable');
   const [usersCategory, setUsersCategory] = useState<UserCategoryKey>('students');
+
+  // وضعیت مشاهده فقط-خواندنی انبار و کارپردازی برای مدیر کل
+  const [adminWhSubTab, setAdminWhSubTab] = useState<'inventory' | 'transactions' | 'requests' | 'procurement'>('inventory');
+  const [adminWhSearch, setAdminWhSearch] = useState('');
+  const [adminWhCatFilter, setAdminWhCatFilter] = useState<string>('all');
 
   // لاگ فعالیت‌ها و تذکرات / ارزیابی‌های دانشجویان
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(Storage.getActivityLogs());
@@ -211,13 +223,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [shiftDayFilter, setShiftDayFilter] = useState('all');
   const [shiftFeedback, setShiftFeedback] = useState<string | null>(null);
 
-  // فهرست پرسنل انبار و امور مالی
+  // فهرست پرسنل انبار، کارپردازی و امور مالی
   const [warehouseStaffList, setWarehouseStaffList] = useState<WarehouseStaff[]>(Storage.getWarehouseStaff());
+  const [procurementStaffList, setProcurementStaffList] = useState<ProcurementStaff[]>(Storage.getProcurementStaff());
   const [financeStaffList, setFinanceStaffList] = useState<FinanceStaff[]>(Storage.getFinanceStaff());
 
   const handleUsersRefresh = () => {
     setCounselorsList(Storage.getCounselors());
     setWarehouseStaffList(Storage.getWarehouseStaff());
+    setProcurementStaffList(Storage.getProcurementStaff());
     setFinanceStaffList(Storage.getFinanceStaff());
     onRefreshData();
   };
@@ -233,6 +247,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setActivityLogs(Storage.getActivityLogs());
     setStudentEvaluations(Storage.getStudentEvaluations());
     setWarehouseStaffList(Storage.getWarehouseStaff());
+    setProcurementStaffList(Storage.getProcurementStaff());
     setFinanceStaffList(Storage.getFinanceStaff());
   }, [cloudSyncTick]);
 
@@ -258,6 +273,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStudentEvaluations(Storage.getStudentEvaluations());
     setCounselorsList(Storage.getCounselors());
     setWarehouseStaffList(Storage.getWarehouseStaff());
+    setProcurementStaffList(Storage.getProcurementStaff());
     setFinanceStaffList(Storage.getFinanceStaff());
   }, [students, warnings, announcements, rooms, beds, mainTab, cartableSubTab]);
 
@@ -1824,7 +1840,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <Users className="w-4 h-4 text-teal-600" />
           <span>مدیریت کاربران سامانه</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
-            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + counselorsList.length + financeStaffList.length}
+            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length}
           </span>
         </button>
 
@@ -1844,7 +1860,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </span>
         </button>
 
-        {/* ۴. تب درخواست‌های اسکان و تخصیص موقت */}
+        {/* ۴. تب درخواست‌های اسکان و مهمان */}
         <button
           onClick={() => setMainTab('requests')}
           className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
@@ -1854,10 +1870,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }`}
         >
           <Clock className="w-4 h-4 text-amber-500" />
-          <span>درخواست‌های اسکان موقت</span>
-          {pendingStudents.length > 0 && (
+          <span>درخواست‌های اسکان و مهمان</span>
+          {(pendingStudents.length + Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length) > 0 && (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-white font-black animate-pulse">
-              {pendingStudents.length}
+              {pendingStudents.length + Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length}
             </span>
           )}
         </button>
@@ -1878,6 +1894,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {activeCampusMaintCount}
             </span>
           )}
+        </button>
+
+        {/* ۵-ب. تب مشاهده موجودی انبار و وضعیت خرید کارپرداز (فقط مشاهده) */}
+        <button
+          onClick={() => setMainTab('warehouse')}
+          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+            mainTab === 'warehouse'
+              ? 'bg-white dark:bg-slate-900 text-violet-700 dark:text-violet-300 shadow-md'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Package className="w-4 h-4 text-violet-600" />
+          <span>انبار و کارپردازی (فقط مشاهده)</span>
         </button>
 
         {/* ۶. تب شیفت‌بندی سرپرستان و حضور و غیاب */}
@@ -1959,6 +1988,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           warehouseStaff={warehouseStaffList}
           counselors={counselorsList}
           financeStaff={financeStaffList}
+          procurementStaff={procurementStaffList}
           onRefreshData={handleUsersRefresh}
           onOpenExcelModal={onOpenExcelModal}
           onOpenReports={onOpenReports}
@@ -2997,10 +3027,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* ========================================================= */}
-      {/* ۳. تب درخواست‌های اسکان و تخصیص موقت اتاق‌ها */}
+      {/* ۳. تب درخواست‌های اسکان، تخصیص موقت و مهمان */}
       {/* ========================================================= */}
       {mainTab === 'requests' && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5 animate-in fade-in duration-200">
+        <div className="space-y-6 animate-in fade-in duration-200">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2.5">
               <div className="p-2.5 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
@@ -3140,6 +3171,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
           )}
+        </div>
+
+        <SupervisorGuestRequestsPanel
+          activeDormIds={dorms.map((d) => d.id)}
+          actorName="مدیر کل سامانه"
+          onDataChanged={onRefreshData}
+        />
         </div>
       )}
 
@@ -4887,6 +4925,394 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* ========================================================= */}
+      {/* ۵-ب. تب مشاهده لیست انبار، گردش کالا و کارپردازی (فقط مشاهده برای مدیر کل) */}
+      {/* ========================================================= */}
+      {mainTab === 'warehouse' && (() => {
+        const invItems: InventoryItem[] = Storage.getInventoryItems();
+        const invTxs: InventoryTransaction[] = Storage.getInventoryTransactions();
+        const whReqs: WarehouseRequest[] = Storage.getWarehouseRequests();
+        const procReqs: ProcurementRequest[] = Storage.getProcurementRequests();
+        const lowStockCount = invItems.filter((i) => i.quantity <= i.minStockLevel).length;
+        const activeProcCount = procReqs.filter(
+          (p) => p.status !== 'warehouse_confirmed' && p.status !== 'cancelled'
+        ).length;
+
+        const qNorm = toEnglishDigits(adminWhSearch.trim().toLowerCase());
+        const filteredInv = invItems.filter((it) => {
+          if (adminWhCatFilter !== 'all' && it.category !== adminWhCatFilter) return false;
+          if (qNorm) {
+            const hay = toEnglishDigits(`${it.code} ${it.name} ${it.location || ''}`).toLowerCase();
+            if (!hay.includes(qNorm)) return false;
+          }
+          return true;
+        });
+
+        const filteredTxs = invTxs.filter((tx) => {
+          if (!qNorm) return true;
+          const hay = toEnglishDigits(`${tx.itemCode} ${tx.itemName} ${tx.actorName} ${tx.reason || ''}`).toLowerCase();
+          return hay.includes(qNorm);
+        });
+
+        const filteredWhReqs = whReqs.filter((r) => {
+          if (!qNorm) return true;
+          const hay = toEnglishDigits(`${r.requestCode} ${r.itemTitle} ${r.dormName} ${r.requestedByStaffName}`).toLowerCase();
+          return hay.includes(qNorm);
+        });
+
+        const filteredProcReqs = procReqs.filter((p) => {
+          if (!qNorm) return true;
+          const hay = toEnglishDigits(`${p.trackingCode} ${p.itemTitle} ${p.dormName || ''} ${p.supplierName || ''} ${p.invoiceNumber || ''}`).toLowerCase();
+          return hay.includes(qNorm);
+        });
+
+        const catMap: Record<string, string> = {
+          plumbing: 'تأسیسات و لوله‌کشی',
+          electrical: 'برق و روشنایی',
+          carpentry: 'نجاری و در و پنجره',
+          cleaning: 'مواد شوینده و بهداشتی',
+          general: 'عمومی و متفرقه',
+        };
+
+        const procStatusMap: Record<string, { label: string; cls: string }> = {
+          pending_purchase: { label: 'در انتظار خرید', cls: 'bg-amber-100 text-amber-800' },
+          purchasing: { label: 'در حال خرید', cls: 'bg-blue-100 text-blue-800' },
+          purchased: { label: 'خریداری شده', cls: 'bg-indigo-100 text-indigo-800' },
+          delivered_to_warehouse: { label: 'تحویل به انبار (منتظر تأیید)', cls: 'bg-orange-100 text-orange-800' },
+          warehouse_confirmed: { label: 'تأیید و وارد انبار شد', cls: 'bg-emerald-100 text-emerald-800' },
+          cancelled: { label: 'لغو شده', cls: 'bg-rose-100 text-rose-800' },
+        };
+
+        return (
+          <div className="space-y-6 animate-in fade-in duration-200">
+            {/* هشدار دسترسی فقط-مشاهده */}
+            <div className="p-4 rounded-2xl bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 text-xs text-violet-900 dark:text-violet-200">
+                <Lock className="w-4 h-4 text-violet-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-extrabold">حالت مشاهده لیست انبار و کارپردازی (فقط خواندنی)</div>
+                  <p className="text-[11px] text-violet-700 dark:text-violet-300 mt-0.5">
+                    مطابق سطح دسترسی سامانه، افزودن، ویرایش، حذف و ثبت ورود/خروج اقلام منحصراً در اختیار <strong>کاربر مسئول انبار</strong> است و مدیریت کل تنها امکان مشاهده گزارش و دریافت اکسل دارد.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => exportInventoryToExcel(invItems, invTxs)}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>خروجی اکسل موجودی و گردش</span>
+              </button>
+            </div>
+
+            {/* کارت‌های آماری */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+                <span className="text-[11px] text-slate-500 font-bold block">تنوع اقلام موجود در انبار</span>
+                <span className="text-2xl font-black text-slate-900 dark:text-white mt-1 block">{invItems.length}</span>
+              </div>
+              <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/40 shadow-xs">
+                <span className="text-[11px] text-rose-600 font-bold block">اقلام زیر حد نصاب / ناموجود</span>
+                <span className="text-2xl font-black text-rose-600 mt-1 block">{lowStockCount}</span>
+              </div>
+              <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-orange-200 dark:border-orange-900/40 shadow-xs">
+                <span className="text-[11px] text-orange-600 font-bold block">سفارشات باز کارپردازی</span>
+                <span className="text-2xl font-black text-orange-600 mt-1 block">{activeProcCount}</span>
+              </div>
+              <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/40 shadow-xs">
+                <span className="text-[11px] text-indigo-600 font-bold block">تعداد تراکنش‌های ورودی/خروجی</span>
+                <span className="text-2xl font-black text-indigo-700 dark:text-indigo-300 mt-1 block">{invTxs.length}</span>
+              </div>
+            </div>
+
+            {/* زیرتب‌ها و جستجو */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'inventory' as const, label: `فهرست موجودی انبار (${invItems.length})` },
+                    { id: 'transactions' as const, label: `دفتر ورود و خروج (${invTxs.length})` },
+                    { id: 'requests' as const, label: `حواله‌های سرا (${whReqs.length})` },
+                    { id: 'procurement' as const, label: `ارجاعات خرید کارپرداز (${procReqs.length})` },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setAdminWhSubTab(tab.id)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                        adminWhSubTab === tab.id
+                          ? 'bg-violet-600 text-white shadow-sm'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={adminWhSearch}
+                      onChange={(e) => setAdminWhSearch(e.target.value)}
+                      placeholder="جستجو بر اساس کد، نام کالا، سرا یا فاکتور..."
+                      className="pr-9 pl-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs w-64"
+                    />
+                  </div>
+                  {adminWhSubTab === 'inventory' && (
+                    <select
+                      value={adminWhCatFilter}
+                      onChange={(e) => setAdminWhCatFilter(e.target.value)}
+                      className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                    >
+                      <option value="all">همه دسته‌ها</option>
+                      {Object.entries(catMap).map(([k, v]) => (
+                        <option key={k} value={k}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* ۱. لیست موجودی انبار (فقط مشاهده) */}
+              {adminWhSubTab === 'inventory' && (
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                      <tr>
+                        <th className="p-3">کد کالا</th>
+                        <th className="p-3">نام کالا / تجهیز</th>
+                        <th className="p-3">دسته‌بندی</th>
+                        <th className="p-3">موجودی فعلی</th>
+                        <th className="p-3">حداقل نصاب</th>
+                        <th className="p-3">قیمت واحد</th>
+                        <th className="p-3">قفسه / محل</th>
+                        <th className="p-3 text-center">وضعیت</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filteredInv.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="p-8 text-center text-slate-400">
+                            هیچ کالایی مطابق با جستجوی شما یافت نشد.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredInv.map((item) => {
+                          const isOut = item.quantity <= 0;
+                          const isLow = item.quantity > 0 && item.quantity <= item.minStockLevel;
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                              <td className="p-3 font-mono font-bold text-slate-700 dark:text-slate-300">{item.code}</td>
+                              <td className="p-3 font-bold text-slate-900 dark:text-white">{item.name}</td>
+                              <td className="p-3 text-slate-500">{catMap[item.category] || item.category}</td>
+                              <td className="p-3 font-black text-violet-700 dark:text-violet-300">
+                                {item.quantity.toLocaleString('fa-IR')} {item.unit}
+                              </td>
+                              <td className="p-3 text-slate-500">{item.minStockLevel} {item.unit}</td>
+                              <td className="p-3 font-mono">
+                                {item.unitPrice ? `${item.unitPrice.toLocaleString('fa-IR')} ریال` : '-'}
+                              </td>
+                              <td className="p-3 text-slate-500">{item.location || '-'}</td>
+                              <td className="p-3 text-center">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    isOut
+                                      ? 'bg-rose-100 text-rose-800'
+                                      : isLow
+                                      ? 'bg-amber-100 text-amber-800'
+                                      : 'bg-emerald-100 text-emerald-800'
+                                  }`}
+                                >
+                                  {isOut ? 'ناموجود' : isLow ? 'نزدیک به اتمام' : 'موجود'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* ۲. دفتر گردش ورود و خروج (فقط مشاهده) */}
+              {adminWhSubTab === 'transactions' && (
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                      <tr>
+                        <th className="p-3">تاریخ</th>
+                        <th className="p-3">نوع تراکنش</th>
+                        <th className="p-3">کد و نام کالا</th>
+                        <th className="p-3">تغییر موجودی</th>
+                        <th className="p-3">موجودی قبل ← بعد</th>
+                        <th className="p-3">ثبت‌کننده</th>
+                        <th className="p-3">شرح و مرجع</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filteredTxs.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="p-8 text-center text-slate-400">
+                            تراکنش انباری ثبت نشده است.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredTxs.map((tx) => (
+                          <tr key={tx.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <td className="p-3 font-mono text-[11px]">{tx.date}</td>
+                            <td className="p-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                                  tx.type === 'in'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : tx.type === 'out'
+                                    ? 'bg-rose-100 text-rose-800'
+                                    : 'bg-slate-100 text-slate-800'
+                                }`}
+                              >
+                                {tx.type === 'in' ? 'ورودی به انبار' : tx.type === 'out' ? 'خروجی از انبار' : 'تعدیل موجودی'}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              <span className="font-mono text-slate-400 ml-1">[{tx.itemCode}]</span>
+                              <span className="font-bold text-slate-900 dark:text-white">{tx.itemName}</span>
+                            </td>
+                            <td className="p-3 font-black" dir="ltr">
+                              {tx.type === 'in' ? `+${tx.quantity}` : tx.type === 'out' ? `-${tx.quantity}` : tx.quantity} {tx.unit}
+                            </td>
+                            <td className="p-3 font-mono text-slate-500">
+                              {tx.previousQuantity} ← <strong className="text-slate-900 dark:text-white">{tx.newQuantity}</strong>
+                            </td>
+                            <td className="p-3">{tx.actorName}</td>
+                            <td className="p-3 text-slate-600 dark:text-slate-300">{tx.reason || '-'}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* ۳. حواله‌های درخواست کالا (فقط مشاهده) */}
+              {adminWhSubTab === 'requests' && (
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                      <tr>
+                        <th className="p-3">کد حواله</th>
+                        <th className="p-3">قلم درخواستی</th>
+                        <th className="p-3">مقدار</th>
+                        <th className="p-3">سرا / متقاضی</th>
+                        <th className="p-3">تاریخ</th>
+                        <th className="p-3">وضعیت</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filteredWhReqs.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-400">
+                            درخواست حواله‌ای ثبت نشده است.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredWhReqs.map((req) => (
+                          <tr key={req.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <td className="p-3 font-mono font-bold">{req.requestCode}</td>
+                            <td className="p-3 font-bold text-slate-900 dark:text-white">{req.itemTitle}</td>
+                            <td className="p-3">{req.quantityRequested} {req.unit}</td>
+                            <td className="p-3">{req.dormName} • {req.requestedByStaffName}</td>
+                            <td className="p-3 font-mono text-[11px]">{req.requestDate}</td>
+                            <td className="p-3">
+                              <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 dark:bg-slate-800">
+                                {req.status === 'pending_supervisor'
+                                  ? 'در انتظار تأیید سرپرست'
+                                  : req.status === 'pending_warehouse'
+                                  ? 'در انتظار اقدام انبار'
+                                  : req.status === 'referred_to_procurement'
+                                  ? 'ارجاع به کارپرداز جهت خرید'
+                                  : req.status === 'issued'
+                                  ? 'تحویل داده شد'
+                                  : 'رد شده'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* ۴. سفارشات کارپردازی و خرید (فقط مشاهده) */}
+              {adminWhSubTab === 'procurement' && (
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                      <tr>
+                        <th className="p-3">کد کارپردازی</th>
+                        <th className="p-3">کالا / قطعه</th>
+                        <th className="p-3">درخواست / خریداری‌شده</th>
+                        <th className="p-3">مبلغ کل خرید</th>
+                        <th className="p-3">فروشنده / فاکتور</th>
+                        <th className="p-3">وضعیت خرید و تحویل انبار</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filteredProcReqs.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-400">
+                            هنوز سفارشی به کارپردازی ارجاع نشده است.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredProcReqs.map((p) => {
+                          const meta = procStatusMap[p.status] || { label: p.status, cls: 'bg-slate-100 text-slate-800' };
+                          return (
+                            <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                              <td className="p-3 font-mono font-bold text-orange-700">{p.trackingCode}</td>
+                              <td className="p-3 font-bold text-slate-900 dark:text-white">
+                                {p.itemTitle}
+                                {p.dormName && <div className="text-[10px] text-slate-400 font-normal">{p.dormName}</div>}
+                              </td>
+                              <td className="p-3">
+                                <div>نیاز: {p.requestedQuantity} {p.unit}</div>
+                                {p.purchasedQuantity != null && (
+                                  <div className="text-[11px] font-bold text-emerald-700">
+                                    خرید: {p.purchasedQuantity} {p.unit} ({p.purchasedItemCount || 1} بسته/عدد)
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-3 font-mono font-bold">
+                                {p.totalPrice ? `${p.totalPrice.toLocaleString('fa-IR')} ریال` : '-'}
+                              </td>
+                              <td className="p-3 text-slate-600 dark:text-slate-300">
+                                {p.supplierName || '-'} {p.invoiceNumber ? `(فاکتور ${p.invoiceNumber})` : ''}
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${meta.cls}`}>
+                                  {meta.label}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================= */}
       {/* ۶. تب گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران (Activity Log) */}
       {/* ========================================================= */}
       {mainTab === 'activity_log' && (() => {
@@ -4896,6 +5322,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           student: 'دانشجو',
           maintenance: 'تأسیسات',
           warehouse: 'مسئول انبار',
+          procurement: 'کارپرداز و خرید',
           counselor: 'مشاور',
           finance: 'امور مالی و حسابداری',
           system: 'سیستم / مهمان',
@@ -4908,8 +5335,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           staff: 'پرسنل و کاربران',
           maintenance: 'امور تأسیسات',
           warehouse: 'انبار و تجهیزات',
+          procurement: 'کارپردازی و خرید',
           finance: 'امور مالی و کسورات',
           warning_eval: 'تذکر، اخطار و ارزیابی',
+          guest: 'درخواست مهمان',
           settings: 'تنظیمات و اطلاعیه‌ها',
           backup: 'پشتیبان و بازنشانی',
           excel: 'ورود اطلاعات اکسل',
@@ -5180,6 +5609,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { key: 'supervisors' as const, label: `سرپرستان (${supervisors.length})` },
                 { key: 'maintenance' as const, label: `تأسیسات (${campusStaff.length})` },
                 { key: 'warehouse' as const, label: `انبار (${warehouseStaffList.length})` },
+                { key: 'procurement' as const, label: `کارپرداز (${procurementStaffList.length})` },
                 { key: 'counselors' as const, label: `مشاوران (${counselorsList.length})` },
                 { key: 'finance' as const, label: `امور مالی (${financeStaffList.length})` },
               ].map((item) => (

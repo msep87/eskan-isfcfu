@@ -9,6 +9,7 @@ import {
   WarehouseStaff,
   CounselorStaff,
   FinanceStaff,
+  ProcurementStaff,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
@@ -54,6 +55,7 @@ import {
   ArrowDown,
   FileText,
   Wallet,
+  ShoppingBag,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -61,6 +63,7 @@ export type UserCategoryKey =
   | 'supervisors'
   | 'maintenance'
   | 'warehouse'
+  | 'procurement'
   | 'counselors'
   | 'finance';
 
@@ -76,6 +79,7 @@ interface AdminUsersPanelProps {
   warehouseStaff: WarehouseStaff[];
   counselors: CounselorStaff[];
   financeStaff: FinanceStaff[];
+  procurementStaff: ProcurementStaff[];
   onRefreshData: () => void;
   onOpenExcelModal: (tab: ExcelImportTab) => void;
   onOpenReports: () => void;
@@ -90,7 +94,7 @@ interface AdminUsersPanelProps {
   onToggleStudentSecondaryEdit?: () => void;
 }
 
-type StaffRole = 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance';
+type StaffRole = 'supervisor' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance';
 type StudentSortKey =
   | 'default'
   | 'lastName'
@@ -112,6 +116,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   warehouseStaff,
   counselors,
   financeStaff,
+  procurementStaff,
   onRefreshData,
   onOpenExcelModal,
   onOpenReports,
@@ -254,6 +259,12 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           showToast('error', res.message);
           return;
         }
+      } else if (role === 'procurement') {
+        const res = Storage.updateProcurementStaff(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
       }
 
       const syncRes = await Storage.waitForPendingCloudSync();
@@ -336,6 +347,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             ? maintenanceStaff
             : targetRole === 'warehouse'
             ? warehouseStaff
+            : targetRole === 'procurement'
+            ? procurementStaff
             : targetRole === 'finance'
             ? financeStaff
             : counselors;
@@ -776,6 +789,23 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     });
   }, [financeStaff, staffQuery, staffStatusFilter]);
 
+  const filteredProcurement = useMemo(() => {
+    const q = norm(staffQuery);
+    return procurementStaff.filter((proc) => {
+      const isActive = proc.status !== 'inactive' && proc.isActive !== false;
+      if (staffStatusFilter === 'active' && !isActive) return false;
+      if (staffStatusFilter === 'inactive' && isActive) return false;
+
+      if (q) {
+        const txt = `${norm(proc.fullName)} ${norm(proc.username)} ${norm(proc.mobile || proc.phone)} ${norm(
+          proc.department
+        )} ${norm(proc.notes)}`;
+        if (!txt.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [procurementStaff, staffQuery, staffStatusFilter]);
+
   // باز کردن مدال افزودن کاربر پرسنل
   const openAddStaffModal = (role: StaffRole) => {
     setStaffModalRole(role);
@@ -785,7 +815,13 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     setFormPassword('');
     setFormPhone('');
     setFormSpecialty('');
-    setFormDepartment(role === 'finance' ? 'واحد امور مالی و حسابداری' : '');
+    setFormDepartment(
+      role === 'finance'
+        ? 'واحد امور مالی و حسابداری'
+        : role === 'procurement'
+        ? 'واحد کارپردازی و خرید'
+        : ''
+    );
     setFormOfficeLocation('');
     setFormNotes('');
     setFormActive(true);
@@ -802,7 +838,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   };
 
   // باز کردن مدال ویرایش کاربر پرسنل
-  const openEditStaffModal = (role: StaffRole, user: Supervisor | MaintenanceStaff | WarehouseStaff | CounselorStaff | FinanceStaff) => {
+  const openEditStaffModal = (
+    role: StaffRole,
+    user: Supervisor | MaintenanceStaff | WarehouseStaff | CounselorStaff | FinanceStaff | ProcurementStaff
+  ) => {
     setStaffModalRole(role);
     setEditingStaffId(user.id);
     setFormFullName(user.fullName || '');
@@ -846,6 +885,11 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormDepartment(fin.department || 'واحد امور مالی و حسابداری');
       setFormNotes(fin.notes || '');
       setFormActive(fin.status !== 'inactive' && fin.isActive !== false);
+    } else if (role === 'procurement') {
+      const proc = user as ProcurementStaff;
+      setFormDepartment(proc.department || 'واحد کارپردازی و خرید');
+      setFormNotes(proc.notes || '');
+      setFormActive(proc.status !== 'inactive' && proc.isActive !== false);
     }
 
     setStaffModalOpen(true);
@@ -1098,6 +1142,45 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         }
         showToast('success', res.message);
       }
+    } else if (staffModalRole === 'procurement') {
+      if (editingStaffId) {
+        const res = Storage.updateProcurementStaff(editingStaffId, {
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'واحد کارپردازی و خرید',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      } else {
+        const res = Storage.addProcurementStaff({
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'واحد کارپردازی و خرید',
+          role: 'procurement',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      }
     }
 
     await Storage.waitForPendingCloudSync();
@@ -1159,6 +1242,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     } else if (deleteTarget.role === 'finance') {
       const res = Storage.deleteFinanceStaff(deleteTarget.id);
       showToast('success', res.message);
+    } else if (deleteTarget.role === 'procurement') {
+      const res = Storage.deleteProcurementStaff(deleteTarget.id);
+      showToast('success', res.message);
     }
     setDeleteTarget(null);
     onRefreshData();
@@ -1194,12 +1280,21 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     },
     {
       key: 'warehouse' as const,
-      title: 'انبار و کارپردازی',
-      subtitle: 'تحویل‌داران انبار، ورود تکی/اکسل و مدیریت رمز',
+      title: 'مسئولان انبار',
+      subtitle: 'مدیریت موجودی انبار، حواله‌ها و ارجاع خرید',
       count: warehouseStaff.length,
       icon: Package,
       activeBg: 'bg-violet-600 text-white border-violet-600 shadow-lg shadow-violet-600/25',
       badgeBg: 'bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300',
+    },
+    {
+      key: 'procurement' as const,
+      title: 'کارپردازی و خرید',
+      subtitle: 'خرید اقلام ناموجود، قیمت‌گذاری و تحویل به انبار',
+      count: procurementStaff.length,
+      icon: ShoppingBag,
+      activeBg: 'bg-orange-600 text-white border-orange-600 shadow-lg shadow-orange-600/25',
+      badgeBg: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300',
     },
     {
       key: 'counselors' as const,
@@ -1224,7 +1319,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const roleLabels: Record<StaffRole, string> = {
     supervisor: 'سرپرست سرا',
     maintenance: 'کارشناس تأسیسات',
-    warehouse: 'کاربر انبار و کارپردازی',
+    warehouse: 'مسئول انبار',
+    procurement: 'کارپرداز و خرید',
     counselor: 'کارشناس مشاوره و روانشناسی',
     finance: 'کارشناس امور مالی و حسابداری',
   };
@@ -1255,6 +1351,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 supervisors.length +
                 maintenanceStaff.length +
                 warehouseStaff.length +
+                procurementStaff.length +
                 counselors.length +
                 financeStaff.length}
             </span>
@@ -1262,7 +1359,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         </div>
 
         {/* دکمه‌های تفکیکی انتخاب نوع کاربر */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mt-5 pt-5 border-t border-white/15">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7 gap-3 mt-5 pt-5 border-t border-white/15">
           {roleCategories.map((cat) => {
             const Icon = cat.icon;
             const isActive = activeCategory === cat.key;
@@ -2021,6 +2118,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 {activeCategory === 'supervisors' && <ShieldCheck className="w-5 h-5" />}
                 {activeCategory === 'maintenance' && <Wrench className="w-5 h-5" />}
                 {activeCategory === 'warehouse' && <Package className="w-5 h-5" />}
+                {activeCategory === 'procurement' && <ShoppingBag className="w-5 h-5 text-orange-600" />}
                 {activeCategory === 'counselors' && <HeartHandshake className="w-5 h-5" />}
                 {activeCategory === 'finance' && <Wallet className="w-5 h-5 text-emerald-600" />}
               </div>
@@ -2028,7 +2126,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
                   {activeCategory === 'supervisors' && `مدیریت سرپرستان سراها (${filteredSupervisors.length} از ${supervisors.length})`}
                   {activeCategory === 'maintenance' && `مدیریت پرسنل تأسیسات و فنی (${filteredMaintenance.length} از ${maintenanceStaff.length})`}
-                  {activeCategory === 'warehouse' && `مدیریت کاربران انبار و کارپردازی (${filteredWarehouse.length} از ${warehouseStaff.length})`}
+                  {activeCategory === 'warehouse' && `مدیریت کاربران انبار (${filteredWarehouse.length} از ${warehouseStaff.length})`}
+                  {activeCategory === 'procurement' && `مدیریت کاربران کارپردازی و خرید (${filteredProcurement.length} از ${procurementStaff.length})`}
                   {activeCategory === 'counselors' && `مدیریت مشاوران و روانشناسان (${filteredCounselors.length} از ${counselors.length})`}
                   {activeCategory === 'finance' && `مدیریت کاربران امور مالی و حسابداری (${filteredFinance.length} از ${financeStaff.length})`}
                 </h3>
@@ -2049,6 +2148,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       ? 'maintenance'
                       : activeCategory === 'warehouse'
                       ? 'warehouse'
+                      : activeCategory === 'procurement'
+                      ? 'procurement'
                       : activeCategory === 'finance'
                       ? 'finance'
                       : 'counselor'
@@ -2061,6 +2162,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'supervisors' && 'افزودن سرپرست جدید'}
                   {activeCategory === 'maintenance' && 'افزودن تکنسین جدید'}
                   {activeCategory === 'warehouse' && 'افزودن کاربر انبار جدید'}
+                  {activeCategory === 'procurement' && 'افزودن کارپرداز جدید'}
                   {activeCategory === 'counselors' && 'افزودن مشاور جدید'}
                   {activeCategory === 'finance' && 'افزودن کاربر امور مالی جدید'}
                 </span>
@@ -2076,6 +2178,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       ? 'maintenance'
                       : activeCategory === 'warehouse'
                       ? 'warehouse'
+                      : activeCategory === 'procurement'
+                      ? 'procurement'
                       : activeCategory === 'finance'
                       ? 'finance'
                       : 'counselors'
@@ -2095,6 +2199,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     ? 'maintenance'
                     : activeCategory === 'warehouse'
                     ? 'warehouse'
+                    : activeCategory === 'procurement'
+                    ? 'procurement'
                     : activeCategory === 'finance'
                     ? 'finance'
                     : 'counselor';
@@ -2157,7 +2263,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
               <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
             </div>
 
-            {activeCategory !== 'warehouse' && activeCategory !== 'finance' && (
+            {activeCategory !== 'warehouse' && activeCategory !== 'finance' && activeCategory !== 'procurement' && (
               <div className="flex items-center gap-1.5">
                 <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <select
@@ -2199,10 +2305,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   <th className="p-3">نام کاربری</th>
                   <th className="p-3">رمز عبور</th>
                   <th className="p-3">شماره تماس</th>
-                  {activeCategory !== 'warehouse' && activeCategory !== 'finance' && (
+                  {activeCategory !== 'warehouse' && activeCategory !== 'finance' && activeCategory !== 'procurement' && (
                     <th className="p-3">محدوده سرا / تخصص</th>
                   )}
-                  {(activeCategory === 'warehouse' || activeCategory === 'finance') && (
+                  {(activeCategory === 'warehouse' || activeCategory === 'finance' || activeCategory === 'procurement') && (
                     <th className="p-3">بخش / سمت و توضیحات</th>
                   )}
                   {activeCategory !== 'supervisors' && <th className="p-3">وضعیت</th>}
@@ -2948,6 +3054,148 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       );
                     })
                   ))}
+
+                {activeCategory === 'procurement' &&
+                  (filteredProcurement.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-slate-400">
+                        هیچ کارپردازی با مشخصات جستجوشده یافت نشد. برای ثبت کاربر از دکمه «افزودن کارپرداز جدید» یا «ثبت گروهی با اکسل» استفاده کنید.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredProcurement.map((proc) => {
+                      const isActive = proc.status !== 'inactive' && proc.isActive !== false;
+                      const passKey = `proc_${proc.id}`;
+                      const isShown = revealedPasswords[passKey];
+
+                      return (
+                        <tr key={proc.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {proc.photoUrl ? (
+                                <img
+                                  src={proc.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-orange-200 dark:border-orange-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-orange-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(proc.fullName || 'ک').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{proc.fullName}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
+                            {proc.username}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                {isShown ? proc.password : '••••••'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => toggleRevealPassword(passKey)}
+                                className="p-1 text-slate-400 hover:text-orange-600 cursor-pointer"
+                                title={isShown ? 'مخفی کردن رمز' : 'نمایش رمز'}
+                              >
+                                {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono" dir="ltr">
+                            {proc.mobile || proc.phone || '-'}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-semibold text-orange-700 dark:text-orange-300">
+                              {proc.department || 'واحد کارپردازی و خرید'}
+                            </div>
+                            {proc.notes && <div className="text-[11px] text-slate-400">{proc.notes}</div>}
+                          </td>
+                          <td className="p-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextStatus = isActive ? 'inactive' : 'active';
+                                Storage.updateProcurementStaff(proc.id, {
+                                  status: nextStatus,
+                                  isActive: nextStatus === 'active',
+                                });
+                                onRefreshData();
+                              }}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                                isActive
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                              }`}
+                            >
+                              {isActive ? 'فعال' : 'غیرفعال'}
+                            </button>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <label
+                                className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                title="بارگذاری یا تغییر عکس کارپرداز"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('procurement', proc.id, proc.fullName, e, proc.username)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => openEditStaffModal('procurement', proc)}
+                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                                title="ویرایش مشخصات کارپرداز"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPasswordError('');
+                                  setNewPasswordInput('');
+                                  setPasswordModalTarget({
+                                    role: 'procurement',
+                                    id: proc.id,
+                                    fullName: proc.fullName,
+                                    usernameOrCode: proc.username,
+                                    defaultResetValue: '123456',
+                                    defaultResetLabel: 'ریست فوری به 123456',
+                                  });
+                                }}
+                                className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                                title="تغییر یا ریست رمز عبور"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({
+                                    role: 'procurement',
+                                    id: proc.id,
+                                    fullName: proc.fullName,
+                                  })
+                                }
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                                title="حذف کارپرداز"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ))}
               </tbody>
             </table>
           </div>
@@ -3118,18 +3366,22 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   </div>
                 )}
 
-                {(staffModalRole === 'warehouse' || staffModalRole === 'finance') && (
+                {(staffModalRole === 'warehouse' || staffModalRole === 'finance' || staffModalRole === 'procurement') && (
                   <>
-                    {staffModalRole === 'finance' && (
+                    {(staffModalRole === 'finance' || staffModalRole === 'procurement') && (
                       <div className="sm:col-span-2">
                         <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                          بخش / واحد مالی
+                          {staffModalRole === 'procurement' ? 'بخش / واحد کارپردازی' : 'بخش / واحد مالی'}
                         </label>
                         <input
                           type="text"
                           value={formDepartment}
                           onChange={(e) => setFormDepartment(e.target.value)}
-                          placeholder="واحد امور مالی و حسابداری پردیس"
+                          placeholder={
+                            staffModalRole === 'procurement'
+                              ? 'واحد کارپردازی و تدارکات سراها'
+                              : 'واحد امور مالی و حسابداری پردیس'
+                          }
                           className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
                         />
                       </div>
@@ -3145,7 +3397,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                         placeholder={
                           staffModalRole === 'finance'
                             ? 'کارشناس بررسی کسورات ۴۵٪ و ۲۵٪ / حسابدار...'
-                            : 'مسئول انبار مرکزی / کارپرداز...'
+                            : staffModalRole === 'procurement'
+                            ? 'کارپرداز خرید تجهیزات و قطعات مصرفی سراها...'
+                            : 'مسئول انبار مرکزی...'
                         }
                         className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
                       />
@@ -3154,7 +3408,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 )}
               </div>
 
-              {staffModalRole !== 'warehouse' && staffModalRole !== 'finance' && dorms.length > 0 && (
+              {staffModalRole !== 'warehouse' &&
+                staffModalRole !== 'finance' &&
+                staffModalRole !== 'procurement' &&
+                dorms.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="font-bold text-slate-700 dark:text-slate-300">

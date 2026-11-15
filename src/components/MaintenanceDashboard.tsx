@@ -32,13 +32,7 @@ import {
   HelpCircle,
   CheckCheck,
   Package,
-  Boxes,
   BookOpen,
-  Edit2,
-  Trash2,
-  Tag,
-  Layers,
-  Settings2,
 } from 'lucide-react';
 
 interface MaintenanceDashboardProps {
@@ -100,19 +94,6 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
   const [partReason, setPartReason] = useState('');
   const [partUrgency, setPartUrgency] = useState<'normal' | 'urgent' | 'emergency'>('normal');
 
-  // مدال افزودن قطعه/قلم مصرفی جدید به انبار توسط تأسیسات با کد خودکار
-  const [isAddNewPartModalOpen, setIsAddNewPartModalOpen] = useState(false);
-  const [newPartName, setNewPartName] = useState('');
-  const [newPartCategory, setNewPartCategory] = useState<'plumbing' | 'electrical' | 'carpentry' | 'cleaning' | 'general'>('plumbing');
-  const [newPartUnit, setNewPartUnit] = useState('عدد');
-  const [newPartQuantity, setNewPartQuantity] = useState(10);
-  const [newPartUnitPrice, setNewPartUnitPrice] = useState('500,000');
-  const [newPartLocation, setNewPartLocation] = useState('قفسه فنی و قطعات مصرفی');
-
-  // مدال مدیریت/ویرایش/حذف قطعات کاتالوگ انبار
-  const [isManagePartsModalOpen, setIsManagePartsModalOpen] = useState(false);
-  const [editingPartItem, setEditingPartItem] = useState<{ id: string; name: string; unit: string; quantity: number } | null>(null);
-
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const showFeedback = (text: string, type: 'success' | 'error' = 'success') => {
@@ -121,79 +102,6 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
   };
 
   const inventoryCatalog = Storage.getInventoryItems();
-
-  // ثبت دستی قطعه جدید در انبار و اتصال خودکار به فرم درخواست
-  const handleAddNewPartSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPartName.trim()) {
-      alert('لطفاً عنوان قطعه را وارد فرمایید.');
-      return;
-    }
-
-    const cleanName = newPartName.trim();
-    // تولید کد خودکار استاندارد برای قطعه جدید
-    const autoCode = `PRT-${Date.now().toString().slice(-4)}`;
-    const parsedPrice = parseInt(newPartUnitPrice.replace(/,/g, ''), 10) || 100000;
-
-    const res = Storage.addInventoryItem({
-      code: autoCode,
-      name: cleanName,
-      category: newPartCategory,
-      quantity: Number(newPartQuantity) || 1,
-      unit: newPartUnit.trim() || 'عدد',
-      minStockLevel: 2,
-      unitPrice: parsedPrice,
-      location: newPartLocation.trim() || 'انبار قطعات تأسیساتی',
-    });
-
-    if (res.success && res.item) {
-      showFeedback(`قطعه جدید «${res.item.name}» با کد رهگیری [${res.item.code}] ذخیره و به کاتالوگ انبار افزوده شد.`);
-      // انتخاب و جایگذاری مستقیم در فرم درخواست قطعه در صورت باز بودن
-      setPartItemId(res.item.id);
-      setPartItemTitle(res.item.name);
-      setPartUnit(res.item.unit);
-      setIsAddNewPartModalOpen(false);
-      setNewPartName('');
-      onRefreshData();
-    } else {
-      showFeedback(res.message || 'خطا در ثبت قطعه جدید', 'error');
-    }
-  };
-
-  // ویرایش نام یا مشخصات قطعه
-  const handleUpdatePartSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingPartItem || !editingPartItem.name.trim()) return;
-
-    const res = Storage.updateInventoryItem(editingPartItem.id, {
-      name: editingPartItem.name.trim(),
-      unit: editingPartItem.unit.trim() || 'عدد',
-      quantity: Number(editingPartItem.quantity) || 0,
-    });
-
-    if (res.success) {
-      showFeedback('مشخصات قطعه با موفقیت ویرایش گردید.');
-      setEditingPartItem(null);
-      onRefreshData();
-    } else {
-      showFeedback(res.message, 'error');
-    }
-  };
-
-  // حذف قطعه از کاتالوگ
-  const handleDeletePart = (itemId: string, itemName: string) => {
-    if (confirm(`آیا از حذف قطعه «${itemName}» از لیست کاتالوگ اطمینان دارید؟`)) {
-      const res = Storage.deleteInventoryItem(itemId);
-      if (res.success) {
-        showFeedback(`قطعه «${itemName}» حذف شد.`);
-        if (partItemId === itemId) {
-          setPartItemId('');
-          setPartItemTitle('');
-        }
-        onRefreshData();
-      }
-    }
-  };
 
   const handleWarehouseRequestSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -220,7 +128,7 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
       setPartRequestTask(null);
       onRefreshData();
     } else {
-      alert(res.message);
+      showFeedback(res.message || 'خطا در ثبت درخواست قطعه', 'error');
     }
   };
 
@@ -441,15 +349,6 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
             >
               <Plus className="w-4 h-4 text-amber-600" />
               <span>+ ثبت خرابی جدید در محل</span>
-            </button>
-
-            <button
-              onClick={() => setIsManagePartsModalOpen(true)}
-              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl text-xs font-bold transition flex items-center gap-2 shadow-md cursor-pointer"
-              title="مشاهده، تعریف قطعات مصرفی جدید، ویرایش نام و حذف قطعات"
-            >
-              <Boxes className="w-4 h-4 text-slate-950" />
-              <span>مدیریت قطعات و اقلام مصرفی</span>
             </button>
 
             <button
@@ -1111,18 +1010,13 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    انتخاب از کاتالوگ انبار سراها
+                    انتخاب از کاتالوگ انبار سراها (فقط مشاهده)
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddNewPartModalOpen(true)}
-                    className="text-[11px] font-bold text-violet-600 dark:text-violet-400 hover:text-violet-700 flex items-center gap-1 cursor-pointer bg-violet-50 dark:bg-violet-950/50 px-2 py-0.5 rounded-lg border border-violet-200 dark:border-violet-800"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>+ تعریف قطعه جدید (با کد رهگیری خودکار)</span>
-                  </button>
+                  <span className="text-[10px] text-slate-400">
+                    ویرایش موجودی منحصراً در اختیار مسئول انبار است
+                  </span>
                 </div>
                 <select
                   value={partItemId}
@@ -1357,294 +1251,6 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* مدال افزودن قطعه و کالای مصرفی جدید با کد خودکار */}
-      {isAddNewPartModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 relative">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-violet-500/10 text-violet-600">
-                  <Package className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
-                    تعریف و افزودن قطعه جدید به انبار
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    قطعه با کد رهگیری یکتا ذخیره شده و همواره در کاتالوگ قابل استفاده خواهد بود
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsAddNewPartModalOpen(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddNewPartSubmit} className="space-y-3.5 my-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  نام دقیق قطعه یا ابزار مصرفی *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="مثال: واشر آب‌بندی دیافراگمی، رله استارت مشعل..."
-                  value={newPartName}
-                  onChange={(e) => setNewPartName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium focus:ring-2 focus:ring-violet-500 outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    دسته‌بندی فنی
-                  </label>
-                  <select
-                    value={newPartCategory}
-                    onChange={(e) => setNewPartCategory(e.target.value as any)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium focus:ring-2 focus:ring-violet-500 outline-none"
-                  >
-                    <option value="plumbing">تأسیسات و لوله‌کشی آب</option>
-                    <option value="electrical">برق و روشنایی</option>
-                    <option value="carpentry">نجاری و ابزارآلات</option>
-                    <option value="cleaning">مواد مصرفی و بهداشتی</option>
-                    <option value="general">تجهیزات عمومی</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    واحد شمارش
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newPartUnit}
-                    onChange={(e) => setNewPartUnit(e.target.value)}
-                    placeholder="عدد، متر، دست، شاخه..."
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    موجودی اولیه (تعداد)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={newPartQuantity}
-                    onChange={(e) => setNewPartQuantity(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    برآورد قیمت واحد (ریال)
-                  </label>
-                  <input
-                    type="text"
-                    value={newPartUnitPrice}
-                    onChange={(e) => setNewPartUnitPrice(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  محل نگهداری در انبار
-                </label>
-                <input
-                  type="text"
-                  value={newPartLocation}
-                  onChange={(e) => setNewPartLocation(e.target.value)}
-                  placeholder="مثال: قفسه C، ردیف ۲"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium"
-                />
-              </div>
-
-              <div className="p-2.5 rounded-xl bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-800 text-[11px] text-violet-800 dark:text-violet-300 flex items-center gap-2">
-                <Tag className="w-4 h-4 shrink-0 text-violet-600" />
-                <span>کد رهگیری قطعه به‌صورت خودکار توسط سیستم تولید خواهد شد.</span>
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddNewPartModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
-                >
-                  انصراف
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-700 text-white shadow-md shadow-violet-600/20 transition cursor-pointer flex items-center gap-1.5"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>ثبت قطعه و افزودن به کاتالوگ</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* مدال مدیریت کاتالوگ قطعات (ویرایش نام و حذف قطعه) */}
-      {isManagePartsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 relative max-h-[88vh] flex flex-col">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600">
-                  <Boxes className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
-                    مدیریت کاتالوگ قطعات و اقلام مصرفی انبار
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    امکان مشاهده، تعریف قطعه جدید، ویرایش نام و حذف قطعات ثبت‌شده
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIsAddNewPartModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>+ قطعه جدید</span>
-                </button>
-                <button
-                  onClick={() => setIsManagePartsModalOpen(false)}
-                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* فرم ویرایش سریع قطعه در صورت انتخاب */}
-            {editingPartItem && (
-              <form onSubmit={handleUpdatePartSubmit} className="my-3 p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 shrink-0 space-y-2">
-                <div className="text-xs font-bold text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
-                  <Edit2 className="w-3.5 h-3.5" />
-                  <span>ویرایش مشخصات قطعه:</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <input
-                    type="text"
-                    required
-                    value={editingPartItem.name}
-                    onChange={(e) => setEditingPartItem({ ...editingPartItem, name: e.target.value })}
-                    placeholder="نام قطعه"
-                    className="px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs font-semibold"
-                  />
-                  <input
-                    type="text"
-                    required
-                    value={editingPartItem.unit}
-                    onChange={(e) => setEditingPartItem({ ...editingPartItem, unit: e.target.value })}
-                    placeholder="واحد (عدد، متر...)"
-                    className="px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    value={editingPartItem.quantity}
-                    onChange={(e) => setEditingPartItem({ ...editingPartItem, quantity: Number(e.target.value) })}
-                    placeholder="موجودی"
-                    className="px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs font-bold"
-                  />
-                </div>
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setEditingPartItem(null)}
-                    className="px-3 py-1 rounded-xl text-xs border border-slate-200 text-slate-600 hover:bg-slate-100 cursor-pointer"
-                  >
-                    انصراف
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-1 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
-                  >
-                    ذخیره تغییرات
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* فهرست قطعات کاتالوگ */}
-            <div className="overflow-y-auto flex-1 my-3 divide-y divide-slate-100 dark:divide-slate-800 pr-1">
-              {inventoryCatalog.length === 0 ? (
-                <div className="text-center py-8 text-xs text-slate-400">
-                  هیچ قطعه‌ای در کاتالوگ انبار ثبت نشده است.
-                </div>
-              ) : (
-                inventoryCatalog.map((item) => (
-                  <div
-                    key={item.id}
-                    className="py-2.5 flex items-center justify-between gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 px-2 rounded-xl transition"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="font-mono text-[11px] font-black px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 shrink-0">
-                        {item.code}
-                      </span>
-                      <div className="truncate">
-                        <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                          {item.name}
-                        </div>
-                        <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
-                          <span>موجودی: {item.quantity} {item.unit}</span>
-                          <span>•</span>
-                          <span>محل: {item.location || 'انبار مرکزی'}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => setEditingPartItem({ id: item.id, name: item.name, unit: item.unit, quantity: item.quantity })}
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 cursor-pointer"
-                        title="ویرایش نام یا مشخصات قطعه"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDeletePart(item.id, item.name)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
-                        title="حذف قطعه از کاتالوگ"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsManagePartsModalOpen(false)}
-                className="px-5 py-2 rounded-xl text-xs font-bold bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:opacity-90 cursor-pointer"
-              >
-                بستن پنجره
-              </button>
-            </div>
           </div>
         </div>
       )}
