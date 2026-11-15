@@ -2318,7 +2318,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {studentEvaluations.map((ev) => (
+                    {studentEvaluations.map((ev) => {
+                      const summonsTargetLabel =
+                        ev.summonsTarget === 'disciplinary_council'
+                          ? 'شورای انضباطی'
+                          : ev.summonsTarget === 'security'
+                          ? 'حراست دانشگاه'
+                          : 'سرپرستی سرا';
+                      const scoreCategoryLabel =
+                        ev.scoreCategory === 'discipline'
+                          ? 'انضباط و مقررات سکونت و رفت و آمد'
+                          : ev.scoreCategory === 'cleanliness'
+                          ? 'نظافت فردی و اجتماعی'
+                          : null;
+                      return (
                       <div
                         key={ev.id}
                         className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
@@ -2326,6 +2339,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
                             : ev.type === 'report'
                             ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50'
+                            : ev.type === 'summons'
+                            ? 'bg-purple-50/60 dark:bg-purple-950/25 border-purple-200 dark:border-purple-900/50'
+                            : ev.type === 'negative_score'
+                            ? 'bg-rose-50/60 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50'
                             : ev.type === 'warning'
                             ? 'bg-rose-50/60 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50'
                             : 'bg-amber-50/60 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50'
@@ -2339,6 +2356,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   ? 'bg-emerald-600 text-white'
                                   : ev.type === 'report'
                                   ? 'bg-blue-600 text-white'
+                                  : ev.type === 'summons'
+                                  ? 'bg-purple-700 text-white'
+                                  : ev.type === 'negative_score'
+                                  ? 'bg-rose-700 text-white'
                                   : ev.type === 'warning'
                                   ? 'bg-rose-600 text-white'
                                   : 'bg-amber-500 text-white'
@@ -2348,6 +2369,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 ? `نمره ارزیابی: ${ev.score ?? '-'} از ۱۰۰`
                                 : ev.type === 'report'
                                 ? 'گزارش'
+                                : ev.type === 'summons'
+                                ? `فراخوانی به ${summonsTargetLabel}`
+                                : ev.type === 'negative_score'
+                                ? `نمره منفی (${ev.negativePoints ?? 0}- امتیاز)`
                                 : ev.type === 'warning'
                                 ? 'اخطار رسمی'
                                 : 'تذکر'}
@@ -2355,6 +2380,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <span className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300">
                               {ev.scope === 'room' ? 'گستره: اتاق' : 'گستره: فردی'}
                             </span>
+                            {scoreCategoryLabel && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-rose-100/80 dark:bg-rose-900/40 text-rose-800 dark:text-rose-200 font-bold">
+                                بخش: {scoreCategoryLabel}
+                              </span>
+                            )}
+                            {ev.type === 'summons' && ev.summonsSchedule && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200 font-bold">
+                                زمان مراجعه: {ev.summonsSchedule}
+                              </span>
+                            )}
                             <span className="font-extrabold text-sm text-slate-900 dark:text-white">
                               {ev.studentName} ({ev.studentId})
                             </span>
@@ -2368,12 +2403,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <div className="text-xs text-slate-600 dark:text-slate-400">{ev.description}</div>
                           <div className="text-[10px] text-slate-400">
                             ثبت‌کننده: {ev.evaluatorName} • تاریخ: {ev.date}
-                            {(ev.type === 'notice' || ev.type === 'warning') && ` • وضعیت: ${ev.resolved ? 'برطرف شده' : 'فعال'}`}
+                            {(ev.type === 'notice' || ev.type === 'warning' || ev.type === 'summons') &&
+                              ` • وضعیت: ${ev.resolved ? 'برطرف شده' : 'فعال'}`}
                           </div>
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {(ev.type === 'notice' || ev.type === 'warning') && !ev.resolved && (
+                          {(ev.type === 'notice' || ev.type === 'warning' || ev.type === 'summons') && !ev.resolved && (
                             <button
                               onClick={() => {
                                 Storage.resolveStudentEvaluation(ev.id);
@@ -2400,7 +2436,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </button>
                         </div>
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 )}
               </div>
@@ -5338,6 +5375,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           procurement: 'کارپردازی و خرید',
           finance: 'امور مالی و کسورات',
           warning_eval: 'تذکر، اخطار و ارزیابی',
+          visit_report: 'گزارش بازدید سرپرستی',
           guest: 'درخواست مهمان',
           settings: 'تنظیمات و اطلاعیه‌ها',
           backup: 'پشتیبان و بازنشانی',

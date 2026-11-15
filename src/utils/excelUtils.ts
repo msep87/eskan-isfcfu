@@ -16,6 +16,7 @@ import {
   StudentFinancialRecord,
   StudentFinancialStatus,
   GuestRequest,
+  VisitReport,
 } from '../types';
 import {
   computeStudentFinancialInfo,
@@ -1092,6 +1093,7 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
     finance: 'امور مالی و کسورات',
     warning_eval: 'تذکر، اخطار و ارزیابی',
     guest: 'درخواست مهمان',
+    visit_report: 'گزارش بازدید سرپرستی',
     settings: 'تنظیمات و اطلاعیه‌ها',
     backup: 'پشتیبان و بازنشانی',
     excel: 'ورود اطلاعات اکسل',
@@ -2116,4 +2118,44 @@ export function exportGuestRequestsToExcel(requests: GuestRequest[]) {
   XLSX.utils.book_append_sheet(wb, ws, 'درخواست‌های مهمان');
   XLSX.writeFile(wb, `گزارش_درخواست_مهمان_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
+
+// ۱۱. خروجی اکسل گزارش‌های بازدید سرپرستان از سراها و اتاق‌ها
+export function exportVisitReportsToExcel(reports: VisitReport[]) {
+  const cleanMap: Record<VisitReport['cleanlinessCondition'], string> = {
+    excellent: 'بسیار مطلوب',
+    good: 'قابل قبول',
+    needs_attention: 'نیازمند تذکر',
+    poor: 'نامطلوب',
+  };
+  const facMap: Record<VisitReport['facilitiesCondition'], string> = {
+    healthy: 'سالم و بدون نقص',
+    minor_issue: 'دارای نقص جزئی',
+    urgent_repair: 'نیازمند تعمیر فوری',
+  };
+
+  const rows = reports.map((r, idx) => ({
+    'ردیف': idx + 1,
+    'کد گزارش': r.reportCode,
+    'محدوده بازدید': r.scope === 'room' ? `اتاق ${r.roomNumber || '-'}` : 'کل سرا',
+    'نام سرا': r.dormName,
+    'شماره اتاق': r.roomNumber || '-',
+    'تاریخ بازدید': r.visitDate,
+    'ساعت بازدید': r.visitTime,
+    'بازدیدکننده': r.inspectorName,
+    'وضعیت نظافت': cleanMap[r.cleanlinessCondition] || r.cleanlinessCondition,
+    'وضعیت تأسیسات و اموال': facMap[r.facilitiesCondition] || r.facilitiesCondition,
+    'نمره انضباط و مقررات سکونت': typeof r.disciplineScore === 'number' ? r.disciplineScore : '-',
+    'نمره نظافت فردی و اجتماعی': typeof r.cleanlinessScore === 'number' ? r.cleanlinessScore : '-',
+    'وضعیت حضور ساکنین': r.residentPresenceSummary || '-',
+    'شرح گزارش بازدید': r.summary,
+    'توصیه‌ها و تذکرات': r.recommendations || '-',
+    'تاریخ ثبت سیستمی': r.createdAt,
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'گزارش‌های بازدید');
+  XLSX.writeFile(wb, `گزارش_بازدید_سراها_و_اتاقها_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
 

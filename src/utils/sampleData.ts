@@ -26,6 +26,7 @@ import {
   ActivityLog,
   StudentEvaluation,
   GuestRequest,
+  VisitReport,
 } from '../types';
 
 export const INITIAL_SETTINGS: AppSettings = {
@@ -122,3 +123,6 @@ export const INITIAL_INVENTORY_TRANSACTIONS: InventoryTransaction[] = [];
 
 // درخواست‌های موافقت با مهمان دانشجویان (کاملاً خالی)
 export const INITIAL_GUEST_REQUESTS: GuestRequest[] = [];
+
+// گزارش‌های بازدید سرپرستان از سراها و اتاق‌ها (کاملاً خالی)
+export const INITIAL_VISIT_REPORTS: VisitReport[] = [];

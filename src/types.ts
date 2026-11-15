@@ -66,6 +66,10 @@ export interface Room {
   facilities: string[]; // امکانات اتاق (یخچال، بالکن، شوفاژ، کولر، کمد دیواری، میز مطالعه)
   notes?: string;
   status?: 'active' | 'maintenance' | 'inactive';
+  disciplineScore?: number; // نمره انضباط و رعایت مقررات سکونت و رفت و آمد (۰ تا ۱۰۰)
+  cleanlinessScore?: number; // نمره رعایت نظافت فردی و اجتماعی اتاق (۰ تا ۱۰۰)
+  lastVisitAt?: string; // تاریخ آخرین بازدید سرپرستی
+  lastVisitBy?: string;
 }
 
 export interface RoomWarning {
@@ -542,6 +546,7 @@ export type ActivityLogCategory =
   | 'finance'
   | 'warning_eval'
   | 'guest'
+  | 'visit_report'
   | 'settings'
   | 'backup'
   | 'excel';
@@ -630,9 +635,13 @@ export interface StudentEvaluation {
   dormName?: string;
   roomId?: string;
   roomNumber?: string;
-  type: 'evaluation' | 'notice' | 'warning' | 'report';
+  type: 'evaluation' | 'notice' | 'warning' | 'report' | 'summons' | 'negative_score';
   scope: 'individual' | 'room';
   score?: number; // نمره ارزیابی بین ۰ تا ۱۰۰
+  scoreCategory?: 'discipline' | 'cleanliness' | 'general';
+  negativePoints?: number; // میزان نمره منفی ثبت‌شده
+  summonsTarget?: 'supervisor' | 'disciplinary_council' | 'security'; // مرجع فراخوانی
+  summonsSchedule?: string; // زمان/موعد مراجعه فراخوانی
   title: string;
   description: string;
   evaluatorName: string;
@@ -640,4 +649,30 @@ export interface StudentEvaluation {
   date: string;
   resolved?: boolean;
   resolvedAt?: string;
+}
+
+export type VisitCleanlinessCondition = 'excellent' | 'good' | 'needs_attention' | 'poor';
+export type VisitFacilitiesCondition = 'healthy' | 'minor_issue' | 'urgent_repair';
+
+export interface VisitReport {
+  id: string;
+  reportCode: string; // مثلاً VR-101
+  dormId: string;
+  dormName: string;
+  roomId?: string;
+  roomNumber?: string;
+  scope: 'dorm' | 'room';
+  inspectorId?: string;
+  inspectorName: string;
+  inspectorRole: 'supervisor' | 'admin';
+  visitDate: string;
+  visitTime: string;
+  cleanlinessCondition: VisitCleanlinessCondition;
+  facilitiesCondition: VisitFacilitiesCondition;
+  disciplineScore?: number;
+  cleanlinessScore?: number;
+  residentPresenceSummary?: string;
+  summary: string;
+  recommendations?: string;
+  createdAt: string;
 }

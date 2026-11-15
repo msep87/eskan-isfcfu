@@ -31,6 +31,7 @@ import {
   StudentEvaluation,
   GuestRequest,
   GuestEligibilityType,
+  VisitReport,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -58,6 +59,7 @@ import {
   INITIAL_ACTIVITY_LOGS,
   INITIAL_STUDENT_EVALUATIONS,
   INITIAL_GUEST_REQUESTS,
+  INITIAL_VISIT_REPORTS,
   generateInitialRoomsAndBeds,
 } from './sampleData';
 
@@ -92,6 +94,7 @@ const STORAGE_KEYS = {
   ACTIVITY_LOGS: 'farhangian_dorm_activity_logs_prod',
   STUDENT_EVALUATIONS: 'farhangian_dorm_student_evaluations_prod',
   GUEST_REQUESTS: 'farhangian_dorm_guest_requests_prod',
+  VISIT_REPORTS: 'farhangian_dorm_visit_reports_prod',
 };
 
 
@@ -168,6 +171,9 @@ export function initializeStorageIfNeeded(): void {
   }
   if (!localStorage.getItem(STORAGE_KEYS.GUEST_REQUESTS)) {
     localStorage.setItem(STORAGE_KEYS.GUEST_REQUESTS, JSON.stringify(INITIAL_GUEST_REQUESTS));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.VISIT_REPORTS)) {
+    localStorage.setItem(STORAGE_KEYS.VISIT_REPORTS, JSON.stringify(INITIAL_VISIT_REPORTS));
   }
 
   if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
@@ -646,6 +652,26 @@ export const Storage = {
         }
       });
       if (srChanged) set(STORAGE_KEYS.SHIFT_REPORTS, shiftReports);
+
+      const guestReqs = Storage.getGuestRequests();
+      let grChanged = false;
+      guestReqs.forEach((gr) => {
+        if (gr.dormId === dormId) {
+          gr.dormName = cleanName;
+          grChanged = true;
+        }
+      });
+      if (grChanged) Storage.setGuestRequests(guestReqs);
+
+      const visitReports = Storage.getVisitReports();
+      let vrChanged = false;
+      visitReports.forEach((vr) => {
+        if (vr.dormId === dormId) {
+          vr.dormName = cleanName;
+          vrChanged = true;
+        }
+      });
+      if (vrChanged) Storage.setVisitReports(visitReports);
     }
 
     Storage.addActivityLog({
@@ -1611,6 +1637,7 @@ export const Storage = {
       financeStaff: Storage.getFinanceStaff(),
       studentFinances: Storage.getStudentFinances(),
       guestRequests: Storage.getGuestRequests(),
+      visitReports: Storage.getVisitReports(),
       exportedAt: new Date().toISOString(),
       appName: 'سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
     };
@@ -1656,6 +1683,7 @@ export const Storage = {
         if (data.financeStaff) Storage.setFinanceStaff(data.financeStaff);
         if (data.studentFinances) Storage.setStudentFinances(data.studentFinances);
         if (data.guestRequests) Storage.setGuestRequests(data.guestRequests);
+        if (data.visitReports) Storage.setVisitReports(data.visitReports);
         Storage.addActivityLog({
           category: 'backup',
           action: 'بازیابی نسخه پشتیبان JSON',
@@ -4011,10 +4039,17 @@ export const Storage = {
 
         if (data.type === 'evaluation' && typeof data.score === 'number') {
           st.previousScore = data.score;
+        } else if (data.type === 'negative_score' && typeof data.negativePoints === 'number' && data.negativePoints > 0) {
+          const prevNumeric = Number(st.previousScore ?? 100);
+          const safePrev = Number.isNaN(prevNumeric) ? 100 : prevNumeric;
+          st.previousScore = Math.max(0, Math.round((safePrev - data.negativePoints) * 10) / 10);
         }
       });
       Storage.setStudentEvaluations(items);
-      if (data.type === 'evaluation' && typeof data.score === 'number') {
+      if (
+        (data.type === 'evaluation' && typeof data.score === 'number') ||
+        (data.type === 'negative_score' && typeof data.negativePoints === 'number' && data.negativePoints > 0)
+      ) {
         Storage.setStudents(students);
         const currentUser = Storage.getCurrentUser();
         if (currentUser && currentUser.role === 'student') {
@@ -4029,6 +4064,16 @@ export const Storage = {
     const typeLabel =
       data.type === 'evaluation'
         ? `نمره ارزیابی (${data.score ?? '-'} از ۱۰۰)`
+        : data.type === 'negative_score'
+        ? `نمره منفی (${data.negativePoints ?? 0}- امتیاز)`
+        : data.type === 'summons'
+        ? `فراخوانی به ${
+            data.summonsTarget === 'disciplinary_council'
+              ? 'شورای انضباطی'
+              : data.summonsTarget === 'security'
+              ? 'حراست'
+              : 'سرپرستی'
+          }`
         : data.type === 'warning'
         ? 'اخطار رسمی'
         : data.type === 'report'
@@ -4040,7 +4085,7 @@ export const Storage = {
       action: `ثبت ${typeLabel} (${scopeLabel})`,
       details: `${typeLabel} با عنوان «${data.title}» برای ${targetStudents.length > 1 ? `${targetStudents.length} نفر از ساکنین اتاق ${data.roomNumber || ''}` : data.studentName} ثبت شد.`,
       targetName: data.studentName,
-      severity: data.type === 'warning' ? 'warning' : 'info',
+      severity: data.type === 'warning' || data.type === 'summons' || data.type === 'negative_score' ? 'warning' : 'info',
       actorName: data.evaluatorName,
       actorRole: data.evaluatorRole,
     });
@@ -4411,6 +4456,250 @@ export const Storage = {
     });
 
     return { success: true, message: 'درخواست مهمان لغو شد.' };
+  },
+
+  // -------------------------------------------------------------
+  // نمرات دوگانه اتاق (انضباط/مقررات سکونت و نظافت فردی/اجتماعی) و گزارش‌های بازدید سرپرستی
+  // -------------------------------------------------------------
+  updateRoomScores: (
+    roomId: string,
+    scores: { disciplineScore?: number; cleanlinessScore?: number },
+    actorName = 'سرپرست / مدیر سرا',
+    actorRole: 'admin' | 'supervisor' = 'supervisor'
+  ): { success: boolean; message: string } => {
+    const rooms = Storage.getRooms();
+    const room = rooms.find((r) => r.id === roomId);
+    if (!room) {
+      return { success: false, message: 'اتاق مورد نظر یافت نشد.' };
+    }
+    const clamp = (val: number) => Math.max(0, Math.min(100, Math.round(val * 10) / 10));
+    if (typeof scores.disciplineScore === 'number' && !Number.isNaN(scores.disciplineScore)) {
+      room.disciplineScore = clamp(scores.disciplineScore);
+    }
+    if (typeof scores.cleanlinessScore === 'number' && !Number.isNaN(scores.cleanlinessScore)) {
+      room.cleanlinessScore = clamp(scores.cleanlinessScore);
+    }
+    Storage.setRooms(rooms);
+
+    const dorm = Storage.getDormitories().find((d) => d.id === room.dormId);
+    Storage.addActivityLog({
+      category: 'warning_eval',
+      action: 'بروزرسانی نمرات انضباط و نظافت اتاق',
+      details: `نمرات اتاق ${room.roomNumber} (${dorm?.name || ''}) ثبت شد: انضباط و مقررات سکونت ${room.disciplineScore ?? 100}/100 و نظافت فردی و اجتماعی ${room.cleanlinessScore ?? 100}/100.`,
+      targetName: `اتاق ${room.roomNumber}`,
+      actorName,
+      actorRole,
+    });
+
+    return {
+      success: true,
+      message: `نمرات اتاق ${room.roomNumber} با موفقیت بروزرسانی شد.`,
+    };
+  },
+
+  applyRoomNegativeScore: (params: {
+    roomId: string;
+    category: 'discipline' | 'cleanliness' | 'both';
+    negativePoints: number;
+    targetStudentIds?: string[];
+    title: string;
+    description: string;
+    actorName: string;
+    actorRole: 'admin' | 'supervisor';
+    actorId?: string;
+    sendMessage?: boolean;
+  }): { success: boolean; message: string } => {
+    const pts = Math.max(0.5, Math.min(100, Math.round(params.negativePoints * 10) / 10));
+    const rooms = Storage.getRooms();
+    const room = rooms.find((r) => r.id === params.roomId);
+    if (!room) {
+      return { success: false, message: 'اتاق مورد نظر یافت نشد.' };
+    }
+
+    const dorm = Storage.getDormitories().find((d) => d.id === room.dormId);
+    const curDiscipline = room.disciplineScore ?? 100;
+    const curCleanliness = room.cleanlinessScore ?? 100;
+
+    if (params.category === 'discipline' || params.category === 'both') {
+      room.disciplineScore = Math.max(0, Math.round((curDiscipline - pts) * 10) / 10);
+    }
+    if (params.category === 'cleanliness' || params.category === 'both') {
+      room.cleanlinessScore = Math.max(0, Math.round((curCleanliness - pts) * 10) / 10);
+    }
+    Storage.setRooms(rooms);
+
+    const students = Storage.getStudents();
+    const beds = Storage.getBeds();
+    const roomOccupants = beds
+      .filter((b) => b.roomId === room.id && b.studentId)
+      .map((b) => students.find((s) => s.studentId === b.studentId))
+      .filter((s): s is Student => Boolean(s));
+
+    const targeted =
+      params.targetStudentIds && params.targetStudentIds.length > 0
+        ? roomOccupants.filter((s) => params.targetStudentIds!.includes(s.studentId))
+        : roomOccupants;
+
+    const nowFa = new Date().toLocaleDateString('fa-IR');
+    const scoreCategory: 'discipline' | 'cleanliness' | 'general' =
+      params.category === 'discipline'
+        ? 'discipline'
+        : params.category === 'cleanliness'
+        ? 'cleanliness'
+        : 'general';
+
+    targeted.forEach((st) => {
+      Storage.addStudentEvaluation(
+        {
+          studentId: st.studentId,
+          studentName: st.fullName,
+          dormId: room.dormId,
+          dormName: dorm?.name || st.assignedDormName,
+          roomId: room.id,
+          roomNumber: room.roomNumber,
+          type: 'negative_score',
+          scope: targeted.length === roomOccupants.length ? 'room' : 'individual',
+          scoreCategory,
+          negativePoints: pts,
+          title: params.title,
+          description: params.description,
+          evaluatorName: params.actorName,
+          evaluatorRole: params.actorRole,
+        },
+        false
+      );
+
+      if (params.sendMessage) {
+        Storage.addMessage({
+          senderId: params.actorId || params.actorRole,
+          senderName: params.actorName,
+          senderRole: params.actorRole,
+          receiverType: 'student',
+          receiverId: st.studentId,
+          subject: `ثبت نمره منفی (${pts}-): ${params.title}`,
+          content: `${params.description}\n(سرا: ${dorm?.name || '-'} | اتاق ${room.roomNumber})`,
+          category: params.category === 'cleanliness' ? 'services_cleaning' : 'discipline',
+          date: nowFa,
+        });
+      }
+    });
+
+    if (targeted.length === 0) {
+      Storage.addActivityLog({
+        category: 'warning_eval',
+        action: `ثبت نمره منفی اتاق (${pts}-)`,
+        details: `نمره منفی ${pts}- برای اتاق ${room.roomNumber} (${dorm?.name || ''}) ثبت شد: ${params.title}`,
+        targetName: `اتاق ${room.roomNumber}`,
+        severity: 'warning',
+        actorName: params.actorName,
+        actorRole: params.actorRole,
+      });
+    }
+
+    return {
+      success: true,
+      message: `نمره منفی (${pts}- امتیاز) برای اتاق ${room.roomNumber}${targeted.length > 0 ? ` و ${targeted.length} دانشجو` : ''} با موفقیت ثبت شد.`,
+    };
+  },
+
+  getVisitReports: (): VisitReport[] => {
+    return get<VisitReport[]>(STORAGE_KEYS.VISIT_REPORTS, INITIAL_VISIT_REPORTS);
+  },
+
+  setVisitReports: (items: VisitReport[]): void => {
+    set(STORAGE_KEYS.VISIT_REPORTS, items);
+  },
+
+  addVisitReport: (
+    payload: Omit<VisitReport, 'id' | 'reportCode' | 'createdAt'>,
+    applyScoresToRoom = true
+  ): { success: boolean; message: string; report?: VisitReport } => {
+    if (!payload.dormId || !payload.summary.trim()) {
+      return { success: false, message: 'انتخاب سرا و شرح گزارش بازدید الزامی است.' };
+    }
+    if (payload.scope === 'room' && !payload.roomId) {
+      return { success: false, message: 'برای گزارش بازدید اتاق، انتخاب اتاق الزامی است.' };
+    }
+
+    const reports = Storage.getVisitReports();
+    const now = new Date();
+    const createdAt = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const newReport: VisitReport = {
+      ...payload,
+      id: `visit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      reportCode: `VR-${101 + reports.length}`,
+      summary: payload.summary.trim(),
+      recommendations: payload.recommendations?.trim() || undefined,
+      residentPresenceSummary: payload.residentPresenceSummary?.trim() || undefined,
+      createdAt,
+    };
+
+    reports.unshift(newReport);
+    Storage.setVisitReports(reports);
+
+    if (payload.scope === 'room' && payload.roomId) {
+      const rooms = Storage.getRooms();
+      const targetRoom = rooms.find((r) => r.id === payload.roomId);
+      if (targetRoom) {
+        targetRoom.lastVisitAt = `${payload.visitDate} (${payload.visitTime})`;
+        targetRoom.lastVisitBy = payload.inspectorName;
+        if (applyScoresToRoom) {
+          if (typeof payload.disciplineScore === 'number' && !Number.isNaN(payload.disciplineScore)) {
+            targetRoom.disciplineScore = Math.max(0, Math.min(100, payload.disciplineScore));
+          }
+          if (typeof payload.cleanlinessScore === 'number' && !Number.isNaN(payload.cleanlinessScore)) {
+            targetRoom.cleanlinessScore = Math.max(0, Math.min(100, payload.cleanlinessScore));
+          }
+        }
+        Storage.setRooms(rooms);
+      }
+    }
+
+    Storage.addActivityLog({
+      category: 'visit_report',
+      action:
+        payload.scope === 'room'
+          ? `ثبت گزارش بازدید اتاق ${payload.roomNumber || ''}`
+          : 'ثبت گزارش بازدید کلی سرا',
+      details: `گزارش بازدید ${newReport.reportCode} توسط ${payload.inspectorName} برای ${payload.dormName}${
+        payload.scope === 'room' ? ` - اتاق ${payload.roomNumber}` : ''
+      } ثبت شد.`,
+      targetName:
+        payload.scope === 'room'
+          ? `${payload.dormName} - اتاق ${payload.roomNumber}`
+          : payload.dormName,
+      severity:
+        payload.cleanlinessCondition === 'poor' || payload.facilitiesCondition === 'urgent_repair'
+          ? 'warning'
+          : 'info',
+      actorName: payload.inspectorName,
+      actorRole: payload.inspectorRole,
+    });
+
+    return {
+      success: true,
+      message: `گزارش بازدید با کد ${newReport.reportCode} با موفقیت ثبت شد.`,
+      report: newReport,
+    };
+  },
+
+  deleteVisitReport: (id: string): void => {
+    const reports = Storage.getVisitReports();
+    const target = reports.find((r) => r.id === id);
+    Storage.setVisitReports(reports.filter((r) => r.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'visit_report',
+        action: 'حذف گزارش بازدید سرپرستی',
+        details: `گزارش بازدید ${target.reportCode} مربوط به ${target.dormName}${target.roomNumber ? ` اتاق ${target.roomNumber}` : ''} حذف شد.`,
+        targetName: target.reportCode,
+        severity: 'warning',
+      });
+    }
   },
 
   // -------------------------------------------------------------

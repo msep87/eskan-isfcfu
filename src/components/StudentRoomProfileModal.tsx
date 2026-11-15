@@ -1069,7 +1069,20 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                    {studentEvaluations.map((ev) => (
+                    {studentEvaluations.map((ev) => {
+                      const summonsTargetLabel =
+                        ev.summonsTarget === 'disciplinary_council'
+                          ? 'شورای انضباطی'
+                          : ev.summonsTarget === 'security'
+                          ? 'حراست دانشگاه'
+                          : 'سرپرستی سرا';
+                      const scoreCategoryLabel =
+                        ev.scoreCategory === 'discipline'
+                          ? 'انضباط و مقررات سکونت'
+                          : ev.scoreCategory === 'cleanliness'
+                          ? 'نظافت فردی و اجتماعی'
+                          : null;
+                      return (
                       <div
                         key={ev.id}
                         className={`p-3 rounded-2xl border flex items-start justify-between gap-3 text-xs ${
@@ -1077,6 +1090,10 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                             ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
                             : ev.type === 'report'
                             ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50'
+                            : ev.type === 'summons'
+                            ? 'bg-purple-50/50 dark:bg-purple-950/25 border-purple-200 dark:border-purple-900/50'
+                            : ev.type === 'negative_score'
+                            ? 'bg-rose-50/50 dark:bg-rose-950/25 border-rose-200 dark:border-rose-900/50'
                             : ev.type === 'warning'
                             ? 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50'
                             : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50'
@@ -1090,6 +1107,10 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                                   ? 'bg-emerald-600 text-white'
                                   : ev.type === 'report'
                                   ? 'bg-blue-600 text-white'
+                                  : ev.type === 'summons'
+                                  ? 'bg-purple-700 text-white'
+                                  : ev.type === 'negative_score'
+                                  ? 'bg-rose-700 text-white'
                                   : ev.type === 'warning'
                                   ? 'bg-rose-600 text-white'
                                   : 'bg-amber-500 text-white'
@@ -1099,6 +1120,10 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                                 ? `نمره: ${ev.score ?? '-'}`
                                 : ev.type === 'report'
                                 ? 'گزارش'
+                                : ev.type === 'summons'
+                                ? `فراخوانی به ${summonsTargetLabel}`
+                                : ev.type === 'negative_score'
+                                ? `نمره منفی (${ev.negativePoints ?? 0}-)`
                                 : ev.type === 'warning'
                                 ? 'اخطار رسمی'
                                 : 'تذکر'}
@@ -1106,8 +1131,18 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                             <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
                               {ev.scope === 'room' ? 'اتاق' : 'فردی'}
                             </span>
+                            {scoreCategoryLabel && (
+                              <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-rose-100/80 dark:bg-rose-900/40 text-rose-800 dark:text-rose-200">
+                                {scoreCategoryLabel}
+                              </span>
+                            )}
+                            {ev.type === 'summons' && ev.summonsSchedule && (
+                              <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200">
+                                {ev.summonsSchedule}
+                              </span>
+                            )}
                             <span className="font-extrabold text-slate-800 dark:text-white">{ev.title}</span>
-                            {(ev.type === 'notice' || ev.type === 'warning') && (
+                            {(ev.type === 'notice' || ev.type === 'warning' || ev.type === 'summons') && (
                               <span
                                 className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
                                   ev.resolved
@@ -1126,7 +1161,7 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0">
-                          {(ev.type === 'notice' || ev.type === 'warning') && !ev.resolved && (
+                          {(ev.type === 'notice' || ev.type === 'warning' || ev.type === 'summons') && !ev.resolved && (
                             <button
                               type="button"
                               onClick={() => {
@@ -1154,7 +1189,8 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

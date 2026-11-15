@@ -101,7 +101,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   );
   const individualEvalList = myEvaluations.filter((e) => e.type === 'evaluation' && e.scope === 'individual');
   const roomEvalList = myEvaluations.filter((e) => e.type === 'evaluation' && e.scope === 'room');
-  const activePersonalAlerts = myEvaluations.filter((e) => (e.type === 'notice' || e.type === 'warning') && !e.resolved);
+  const activePersonalAlerts = myEvaluations.filter(
+    (e) => (e.type === 'notice' || e.type === 'warning' || e.type === 'summons') && !e.resolved
+  );
 
   const latestIndividualScore =
     individualEvalList.length > 0 && typeof individualEvalList[0].score === 'number'
@@ -611,13 +613,60 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               </div>
             </div>
 
+            {studentRoom && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/25 border border-indigo-200 dark:border-indigo-900/50 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[11px] font-bold text-indigo-800 dark:text-indigo-300 block">
+                      نمره انضباط و رعایت مقررات سکونت و رفت و آمد اتاق
+                    </span>
+                    <span className="text-[10px] text-indigo-600/80 dark:text-indigo-400">
+                      اتاق {studentRoom.roomNumber}
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-indigo-800 dark:text-indigo-200 shrink-0">
+                    {studentRoom.disciplineScore ?? 100}{' '}
+                    <span className="text-xs font-bold text-indigo-600/80">از ۱۰۰</span>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-sky-50/70 dark:bg-sky-950/25 border border-sky-200 dark:border-sky-900/50 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[11px] font-bold text-sky-800 dark:text-sky-300 block">
+                      نمره رعایت نظافت فردی و اجتماعی اتاق
+                    </span>
+                    <span className="text-[10px] text-sky-600/80 dark:text-sky-400">
+                      اتاق {studentRoom.roomNumber}
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-sky-800 dark:text-sky-200 shrink-0">
+                    {studentRoom.cleanlinessScore ?? 100}{' '}
+                    <span className="text-xs font-bold text-sky-600/80">از ۱۰۰</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {myEvaluations.length === 0 ? (
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 text-center text-xs text-slate-500">
                 تاکنون هیچ تذکر، اخطار یا نمره ارزیابی جدیدی در کارتابل شما ثبت نشده است و وضعیت انضباطی شما مطلوب می‌باشد.
               </div>
             ) : (
               <div className="space-y-2.5">
-                {myEvaluations.map((ev) => (
+                {myEvaluations.map((ev) => {
+                  const summonsTargetLabel =
+                    ev.summonsTarget === 'disciplinary_council'
+                      ? 'شورای انضباطی'
+                      : ev.summonsTarget === 'security'
+                      ? 'حراست دانشگاه'
+                      : 'سرپرستی سرا';
+                  const scoreCategoryLabel =
+                    ev.scoreCategory === 'discipline'
+                      ? 'انضباط و مقررات سکونت و رفت و آمد'
+                      : ev.scoreCategory === 'cleanliness'
+                      ? 'نظافت فردی و اجتماعی'
+                      : null;
+                  return (
                   <div
                     key={ev.id}
                     className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
@@ -625,6 +674,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                         ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
                         : ev.type === 'report'
                         ? 'bg-blue-50/60 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50'
+                        : ev.type === 'summons'
+                        ? 'bg-purple-50/70 dark:bg-purple-950/25 border-purple-200 dark:border-purple-900/50'
+                        : ev.type === 'negative_score'
+                        ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50'
                         : ev.type === 'warning'
                         ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50'
                         : 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50'
@@ -638,6 +691,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                               ? 'bg-emerald-600 text-white'
                               : ev.type === 'report'
                               ? 'bg-blue-600 text-white'
+                              : ev.type === 'summons'
+                              ? 'bg-purple-700 text-white'
+                              : ev.type === 'negative_score'
+                              ? 'bg-rose-700 text-white'
                               : ev.type === 'warning'
                               ? 'bg-rose-600 text-white'
                               : 'bg-amber-500 text-white'
@@ -653,6 +710,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                               ? `نمره ارزیابی: ${ev.score ?? '-'} از ۱۰۰`
                               : ev.type === 'report'
                               ? 'گزارش ثبت‌شده'
+                              : ev.type === 'summons'
+                              ? `فراخوانی به ${summonsTargetLabel}`
+                              : ev.type === 'negative_score'
+                              ? `نمره منفی (${ev.negativePoints ?? 0}- امتیاز)`
                               : ev.type === 'warning'
                               ? 'اخطار رسمی'
                               : 'تذکر'}
@@ -661,7 +722,17 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                         <span className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300">
                           {ev.scope === 'room' ? 'مربوط به اتاق' : 'ارزیابی فردی'}
                         </span>
-                        {(ev.type === 'notice' || ev.type === 'warning') && (
+                        {scoreCategoryLabel && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-rose-100/80 dark:bg-rose-900/40 text-rose-800 dark:text-rose-200 font-bold">
+                            {scoreCategoryLabel}
+                          </span>
+                        )}
+                        {ev.type === 'summons' && ev.summonsSchedule && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200 font-bold">
+                            زمان مراجعه: {ev.summonsSchedule}
+                          </span>
+                        )}
+                        {(ev.type === 'notice' || ev.type === 'warning' || ev.type === 'summons') && (
                           <span
                             className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
                               ev.resolved
@@ -680,7 +751,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
