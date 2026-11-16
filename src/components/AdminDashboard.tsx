@@ -31,6 +31,10 @@ import {
   CulturalStaff,
   StudentAffairsStaff,
   AcademicStatusNotice,
+  SecurityStaff,
+  AboutCapabilityItem,
+  AboutAttachmentFile,
+  AboutContentSettings,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { ExcelImportTab } from './ExcelImportModal';
@@ -59,6 +63,7 @@ import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
 import { AdminUsersPanel, UserCategoryKey } from './AdminUsersPanel';
 import { AdminSurveyManager } from './AdminSurveyManager';
+import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
 import { STANDARD_FONTS, readMultipleFontFiles } from '../utils/fonts';
 import {
@@ -67,6 +72,11 @@ import {
   HERO_PRESET_COLORS,
   resolveHeroBannerStyle,
 } from '../utils/homeDefaults';
+import {
+  DEFAULT_ABOUT_CONTENT,
+  resolveAboutContent,
+  ResolvedAboutContent,
+} from '../utils/aboutDefaults';
 import {
   Settings,
   Calendar,
@@ -132,6 +142,7 @@ import {
   AlertCircle,
   FileWarning,
   ClipboardList,
+  Paperclip,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -163,9 +174,11 @@ interface AdminDashboardProps {
       | 'education'
       | 'cultural'
       | 'student_affairs'
+      | 'security'
       | 'student'
   ) => void;
   cloudSyncTick?: number;
+  focusAboutEditorTick?: number;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -187,6 +200,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onUpdateSettings,
   onOpenUserGuide,
   cloudSyncTick = 0,
+  focusAboutEditorTick = 0,
 }) => {
   // تب‌های اصلی داشبورد مدیر
   const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'warehouse' | 'shifts' | 'counseling' | 'surveys' | 'activity_log' | 'settings'>('cartable');
@@ -252,6 +266,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [educationStaffList, setEducationStaffList] = useState<EducationStaff[]>(Storage.getEducationStaff());
   const [culturalStaffList, setCulturalStaffList] = useState<CulturalStaff[]>(Storage.getCulturalStaff());
   const [studentAffairsStaffList, setStudentAffairsStaffList] = useState<StudentAffairsStaff[]>(Storage.getStudentAffairsStaff());
+  const [securityStaffList, setSecurityStaffList] = useState<SecurityStaff[]>(Storage.getSecurityStaff());
+  const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
   const [academicNotices, setAcademicNotices] = useState<AcademicStatusNotice[]>(Storage.getAcademicNotices());
   const [academicNoticeFilter, setAcademicNoticeFilter] = useState<'all' | 'pending' | 'reviewed' | 'action_taken'>('all');
   const [academicNoticeNotes, setAcademicNoticeNotes] = useState<Record<string, string>>({});
@@ -264,6 +280,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEducationStaffList(Storage.getEducationStaff());
     setCulturalStaffList(Storage.getCulturalStaff());
     setStudentAffairsStaffList(Storage.getStudentAffairsStaff());
+    setSecurityStaffList(Storage.getSecurityStaff());
     setAcademicNotices(Storage.getAcademicNotices());
     onRefreshData();
   };
@@ -284,6 +301,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEducationStaffList(Storage.getEducationStaff());
     setCulturalStaffList(Storage.getCulturalStaff());
     setStudentAffairsStaffList(Storage.getStudentAffairsStaff());
+    setSecurityStaffList(Storage.getSecurityStaff());
     setAcademicNotices(Storage.getAcademicNotices());
   }, [cloudSyncTick]);
 
@@ -489,6 +507,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
     setHomeNotesEditorKey((k) => k + 1);
   }, [settings.homeNotesTitle, settings.homeNotes]);
+
+  // وضعیت ویرایش بخش «درباره ما» و فایل‌های پیوست توسط مدیر کل
+  const [draftAbout, setDraftAbout] = useState<ResolvedAboutContent>(() =>
+    resolveAboutContent(settings.aboutContent)
+  );
+  const [aboutEditorResetKey, setAboutEditorResetKey] = useState(0);
+  const [aboutFeedback, setAboutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const lastSyncedAboutJsonRef = useRef<string>(JSON.stringify(settings.aboutContent || null));
+
+  useEffect(() => {
+    const incomingJson = JSON.stringify(settings.aboutContent || null);
+    if (incomingJson === lastSyncedAboutJsonRef.current) return;
+    lastSyncedAboutJsonRef.current = incomingJson;
+    setDraftAbout(resolveAboutContent(settings.aboutContent));
+    setAboutEditorResetKey((k) => k + 1);
+  }, [settings.aboutContent]);
+
+  useEffect(() => {
+    if (!focusAboutEditorTick) return;
+    setMainTab('settings');
+    window.setTimeout(() => {
+      const el = document.getElementById('admin-about-editor');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 150);
+  }, [focusAboutEditorTick]);
 
   // مدیریت دانشجویان توسط مدیر: افزودن، ویرایش و مشاهده کارت
   const [isAddStudentModalOpen, setIsAddStudentModalOpen] = useState(false);
@@ -1763,6 +1808,210 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => setHomeNotesFeedback(null), 3500);
   };
 
+  // توابع مدیریت و ویرایش بخش «درباره ما» و فایل‌های پیوست
+  const handleUpdateDraftAbout = (patch: Partial<ResolvedAboutContent>) => {
+    setDraftAbout((prev) => ({ ...prev, ...patch }));
+  };
+
+  const handleUpdateAboutCapability = (id: string, patch: Partial<AboutCapabilityItem>) => {
+    setDraftAbout((prev) => ({
+      ...prev,
+      capabilities: prev.capabilities.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+    }));
+  };
+
+  const handleAddAboutCapability = () => {
+    setDraftAbout((prev) => ({
+      ...prev,
+      capabilities: [
+        ...prev.capabilities,
+        {
+          id: `cap_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          text: 'امکان جدید سامانه...',
+          highlight: false,
+        },
+      ],
+    }));
+  };
+
+  const handleDeleteAboutCapability = (id: string) => {
+    setDraftAbout((prev) => {
+      if (prev.capabilities.length <= 1) {
+        setAboutFeedback({
+          type: 'error',
+          message: 'حداقل یک مورد در فهرست امکانات بخش درباره ما باید باقی بماند.',
+        });
+        setTimeout(() => setAboutFeedback(null), 3500);
+        return prev;
+      }
+      return {
+        ...prev,
+        capabilities: prev.capabilities.filter((c) => c.id !== id),
+      };
+    });
+  };
+
+  const handleUploadAboutAttachment = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const MAX_BYTES = 3.5 * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      setAboutFeedback({
+        type: 'error',
+        message: 'حجم فایل انتخاب‌شده بیش از حد مجاز (۳.۵ مگابایت) است.',
+      });
+      setTimeout(() => setAboutFeedback(null), 4000);
+      return;
+    }
+
+    try {
+      let dataUrl = '';
+      if (file.type.startsWith('image/')) {
+        dataUrl = await compressAvatarImageFile(file, 1400, 0.85);
+      } else {
+        dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error('خطا در خواندن فایل انتخاب‌شده'));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      const newAtt: AboutAttachmentFile = {
+        id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        title: file.name.replace(/\.[^.]+$/, '') || 'فایل پیوست جدید',
+        description: '',
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+        dataUrl,
+        uploadedAt: new Date().toLocaleDateString('fa-IR'),
+      };
+
+      setDraftAbout((prev) => ({
+        ...prev,
+        attachments: [...prev.attachments, newAtt],
+      }));
+      setAboutFeedback({
+        type: 'success',
+        message: `فایل «${file.name}» با موفقیت پیوست شد. برای انتشار نهایی دکمه «ذخیره تغییرات بخش درباره ما» را بزنید.`,
+      });
+      setTimeout(() => setAboutFeedback(null), 4000);
+    } catch (err) {
+      setAboutFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'خطا در پیوست کردن فایل.',
+      });
+      setTimeout(() => setAboutFeedback(null), 4000);
+    }
+  };
+
+  const handleUpdateAboutAttachment = (id: string, patch: Partial<AboutAttachmentFile>) => {
+    setDraftAbout((prev) => ({
+      ...prev,
+      attachments: prev.attachments.map((att) => (att.id === id ? { ...att, ...patch } : att)),
+    }));
+  };
+
+  const handleDeleteAboutAttachment = (id: string) => {
+    setDraftAbout((prev) => ({
+      ...prev,
+      attachments: prev.attachments.filter((att) => att.id !== id),
+    }));
+  };
+
+  const handleSaveAboutContent = () => {
+    const cleanedCapabilities: AboutCapabilityItem[] = draftAbout.capabilities
+      .map((c) => ({ ...c, text: c.text.trim() }))
+      .filter((c) => Boolean(c.text));
+
+    if (cleanedCapabilities.length === 0) {
+      setAboutFeedback({
+        type: 'error',
+        message: 'حداقل یک مورد معتبر در فهرست قابلیت‌ها باید ثبت شده باشد.',
+      });
+      setTimeout(() => setAboutFeedback(null), 3500);
+      return;
+    }
+
+    const savedAbout: AboutContentSettings = {
+      universityBadge: draftAbout.universityBadge.trim() || DEFAULT_ABOUT_CONTENT.universityBadge,
+      headerTitle: draftAbout.headerTitle.trim() || DEFAULT_ABOUT_CONTENT.headerTitle,
+      headerSubtitle: draftAbout.headerSubtitle.trim() || DEFAULT_ABOUT_CONTENT.headerSubtitle,
+      designerBadge: draftAbout.designerBadge.trim() || DEFAULT_ABOUT_CONTENT.designerBadge,
+      designerName: draftAbout.designerName.trim() || DEFAULT_ABOUT_CONTENT.designerName,
+      designerEmail: draftAbout.designerEmail.trim() || DEFAULT_ABOUT_CONTENT.designerEmail,
+      designerBio: draftAbout.designerBio.trim() || DEFAULT_ABOUT_CONTENT.designerBio,
+      designerBioHtml: draftAbout.designerBioHtml
+        ? sanitizeRichHtml(draftAbout.designerBioHtml)
+        : DEFAULT_ABOUT_CONTENT.designerBioHtml,
+      pdfCardTitle: draftAbout.pdfCardTitle.trim() || DEFAULT_ABOUT_CONTENT.pdfCardTitle,
+      pdfCardDescription:
+        draftAbout.pdfCardDescription.trim() || DEFAULT_ABOUT_CONTENT.pdfCardDescription,
+      boardingSectionTitle:
+        draftAbout.boardingSectionTitle.trim() || DEFAULT_ABOUT_CONTENT.boardingSectionTitle,
+      boardingSectionHtml: draftAbout.boardingSectionHtml
+        ? sanitizeRichHtml(draftAbout.boardingSectionHtml)
+        : DEFAULT_ABOUT_CONTENT.boardingSectionHtml,
+      boardingSectionText:
+        draftAbout.boardingSectionText.trim() || DEFAULT_ABOUT_CONTENT.boardingSectionText,
+      capabilitiesSectionTitle:
+        draftAbout.capabilitiesSectionTitle.trim() || DEFAULT_ABOUT_CONTENT.capabilitiesSectionTitle,
+      capabilities: cleanedCapabilities,
+      extraSectionTitle:
+        draftAbout.extraSectionTitle.trim() || DEFAULT_ABOUT_CONTENT.extraSectionTitle,
+      extraSectionHtml: draftAbout.extraSectionHtml
+        ? sanitizeRichHtml(draftAbout.extraSectionHtml)
+        : '',
+      extraSectionText: draftAbout.extraSectionText.trim(),
+      attachmentsTitle: draftAbout.attachmentsTitle.trim() || DEFAULT_ABOUT_CONTENT.attachmentsTitle,
+      attachments: draftAbout.attachments,
+      footerNote: draftAbout.footerNote.trim() || DEFAULT_ABOUT_CONTENT.footerNote,
+      updatedAt: new Date().toLocaleDateString('fa-IR'),
+    };
+
+    const updated: AppSettings = {
+      ...localSettings,
+      aboutContent: savedAbout,
+    };
+    lastSyncedAboutJsonRef.current = JSON.stringify(savedAbout);
+    setLocalSettings(updated);
+    Storage.setSettings(updated);
+    Storage.addActivityLog({
+      category: 'settings',
+      action: 'ویرایش محتوا و فایل‌های بخش درباره ما',
+      details: `${savedAbout.capabilities?.length || 0} قابلیت و ${savedAbout.attachments?.length || 0} فایل پیوست ذخیره شد.`,
+      targetName: 'بخش درباره ما',
+    });
+    setActivityLogs(Storage.getActivityLogs());
+    onUpdateSettings(updated);
+    setAboutFeedback({
+      type: 'success',
+      message: 'محتوا، توضیحات و فایل‌های بخش «درباره ما» با موفقیت ذخیره و در سامانه اعمال شد.',
+    });
+    setTimeout(() => setAboutFeedback(null), 4000);
+  };
+
+  const handleResetAboutContent = () => {
+    const updated: AppSettings = {
+      ...localSettings,
+      aboutContent: undefined,
+    };
+    lastSyncedAboutJsonRef.current = JSON.stringify(null);
+    setDraftAbout(DEFAULT_ABOUT_CONTENT);
+    setAboutEditorResetKey((k) => k + 1);
+    setLocalSettings(updated);
+    Storage.setSettings(updated);
+    onUpdateSettings(updated);
+    setAboutFeedback({
+      type: 'success',
+      message: 'محتوای بخش «درباره ما» به نسخه استاندارد ۱۲ نقشه پیش‌فرض بازگردانی شد.',
+    });
+    setTimeout(() => setAboutFeedback(null), 3500);
+  };
+
   const handleBackupExport = () => {
     Storage.exportBackupJson();
   };
@@ -1991,6 +2240,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <span>گزارش‌ها و خروجی اکسل</span>
             </button>
 
+            <button
+              onClick={() => setIsSendSecurityModalOpen(true)}
+              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-rose-600/20 cursor-pointer"
+              title="ثبت گزارش حفاظتی/انضباطی برای یک یا چند دانشجو و ارسال مستقیم به حراست"
+            >
+              <ShieldAlert className="w-4 h-4" />
+              <span>ارسال گزارش به حراست</span>
+            </button>
+
             {onOpenUserGuide && (
               <button
                 onClick={() => onOpenUserGuide('admin')}
@@ -2052,7 +2310,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <Users className="w-4 h-4 text-teal-600" />
           <span>مدیریت کاربران سامانه</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
-            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length + educationStaffList.length + culturalStaffList.length + studentAffairsStaffList.length}
+            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length + educationStaffList.length + culturalStaffList.length + studentAffairsStaffList.length + securityStaffList.length}
           </span>
         </button>
 
@@ -2226,6 +2484,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           educationStaff={educationStaffList}
           culturalStaff={culturalStaffList}
           studentAffairsStaff={studentAffairsStaffList}
+          securityStaff={securityStaffList}
           onRefreshData={handleUsersRefresh}
           onOpenExcelModal={onOpenExcelModal}
           onOpenReports={onOpenReports}
@@ -7057,6 +7316,397 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
+          {/* بخش ویرایش کامل محتوا، کارت‌ها و فایل‌های پیوست بخش «درباره ما» */}
+          <div
+            id="admin-about-editor"
+            className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-indigo-600" />
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    ویرایش کامل محتوا و فایل‌های بخش «درباره ما»
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    مدیر کل می‌تواند تمام متن‌ها، معرفی طراح، فلسفه شبانه‌روزی، فهرست قابلیت‌ها، بخش تکمیلی و فایل‌های پیوست PDF/تصویر/آیین‌نامه در پنجره «درباره ما» را ویرایش و مدیریت کند.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleResetAboutContent}
+                className="px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>بازگردانی پیش‌فرض (۱۲ نقشه)</span>
+              </button>
+            </div>
+
+            {aboutFeedback && (
+              <div
+                className={`p-3 rounded-2xl text-xs font-bold flex items-center gap-2 border ${
+                  aboutFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
+                }`}
+              >
+                {aboutFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{aboutFeedback.message}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  عنوان/نشان دانشگاه در سربرگ:
+                </label>
+                <input
+                  type="text"
+                  value={draftAbout.universityBadge}
+                  onChange={(e) => handleUpdateDraftAbout({ universityBadge: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  تیتر اصلی پنجره «درباره ما»:
+                </label>
+                <input
+                  type="text"
+                  value={draftAbout.headerTitle}
+                  onChange={(e) => handleUpdateDraftAbout({ headerTitle: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  زیرتیتر توصیفی سربرگ:
+                </label>
+                <input
+                  type="text"
+                  value={draftAbout.headerSubtitle}
+                  onChange={(e) => handleUpdateDraftAbout({ headerSubtitle: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                />
+              </div>
+            </div>
+
+            {/* معرفی طراح و معمار */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-3">
+              <div className="text-xs font-extrabold text-teal-700 dark:text-teal-300">
+                اطلاعات طراح و پشتیبانی علمی/فنی
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    عنوان سمت:
+                  </label>
+                  <input
+                    type="text"
+                    value={draftAbout.designerBadge}
+                    onChange={(e) => handleUpdateDraftAbout({ designerBadge: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    نام کامل:
+                  </label>
+                  <input
+                    type="text"
+                    value={draftAbout.designerName}
+                    onChange={(e) => handleUpdateDraftAbout({ designerName: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    ایمیل رسمی تماس:
+                  </label>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={draftAbout.designerEmail}
+                    onChange={(e) => handleUpdateDraftAbout({ designerEmail: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono text-left"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  متن معرفی طراح و هدف طراحی سامانه:
+                </label>
+                <RichTextEditor
+                  valueHtml={draftAbout.designerBioHtml || plainTextToHtml(draftAbout.designerBio)}
+                  onChange={(html, plain) =>
+                    handleUpdateDraftAbout({ designerBioHtml: html, designerBio: plain })
+                  }
+                  customFonts={localSettings.customFonts}
+                  resetKey={`about_designer_${aboutEditorResetKey}`}
+                  minHeightClass="min-h-[85px]"
+                />
+              </div>
+            </div>
+
+            {/* باکس سند PDF */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4 rounded-2xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200/70 dark:border-indigo-900/40">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  عنوان کارت دانلود سند PDF سامانه:
+                </label>
+                <input
+                  type="text"
+                  value={draftAbout.pdfCardTitle}
+                  onChange={(e) => handleUpdateDraftAbout({ pdfCardTitle: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  توضیحات زیرعنوان کارت PDF:
+                </label>
+                <input
+                  type="text"
+                  value={draftAbout.pdfCardDescription}
+                  onChange={(e) => handleUpdateDraftAbout({ pdfCardDescription: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                />
+              </div>
+            </div>
+
+            {/* ماهیت شبانه‌روزی دانشگاه فرهنگیان */}
+            <div className="p-4 rounded-2xl bg-emerald-50/40 dark:bg-emerald-950/20 border border-emerald-200/70 dark:border-emerald-900/40 space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  عنوان بخش ماهیت شبانه‌روزی و رسالت تربیت معلم:
+                </label>
+                <input
+                  type="text"
+                  value={draftAbout.boardingSectionTitle}
+                  onChange={(e) => handleUpdateDraftAbout({ boardingSectionTitle: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  متن کامل بخش (با قابلیت ویرایش پیشرفته):
+                </label>
+                <RichTextEditor
+                  valueHtml={draftAbout.boardingSectionHtml}
+                  onChange={(html, plain) =>
+                    handleUpdateDraftAbout({
+                      boardingSectionHtml: html,
+                      boardingSectionText: plain,
+                    })
+                  }
+                  customFonts={localSettings.customFonts}
+                  resetKey={`about_boarding_${aboutEditorResetKey}`}
+                  minHeightClass="min-h-[120px]"
+                />
+              </div>
+            </div>
+
+            {/* فهرست قابلیت‌ها و نقش‌ها */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex-1 min-w-[220px]">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    عنوان بخش فهرست امکانات و ۱۲ نقش سامانه:
+                  </label>
+                  <input
+                    type="text"
+                    value={draftAbout.capabilitiesSectionTitle}
+                    onChange={(e) =>
+                      handleUpdateDraftAbout({ capabilitiesSectionTitle: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddAboutCapability}
+                  className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer mt-4"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>افزودن مورد جدید</span>
+                </button>
+              </div>
+
+              <div className="space-y-2.5">
+                {draftAbout.capabilities.map((cap, idx) => (
+                  <div
+                    key={cap.id}
+                    className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-extrabold text-teal-700 dark:text-teal-300">
+                        بند شماره {(idx + 1).toLocaleString('fa-IR')}
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700 dark:text-amber-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(cap.highlight)}
+                            onChange={(e) =>
+                              handleUpdateAboutCapability(cap.id, { highlight: e.target.checked })
+                            }
+                            className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                          />
+                          <span>نمایش ویژه (تمام‌عرض متمایز)</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAboutCapability(cap.id)}
+                          className="text-[11px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>حذف</span>
+                        </button>
+                      </div>
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={cap.text}
+                      onChange={(e) =>
+                        handleUpdateAboutCapability(cap.id, { text: e.target.value })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs leading-relaxed"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* بخش توضیحات تکمیلی دلخواه مدیر */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  عنوان بخش توضیحات تکمیلی / آیین‌نامه‌ها (در صورت خالی بودن متن نمایش داده نمی‌شود):
+                </label>
+                <input
+                  type="text"
+                  value={draftAbout.extraSectionTitle}
+                  onChange={(e) => handleUpdateDraftAbout({ extraSectionTitle: e.target.value })}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                />
+              </div>
+              <RichTextEditor
+                valueHtml={draftAbout.extraSectionHtml || ''}
+                onChange={(html, plain) =>
+                  handleUpdateDraftAbout({ extraSectionHtml: html, extraSectionText: plain })
+                }
+                customFonts={localSettings.customFonts}
+                resetKey={`about_extra_${aboutEditorResetKey}`}
+                minHeightClass="min-h-[90px]"
+                placeholder="در صورت نیاز متن، آیین‌نامه یا پیام تکمیلی مدیر را اینجا وارد نمایید..."
+              />
+            </div>
+
+            {/* مدیریت فایل‌های پیوست بخش درباره ما */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex-1 min-w-[220px]">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    عنوان بخش فایل‌ها و مستندات پیوست‌شده:
+                  </label>
+                  <input
+                    type="text"
+                    value={draftAbout.attachmentsTitle}
+                    onChange={(e) => handleUpdateDraftAbout({ attachmentsTitle: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                  />
+                </div>
+                <label className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm mt-4">
+                  <Paperclip className="w-4 h-4" />
+                  <span>افزودن فایل (PDF، تصویر، Word، Excel)</span>
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.webp"
+                    onChange={handleUploadAboutAttachment}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              {draftAbout.attachments.length === 0 ? (
+                <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-400">
+                  هنوز فایلی برای نمایش و دانلود در بخش «درباره ما» پیوست نشده است.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {draftAbout.attachments.map((att) => (
+                    <div
+                      key={att.id}
+                      className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center gap-3"
+                    >
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={att.title}
+                          onChange={(e) =>
+                            handleUpdateAboutAttachment(att.id, { title: e.target.value })
+                          }
+                          placeholder="عنوان نمایشی فایل..."
+                          className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                        />
+                        <input
+                          type="text"
+                          value={att.description || ''}
+                          onChange={(e) =>
+                            handleUpdateAboutAttachment(att.id, { description: e.target.value })
+                          }
+                          placeholder="توضیح کوتاه فایل (اختیاری)..."
+                          className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0 text-[11px] text-slate-500">
+                        <span className="max-w-[160px] truncate" dir="ltr">
+                          {att.fileName}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAboutAttachment(att.id)}
+                          className="px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-600 hover:bg-rose-100 font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>حذف</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                متن پاورقی (Footer) پنجره «درباره ما»:
+              </label>
+              <input
+                type="text"
+                value={draftAbout.footerNote}
+                onChange={(e) => handleUpdateDraftAbout({ footerNote: e.target.value })}
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+              />
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={handleSaveAboutContent}
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/20 transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                <span>ذخیره تغییرات بخش «درباره ما»</span>
+              </button>
+            </div>
+          </div>
+
           {/* بخش پشتیبان‌گیری و بازنشانی */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
             <h3 className="font-extrabold text-base text-slate-900 dark:text-white mb-2">
@@ -8391,6 +9041,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
       )}
+
+      <SendSecurityReportModal
+        isOpen={isSendSecurityModalOpen}
+        onClose={() => setIsSendSecurityModalOpen(false)}
+        reporterRole="admin"
+        reporterId="admin"
+        reporterName="مدیر کل امور سراها"
+        students={students}
+        dorms={dorms}
+        rooms={rooms}
+        onSuccess={() => {
+          onRefreshData();
+          setActivityLogs(Storage.getActivityLogs());
+        }}
+      />
 
     </div>
   );

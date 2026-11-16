@@ -57,7 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
     if (currentUser?.role === 'maintenance') {
       return (
-        (m.category === 'maintenance' || m.receiverType === 'all' || m.senderRole === 'maintenance') &&
+        (m.receiverType === 'maintenance' || m.category === 'maintenance' || m.receiverType === 'all' || m.senderRole === 'maintenance') &&
         m.status !== 'answered'
       );
     }
@@ -96,6 +96,16 @@ export const Navbar: React.FC<NavbarProps> = ({
         (m.receiverType === 'student_affairs' ||
           m.category === 'student_affairs' ||
           m.senderRole === 'student_affairs' ||
+          m.receiverType === 'all') &&
+        m.status !== 'answered'
+      );
+    }
+    if (currentUser?.role === 'security') {
+      return (
+        (!m.isConfidential || m.receiverType === 'security' || m.senderRole === 'security') &&
+        (m.receiverType === 'security' ||
+          m.category === 'security' ||
+          m.senderRole === 'security' ||
           m.receiverType === 'all') &&
         m.status !== 'answered'
       );
@@ -245,6 +255,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ? currentUser.staff.photoUrl
                       : currentUser.role === 'student_affairs'
                       ? currentUser.staff.photoUrl
+                      : currentUser.role === 'security'
+                      ? currentUser.staff.photoUrl
                       : currentUser.role === 'counselor'
                       ? currentUser.counselor.photoUrl
                       : undefined;
@@ -269,6 +281,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       {currentUser.role === 'education' && currentUser.staff.fullName}
                       {currentUser.role === 'cultural' && currentUser.staff.fullName}
                       {currentUser.role === 'student_affairs' && currentUser.staff.fullName}
+                      {currentUser.role === 'security' && currentUser.staff.fullName}
                       {currentUser.role === 'admin' && 'مدیر امور خوابگاه‌ها'}
                     </span>
                     {currentUser.role === 'counselor' && (
@@ -311,6 +324,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                         امور دانشجویی و تربیت بدنی
                       </span>
                     )}
+                    {currentUser.role === 'security' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-slate-800 text-amber-300 dark:bg-amber-950 dark:text-amber-300 font-bold">
+                        حراست و انتظامات
+                      </span>
+                    )}
                     {currentUser.role === 'student' && (
                       currentUser.student.isProfileCompleted ? (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
@@ -334,6 +352,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentUser.role === 'education' && (currentUser.staff.department || 'واحد امور آموزشی')}
                     {currentUser.role === 'cultural' && (currentUser.staff.department || 'واحد امور فرهنگی و اجتماعی سراها')}
                     {currentUser.role === 'student_affairs' && (currentUser.staff.department || 'اداره امور دانشجویی، تربیت بدنی و رفاهی')}
+                    {currentUser.role === 'security' && (currentUser.staff.department || 'واحد حراست و انتظامات')}
                     {currentUser.role === 'admin' && 'مدیر کل سامانه'}
                   </div>
                 </div>

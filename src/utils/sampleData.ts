@@ -41,6 +41,8 @@ import {
   DisciplinaryReferral,
   SportsProgram,
   SportsRegistration,
+  SecurityStaff,
+  SecurityReport,
 } from '../types';
 
 export const INITIAL_SETTINGS: AppSettings = {
@@ -183,3 +185,8 @@ export const INITIAL_SPORTS_PROGRAMS: SportsProgram[] = [];
 // ثبت‌نام و حضور و غیاب دانشجویان در برنامه‌های ورزشی (کاملاً خالی)
 export const INITIAL_SPORTS_REGISTRATIONS: SportsRegistration[] = [];
 
+// کارشناسان حراست و انتظامات (کاملاً خالی)
+export const INITIAL_SECURITY_STAFF: SecurityStaff[] = [];
+
+// گزارش‌های ارسالی به واحد حراست و انتظامات (کاملاً خالی)
+export const INITIAL_SECURITY_REPORTS: SecurityReport[] = [];

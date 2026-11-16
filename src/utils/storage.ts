@@ -54,6 +54,12 @@ import {
   SportsProgramStatus,
   SportsRegistration,
   SportsRegistrationStatus,
+  SecurityStaff,
+  SecurityReport,
+  SecurityReportCategory,
+  SecurityReportSeverity,
+  SecurityReportStatus,
+  SecurityReportStudentSnapshot,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -96,6 +102,8 @@ import {
   INITIAL_DISCIPLINARY_REFERRALS,
   INITIAL_SPORTS_PROGRAMS,
   INITIAL_SPORTS_REGISTRATIONS,
+  INITIAL_SECURITY_STAFF,
+  INITIAL_SECURITY_REPORTS,
   generateInitialRoomsAndBeds,
 } from './sampleData';
 
@@ -145,7 +153,72 @@ const STORAGE_KEYS = {
   DISCIPLINARY_REFERRALS: 'farhangian_dorm_disciplinary_referrals_prod',
   SPORTS_PROGRAMS: 'farhangian_dorm_sports_programs_prod',
   SPORTS_REGISTRATIONS: 'farhangian_dorm_sports_registrations_prod',
+  SECURITY_STAFF: 'farhangian_dorm_security_staff_prod',
+  SECURITY_REPORTS: 'farhangian_dorm_security_reports_prod',
 };
+
+export const SECURITY_REPORT_PRESETS: Array<{
+  category: SecurityReportCategory;
+  label: string;
+  defaultTitle: string;
+  defaultDescription: string;
+}> = [
+  {
+    category: 'disciplinary_incident',
+    label: 'وقوع تخلف یا حادثه انضباطی و امنیتی',
+    defaultTitle: 'گزارش حادثه / تخلف انضباطی جهت بررسی حراست',
+    defaultDescription:
+      'با احترام، به استحضار واحد محترم حراست و انتظامات می‌رساند مورد انضباطی/امنیتی مرتبط با دانشجو(یان) نامبرده در محدوده سرای دانشجویی مشاهده و ثبت گردیده است. خواهشمند است بررسی و پیگیری حفاظتی لازم معمول گردد.',
+  },
+  {
+    category: 'curfew_entry_exit',
+    label: 'تردد غیرمجاز و عدم رعایت ساعت ورود و خروج',
+    defaultTitle: 'گزارش تردد خارج از ضوابط و ساعت مقرر سرا',
+    defaultDescription:
+      'به اطلاع واحد حراست می‌رساند نامبرده(ها) ضوابط ورود و خروج و تردد شبانه سرای دانشجویی را رعایت ننموده‌اند. مراتب جهت ثبت در سوابق و پیگیری انتظامات ارسال می‌گردد.',
+  },
+  {
+    category: 'unauthorized_guest',
+    label: 'ورود یا اسکان افراد غیرمجاز و بدون مجوز',
+    defaultTitle: 'گزارش حضور یا اسکان مهمان غیرمجاز در سرا',
+    defaultDescription:
+      'در بررسی‌های انجام‌شده مشخص گردید بدون اخذ مجوز رسمی، فرد غیرساکن در محیط سرا حضور/اسکان یافته است. موضوع جهت بررسی حفاظتی به واحد حراست اعلام می‌گردد.',
+  },
+  {
+    category: 'property_damage_safety',
+    label: 'خسارت به اموال عمومی و تأسیسات یا مخاطره ایمنی',
+    defaultTitle: 'گزارش خسارت به اموال / تأسیسات و خطر ایمنی سرا',
+    defaultDescription:
+      'به استحضار می‌رساند آسیب یا دستکاری غیرمجاز در تجهیزات، تأسیسات، قفل‌ها یا اموال عمومی سرا مشاهده شده است که نیازمند بررسی کارشناسی و پیگیری حراست می‌باشد.',
+  },
+  {
+    category: 'conflict_harassment',
+    label: 'درگیری، تنش یا سلب آسایش و تهدید امنیت ساکنین',
+    defaultTitle: 'گزارش تنش، درگیری یا مزاحمت در سرای دانشجویی',
+    defaultDescription:
+      'به اطلاع می‌رساند در پی بروز تنش/مزاحمت میان ساکنین و اختلال در آرامش محیط سرا، موضوع جهت وساطت، پیگیری و اتخاذ تدابیر حفاظتی به حراست ارجاع می‌گردد.',
+  },
+  {
+    category: 'facility_security_hazard',
+    label: 'موارد حفاظتی، قفل و دوربین‌ها، وسایل خطرناک یا ایمنی',
+    defaultTitle: 'گزارش ایمنی و حفاظتی تجهیزات / وسایل پرخطر',
+    defaultDescription:
+      'گزارش وجود مخاطره ایمنی، استفاده از وسایل برقی/گرمایشی غیرمجاز یا نقص حفاظتی در اتاق/بخش مرتبط جهت اقدام عاجل حراست ارسال می‌شود.',
+  },
+  {
+    category: 'suspicious_activity',
+    label: 'موارد مشکوک، گم‌شدن اشیاء یا مسائل نیازمند حراست',
+    defaultTitle: 'گزارش مورد مشکوک / مفقودی وسایل در سرای دانشجویی',
+    defaultDescription:
+      'مورد مشکوک یا گزارش مفقودی/حفاظتی در سرای دانشجویی ثبت شده و جهت بررسی دقیق دوربین‌ها، مستندات و پیگیری به واحد حراست ارسال می‌گردد.',
+  },
+  {
+    category: 'other',
+    label: 'سایر گزارش‌های حفاظتی و انتظاماتی',
+    defaultTitle: 'گزارش تخصصی به واحد حراست و انتظامات',
+    defaultDescription: '',
+  },
+];
 
 export const DISCIPLINARY_VIOLATION_PRESETS: Array<{
   type: DisciplinaryViolationType;
@@ -298,6 +371,8 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.DISCIPLINARY_REFERRALS, INITIAL_DISCIPLINARY_REFERRALS);
   setIfMissing(STORAGE_KEYS.SPORTS_PROGRAMS, INITIAL_SPORTS_PROGRAMS);
   setIfMissing(STORAGE_KEYS.SPORTS_REGISTRATIONS, INITIAL_SPORTS_REGISTRATIONS);
+  setIfMissing(STORAGE_KEYS.SECURITY_STAFF, INITIAL_SECURITY_STAFF);
+  setIfMissing(STORAGE_KEYS.SECURITY_REPORTS, INITIAL_SECURITY_REPORTS);
 
   try {
     if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
@@ -1630,7 +1705,7 @@ export const Storage = {
 
   // تطبیق و اتصال دسته‌جمعی عکس‌های پرسنل و کادر بر اساس نام/کد کاربری
   batchAssignStaffPhotos: (
-    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs',
+    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security',
     photoMap: Record<string, string>
   ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     let matchedCount = 0;
@@ -1819,6 +1894,25 @@ export const Storage = {
           if (ref) Storage.setCurrentUser({ role: 'student_affairs', staff: ref });
         }
       }
+    } else if (role === 'security') {
+      const list = Storage.getSecurityStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setSecurityStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'security') {
+          const ref = list.find((sec) => sec.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'security', staff: ref });
+        }
+      }
     }
 
     if (matchedCount > 0 && saved) {
@@ -1832,6 +1926,7 @@ export const Storage = {
         education: 'کارشناسان آموزش',
         cultural: 'کارشناسان امور فرهنگی',
         student_affairs: 'کارشناسان امور دانشجویی و تربیت بدنی',
+        security: 'کارشناسان حراست و انتظامات',
       };
       Storage.addActivityLog({
         category: 'staff',
@@ -1913,7 +2008,7 @@ export const Storage = {
     messageId: string,
     reply: {
       senderName: string;
-      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs';
+      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security';
       content: string;
       date: string;
     }
@@ -2242,6 +2337,8 @@ export const Storage = {
       disciplinaryReferrals: Storage.getDisciplinaryReferrals(),
       sportsPrograms: Storage.getSportsPrograms(),
       sportsRegistrations: Storage.getSportsRegistrations(),
+      securityStaff: Storage.getSecurityStaff(),
+      securityReports: Storage.getSecurityReports(),
       exportedAt: new Date().toISOString(),
       appName: 'سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
     };
@@ -2320,6 +2417,8 @@ export const Storage = {
       if (Array.isArray(data.disciplinaryReferrals)) Storage.setDisciplinaryReferrals(data.disciplinaryReferrals);
       if (Array.isArray(data.sportsPrograms)) Storage.setSportsPrograms(data.sportsPrograms);
       if (Array.isArray(data.sportsRegistrations)) Storage.setSportsRegistrations(data.sportsRegistrations);
+      if (Array.isArray(data.securityStaff)) Storage.setSecurityStaff(data.securityStaff);
+      if (Array.isArray(data.securityReports)) Storage.setSecurityReports(data.securityReports);
 
       Storage.addActivityLog({
         category: 'backup',
@@ -2574,7 +2673,7 @@ export const Storage = {
 
   // تغییر کلمه عبور برای تمام نقش‌ها
   changePassword: (
-    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs',
+    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security',
     userId: string,
     currentPasswordInput: string,
     newPasswordInput: string
@@ -2788,6 +2887,26 @@ export const Storage = {
         targetName: staff.fullName,
       });
       return { success: true, message: 'کلمه عبور امور دانشجویی با موفقیت تغییر یافت.' };
+    }
+
+    if (role === 'security') {
+      const staffList = Storage.getSecurityStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) {
+        return { success: false, message: 'کاربر حراست یافت نشد.' };
+      }
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی حراست اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setSecurityStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور حراست',
+        details: `کلمه عبور کارشناس حراست ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور حراست با موفقیت تغییر یافت.' };
     }
 
     if (role === 'student') {
@@ -3094,7 +3213,7 @@ export const Storage = {
 
   // تغییر یا ریست مستقیم رمز عبور کاربران توسط مدیر کل (بدون نیاز به رمز قبلی)
   adminResetUserPassword: (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security',
     idOrStudentId: string,
     newPasswordInput: string
   ): { success: boolean; message: string } => {
@@ -3307,6 +3426,25 @@ export const Storage = {
       return {
         success: true,
         message: `رمز عبور امور دانشجویی «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'security') {
+      const list = Storage.getSecurityStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر حراست یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setSecurityStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز حراست توسط مدیر',
+        details: `کلمه عبور کارشناس حراست ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور حراست «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
       };
     }
 
@@ -5028,6 +5166,10 @@ export const Storage = {
       } else if (currentUser.role === 'student_affairs') {
         actorName = currentUser.staff.fullName;
         actorRole = 'student_affairs';
+        actorUsername = currentUser.staff.username;
+      } else if (currentUser.role === 'security') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'security';
         actorUsername = currentUser.staff.username;
       }
     }
@@ -7394,7 +7536,7 @@ export const Storage = {
   },
 
   uploadPhotosToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security',
     items: Array<{ userId: string; dataUrl: string }>
   ): Promise<{
     supported: boolean;
@@ -7479,7 +7621,7 @@ export const Storage = {
   },
 
   uploadSinglePhotoToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security',
     userId: string,
     dataUrl: string
   ): Promise<{ supported: boolean; ok: boolean; url: string; errorMessage?: string }> => {
@@ -7644,7 +7786,8 @@ export const Storage = {
         | 'finance'
         | 'education'
         | 'cultural'
-        | 'student_affairs';
+        | 'student_affairs'
+        | 'security';
       roleLabel: string;
       fullName: string;
       username: string;
@@ -7735,6 +7878,15 @@ export const Storage = {
         isInactive: sa.status === 'inactive' || sa.isActive === false,
         user: { role: 'student_affairs' as const, staff: sa },
       })),
+      ...Storage.getSecurityStaff().map((sec) => ({
+        role: 'security' as const,
+        roleLabel: 'حراست و انتظامات',
+        fullName: sec.fullName,
+        username: sec.username,
+        password: sec.password,
+        isInactive: sec.status === 'inactive' || sec.isActive === false,
+        user: { role: 'security' as const, staff: sec },
+      })),
     ];
 
     const matched = candidates.filter(
@@ -7802,7 +7954,253 @@ export const Storage = {
       message: 'نام کاربری یا کلمه عبور کارکنان نادرست است.',
     };
   },
+
+  // -------------------------------------------------------------
+  // متدهای مدیریت کاربران حراست و انتظامات و گزارش‌های ارسالی به حراست
+  // -------------------------------------------------------------
+  getSecurityStaff: (): SecurityStaff[] =>
+    get<SecurityStaff[]>(STORAGE_KEYS.SECURITY_STAFF, INITIAL_SECURITY_STAFF),
+
+  setSecurityStaff: (staff: SecurityStaff[]): boolean =>
+    set(STORAGE_KEYS.SECURITY_STAFF, staff),
+
+  addSecurityStaff: (
+    staffData: Omit<SecurityStaff, 'id'>
+  ): { success: boolean; message: string; staff?: SecurityStaff } => {
+    const list = Storage.getSecurityStaff();
+    const cleanUsername = normalizeAsciiDigits(staffData.username).toLowerCase();
+    if (!cleanUsername) {
+      return { success: false, message: 'نام کاربری کارشناس حراست نمی‌تواند خالی باشد.' };
+    }
+    if (list.some((s) => normalizeAsciiDigits(s.username).toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کاربر حراست دیگری ثبت شده است.' };
+    }
+    const newStaff: SecurityStaff = {
+      ...staffData,
+      id: makeUniqueId('sec'),
+      username: cleanUsername,
+      role: 'security',
+      department: staffData.department?.trim() || 'واحد حراست و انتظامات پردیس / سراها',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setSecurityStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کارشناس حراست و انتظامات',
+      details: `کارشناس حراست «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کارشناس حراست «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateSecurityStaff: (
+    id: string,
+    updates: Partial<SecurityStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getSecurityStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر حراست یافت نشد.' };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizeAsciiDigits(normalizedUpdates.username).toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((s) => s.id !== id && normalizeAsciiDigits(s.username).toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر حراست دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
+    Storage.setSecurityStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'security' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'security', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کارشناس حراست با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteSecurityStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getSecurityStaff();
+    const target = list.find((s) => s.id === id);
+    Storage.setSecurityStaff(list.filter((s) => s.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کارشناس حراست',
+        details: `حساب کاربری حراست «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کارشناس حراست با موفقیت حذف گردید.' };
+  },
+
+  getSecurityReports: (): SecurityReport[] =>
+    get<SecurityReport[]>(STORAGE_KEYS.SECURITY_REPORTS, INITIAL_SECURITY_REPORTS),
+
+  setSecurityReports: (items: SecurityReport[]): boolean =>
+    set(STORAGE_KEYS.SECURITY_REPORTS, items),
+
+  createSecurityReport: (payload: {
+    students: Student[];
+    title: string;
+    category: SecurityReportCategory;
+    categoryLabel?: string;
+    severity: SecurityReportSeverity;
+    dormId?: string;
+    dormName?: string;
+    roomNumber?: string;
+    locationDetails?: string;
+    incidentDate?: string;
+    description: string;
+    reportedById: string;
+    reportedByName: string;
+    reportedByRole: 'supervisor' | 'admin' | 'maintenance' | 'student_affairs';
+  }): { success: boolean; message: string; report?: SecurityReport } => {
+    if (!payload.students || payload.students.length === 0) {
+      return { success: false, message: 'لطفاً حداقل یک دانشجو برای ارسال گزارش به حراست انتخاب نمایید.' };
+    }
+    if (!payload.title.trim() || !payload.description.trim()) {
+      return { success: false, message: 'عنوان و شرح کامل گزارش به حراست الزامی است.' };
+    }
+
+    const list = Storage.getSecurityReports();
+    const dorms = Storage.getDormitories();
+    const rooms = Storage.getRooms();
+    const dormMap = new Map(dorms.map((d) => [d.id, d.name]));
+    const roomMap = new Map(rooms.map((r) => [r.id, r.roomNumber]));
+    const preset = SECURITY_REPORT_PRESETS.find((p) => p.category === payload.category);
+    const resolvedCategoryLabel = payload.categoryLabel?.trim() || preset?.label || 'گزارش حفاظتی';
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const snapshots: SecurityReportStudentSnapshot[] = payload.students.map((st) => ({
+      studentId: st.studentId,
+      fullName: st.fullName,
+      nationalId: st.nationalId,
+      mobile: st.mobile,
+      fieldOfStudy: st.fieldOfStudy,
+      entryTerm: st.entryTerm,
+      dormName: (st.assignedDormId ? dormMap.get(st.assignedDormId) : undefined) || st.assignedDormName || 'فاقد سرا',
+      roomNumber: (st.assignedRoomId ? roomMap.get(st.assignedRoomId) : undefined) || st.assignedRoomNumber || '-',
+    }));
+
+    const firstSnap = snapshots[0];
+    const resolvedDormName =
+      payload.dormName?.trim() ||
+      (payload.dormId ? dormMap.get(payload.dormId) : undefined) ||
+      (firstSnap?.dormName && firstSnap.dormName !== 'فاقد سرا' ? firstSnap.dormName : 'سراهای دانشجویی');
+
+    const newReport: SecurityReport = {
+      id: makeUniqueId('secrep'),
+      reportCode: `SEC-${101 + list.length}`,
+      title: payload.title.trim(),
+      category: payload.category,
+      categoryLabel: resolvedCategoryLabel,
+      severity: payload.severity,
+      dormId: payload.dormId || payload.students[0]?.assignedDormId,
+      dormName: resolvedDormName,
+      roomNumber: payload.roomNumber?.trim() || (firstSnap?.roomNumber !== '-' ? firstSnap?.roomNumber : undefined),
+      locationDetails: payload.locationDetails?.trim() || undefined,
+      incidentDate: payload.incidentDate?.trim() || new Date().toLocaleDateString('fa-IR'),
+      description: payload.description.trim(),
+      studentIds: snapshots.map((s) => s.studentId),
+      studentsSnapshot: snapshots,
+      reportedById: payload.reportedById,
+      reportedByName: payload.reportedByName,
+      reportedByRole: payload.reportedByRole,
+      reportedAt: nowStr,
+      status: 'pending',
+    };
+
+    list.unshift(newReport);
+    Storage.setSecurityReports(list);
+
+    const roleFa: Record<'supervisor' | 'admin' | 'maintenance' | 'student_affairs', string> = {
+      supervisor: 'سرپرست سرا',
+      admin: 'مدیر کل سامانه',
+      maintenance: 'واحد تأسیسات',
+      student_affairs: 'امور دانشجویی',
+    };
+
+    Storage.addActivityLog({
+      category: 'security',
+      action: 'ارسال گزارش جدید به واحد حراست و انتظامات',
+      details: `گزارش «${newReport.title}» (${newReport.reportCode}) برای ${snapshots.length} دانشجو (${snapshots.map((s) => s.fullName).slice(0, 4).join('، ')}${snapshots.length > 4 ? ' و...' : ''}) توسط ${payload.reportedByName} (${roleFa[payload.reportedByRole]}) به حراست ارسال شد.`,
+      targetName: newReport.reportCode,
+      severity: payload.severity === 'urgent' ? 'critical' : 'warning',
+      actorName: payload.reportedByName,
+      actorRole: payload.reportedByRole,
+    });
+
+    return {
+      success: true,
+      message: `گزارش با کد رهگیری «${newReport.reportCode}» برای ${snapshots.length} دانشجو با موفقیت به واحد حراست ارسال گردید.`,
+      report: newReport,
+    };
+  },
+
+  updateSecurityReport: (
+    id: string,
+    updates: {
+      status?: SecurityReportStatus;
+      securityNotes?: string;
+      actionTaken?: string;
+      reviewedBy?: string;
+    }
+  ): { success: boolean; message: string } => {
+    const list = Storage.getSecurityReports();
+    const idx = list.findIndex((r) => r.id === id);
+    if (idx === -1) return { success: false, message: 'گزارش مورد نظر یافت نشد.' };
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    list[idx] = {
+      ...list[idx],
+      ...updates,
+      reviewedAt: updates.reviewedBy ? nowStr : list[idx].reviewedAt,
+      updatedAt: nowStr,
+    };
+    Storage.setSecurityReports(list);
+
+    Storage.addActivityLog({
+      category: 'security',
+      action: 'بروزرسانی و بررسی گزارش حراست',
+      details: `وضعیت گزارش ${list[idx].reportCode} توسط ${updates.reviewedBy || 'واحد حراست'} به «${list[idx].status}» تغییر یافت.`,
+      targetName: list[idx].reportCode,
+    });
+
+    return { success: true, message: `گزارش ${list[idx].reportCode} با موفقیت بروزرسانی شد.` };
+  },
+
+  deleteSecurityReport: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getSecurityReports();
+    const target = list.find((r) => r.id === id);
+    Storage.setSecurityReports(list.filter((r) => r.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'security',
+        action: 'حذف گزارش حراست',
+        details: `گزارش حراست ${target.reportCode} («${target.title}») حذف گردید.`,
+        targetName: target.reportCode,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'گزارش حراست با موفقیت حذف شد.' };
+  },
 };
+
 
 
 

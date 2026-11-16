@@ -41,6 +41,7 @@ import { FinanceDashboard } from './components/FinanceDashboard';
 import { EducationDashboard } from './components/EducationDashboard';
 import { CulturalDashboard } from './components/CulturalDashboard';
 import { StudentAffairsDashboard } from './components/StudentAffairsDashboard';
+import { SecurityDashboard } from './components/SecurityDashboard';
 import { AboutModal } from './components/AboutModal';
 import { UserGuideModal } from './components/UserGuideModal';
 import { AiDormAssistant } from './components/AiDormAssistant';
@@ -164,6 +165,11 @@ export default function App() {
       if (refreshedSa) {
         setCurrentUser({ role: 'student_affairs', staff: refreshedSa });
       }
+    } else if (user && user.role === 'security') {
+      const refreshedSec = Storage.getSecurityStaff().find((sec) => sec.id === user.staff.id);
+      if (refreshedSec) {
+        setCurrentUser({ role: 'security', staff: refreshedSec });
+      }
     } else if (user && user.role === 'counselor') {
       const refreshedCns = Storage.getCounselors().find((c) => c.id === user.counselor.id);
       if (refreshedCns) {
@@ -253,6 +259,7 @@ export default function App() {
   const [isMessagesModalOpen, setIsMessagesModalOpen] = useState(false);
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+  const [focusAboutEditorTick, setFocusAboutEditorTick] = useState(0);
   const [isUserGuideOpen, setIsUserGuideOpen] = useState(false);
   const [userGuideInitialRole, setUserGuideInitialRole] = useState<UserRoleType>('student');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -656,6 +663,7 @@ export default function App() {
             }}
             onOpenUserGuide={(r) => handleOpenUserGuide(r || 'admin')}
             cloudSyncTick={cloudSyncTick}
+            focusAboutEditorTick={focusAboutEditorTick}
           />
         )}
 
@@ -665,6 +673,7 @@ export default function App() {
             technician={currentUser.technician}
             dorms={dorms}
             rooms={rooms}
+            students={students}
             tasks={maintenanceTasks}
             onRefreshData={refreshAllData}
             onOpenMessages={() => setIsMessagesModalOpen(true)}
@@ -767,6 +776,31 @@ export default function App() {
           />
         )}
 
+        {/* ۱۲. در صورتی که کاربر حراست و انتظامات است */}
+        {currentUser?.role === 'security' && (
+          <SecurityDashboard
+            securityStaff={currentUser.staff}
+            students={students}
+            dorms={dorms}
+            rooms={rooms}
+            beds={beds}
+            messagesCount={
+              messages.filter(
+                (m) =>
+                  m.status === 'pending' &&
+                  (m.receiverType === 'security' ||
+                    m.category === 'security' ||
+                    (m.senderRole !== 'security' &&
+                      (m.receiverType === 'all' ||
+                        (!m.isConfidential && m.category === 'discipline'))))
+              ).length
+            }
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onRefreshData={refreshAllData}
+            onOpenUserGuide={(r) => handleOpenUserGuide(r || 'security')}
+          />
+        )}
+
       </main>
 
       {/* فوتر سایت */}
@@ -820,6 +854,12 @@ export default function App() {
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
         customLogoUrl={settings.customLogoUrl}
+        settings={settings}
+        isAdmin={currentUser?.role === 'admin'}
+        onOpenAdminEdit={() => {
+          setIsAboutModalOpen(false);
+          setFocusAboutEditorTick((t) => t + 1);
+        }}
       />
 
       <UserGuideModal

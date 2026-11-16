@@ -32,6 +32,7 @@ import {
   HeartHandshake,
   ShoppingBag,
   Award,
+  ShieldAlert,
 } from 'lucide-react';
 import {
   ROLE_GUIDES,
@@ -101,6 +102,8 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         return <Sparkles className="w-5 h-5 text-fuchsia-600 dark:text-fuchsia-400" />;
       case 'student_affairs':
         return <Award className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />;
+      case 'security':
+        return <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400" />;
       case 'student':
         return <GraduationCap className="w-5 h-5 text-blue-600 dark:text-blue-400" />;
     }
@@ -164,6 +167,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                 { id: 'supervisor', label: 'سرپرست سرا', role: 'supervisor' as UserRoleType },
                 { id: 'cultural', label: 'امور فرهنگی', role: 'cultural' as UserRoleType },
                 { id: 'student_affairs', label: 'امور دانشجویی', role: 'student_affairs' as UserRoleType },
+                { id: 'security', label: 'حراست و انتظامات', role: 'security' as UserRoleType },
                 { id: 'counselor', label: 'مشاور و روانشناس', role: 'counselor' as UserRoleType },
                 { id: 'education', label: 'کارشناس آموزش', role: 'education' as UserRoleType },
                 { id: 'maintenance', label: 'تأسیسات و فنی', role: 'maintenance' as UserRoleType },

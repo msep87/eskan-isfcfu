@@ -103,6 +103,7 @@ export type MessageCategory =
   | 'education' // امور آموزشی، مرخصی تحصیلی، انتخاب واحد و مسائل دانشجویی
   | 'cultural' // امور فرهنگی، فوق‌برنامه، تشکل‌ها و انجمن‌های دانشجویی
   | 'student_affairs' // امور دانشجویی، تربیت بدنی، شورای صنفی و شورای انضباطی
+  | 'security' // امور حراست، انتظامات و گزارش‌های حفاظتی
   | 'accommodation' // امور اسکان و انتخاب اتاق
   | 'maintenance' // خرابی تأسیسات و تعمیرات
   | 'services_cleaning' // خدمات، نظافت و بهداشت سرا
@@ -117,7 +118,7 @@ export type MessageCategory =
 export interface MessageReply {
   id: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security';
   content: string;
   date: string;
 }
@@ -126,8 +127,8 @@ export interface Message {
   id: string;
   senderId: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs';
-  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'all';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security';
+  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'all';
   receiverId?: string;
   receiverName?: string;
   targetScope?: 'single' | 'field' | 'entry_term';
@@ -259,6 +260,74 @@ export interface StudentAffairsStaff {
   status: 'active' | 'inactive';
   isActive?: boolean;
   notes?: string;
+}
+
+export interface SecurityStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل کارشناس حراست و انتظامات
+  department?: string; // واحد حراست و انتظامات پردیس / سراها
+  badgeCode?: string; // کد سازمانی / گشت حفاظتی
+  coveredDormIds?: string[]; // سراهای تحت پوشش (خالی = همه سراها)
+  role: 'security';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
+export type SecurityReportCategory =
+  | 'disciplinary_incident'
+  | 'curfew_entry_exit'
+  | 'unauthorized_guest'
+  | 'property_damage_safety'
+  | 'conflict_harassment'
+  | 'facility_security_hazard'
+  | 'suspicious_activity'
+  | 'other';
+
+export type SecurityReportSeverity = 'normal' | 'important' | 'urgent';
+export type SecurityReportStatus = 'pending' | 'reviewing' | 'resolved' | 'archived';
+
+export interface SecurityReportStudentSnapshot {
+  studentId: string;
+  fullName: string;
+  nationalId?: string;
+  mobile?: string;
+  fieldOfStudy?: string;
+  entryTerm?: string;
+  dormName?: string;
+  roomNumber?: string;
+}
+
+export interface SecurityReport {
+  id: string;
+  reportCode: string; // مثلاً SEC-101
+  title: string;
+  category: SecurityReportCategory;
+  categoryLabel: string;
+  severity: SecurityReportSeverity;
+  dormId?: string;
+  dormName?: string;
+  roomNumber?: string;
+  locationDetails?: string;
+  incidentDate: string;
+  description: string;
+  studentIds: string[];
+  studentsSnapshot: SecurityReportStudentSnapshot[];
+  reportedById: string;
+  reportedByName: string;
+  reportedByRole: 'supervisor' | 'admin' | 'maintenance' | 'student_affairs';
+  reportedAt: string;
+  status: SecurityReportStatus;
+  securityNotes?: string;
+  actionTaken?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  updatedAt?: string;
 }
 
 export type AcademicNoticeType = 'academic_leave' | 'expulsion';
@@ -477,6 +546,48 @@ export interface HomeNoteItem {
   bodyHtml?: string;
 }
 
+export interface AboutCapabilityItem {
+  id: string;
+  text: string;
+  highlight?: boolean;
+}
+
+export interface AboutAttachmentFile {
+  id: string;
+  title: string;
+  description?: string;
+  fileName: string;
+  mimeType: string;
+  fileSize?: number;
+  dataUrl: string;
+  uploadedAt: string;
+}
+
+export interface AboutContentSettings {
+  universityBadge?: string;
+  headerTitle?: string;
+  headerSubtitle?: string;
+  designerBadge?: string;
+  designerName?: string;
+  designerEmail?: string;
+  designerBio?: string;
+  designerBioHtml?: string;
+  pdfCardTitle?: string;
+  pdfCardDescription?: string;
+  boardingSectionTitle?: string;
+  boardingSectionHtml?: string;
+  boardingSectionText?: string;
+  capabilitiesSectionTitle?: string;
+  capabilities?: AboutCapabilityItem[];
+  extraSectionTitle?: string;
+  extraSectionHtml?: string;
+  extraSectionText?: string;
+  attachmentsTitle?: string;
+  attachments?: AboutAttachmentFile[];
+  footerNote?: string;
+  updatedAt?: string;
+}
+
 export interface AppSettings {
   selectionActive: boolean; // فعال بودن امکان انتخاب اتاق
   selectionStartDate: string; // تاریخ و ساعت شروع
@@ -502,6 +613,7 @@ export interface AppSettings {
   homeNotesTitle?: string; // عنوان بخش نکات مهم انتخاب اتاق و اسکان صفحه اول
   homeNotes?: HomeNoteItem[]; // کارت‌های بخش نکات مهم صفحه اول
   studentSecondaryEditEnabled?: boolean; // اجازه ویرایش ثانویه اطلاعات و عکس توسط دانشجو پس از تکمیل اولیه پرونده
+  aboutContent?: AboutContentSettings; // محتوا و فایل‌های قابل ویرایش بخش درباره ما توسط مدیر
 }
 
 export interface CounselorStaff {
@@ -536,6 +648,7 @@ export type CurrentUser =
   | { role: 'education'; staff: EducationStaff }
   | { role: 'cultural'; staff: CulturalStaff }
   | { role: 'student_affairs'; staff: StudentAffairsStaff }
+  | { role: 'security'; staff: SecurityStaff }
   | null;
 
 export type DayOfWeek = 'saturday' | 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
@@ -631,6 +744,7 @@ export type ActivityLogCategory =
   | 'student_affairs'
   | 'sports'
   | 'disciplinary'
+  | 'security'
   | 'election'
   | 'warning_eval'
   | 'guest'
@@ -707,7 +821,7 @@ export interface ActivityLog {
   timestamp: string; // ISO string برای مرتب‌سازی دقیق
   date: string; // تاریخ و ساعت شمسی خوانا
   actorName: string;
-  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'system';
+  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'system';
   actorUsername?: string;
   category: ActivityLogCategory;
   action: string;

@@ -4,8 +4,10 @@ import {
   MaintenanceTask,
   Dormitory,
   Room,
+  Student,
 } from '../types';
 import { Storage } from '../utils/storage';
+import { SendSecurityReportModal } from './SendSecurityReportModal';
 import {
   Wrench,
   CheckCircle2,
@@ -25,6 +27,7 @@ import {
   X,
   FileText,
   DollarSign,
+  Shield,
   ShieldCheck,
   MessageSquare,
   ArrowRight,
@@ -39,6 +42,7 @@ interface MaintenanceDashboardProps {
   technician: MaintenanceStaff;
   dorms: Dormitory[];
   rooms: Room[];
+  students?: Student[];
   tasks: MaintenanceTask[];
   onRefreshData: () => void;
   onOpenMessages: () => void;
@@ -49,6 +53,7 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
   technician,
   dorms,
   rooms,
+  students,
   tasks,
   onRefreshData,
   onOpenMessages,
@@ -95,6 +100,7 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
   const [partUrgency, setPartUrgency] = useState<'normal' | 'urgent' | 'emergency'>('normal');
 
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
 
   const showFeedback = (text: string, type: 'success' | 'error' = 'success') => {
     setFeedbackMsg({ type, text });
@@ -102,6 +108,7 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
   };
 
   const inventoryCatalog = Storage.getInventoryItems();
+  const allStudents = students || Storage.getStudents();
 
   const handleWarehouseRequestSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -357,6 +364,15 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
             >
               <MessageSquare className="w-4 h-4 text-amber-200" />
               <span>صندوق پیام‌ها و تیکت‌ها</span>
+            </button>
+
+            <button
+              onClick={() => setIsSendSecurityModalOpen(true)}
+              className="px-4 py-2.5 bg-slate-900/80 hover:bg-slate-900 text-amber-300 border border-amber-400/40 rounded-2xl text-xs font-bold transition flex items-center gap-2 cursor-pointer"
+              title="ارسال گزارش مستقیم برای یک یا چند دانشجو به واحد حراست و انتظامات"
+            >
+              <Shield className="w-4 h-4" />
+              <span>گزارش به حراست</span>
             </button>
 
             {onOpenUserGuide && (
@@ -1254,6 +1270,22 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
           </div>
         </div>
       )}
+
+      <SendSecurityReportModal
+        isOpen={isSendSecurityModalOpen}
+        onClose={() => setIsSendSecurityModalOpen(false)}
+        reporterRole="maintenance"
+        reporterId={technician.id}
+        reporterName={technician.fullName}
+        students={allStudents}
+        dorms={dorms}
+        rooms={rooms}
+        defaultDormId={coveredDorms.includes('all') ? dorms[0]?.id : coveredDorms[0]}
+        onSuccess={(msg) => {
+          showFeedback(msg);
+          onRefreshData();
+        }}
+      />
 
     </div>
   );

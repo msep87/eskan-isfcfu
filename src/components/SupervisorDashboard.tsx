@@ -26,10 +26,12 @@ import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 import { SupervisorGuestRequestsPanel } from './SupervisorGuestRequestsPanel';
 import { RichTextDisplay } from './RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
+import { SendSecurityReportModal } from './SendSecurityReportModal';
 import {
   Building2,
   Users,
   Bed as BedIcon,
+  Shield,
   ShieldAlert,
   Bell,
   Sparkles,
@@ -104,6 +106,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'announcements' | 'students' | 'guest_requests' | 'maintenance' | 'warehouse' | 'shifts'>('manager');
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
   const [isStudentEvalModalOpen, setIsStudentEvalModalOpen] = useState(false);
+  const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
   const [evalTargetStudent, setEvalTargetStudent] = useState<Student | null>(null);
   const [evalRefreshTick, setEvalRefreshTick] = useState(0);
 
@@ -708,6 +711,15 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           >
             <Wrench className="w-4 h-4" />
             <span>ثبت خرابی تأسیسات</span>
+          </button>
+
+          <button
+            onClick={() => setIsSendSecurityModalOpen(true)}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-400/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md cursor-pointer"
+            title="ارسال گزارش مستقیم برای یک یا چند دانشجو به واحد حراست و انتظامات"
+          >
+            <Shield className="w-4 h-4" />
+            <span>گزارش به حراست</span>
           </button>
         </div>
       </div>
@@ -2978,6 +2990,23 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
         src={previewAnnImage}
         alt="تصویر اطلاعیه"
         onClose={() => setPreviewAnnImage(null)}
+      />
+
+      <SendSecurityReportModal
+        isOpen={isSendSecurityModalOpen}
+        onClose={() => setIsSendSecurityModalOpen(false)}
+        reporterRole="supervisor"
+        reporterId={supervisor.id}
+        reporterName={supervisor.fullName}
+        students={students}
+        dorms={dorms}
+        rooms={rooms}
+        defaultDormId={selectedDormId !== 'all' ? selectedDormId : myDorms[0]?.id}
+        onSuccess={(msg) => {
+          setActionFeedback(msg);
+          setTimeout(() => setActionFeedback(null), 4000);
+          onRefreshData();
+        }}
       />
 
     </div>

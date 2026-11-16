@@ -26,6 +26,7 @@ import {
   exportSportsProgramsToExcel,
 } from '../utils/excelUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
+import { SendSecurityReportModal } from './SendSecurityReportModal';
 import {
   Award,
   Users,
@@ -33,6 +34,7 @@ import {
   FileSpreadsheet,
   Printer,
   Vote,
+  Shield,
   ShieldAlert,
   Plus,
   CheckCircle,
@@ -174,6 +176,7 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
 }) => {
   const [activeTab, setActiveTab] = useState<'students' | 'sports' | 'elections' | 'disciplinary'>('students');
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
 
   // ۱. تب دانشجویان خوابگاهی و ترددی
   const [residencyFilter, setResidencyFilter] = useState<'all' | 'dorm' | 'commuter'>('all');
@@ -820,6 +823,15 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
             >
               <MessageSquare className="w-4 h-4" />
               <span>پیام‌رسان</span>
+            </button>
+
+            <button
+              onClick={() => setIsSendSecurityModalOpen(true)}
+              className="px-3.5 py-2.5 bg-slate-900/75 hover:bg-slate-900 text-amber-300 border border-amber-400/40 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              title="ارسال گزارش مستقیم برای یک یا چند دانشجو به واحد حراست و انتظامات"
+            >
+              <Shield className="w-4 h-4" />
+              <span>گزارش به حراست</span>
             </button>
 
             <button
@@ -2459,6 +2471,21 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
           </div>
         </div>
       )}
+      <SendSecurityReportModal
+        isOpen={isSendSecurityModalOpen}
+        onClose={() => setIsSendSecurityModalOpen(false)}
+        reporterRole="student_affairs"
+        reporterId={staff.id}
+        reporterName={staff.fullName}
+        students={students}
+        dorms={dorms}
+        rooms={rooms}
+        onSuccess={(msg) => {
+          setFeedback({ ok: true, msg });
+          setTimeout(() => setFeedback(null), 4000);
+          reloadLocal();
+        }}
+      />
     </div>
   );
 };

@@ -13,6 +13,7 @@ import {
   EducationStaff,
   CulturalStaff,
   StudentAffairsStaff,
+  SecurityStaff,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
@@ -22,6 +23,7 @@ import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 import {
   Users,
   GraduationCap,
+  Shield,
   ShieldCheck,
   Wrench,
   Package,
@@ -76,7 +78,8 @@ export type UserCategoryKey =
   | 'finance'
   | 'education'
   | 'cultural'
-  | 'student_affairs';
+  | 'student_affairs'
+  | 'security';
 
 interface AdminUsersPanelProps {
   activeCategory: UserCategoryKey;
@@ -94,6 +97,7 @@ interface AdminUsersPanelProps {
   educationStaff: EducationStaff[];
   culturalStaff?: CulturalStaff[];
   studentAffairsStaff?: StudentAffairsStaff[];
+  securityStaff?: SecurityStaff[];
   onRefreshData: () => void;
   onOpenExcelModal: (tab: ExcelImportTab) => void;
   onOpenReports: () => void;
@@ -117,7 +121,8 @@ type StaffRole =
   | 'finance'
   | 'education'
   | 'cultural'
-  | 'student_affairs';
+  | 'student_affairs'
+  | 'security';
 type StudentSortKey =
   | 'default'
   | 'lastName'
@@ -143,6 +148,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   educationStaff,
   culturalStaff = [],
   studentAffairsStaff = [],
+  securityStaff = [],
   onRefreshData,
   onOpenExcelModal,
   onOpenReports,
@@ -324,6 +330,12 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           showToast('error', res.message);
           return;
         }
+      } else if (role === 'security') {
+        const res = Storage.updateSecurityStaff(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
       }
 
       const syncRes = await Storage.waitForPendingCloudSync();
@@ -416,6 +428,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             ? culturalStaff
             : targetRole === 'student_affairs'
             ? studentAffairsStaff
+            : targetRole === 'security'
+            ? securityStaff
             : counselors;
         const found = pool.find((u) => normKey(u.username) === nk || normKey(u.id) === nk);
         if (found) {
@@ -912,6 +926,28 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     });
   }, [studentAffairsStaff, staffQuery, staffStatusFilter]);
 
+  const filteredSecurity = useMemo(() => {
+    const q = norm(staffQuery);
+    return securityStaff.filter((sec) => {
+      const isActive = sec.status !== 'inactive' && sec.isActive !== false;
+      if (staffStatusFilter === 'active' && !isActive) return false;
+      if (staffStatusFilter === 'inactive' && isActive) return false;
+
+      if (staffDormFilter !== 'all') {
+        const ids = sec.coveredDormIds || ['all'];
+        if (!ids.includes('all') && !ids.includes(staffDormFilter)) return false;
+      }
+
+      if (q) {
+        const txt = `${norm(sec.fullName)} ${norm(sec.username)} ${norm(sec.mobile || sec.phone)} ${norm(
+          sec.department
+        )} ${norm(sec.badgeCode)} ${norm(sec.notes)}`;
+        if (!txt.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [securityStaff, staffQuery, staffStatusFilter, staffDormFilter]);
+
   // باز کردن مدال افزودن کاربر پرسنل
   const openAddStaffModal = (role: StaffRole) => {
     setStaffModalRole(role);
@@ -932,6 +968,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         ? 'واحد امور فرهنگی و اجتماعی سراها'
         : role === 'student_affairs'
         ? 'اداره امور دانشجویی، تربیت بدنی و رفاهی'
+        : role === 'security'
+        ? 'واحد حراست و انتظامات'
         : ''
     );
     setFormOfficeLocation('');
@@ -962,6 +1000,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       | EducationStaff
       | CulturalStaff
       | StudentAffairsStaff
+      | SecurityStaff
   ) => {
     setStaffModalRole(role);
     setEditingStaffId(user.id);
@@ -1026,6 +1065,14 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormDepartment(sa.department || 'اداره امور دانشجویی، تربیت بدنی و رفاهی');
       setFormNotes(sa.notes || '');
       setFormActive(sa.status !== 'inactive' && sa.isActive !== false);
+    } else if (role === 'security') {
+      const sec = user as SecurityStaff;
+      setFormDepartment(sec.department || 'واحد حراست و انتظامات');
+      setFormOfficeLocation(sec.badgeCode || '');
+      setFormNotes(sec.notes || '');
+      setFormActive(sec.status !== 'inactive' && sec.isActive !== false);
+      const rawIds = sec.coveredDormIds || [];
+      setFormDormIds(rawIds.length === 0 || rawIds.includes('all') ? dorms.map((d) => d.id) : rawIds);
     }
 
     setStaffModalOpen(true);
@@ -1434,6 +1481,50 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         }
         showToast('success', res.message);
       }
+    } else if (staffModalRole === 'security') {
+      const dormIds = formDormIds.length > 0 ? formDormIds : ['all'];
+      if (editingStaffId) {
+        const res = Storage.updateSecurityStaff(editingStaffId, {
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'واحد حراست و انتظامات',
+          badgeCode: formOfficeLocation.trim() || undefined,
+          coveredDormIds: dormIds,
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      } else {
+        const res = Storage.addSecurityStaff({
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'واحد حراست و انتظامات',
+          badgeCode: formOfficeLocation.trim() || undefined,
+          coveredDormIds: dormIds,
+          role: 'security',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      }
     }
 
     await Storage.waitForPendingCloudSync();
@@ -1506,6 +1597,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       showToast('success', res.message);
     } else if (deleteTarget.role === 'student_affairs') {
       const res = Storage.deleteStudentAffairsStaff(deleteTarget.id);
+      showToast('success', res.message);
+    } else if (deleteTarget.role === 'security') {
+      const res = Storage.deleteSecurityStaff(deleteTarget.id);
       showToast('success', res.message);
     }
     setDeleteTarget(null);
@@ -1603,6 +1697,15 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       activeBg: 'bg-indigo-700 text-white border-indigo-700 shadow-lg shadow-indigo-700/25',
       badgeBg: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300',
     },
+    {
+      key: 'security' as const,
+      title: 'حراست و انتظامات',
+      subtitle: 'دریافت گزارش‌های حراستی، مشاهده اطلاعات، امتیازات و اخطارها',
+      count: securityStaff.length,
+      icon: Shield,
+      activeBg: 'bg-slate-800 text-amber-300 border-slate-700 shadow-lg shadow-slate-900/25',
+      badgeBg: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-amber-300',
+    },
   ];
 
   const roleLabels: Record<StaffRole, string> = {
@@ -1615,6 +1718,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     education: 'کارشناس آموزش',
     cultural: 'کارشناس امور فرهنگی',
     student_affairs: 'کارشناس امور دانشجویی و تربیت بدنی',
+    security: 'کارشناس حراست و انتظامات',
   };
 
   return (
@@ -1648,7 +1752,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 financeStaff.length +
                 educationStaff.length +
                 culturalStaff.length +
-                studentAffairsStaff.length}
+                studentAffairsStaff.length +
+                securityStaff.length}
             </span>
           </div>
         </div>
@@ -2632,6 +2737,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 {activeCategory === 'education' && <GraduationCap className="w-5 h-5 text-sky-600" />}
                 {activeCategory === 'cultural' && <FileText className="w-5 h-5 text-fuchsia-600" />}
                 {activeCategory === 'student_affairs' && <Award className="w-5 h-5 text-indigo-700" />}
+                {activeCategory === 'security' && <Shield className="w-5 h-5 text-amber-600" />}
               </div>
               <div>
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
@@ -2644,6 +2750,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'education' && `مدیریت کارشناسان آموزش (${filteredEducation.length} از ${educationStaff.length})`}
                   {activeCategory === 'cultural' && `مدیریت کاربران امور فرهنگی (${filteredCultural.length} از ${culturalStaff.length})`}
                   {activeCategory === 'student_affairs' && `مدیریت کاربران امور دانشجویی و تربیت بدنی (${filteredStudentAffairs.length} از ${studentAffairsStaff.length})`}
+                  {activeCategory === 'security' && `مدیریت کارشناسان حراست و انتظامات (${filteredSecurity.length} از ${securityStaff.length})`}
                 </h3>
                 <p className="text-xs text-slate-400">
                   مشاهده، جستجوی پیشرفته، ویرایش مشخصات، تغییر یا ریست رمز عبور و ورود تکی یا گروهی
@@ -2672,6 +2779,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       ? 'cultural'
                       : activeCategory === 'student_affairs'
                       ? 'student_affairs'
+                      : activeCategory === 'security'
+                      ? 'security'
                       : 'counselor'
                   )
                 }
@@ -2688,10 +2797,13 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'education' && 'افزودن کارشناس آموزش جدید'}
                   {activeCategory === 'cultural' && 'افزودن کاربر امور فرهنگی جدید'}
                   {activeCategory === 'student_affairs' && 'افزودن کاربر امور دانشجویی جدید'}
+                  {activeCategory === 'security' && 'افزودن کاربر حراست جدید'}
                 </span>
               </button>
 
-              {activeCategory !== 'cultural' && activeCategory !== 'student_affairs' && (
+              {activeCategory !== 'cultural' &&
+                activeCategory !== 'student_affairs' &&
+                activeCategory !== 'security' && (
                 <button
                   type="button"
                   onClick={() =>
@@ -2736,6 +2848,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     ? 'cultural'
                     : activeCategory === 'student_affairs'
                     ? 'student_affairs'
+                    : activeCategory === 'security'
+                    ? 'security'
                     : 'counselor';
                 return (
                   <>
@@ -4170,6 +4284,168 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       );
                     })
                   ))}
+
+                {activeCategory === 'security' &&
+                  (filteredSecurity.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-slate-400">
+                        هیچ کاربر حراست و انتظاماتی با مشخصات جستجوشده یافت نشد. برای ثبت از دکمه «افزودن کاربر حراست جدید» استفاده کنید.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSecurity.map((sec) => {
+                      const isActive = sec.status !== 'inactive' && sec.isActive !== false;
+                      const coveredIds = sec.coveredDormIds || ['all'];
+                      const passKey = `sec_${sec.id}`;
+                      const isShown = revealedPasswords[passKey];
+
+                      return (
+                        <tr key={sec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {sec.photoUrl ? (
+                                <img
+                                  src={sec.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-amber-300 dark:border-amber-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-slate-800 text-amber-300 text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(sec.fullName || 'ح').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{sec.fullName}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
+                            {sec.username}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                {isShown ? sec.password : '••••••'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => toggleRevealPassword(passKey)}
+                                className="p-1 text-slate-400 hover:text-amber-600 cursor-pointer"
+                                title={isShown ? 'مخفی کردن رمز' : 'نمایش رمز'}
+                              >
+                                {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono" dir="ltr">
+                            {sec.mobile || sec.phone || '-'}
+                          </td>
+                          <td className="p-3 space-y-1">
+                            <div className="font-semibold text-slate-800 dark:text-amber-300">
+                              {sec.department || 'واحد حراست و انتظامات'}
+                              {sec.badgeCode && <span className="text-[10px] mr-1.5 font-mono">({sec.badgeCode})</span>}
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {coveredIds.includes('all') || (dorms.length > 0 && coveredIds.length >= dorms.length) ? (
+                                <span className="px-1.5 py-0.5 rounded bg-teal-50 dark:bg-teal-950/50 text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                                  همه سراها
+                                </span>
+                              ) : (
+                                dorms
+                                  .filter((d) => coveredIds.includes(d.id))
+                                  .map((d) => (
+                                    <span
+                                      key={d.id}
+                                      className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-300"
+                                    >
+                                      {d.name}
+                                    </span>
+                                  ))
+                              )}
+                            </div>
+                            {sec.notes && <div className="text-[11px] text-slate-400">{sec.notes}</div>}
+                          </td>
+                          <td className="p-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextStatus = isActive ? 'inactive' : 'active';
+                                Storage.updateSecurityStaff(sec.id, {
+                                  status: nextStatus,
+                                  isActive: nextStatus === 'active',
+                                });
+                                onRefreshData();
+                              }}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                                isActive
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                              }`}
+                            >
+                              {isActive ? 'فعال' : 'غیرفعال'}
+                            </button>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <label
+                                className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                title="بارگذاری یا تغییر عکس کارشناس حراست"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('security', sec.id, sec.fullName, e, sec.username)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => openEditStaffModal('security', sec)}
+                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                                title="ویرایش مشخصات کاربر حراست"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPasswordError('');
+                                  setNewPasswordInput('');
+                                  setPasswordModalTarget({
+                                    role: 'security',
+                                    id: sec.id,
+                                    fullName: sec.fullName,
+                                    usernameOrCode: sec.username,
+                                    defaultResetValue: '123456',
+                                    defaultResetLabel: 'ریست فوری به 123456',
+                                  });
+                                }}
+                                className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                                title="تغییر یا ریست رمز عبور"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({
+                                    role: 'security',
+                                    id: sec.id,
+                                    fullName: sec.fullName,
+                                  })
+                                }
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                                title="حذف کاربر حراست"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ))}
               </tbody>
             </table>
           </div>
@@ -4325,16 +4601,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   </div>
                 )}
 
-                {staffModalRole === 'counselor' && (
+                {(staffModalRole === 'counselor' || staffModalRole === 'security') && (
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      دفتر / اتاق مشاوره
+                      {staffModalRole === 'security' ? 'کد پرسنلی / شناسه سازمانی حراست (اختیاری)' : 'دفتر / اتاق مشاوره'}
                     </label>
                     <input
                       type="text"
                       value={formOfficeLocation}
                       onChange={(e) => setFormOfficeLocation(e.target.value)}
-                      placeholder="مرکز مشاوره پردیس"
+                      placeholder={staffModalRole === 'security' ? 'مثلاً SEC-101' : 'مرکز مشاوره پردیس'}
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
                     />
                   </div>
@@ -4344,7 +4620,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   staffModalRole === 'procurement' ||
                   staffModalRole === 'education' ||
                   staffModalRole === 'cultural' ||
-                  staffModalRole === 'student_affairs') && (
+                  staffModalRole === 'student_affairs' ||
+                  staffModalRole === 'security') && (
                   <div className="sm:col-span-2">
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       {staffModalRole === 'procurement'
@@ -4355,6 +4632,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                         ? 'بخش / واحد امور فرهنگی'
                         : staffModalRole === 'student_affairs'
                         ? 'بخش / اداره امور دانشجویی و تربیت بدنی'
+                        : staffModalRole === 'security'
+                        ? 'بخش / واحد حراست و انتظامات'
                         : 'بخش / واحد مالی'}
                     </label>
                     <input
@@ -4370,6 +4649,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'واحد امور فرهنگی و اجتماعی سراها'
                           : staffModalRole === 'student_affairs'
                           ? 'اداره امور دانشجویی، تربیت بدنی و رفاهی'
+                          : staffModalRole === 'security'
+                          ? 'واحد حراست و انتظامات پردیس'
                           : 'واحد امور مالی و حسابداری پردیس'
                       }
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
@@ -4397,6 +4678,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'مسئول برنامه‌ریزی فرهنگی، تشکل‌ها و کانون‌های دانشجویی...'
                           : staffModalRole === 'student_affairs'
                           ? 'کارشناس امور دانشجویی، شورای صنفی و شورای انضباطی...'
+                          : staffModalRole === 'security'
+                          ? 'کارشناس حراست و انتظامات / شیفت گشت و صیانت سراها...'
                           : staffModalRole === 'maintenance'
                           ? 'سرپرست شیفت تأسیسات / تکنسین فنی...'
                           : staffModalRole === 'counselor'
