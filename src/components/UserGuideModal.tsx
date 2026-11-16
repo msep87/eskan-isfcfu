@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Printer,
@@ -56,6 +56,12 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
   const [activeRole, setActiveRole] = useState<UserRoleType>(initialRole);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveRole(initialRole);
+    }
+  }, [initialRole, isOpen]);
 
   if (!isOpen) return null;
 

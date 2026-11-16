@@ -7608,6 +7608,200 @@ export const Storage = {
 
     return activeSyncPromise;
   },
+
+  authenticateStaffByCredentials: (
+    rawUsername: string,
+    rawPassword: string
+  ): {
+    success: boolean;
+    message?: string;
+    user?: NonNullable<CurrentUser>;
+    roleLabel?: string;
+  } => {
+    const normalizeDigits = (val: string) =>
+      String(val || '')
+        .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+        .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+        .trim();
+
+    const cleanU = normalizeDigits(rawUsername).toLowerCase();
+    const cleanP = normalizeDigits(rawPassword);
+
+    if (!cleanU || !cleanP) {
+      return {
+        success: false,
+        message: 'لطفاً نام کاربری و کلمه عبور خود را وارد نمایید.',
+      };
+    }
+
+    type StaffCandidate = {
+      role:
+        | 'supervisor'
+        | 'counselor'
+        | 'maintenance'
+        | 'warehouse'
+        | 'procurement'
+        | 'finance'
+        | 'education'
+        | 'cultural'
+        | 'student_affairs';
+      roleLabel: string;
+      fullName: string;
+      username: string;
+      password: string;
+      isInactive: boolean;
+      user: NonNullable<CurrentUser>;
+    };
+
+    const candidates: StaffCandidate[] = [
+      ...Storage.getSupervisors().map((s) => ({
+        role: 'supervisor' as const,
+        roleLabel: 'سرپرست سرا',
+        fullName: s.fullName,
+        username: s.username,
+        password: s.password,
+        isInactive: false,
+        user: { role: 'supervisor' as const, supervisor: s },
+      })),
+      ...Storage.getCounselors().map((c) => ({
+        role: 'counselor' as const,
+        roleLabel: 'کارشناس مشاور و روانشناس',
+        fullName: c.fullName,
+        username: c.username,
+        password: c.password,
+        isInactive: c.status === 'inactive' || c.isActive === false,
+        user: { role: 'counselor' as const, counselor: c },
+      })),
+      ...Storage.getMaintenanceStaff().map((m) => ({
+        role: 'maintenance' as const,
+        roleLabel: 'کارشناس تأسیسات و فنی',
+        fullName: m.fullName,
+        username: m.username,
+        password: m.password,
+        isInactive: m.status === 'inactive' || m.isActive === false,
+        user: { role: 'maintenance' as const, technician: m },
+      })),
+      ...Storage.getWarehouseStaff().map((w) => ({
+        role: 'warehouse' as const,
+        roleLabel: 'مسئول انبار و تجهیزات',
+        fullName: w.fullName,
+        username: w.username,
+        password: w.password,
+        isInactive: w.status === 'inactive' || w.isActive === false,
+        user: { role: 'warehouse' as const, staff: w },
+      })),
+      ...Storage.getProcurementStaff().map((p) => ({
+        role: 'procurement' as const,
+        roleLabel: 'کارپرداز و خرید',
+        fullName: p.fullName,
+        username: p.username,
+        password: p.password,
+        isInactive: p.status === 'inactive' || p.isActive === false,
+        user: { role: 'procurement' as const, staff: p },
+      })),
+      ...Storage.getFinanceStaff().map((f) => ({
+        role: 'finance' as const,
+        roleLabel: 'امور مالی و حسابداری',
+        fullName: f.fullName,
+        username: f.username,
+        password: f.password,
+        isInactive: f.status === 'inactive' || f.isActive === false,
+        user: { role: 'finance' as const, staff: f },
+      })),
+      ...Storage.getEducationStaff().map((e) => ({
+        role: 'education' as const,
+        roleLabel: 'کارشناس آموزش',
+        fullName: e.fullName,
+        username: e.username,
+        password: e.password,
+        isInactive: e.status === 'inactive' || e.isActive === false,
+        user: { role: 'education' as const, staff: e },
+      })),
+      ...Storage.getCulturalStaff().map((c) => ({
+        role: 'cultural' as const,
+        roleLabel: 'کارشناس امور فرهنگی',
+        fullName: c.fullName,
+        username: c.username,
+        password: c.password,
+        isInactive: c.status === 'inactive' || c.isActive === false,
+        user: { role: 'cultural' as const, staff: c },
+      })),
+      ...Storage.getStudentAffairsStaff().map((sa) => ({
+        role: 'student_affairs' as const,
+        roleLabel: 'امور دانشجویی و تربیت بدنی',
+        fullName: sa.fullName,
+        username: sa.username,
+        password: sa.password,
+        isInactive: sa.status === 'inactive' || sa.isActive === false,
+        user: { role: 'student_affairs' as const, staff: sa },
+      })),
+    ];
+
+    const matched = candidates.filter(
+      (c) =>
+        normalizeDigits(c.username).toLowerCase() === cleanU &&
+        normalizeDigits(c.password) === cleanP
+    );
+
+    const activeMatch = matched.find((m) => !m.isInactive);
+    if (activeMatch) {
+      Storage.addActivityLog({
+        category: 'auth',
+        action: `ورود موفق ${activeMatch.roleLabel}`,
+        details: `${activeMatch.roleLabel} ${activeMatch.fullName} (${activeMatch.username}) از بخش ورود کارکنان وارد سامانه شد.`,
+        targetName: activeMatch.fullName,
+        actorName: activeMatch.fullName,
+        actorRole: activeMatch.role,
+        actorUsername: activeMatch.username,
+      });
+      return {
+        success: true,
+        user: activeMatch.user,
+        roleLabel: activeMatch.roleLabel,
+      };
+    }
+
+    const inactiveMatch = matched.find((m) => m.isInactive);
+    if (inactiveMatch) {
+      Storage.addActivityLog({
+        category: 'auth',
+        action: `تلاش ورود حساب غیرفعال ${inactiveMatch.roleLabel}`,
+        details: `${inactiveMatch.roleLabel} ${inactiveMatch.fullName} (${inactiveMatch.username}) با حساب غیرفعال تلاش به ورود کرد.`,
+        targetName: inactiveMatch.fullName,
+        severity: 'warning',
+        actorName: inactiveMatch.fullName,
+        actorRole: inactiveMatch.role,
+        actorUsername: inactiveMatch.username,
+      });
+      return {
+        success: false,
+        message: `حساب کاربری ${inactiveMatch.roleLabel} غیرفعال است. لطفاً با مدیر سامانه تماس بگیرید.`,
+      };
+    }
+
+    if (cleanU === 'admin') {
+      return {
+        success: false,
+        message: 'حساب مدیریت کل در بخش «مدیر» قرار دارد. لطفاً تب «مدیر» را انتخاب نمایید.',
+      };
+    }
+
+    Storage.addActivityLog({
+      category: 'auth',
+      action: 'تلاش ناموفق ورود کارکنان',
+      details: `تلاش ناموفق ورود کارکنان با نام کاربری «${cleanU || '-'}» ثبت شد.`,
+      targetName: cleanU || '-',
+      severity: 'warning',
+      actorName: 'کاربر مهمان',
+      actorRole: 'system',
+      actorUsername: cleanU,
+    });
+
+    return {
+      success: false,
+      message: 'نام کاربری یا کلمه عبور کارکنان نادرست است.',
+    };
+  },
 };
 
 
