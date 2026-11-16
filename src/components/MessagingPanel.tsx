@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Message, CurrentUser, MaintenanceStaff, Dormitory } from '../types';
-import { Storage } from '../utils/storage';
+import React, { useMemo, useState } from 'react';
+import { Message, CurrentUser, MaintenanceStaff, Dormitory, Student } from '../types';
+import { Storage, doesStudentMatchMessage, normalizePersianSearch } from '../utils/storage';
+import { toEnglishDigits } from '../utils/excelUtils';
 import {
   MessageSquare,
   Send,
@@ -17,6 +18,9 @@ import {
   CheckCheck,
   AlertTriangle,
   FileText,
+  Search,
+  Users,
+  GraduationCap,
 } from 'lucide-react';
 
 interface MessagingPanelProps {
@@ -37,11 +41,18 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const [activeTab, setActiveTab] = useState<'inbox' | 'compose'>('inbox');
 
   // فرم پیام جدید
-  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor' | 'finance' | 'warehouse' | 'procurement'>('supervisor');
+  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor' | 'finance' | 'warehouse' | 'procurement' | 'education' | 'student'>('supervisor');
   const [category, setCategory] = useState<Message['category']>('accommodation');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
   const [isConfidential, setIsConfidential] = useState(false);
+
+  // انتخاب گیرنده دانشجو/رشته/ورودی ویژه کارشناس آموزش
+  const [eduScope, setEduScope] = useState<'single' | 'field' | 'entry_term'>('single');
+  const [eduStudentQuery, setEduStudentQuery] = useState('');
+  const [eduSelectedStudentId, setEduSelectedStudentId] = useState('');
+  const [eduSelectedField, setEduSelectedField] = useState('');
+  const [eduSelectedEntryTerm, setEduSelectedEntryTerm] = useState('');
 
   // فیلتر دسته‌بندی صندوق پیام‌ها
   const [inboxCategoryFilter, setInboxCategoryFilter] = useState<string>('all');
@@ -62,10 +73,45 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const [referFeedback, setReferFeedback] = useState<string | null>(null);
   const [referError, setReferError] = useState<string | null>(null);
 
+  const eduMatchedStudents = useMemo(() => {
+    if (!isOpen) return [];
+    const list = Storage.getStudents();
+    const q = normalizePersianSearch(eduStudentQuery);
+    if (!q) return list.slice(0, 12);
+    return list
+      .filter((s: Student) => {
+        const hay = [
+          s.fullName,
+          s.fieldOfStudy,
+          s.studentId,
+          toEnglishDigits(s.studentId || ''),
+          s.nationalId,
+          toEnglishDigits(s.nationalId || ''),
+          s.entryTerm,
+        ]
+          .filter(Boolean)
+          .map((item) => normalizePersianSearch(String(item)))
+          .join(' ');
+        return hay.includes(q);
+      })
+      .slice(0, 20);
+  }, [isOpen, eduStudentQuery]);
+
   if (!isOpen) return null;
 
   const dorms = Storage.getDormitories();
+  const allStudentsList = Storage.getStudents();
   const maintenanceStaff = Storage.getMaintenanceStaff().filter((s) => s.status === 'active' || s.isActive !== false);
+
+  const eduUniqueFields = Array.from(
+    new Set(allStudentsList.map((s) => (s.fieldOfStudy || '').trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, 'fa'));
+
+  const eduUniqueEntryTerms = Array.from(
+    new Set(allStudentsList.map((s) => (s.entryTerm || '').trim()).filter(Boolean))
+  ).sort((a, b) => b.localeCompare(a, 'fa'));
+
+  const eduSelectedStudent = allStudentsList.find((s) => s.studentId === eduSelectedStudentId) || null;
 
   // فیلتر کردن پیام‌های مرتبط با کاربر با رعایت حریم خصوصی گزارش‌های محرمانه
   const userMessages = messages.filter((m) => {
@@ -75,7 +121,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     }
 
     if (currentUser.role === 'student') {
-      return m.senderId === currentUser.student.studentId || m.receiverId === currentUser.student.studentId;
+      return m.senderId === currentUser.student.studentId || doesStudentMatchMessage(currentUser.student, m);
     }
     if (currentUser.role === 'supervisor') {
       return m.receiverType === 'supervisor' || m.senderRole === 'supervisor' || m.receiverType === 'all';
@@ -95,6 +141,9 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     if (currentUser.role === 'finance') {
       return m.receiverType === 'finance' || m.category === 'financial' || m.senderRole === 'finance';
     }
+    if (currentUser.role === 'education') {
+      return !m.isConfidential && (m.receiverType === 'education' || m.category === 'education' || m.senderRole === 'education');
+    }
     return true; // admin sees all
   });
 
@@ -102,9 +151,80 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     e.preventDefault();
     if (!subject.trim() || !content.trim()) return;
 
+    const nowDate =
+      new Date().toLocaleDateString('fa-IR') +
+      ' - ' +
+      new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+
+    if (currentUser.role === 'education') {
+      if (eduScope === 'single') {
+        if (!eduSelectedStudent) return;
+        Storage.addMessage({
+          senderId: currentUser.staff.id,
+          senderName: `${currentUser.staff.fullName} (کارشناس آموزش)`,
+          senderRole: 'education',
+          receiverType: 'student',
+          receiverId: eduSelectedStudent.studentId,
+          receiverName: eduSelectedStudent.fullName,
+          targetScope: 'single',
+          category: 'education',
+          subject: subject.trim(),
+          content: content.trim(),
+          isConfidential: false,
+          date: nowDate,
+        });
+      } else if (eduScope === 'field') {
+        if (!eduSelectedField) return;
+        const count = allStudentsList.filter(
+          (s) => normalizePersianSearch(s.fieldOfStudy || '') === normalizePersianSearch(eduSelectedField)
+        ).length;
+        Storage.addMessage({
+          senderId: currentUser.staff.id,
+          senderName: `${currentUser.staff.fullName} (کارشناس آموزش)`,
+          senderRole: 'education',
+          receiverType: 'student',
+          targetScope: 'field',
+          targetFieldOfStudy: eduSelectedField,
+          recipientCount: count,
+          receiverName: `کل دانشجویان رشته ${eduSelectedField}`,
+          category: 'education',
+          subject: subject.trim(),
+          content: content.trim(),
+          isConfidential: false,
+          date: nowDate,
+        });
+      } else {
+        if (!eduSelectedEntryTerm) return;
+        const count = allStudentsList.filter(
+          (s) => normalizePersianSearch(s.entryTerm || '') === normalizePersianSearch(eduSelectedEntryTerm)
+        ).length;
+        Storage.addMessage({
+          senderId: currentUser.staff.id,
+          senderName: `${currentUser.staff.fullName} (کارشناس آموزش)`,
+          senderRole: 'education',
+          receiverType: 'student',
+          targetScope: 'entry_term',
+          targetEntryTerm: eduSelectedEntryTerm,
+          recipientCount: count,
+          receiverName: `کل دانشجویان ورودی ${eduSelectedEntryTerm}`,
+          category: 'education',
+          subject: subject.trim(),
+          content: content.trim(),
+          isConfidential: false,
+          date: nowDate,
+        });
+      }
+      setSubject('');
+      setContent('');
+      setIsConfidential(false);
+      setActiveTab('inbox');
+      onMessagesUpdated();
+      return;
+    }
+
     let senderName = '';
     let senderId = '';
-    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' = 'student';
+    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' = 'student';
 
     if (currentUser.role === 'student') {
       senderName = currentUser.student.fullName;
@@ -149,7 +269,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       content: content.trim(),
       category,
       isConfidential: isConfidential || category === 'social_personal',
-      date: new Date().toLocaleDateString('fa-IR') + ' - ' + new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
+      date: nowDate,
     });
 
     setSubject('');
@@ -163,7 +283,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     if (!replyText.trim()) return;
 
     let senderName = '';
-    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' = 'supervisor';
+    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' = 'supervisor';
 
     if (currentUser.role === 'student') {
       senderName = currentUser.student.fullName;
@@ -186,6 +306,9 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     } else if (currentUser.role === 'finance') {
       senderName = `${currentUser.staff.fullName} (امور مالی و حسابداری)`;
       senderRole = 'finance';
+    } else if (currentUser.role === 'education') {
+      senderName = `${currentUser.staff.fullName} (کارشناس آموزش)`;
+      senderRole = 'education';
     } else {
       senderName = 'مدیریت کل سراها';
       senderRole = 'admin';
@@ -354,112 +477,243 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
           {/* تب ارسال پیام جدید */}
           {activeTab === 'compose' && (
             <form onSubmit={handleSendMessage} className="space-y-4 max-w-xl mx-auto">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  گیرنده پیام
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setReceiverType('supervisor')}
-                    className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
-                      receiverType === 'supervisor'
-                        ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                    }`}
-                  >
-                    سرپرست خوابگاه
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setReceiverType('counselor');
-                      setCategory('counseling' as any);
-                    }}
-                    className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
-                      receiverType === 'counselor'
-                        ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                    }`}
-                  >
-                    مشاور و روانشناس سرا
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setReceiverType('finance');
-                      setCategory('financial');
-                    }}
-                    className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
-                      receiverType === 'finance'
-                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                    }`}
-                  >
-                    امور مالی و حسابداری
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setReceiverType('warehouse');
-                      setCategory('maintenance');
-                    }}
-                    className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
-                      receiverType === 'warehouse'
-                        ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                    }`}
-                  >
-                    مسئول انبار و تجهیزات
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setReceiverType('procurement');
-                      setCategory('other');
-                    }}
-                    className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
-                      receiverType === 'procurement'
-                        ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                    }`}
-                  >
-                    کارپرداز و خرید
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setReceiverType('admin')}
-                    className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
-                      receiverType === 'admin'
-                        ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                    }`}
-                  >
-                    مدیریت کل سراهای دانشگاه
-                  </button>
+              {currentUser.role === 'education' ? (
+                <div className="space-y-3 p-4 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800">
+                  <div className="flex items-center gap-2 text-xs font-extrabold text-sky-900 dark:text-sky-200">
+                    <GraduationCap className="w-4 h-4 text-sky-600" />
+                    <span>انتخاب مخاطب پیام آموزشی (دانشجوی خاص / کل یک رشته / کل یک ورودی)</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 bg-white dark:bg-slate-800 p-1 rounded-xl text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setEduScope('single')}
+                      className={`py-2 rounded-lg transition cursor-pointer ${
+                        eduScope === 'single' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      دانشجوی خاص
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEduScope('field')}
+                      className={`py-2 rounded-lg transition cursor-pointer ${
+                        eduScope === 'field' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      کل یک رشته
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEduScope('entry_term')}
+                      className={`py-2 rounded-lg transition cursor-pointer ${
+                        eduScope === 'entry_term' ? 'bg-sky-600 text-white' : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      کل یک ورودی
+                    </button>
+                  </div>
+
+                  {eduScope === 'single' && (
+                    <div className="space-y-2 text-xs">
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+                        <input
+                          type="text"
+                          value={eduStudentQuery}
+                          onChange={(e) => setEduStudentQuery(e.target.value)}
+                          placeholder="جستجوی دانشجو با نام، نام خانوادگی، رشته، کد دانشجویی یا کد ملی..."
+                          className="w-full pr-9 pl-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                        />
+                      </div>
+                      {eduSelectedStudent ? (
+                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-sky-400 flex items-center justify-between gap-2">
+                          <div>
+                            <div className="font-bold text-slate-900 dark:text-white">{eduSelectedStudent.fullName}</div>
+                            <div className="text-[11px] text-slate-500">
+                              {eduSelectedStudent.studentId} • {eduSelectedStudent.fieldOfStudy} • ورودی {eduSelectedStudent.entryTerm}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setEduSelectedStudentId('')}
+                            className="px-2 py-1 rounded-lg bg-rose-50 text-rose-600 text-[11px] font-bold cursor-pointer"
+                          >
+                            تغییر
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="max-h-36 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700">
+                          {eduMatchedStudents.map((st) => (
+                            <button
+                              key={st.studentId}
+                              type="button"
+                              onClick={() => setEduSelectedStudentId(st.studentId)}
+                              className="w-full text-right p-2 hover:bg-sky-50 dark:hover:bg-sky-950/30 flex items-center justify-between gap-2 cursor-pointer"
+                            >
+                              <span className="font-bold">{st.fullName} ({st.fieldOfStudy})</span>
+                              <span className="font-mono text-[10px] text-slate-500">{st.studentId}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {eduScope === 'field' && (
+                    <select
+                      value={eduSelectedField}
+                      onChange={(e) => setEduSelectedField(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                    >
+                      <option value="">-- انتخاب رشته تحصیلی --</option>
+                      {eduUniqueFields.map((f) => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {eduScope === 'entry_term' && (
+                    <select
+                      value={eduSelectedEntryTerm}
+                      onChange={(e) => setEduSelectedEntryTerm(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                    >
+                      <option value="">-- انتخاب سال / ترم ورودی --</option>
+                      {eduUniqueEntryTerms.map((term) => (
+                        <option key={term} value={term}>ورودی {term}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
-              </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      گیرنده پیام
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setReceiverType('supervisor')}
+                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                          receiverType === 'supervisor'
+                            ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                        }`}
+                      >
+                        سرپرست خوابگاه
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReceiverType('education');
+                          setCategory('education');
+                        }}
+                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                          receiverType === 'education'
+                            ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                        }`}
+                      >
+                        کارشناس آموزش
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReceiverType('counselor');
+                          setCategory('counseling' as any);
+                        }}
+                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                          receiverType === 'counselor'
+                            ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                        }`}
+                      >
+                        مشاور و روانشناس سرا
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReceiverType('finance');
+                          setCategory('financial');
+                        }}
+                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                          receiverType === 'finance'
+                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                        }`}
+                      >
+                        امور مالی و حسابداری
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReceiverType('warehouse');
+                          setCategory('maintenance');
+                        }}
+                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                          receiverType === 'warehouse'
+                            ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                        }`}
+                      >
+                        مسئول انبار و تجهیزات
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReceiverType('procurement');
+                          setCategory('other');
+                        }}
+                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                          receiverType === 'procurement'
+                            ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                        }`}
+                      >
+                        کارپرداز و خرید
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReceiverType('admin')}
+                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                          receiverType === 'admin'
+                            ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                        }`}
+                      >
+                        مدیریت کل سراهای دانشگاه
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  موضوع یا حوزه‌ درخواست *
-                </label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value as any)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-teal-500 mb-2 font-medium"
-                >
-                  <option value="financial">💳 امور مالی، کسورات ۴۵٪ / ۲۵٪، بدهی و حسابداری</option>
-                  <option value="counseling">🧠 مشاوره روانشناختی، سلامت روان، دوری از خانه و استرس تحصیلی</option>
-                  <option value="accommodation">🏠 امور اسکان، رزرو و انتخاب اتاق یا جابجایی تخت</option>
-                  <option value="maintenance">🔧 خرابی تأسیسات، لوله‌کشی، برق، گرمایش و تعمیرات ابنیه</option>
-                  <option value="services_cleaning">🧹 خدمات، نظافت و بهداشت سرا (نظافت راهرو/سرویس، سم‌پاشی، زباله)</option>
-                  <option value="rights_violation">⚠️ عدم رعایت حقوق دیگران (سر و صدا و عدم سکوت شبانه، آزار، وسایل مشترک)</option>
-                  <option value="social_personal">🤝 آسیب‌های فردی و اجتماعی، ناسازگاری هم‌اتاقی و گزارش موارد خاص</option>
-                  <option value="discipline">📋 مقررات و ضوابط انضباطی خوابگاه</option>
-                  <option value="request">✉️ درخواست مرخصی و مجوز تردد شبانه</option>
-                  <option value="other">📌 سایر امور و پیشنهادات</option>
-                </select>
+                {currentUser.role !== 'education' && (
+                  <>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      موضوع یا حوزه‌ درخواست *
+                    </label>
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value as any)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-teal-500 mb-2 font-medium"
+                    >
+                      <option value="education">🎓 سوالات، مشکلات و امور آموزشی (کارشناس آموزش)</option>
+                      <option value="financial">💳 امور مالی، کسورات ۴۵٪ / ۲۵٪، بدهی و حسابداری</option>
+                      <option value="counseling">🧠 مشاوره روانشناختی، سلامت روان، دوری از خانه و استرس تحصیلی</option>
+                      <option value="accommodation">🏠 امور اسکان، رزرو و انتخاب اتاق یا جابجایی تخت</option>
+                      <option value="maintenance">🔧 خرابی تأسیسات، لوله‌کشی، برق، گرمایش و تعمیرات ابنیه</option>
+                      <option value="services_cleaning">🧹 خدمات، نظافت و بهداشت سرا (نظافت راهرو/سرویس، سم‌پاشی، زباله)</option>
+                      <option value="rights_violation">⚠️ عدم رعایت حقوق دیگران (سر و صدا و عدم سکوت شبانه، آزار، وسایل مشترک)</option>
+                      <option value="social_personal">🤝 آسیب‌های فردی و اجتماعی، ناسازگاری هم‌اتاقی و گزارش موارد خاص</option>
+                      <option value="discipline">📋 مقررات و ضوابط انضباطی خوابگاه</option>
+                      <option value="request">✉️ درخواست مرخصی و مجوز تردد شبانه</option>
+                      <option value="other">📌 سایر امور و پیشنهادات</option>
+                    </select>
+                  </>
+                )}
 
                 <input
                   type="text"
@@ -485,23 +739,25 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                 />
               </div>
 
-              {/* گزینه ارسال محرمانه ویژه حفظ حریم خصوصی */}
-              <label className="flex items-start gap-2.5 p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isConfidential || category === 'social_personal' || category === 'rights_violation'}
-                  onChange={(e) => setIsConfidential(e.target.checked)}
-                  className="mt-0.5 rounded text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
-                />
-                <div className="text-xs">
-                  <span className="font-extrabold text-amber-900 dark:text-amber-200 flex items-center gap-1">
-                    🔒 ارسال به عنوان گزارش محرمانه (حفظ هویت و رازداری)
-                  </span>
-                  <span className="text-[11px] text-amber-700 dark:text-amber-300 block mt-0.5 leading-relaxed">
-                    این گزارش منحصراً توسط سرپرست سرا و مدیریت کل قابل بررسی بوده و هویت شما نزد سایر هم‌اتاقی‌ها و دانشجویان کاملاً محفوظ و محرمانه خواهد ماند.
-                  </span>
-                </div>
-              </label>
+              {/* گزینه ارسال محرمانه ویژه حفظ حریم خصوصی (برای ارسال‌های غیرآموزشی) */}
+              {currentUser.role !== 'education' && receiverType !== 'education' && (
+                <label className="flex items-start gap-2.5 p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isConfidential || category === 'social_personal' || category === 'rights_violation'}
+                    onChange={(e) => setIsConfidential(e.target.checked)}
+                    className="mt-0.5 rounded text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                  />
+                  <div className="text-xs">
+                    <span className="font-extrabold text-amber-900 dark:text-amber-200 flex items-center gap-1">
+                      🔒 ارسال به عنوان گزارش محرمانه (حفظ هویت و رازداری)
+                    </span>
+                    <span className="text-[11px] text-amber-700 dark:text-amber-300 block mt-0.5 leading-relaxed">
+                      این گزارش منحصراً توسط سرپرست سرا و مدیریت کل قابل بررسی بوده و هویت شما نزد سایر هم‌اتاقی‌ها و دانشجویان کاملاً محفوظ و محرمانه خواهد ماند.
+                    </span>
+                  </div>
+                </label>
+              )}
 
               <button
                 type="submit"
@@ -527,6 +783,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                     className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-bold"
                   >
                     <option value="all">همه دسته‌ها ({userMessages.length})</option>
+                    <option value="education">امور آموزشی (کارشناس آموزش)</option>
                     <option value="financial">امور مالی و حسابداری</option>
                     <option value="counseling">مشاوره روانشناختی و فردی</option>
                     <option value="maintenance">تأسیسات و تعمیرات</option>
@@ -582,7 +839,9 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
 
                         <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
                           <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
-                            {msg.category === 'financial'
+                            {msg.category === 'education'
+                              ? 'امور آموزشی'
+                              : msg.category === 'financial'
                               ? 'امور مالی'
                               : msg.category === 'maintenance'
                               ? 'تأسیسات'
@@ -630,8 +889,15 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                               ? 'مشاور'
                               : selectedMsg.senderRole === 'finance'
                               ? 'امور مالی'
+                              : selectedMsg.senderRole === 'education'
+                              ? 'کارشناس آموزش'
                               : 'مدیر'}
                           </span>
+                          {selectedMsg.receiverName && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 font-bold">
+                              گیرنده: {selectedMsg.receiverName}
+                            </span>
+                          )}
                           {selectedMsg.isConfidential && (
                             <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-extrabold flex items-center gap-1">
                               <span>🔒 گزارش محرمانه و محافظت‌شده</span>

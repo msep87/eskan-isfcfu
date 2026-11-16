@@ -1,5 +1,6 @@
 import React from 'react';
 import { CurrentUser, AppSettings, RoomWarning, Message } from '../types';
+import { doesStudentMatchMessage } from '../utils/storage';
 import { FarhangianEmblem } from './FarhangianEmblem';
 import {
   User,
@@ -49,7 +50,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (currentUser?.role === 'student') {
       return (
         (m.senderId === currentUser.student.studentId && m.replies.length > 0) ||
-        (m.receiverId === currentUser.student.studentId && m.status !== 'answered')
+        (doesStudentMatchMessage(currentUser.student, m) &&
+          m.senderId !== currentUser.student.studentId &&
+          m.status !== 'answered')
       );
     }
     if (currentUser?.role === 'maintenance') {
@@ -66,6 +69,13 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (currentUser?.role === 'finance') {
       return (
         (m.receiverType === 'finance' || m.category === 'financial' || m.senderRole === 'finance') &&
+        m.status !== 'answered'
+      );
+    }
+    if (currentUser?.role === 'education') {
+      return (
+        !m.isConfidential &&
+        (m.receiverType === 'education' || m.category === 'education' || m.senderRole === 'education') &&
         m.status !== 'answered'
       );
     }
@@ -141,8 +151,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>راهنمای کاربری (PDF)</span>
             </button>
 
-            {/* گزارش‌ها و آمار - فقط برای مدیر، سرپرست و کادر فنی/انبار/مشاور (نه دانشجو و نه امور مالی) */}
-            {currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance' && (
+            {/* گزارش‌ها و آمار - فقط برای مدیر، سرپرست و کادر فنی/انبار/مشاور (نه دانشجو، امور مالی و کارشناس آموزش) */}
+            {currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance' && currentUser.role !== 'education' && (
               <button
                 onClick={onOpenReports}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition cursor-pointer"
@@ -198,6 +208,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ? currentUser.staff.photoUrl
                       : currentUser.role === 'finance'
                       ? currentUser.staff.photoUrl
+                      : currentUser.role === 'education'
+                      ? currentUser.staff.photoUrl
                       : currentUser.role === 'counselor'
                       ? currentUser.counselor.photoUrl
                       : undefined;
@@ -219,6 +231,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       {currentUser.role === 'warehouse' && currentUser.staff.fullName}
                       {currentUser.role === 'procurement' && currentUser.staff.fullName}
                       {currentUser.role === 'finance' && currentUser.staff.fullName}
+                      {currentUser.role === 'education' && currentUser.staff.fullName}
                       {currentUser.role === 'admin' && 'مدیر امور خوابگاه‌ها'}
                     </span>
                     {currentUser.role === 'counselor' && (
@@ -246,6 +259,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                         امور مالی و حسابداری
                       </span>
                     )}
+                    {currentUser.role === 'education' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 font-bold">
+                        کارشناس آموزش
+                      </span>
+                    )}
                     {currentUser.role === 'student' && (
                       currentUser.student.isProfileCompleted ? (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
@@ -266,6 +284,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentUser.role === 'warehouse' && 'مسئول انبار و تجهیزات'}
                     {currentUser.role === 'procurement' && (currentUser.staff.department || 'واحد کارپردازی و خرید')}
                     {currentUser.role === 'finance' && (currentUser.staff.department || 'واحد امور مالی و حسابداری')}
+                    {currentUser.role === 'education' && (currentUser.staff.department || 'واحد امور آموزشی')}
                     {currentUser.role === 'admin' && 'مدیر کل سامانه'}
                   </div>
                 </div>

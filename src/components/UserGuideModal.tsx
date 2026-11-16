@@ -88,6 +88,8 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         return <HeartHandshake className="w-5 h-5 text-rose-600 dark:text-rose-400" />;
       case 'finance':
         return <Wallet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />;
+      case 'education':
+        return <GraduationCap className="w-5 h-5 text-sky-600 dark:text-sky-400" />;
       case 'student':
         return <GraduationCap className="w-5 h-5 text-blue-600 dark:text-blue-400" />;
     }
@@ -144,7 +146,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
           </div>
 
           {/* تب‌های انتخاب نقش با استایل مشخص */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mt-5">
+          <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-9 gap-2 mt-5">
             {(
               [
                 { id: 'admin', label: 'مدیر کل پردیس', role: 'admin' as UserRoleType },
@@ -154,6 +156,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                 { id: 'warehouse', label: 'انبار و تجهیزات', role: 'warehouse' as UserRoleType },
                 { id: 'procurement', label: 'کارپرداز و خرید', role: 'procurement' as UserRoleType },
                 { id: 'finance', label: 'امور مالی و حسابداری', role: 'finance' as UserRoleType },
+                { id: 'education', label: 'کارشناس آموزش', role: 'education' as UserRoleType },
                 { id: 'student', label: 'دانشجومعلم', role: 'student' as UserRoleType },
               ] as const
             ).map((tab) => {

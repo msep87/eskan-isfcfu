@@ -20,6 +20,7 @@ import {
   CounselorShiftReport,
   FinanceStaff,
   StudentFinancialRecord,
+  EducationStaff,
 } from './types';
 import { Storage, initializeStorageIfNeeded } from './utils/storage';
 import { Navbar } from './components/Navbar';
@@ -37,6 +38,7 @@ import { WarehouseDashboard } from './components/WarehouseDashboard';
 import { ProcurementDashboard } from './components/ProcurementDashboard';
 import { CounselorDashboard } from './components/CounselorDashboard';
 import { FinanceDashboard } from './components/FinanceDashboard';
+import { EducationDashboard } from './components/EducationDashboard';
 import { AboutModal } from './components/AboutModal';
 import { UserGuideModal } from './components/UserGuideModal';
 import { AiDormAssistant } from './components/AiDormAssistant';
@@ -84,6 +86,7 @@ export default function App() {
   const [maintenanceTasks, setMaintenanceTasks] = useState<MaintenanceTask[]>(Storage.getMaintenanceTasks());
   const [warehouseStaff, setWarehouseStaff] = useState<WarehouseStaff[]>(Storage.getWarehouseStaff());
   const [financeStaff, setFinanceStaff] = useState<FinanceStaff[]>(Storage.getFinanceStaff());
+  const [educationStaff, setEducationStaff] = useState<EducationStaff[]>(Storage.getEducationStaff());
   const [studentFinances, setStudentFinances] = useState<StudentFinancialRecord[]>(Storage.getStudentFinances());
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(Storage.getInventoryItems());
   const [warehouseRequests, setWarehouseRequests] = useState<WarehouseRequest[]>(Storage.getWarehouseRequests());
@@ -107,6 +110,7 @@ export default function App() {
     setMaintenanceTasks(Storage.getMaintenanceTasks());
     setWarehouseStaff(Storage.getWarehouseStaff());
     setFinanceStaff(Storage.getFinanceStaff());
+    setEducationStaff(Storage.getEducationStaff());
     setStudentFinances(Storage.getStudentFinances());
     setInventoryItems(Storage.getInventoryItems());
     setWarehouseRequests(Storage.getWarehouseRequests());
@@ -141,6 +145,11 @@ export default function App() {
       const refreshedFin = Storage.getFinanceStaff().find((f) => f.id === user.staff.id);
       if (refreshedFin) {
         setCurrentUser({ role: 'finance', staff: refreshedFin });
+      }
+    } else if (user && user.role === 'education') {
+      const refreshedEdu = Storage.getEducationStaff().find((e) => e.id === user.staff.id);
+      if (refreshedEdu) {
+        setCurrentUser({ role: 'education', staff: refreshedEdu });
       }
     } else if (user && user.role === 'counselor') {
       const refreshedCns = Storage.getCounselors().find((c) => c.id === user.counselor.id);
@@ -312,7 +321,7 @@ export default function App() {
         messages={messages}
         onOpenAppearance={() => setIsAppearanceModalOpen(true)}
         onOpenReports={() => {
-          if (currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance') {
+          if (currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance' && currentUser.role !== 'education') {
             setIsReportsModalOpen(true);
           }
         }}
@@ -697,6 +706,19 @@ export default function App() {
           />
         )}
 
+        {/* ۹. در صورتی که کاربر کارشناس آموزش است (فقط پیام‌های آموزشی و اعلام مرخصی/اخراج به مدیر) */}
+        {currentUser?.role === 'education' && (
+          <EducationDashboard
+            staff={currentUser.staff}
+            students={students}
+            messages={messages}
+            settings={settings}
+            onRefreshData={refreshAllData}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onOpenUserGuide={(r) => handleOpenUserGuide(r || 'education')}
+          />
+        )}
+
       </main>
 
       {/* فوتر سایت */}
@@ -711,7 +733,7 @@ export default function App() {
             <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع سراهای دانشجویی</span>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3 text-[11px]">
-            {currentUser && (
+            {currentUser && currentUser.role !== 'education' && (
               <>
                 <button
                   type="button"
@@ -778,7 +800,7 @@ export default function App() {
         />
       )}
 
-      {currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance' && (
+      {currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance' && currentUser.role !== 'education' && (
         <ReportsView
           isOpen={isReportsModalOpen}
           onClose={() => setIsReportsModalOpen(false)}
@@ -844,8 +866,8 @@ export default function App() {
         </div>
       )}
 
-      {/* دستیار هوشمند خوابگاهی و آموزشی (فقط پس از ورود کاربر به کارتابل) */}
-      {currentUser && (
+      {/* دستیار هوشمند خوابگاهی و آموزشی (فقط پس از ورود کاربر به کارتابل و به جز کارشناس آموزش) */}
+      {currentUser && currentUser.role !== 'education' && (
         <AiDormAssistant
           isOpen={isAiChatOpen}
           onClose={() => setIsAiChatOpen(false)}

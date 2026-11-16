@@ -1,6 +1,7 @@
 export interface Student {
   studentId: string; // شماره دانشجویی
   nationalId: string; // کد ملی
+  password?: string; // کلمه عبور اختیاری (در صورت عدم تنظیم یا ریست، همان کد ملی خواهد بود)
   fullName: string;
   fieldOfStudy: string; // رشته تحصیلی
   entryTerm: string; // ترم ورود مثلاً ۴۰۲۱
@@ -99,6 +100,7 @@ export interface Announcement {
 }
 
 export type MessageCategory =
+  | 'education' // امور آموزشی، مرخصی تحصیلی، انتخاب واحد و مسائل دانشجویی
   | 'accommodation' // امور اسکان و انتخاب اتاق
   | 'maintenance' // خرابی تأسیسات و تعمیرات
   | 'services_cleaning' // خدمات، نظافت و بهداشت سرا
@@ -113,7 +115,7 @@ export type MessageCategory =
 export interface MessageReply {
   id: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education';
   content: string;
   date: string;
 }
@@ -122,9 +124,14 @@ export interface Message {
   id: string;
   senderId: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement';
-  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'all';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education';
+  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'all';
   receiverId?: string;
+  receiverName?: string;
+  targetScope?: 'single' | 'field' | 'entry_term';
+  targetFieldOfStudy?: string;
+  targetEntryTerm?: string;
+  recipientCount?: number;
   subject: string;
   content: string;
   category: MessageCategory;
@@ -205,6 +212,46 @@ export interface ProcurementStaff {
   status: 'active' | 'inactive';
   isActive?: boolean;
   notes?: string;
+}
+
+export interface EducationStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل کارشناس آموزش
+  department?: string; // واحد آموزش و امور دانشجویی
+  role: 'education';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
+export type AcademicNoticeType = 'academic_leave' | 'expulsion';
+
+export interface AcademicStatusNotice {
+  id: string;
+  noticeCode: string; // مثلاً EDU-101
+  studentId: string;
+  studentName: string;
+  studentNationalId?: string;
+  studentFieldOfStudy?: string;
+  studentEntryTerm?: string;
+  noticeType: AcademicNoticeType;
+  academicYear: string;
+  semester: string;
+  effectiveDate?: string;
+  letterNumber?: string;
+  description: string;
+  reportedByStaffId: string;
+  reportedByStaffName: string;
+  createdAt: string;
+  status: 'pending' | 'reviewed' | 'action_taken';
+  adminNote?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
 }
 
 export type StudentFinancialStatus =
@@ -454,6 +501,7 @@ export type CurrentUser =
   | { role: 'counselor'; counselor: CounselorStaff }
   | { role: 'finance'; staff: FinanceStaff }
   | { role: 'procurement'; staff: ProcurementStaff }
+  | { role: 'education'; staff: EducationStaff }
   | null;
 
 export type DayOfWeek = 'saturday' | 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
@@ -544,6 +592,7 @@ export type ActivityLogCategory =
   | 'warehouse'
   | 'procurement'
   | 'finance'
+  | 'education'
   | 'warning_eval'
   | 'guest'
   | 'visit_report'
@@ -618,7 +667,7 @@ export interface ActivityLog {
   timestamp: string; // ISO string برای مرتب‌سازی دقیق
   date: string; // تاریخ و ساعت شمسی خوانا
   actorName: string;
-  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'system';
+  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'system';
   actorUsername?: string;
   category: ActivityLogCategory;
   action: string;

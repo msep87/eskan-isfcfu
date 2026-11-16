@@ -223,9 +223,10 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
     setTimeout(() => setActionMessage(null), 3500);
   };
 
-  // ایجاد اتاق جدید در سرا
+  // ایجاد اتاق جدید در سرا (فقط مدیر سامانه)
   const handleCreateRoomSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (actorRole !== 'admin') return;
     if (!newRoomNumber.trim()) return;
     const res = Storage.addRoomWithBeds(selectedDormId, newRoomNumber.trim(), newRoomFloor, newRoomCapacity);
     if (res.success) {
@@ -239,8 +240,9 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
     setTimeout(() => setActionMessage(null), 3500);
   };
 
-  // حذف کامل اتاق
+  // حذف کامل اتاق (فقط مدیر سامانه)
   const handleDeleteRoom = (roomId: string, roomNumber: string) => {
+    if (actorRole !== 'admin') return;
     setConfirmDialog({
       title: `حذف کامل اتاق شماره ${roomNumber}`,
       message: `آیا از حذف کامل اتاق شماره ${roomNumber} و آزادسازی کلیه تخت‌های آن اطمینان دارید؟`,
@@ -254,9 +256,10 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
     });
   };
 
-  // ویرایش و تغییر نام / شماره اتاق
+  // ویرایش و تغییر نام / شماره اتاق (فقط مدیر سامانه)
   const handleEditRoomSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (actorRole !== 'admin') return;
     if (!editingRoomModal) return;
     const res = Storage.updateRoom(editingRoomModal.id, {
       roomNumber: editRoomNumberInput.trim(),
@@ -421,13 +424,15 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
               <Printer className="w-3.5 h-3.5" />
               <span>چاپ لیست اتاق‌ها (A4 / A5)</span>
             </button>
-            <button
-              onClick={() => setIsCreateRoomModalOpen(true)}
-              className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>ثبت اتاق جدید</span>
-            </button>
+            {actorRole === 'admin' && (
+              <button
+                onClick={() => setIsCreateRoomModalOpen(true)}
+                className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>ثبت اتاق جدید</span>
+              </button>
+            )}
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -551,26 +556,30 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                     <Printer className="w-3.5 h-3.5" />
                     <span>چاپ لیست اتاق</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingRoomModal(room);
-                      setEditRoomNumberInput(room.roomNumber);
-                      setEditRoomFloorInput(room.floor ?? 1);
-                      setEditRoomError(null);
-                    }}
-                    className="p-1.5 text-slate-400 hover:text-amber-600 transition cursor-pointer rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950"
-                    title="تغییر نام / شماره و طبقه اتاق"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleDeleteRoom(room.id, room.roomNumber)}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 transition cursor-pointer rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950"
-                    title="حذف کامل این اتاق و تخت‌های آن"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {actorRole === 'admin' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingRoomModal(room);
+                          setEditRoomNumberInput(room.roomNumber);
+                          setEditRoomFloorInput(room.floor ?? 1);
+                          setEditRoomError(null);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-amber-600 transition cursor-pointer rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950"
+                        title="تغییر نام / شماره و طبقه اتاق"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteRoom(room.id, room.roomNumber)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 transition cursor-pointer rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950"
+                        title="حذف کامل این اتاق و تخت‌های آن"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1028,8 +1037,8 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
         </div>
       )}
 
-      {/* مدال ثبت اتاق جدید در سرا توسط مدیر یا سرپرست */}
-      {isCreateRoomModalOpen && (
+      {/* مدال ثبت اتاق جدید در سرا (فقط مدیر سامانه) */}
+      {actorRole === 'admin' && isCreateRoomModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
@@ -1115,8 +1124,8 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
         </div>
       )}
 
-      {/* مدال تغییر نام / شماره اتاق */}
-      {editingRoomModal && (
+      {/* مدال تغییر نام / شماره اتاق (فقط مدیر سامانه) */}
+      {actorRole === 'admin' && editingRoomModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">

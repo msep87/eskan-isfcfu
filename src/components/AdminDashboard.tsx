@@ -27,6 +27,8 @@ import {
   WarehouseRequest,
   ProcurementRequest,
   HomeNoteItem,
+  EducationStaff,
+  AcademicStatusNotice,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { ExcelImportTab } from './ExcelImportModal';
@@ -124,6 +126,7 @@ import {
   Package,
   Info,
   AlertCircle,
+  FileWarning,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -143,7 +146,7 @@ interface AdminDashboardProps {
   onOpenAppearance: () => void;
   onOpenChangePassword: () => void;
   onUpdateSettings: (newSettings: AppSettings) => void;
-  onOpenUserGuide?: (role: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'student') => void;
+  onOpenUserGuide?: (role: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' | 'student') => void;
   cloudSyncTick?: number;
 }
 
@@ -224,16 +227,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [shiftDayFilter, setShiftDayFilter] = useState('all');
   const [shiftFeedback, setShiftFeedback] = useState<string | null>(null);
 
-  // فهرست پرسنل انبار، کارپردازی و امور مالی
+  // فهرست پرسنل انبار، کارپردازی، امور مالی و کارشناسان آموزش
   const [warehouseStaffList, setWarehouseStaffList] = useState<WarehouseStaff[]>(Storage.getWarehouseStaff());
   const [procurementStaffList, setProcurementStaffList] = useState<ProcurementStaff[]>(Storage.getProcurementStaff());
   const [financeStaffList, setFinanceStaffList] = useState<FinanceStaff[]>(Storage.getFinanceStaff());
+  const [educationStaffList, setEducationStaffList] = useState<EducationStaff[]>(Storage.getEducationStaff());
+  const [academicNotices, setAcademicNotices] = useState<AcademicStatusNotice[]>(Storage.getAcademicNotices());
+  const [academicNoticeFilter, setAcademicNoticeFilter] = useState<'all' | 'pending' | 'reviewed' | 'action_taken'>('all');
+  const [academicNoticeNotes, setAcademicNoticeNotes] = useState<Record<string, string>>({});
 
   const handleUsersRefresh = () => {
     setCounselorsList(Storage.getCounselors());
     setWarehouseStaffList(Storage.getWarehouseStaff());
     setProcurementStaffList(Storage.getProcurementStaff());
     setFinanceStaffList(Storage.getFinanceStaff());
+    setEducationStaffList(Storage.getEducationStaff());
+    setAcademicNotices(Storage.getAcademicNotices());
     onRefreshData();
   };
 
@@ -250,6 +259,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setWarehouseStaffList(Storage.getWarehouseStaff());
     setProcurementStaffList(Storage.getProcurementStaff());
     setFinanceStaffList(Storage.getFinanceStaff());
+    setEducationStaffList(Storage.getEducationStaff());
+    setAcademicNotices(Storage.getAcademicNotices());
   }, [cloudSyncTick]);
 
   // فرم ثبت شیفت دستی جدید توسط مدیر
@@ -2017,7 +2028,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <Users className="w-4 h-4 text-teal-600" />
           <span>مدیریت کاربران سامانه</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
-            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length}
+            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length + educationStaffList.length}
           </span>
         </button>
 
@@ -2037,7 +2048,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </span>
         </button>
 
-        {/* ۴. تب درخواست‌های اسکان و مهمان */}
+        {/* ۴. تب درخواست‌های اسکان، مهمان و آموزش */}
         <button
           onClick={() => setMainTab('requests')}
           className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
@@ -2047,10 +2058,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }`}
         >
           <Clock className="w-4 h-4 text-amber-500" />
-          <span>درخواست‌های اسکان و مهمان</span>
-          {(pendingStudents.length + Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length) > 0 && (
+          <span>درخواست‌های اسکان، مهمان و آموزش</span>
+          {(pendingStudents.length +
+            Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length +
+            academicNotices.filter((n) => n.status === 'pending').length) > 0 && (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-white font-black animate-pulse">
-              {pendingStudents.length + Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length}
+              {pendingStudents.length +
+                Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length +
+                academicNotices.filter((n) => n.status === 'pending').length}
             </span>
           )}
         </button>
@@ -2166,6 +2181,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           counselors={counselorsList}
           financeStaff={financeStaffList}
           procurementStaff={procurementStaffList}
+          educationStaff={educationStaffList}
           onRefreshData={handleUsersRefresh}
           onOpenExcelModal={onOpenExcelModal}
           onOpenReports={onOpenReports}
@@ -3397,6 +3413,211 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           actorName="مدیر کل سامانه"
           onDataChanged={onRefreshData}
         />
+
+        {/* اعلامیه‌های مرخصی تحصیلی و اخراج دانشجویان ارسالی از کارشناس آموزش */}
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2.5 rounded-2xl bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                <FileWarning className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    اعلامیه‌های مرخصی تحصیلی و اخراج (از کارشناس آموزش)
+                  </h3>
+                  {academicNotices.filter((n) => n.status === 'pending').length > 0 && (
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-bold animate-pulse">
+                      {academicNotices.filter((n) => n.status === 'pending').length} اعلامیه جدید
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  گزارش‌های وضعیت تحصیلی (مرخصی ترم یا اخراج) اعلام‌شده توسط کارشناس آموزش جهت بررسی و لغو/بروزرسانی اسکان
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
+              {(
+                [
+                  { key: 'all', label: `همه (${academicNotices.length})` },
+                  { key: 'pending', label: 'در انتظار بررسی' },
+                  { key: 'reviewed', label: 'بررسی شد' },
+                  { key: 'action_taken', label: 'اقدام نهایی شد' },
+                ] as const
+              ).map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setAcademicNoticeFilter(item.key)}
+                  className={`px-3 py-1.5 rounded-xl border transition cursor-pointer ${
+                    academicNoticeFilter === item.key
+                      ? 'bg-rose-600 text-white border-rose-600'
+                      : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(() => {
+            const visibleNotices = academicNotices.filter(
+              (n) => academicNoticeFilter === 'all' || n.status === academicNoticeFilter
+            );
+            if (visibleNotices.length === 0) {
+              return (
+                <div className="p-8 text-center text-xs text-slate-400 bg-slate-50/60 dark:bg-slate-800/30 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                  اعلامیه مرخصی تحصیلی یا اخراجی در این دسته ثبت نشده است.
+                </div>
+              );
+            }
+            return (
+              <div className="space-y-3">
+                {visibleNotices.map((notice) => {
+                  const st = students.find((s) => s.studentId === notice.studentId);
+                  const room = st?.assignedRoomId ? rooms.find((r) => r.id === st.assignedRoomId) : undefined;
+                  const dorm = st?.assignedDormId ? dorms.find((d) => d.id === st.assignedDormId) : undefined;
+                  const noteValue =
+                    academicNoticeNotes[notice.id] !== undefined
+                      ? academicNoticeNotes[notice.id]
+                      : notice.adminNote || '';
+
+                  return (
+                    <div
+                      key={notice.id}
+                      className={`p-4 rounded-2xl border text-xs space-y-3 ${
+                        notice.noticeType === 'expulsion'
+                          ? 'bg-rose-50/40 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50'
+                          : 'bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono font-bold px-2 py-0.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                            {notice.noticeCode}
+                          </span>
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full font-extrabold text-[11px] ${
+                              notice.noticeType === 'expulsion'
+                                ? 'bg-rose-600 text-white'
+                                : 'bg-amber-500 text-white'
+                            }`}
+                          >
+                            {notice.noticeType === 'expulsion' ? 'اخراج / محرومیت از تحصیل' : 'مرخصی تحصیلی در ترم'}
+                          </span>
+                          <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                            {notice.studentName}
+                          </span>
+                          <span className="font-mono text-slate-500">({notice.studentId})</span>
+                        </div>
+
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                            notice.status === 'action_taken'
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                              : notice.status === 'reviewed'
+                              ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                              : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                          }`}
+                        >
+                          {notice.status === 'action_taken'
+                            ? 'اقدام نهایی شد'
+                            : notice.status === 'reviewed'
+                            ? 'بررسی شد'
+                            : 'در انتظار بررسی'}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3 text-[11px] text-slate-600 dark:text-slate-300">
+                        <span>اعلام‌کننده: {notice.reportedByStaffName} (کارشناس آموزش)</span>
+                        <span>رشته: {notice.studentFieldOfStudy || '-'}</span>
+                        <span>ورودی: {notice.studentEntryTerm || '-'}</span>
+                        <span>
+                          سال و نیمسال: {notice.academicYear} ({notice.semester})
+                        </span>
+                        <span>تاریخ اجرا: {notice.effectiveDate}</span>
+                        {notice.letterNumber && <span>شماره نامه: {notice.letterNumber}</span>}
+                        {st?.assignedBedId ? (
+                          <span className="font-bold text-teal-700 dark:text-teal-300">
+                            اسکان فعلی: {dorm?.name || 'سرا'} - اتاق {room?.roomNumber || '—'}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">وضعیت فعلی: فاقد تخت خوابگاهی</span>
+                        )}
+                      </div>
+
+                      <p className="p-3 rounded-xl bg-white/80 dark:bg-slate-900/70 border border-slate-200/70 dark:border-slate-800 text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">
+                        {notice.description}
+                      </p>
+
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                        <input
+                          type="text"
+                          value={noteValue}
+                          onChange={(e) =>
+                            setAcademicNoticeNotes((prev) => ({
+                              ...prev,
+                              [notice.id]: e.target.value,
+                            }))
+                          }
+                          placeholder="یادداشت یا نتیجه اقدام مدیر برای کارشناس آموزش..."
+                          className="flex-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              Storage.updateAcademicNoticeStatus(
+                                notice.id,
+                                'reviewed',
+                                noteValue.trim() || undefined,
+                                'مدیر کل سامانه'
+                              );
+                              setAcademicNotices(Storage.getAcademicNotices());
+                              onRefreshData();
+                            }}
+                            className="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs cursor-pointer"
+                          >
+                            ثبت بررسی شد
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              Storage.updateAcademicNoticeStatus(
+                                notice.id,
+                                'action_taken',
+                                noteValue.trim() || undefined,
+                                'مدیر کل سامانه'
+                              );
+                              setAcademicNotices(Storage.getAcademicNotices());
+                              onRefreshData();
+                            }}
+                            className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer"
+                          >
+                            ثبت اقدام نهایی
+                          </button>
+                          {st?.assignedBedId && (
+                            <button
+                              type="button"
+                              onClick={() => handleAdminEvictStudent(st)}
+                              className="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer"
+                              title="آزادسازی فوری تخت دانشجو به دلیل مرخصی تحصیلی یا اخراج"
+                            >
+                              آزادسازی تخت و لغو اسکان
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
         </div>
       )}
 
@@ -5846,6 +6067,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { key: 'procurement' as const, label: `کارپرداز (${procurementStaffList.length})` },
                 { key: 'counselors' as const, label: `مشاوران (${counselorsList.length})` },
                 { key: 'finance' as const, label: `امور مالی (${financeStaffList.length})` },
+                { key: 'education' as const, label: `کارشناس آموزش (${educationStaffList.length})` },
               ].map((item) => (
                 <button
                   key={item.key}

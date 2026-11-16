@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 
 export type RosterPaperSize = 'A4' | 'A5';
+export type RosterOrientation = 'portrait' | 'landscape';
 
 export interface RosterPrintableFields {
   photo: boolean;
@@ -121,6 +122,11 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
   actorTitle = 'مدیریت و سرپرستی امور سراها',
 }) => {
   const [paperSize, setPaperSize] = useState<RosterPaperSize>('A4');
+  const [orientation, setOrientation] = useState<RosterOrientation>('portrait');
+  const [marginTop, setMarginTop] = useState<number>(8);
+  const [marginRight, setMarginRight] = useState<number>(8);
+  const [marginBottom, setMarginBottom] = useState<number>(8);
+  const [marginLeft, setMarginLeft] = useState<number>(8);
   const [fields, setFields] = useState<RosterPrintableFields>(DEFAULT_ROSTER_FIELDS);
   const [filterDormId, setFilterDormId] = useState<string>(initialDormId || 'all');
   const [filterFloor, setFilterFloor] = useState<string>('all');
@@ -491,12 +497,12 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
 <head>
   <meta charset="UTF-8" />
   <base href="${window.location.origin}/" />
-  <title>چاپ لیست ساکنین اتاق‌ها (${paperSize})</title>
+  <title>چاپ لیست ساکنین اتاق‌ها (${paperSize} - ${orientation === 'landscape' ? 'افقی' : 'عمودی'})</title>
   ${headLinks}
   <style>
     @page {
-      size: ${paperSize} portrait;
-      margin: ${isA5 ? '6mm' : '8mm'};
+      size: ${paperSize} ${orientation};
+      margin: ${marginTop}mm ${marginRight}mm ${marginBottom}mm ${marginLeft}mm;
     }
     * {
       box-sizing: border-box;
@@ -644,7 +650,7 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
     }
     .students-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(${orientation === 'landscape' ? 3 : 2}, minmax(0, 1fr));
       gap: ${isA5 ? '6px' : '9px'};
     }
     .room-sheet.dense .students-grid {
@@ -870,7 +876,9 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
               <span>
                 {isPrinting
                   ? 'در حال آماده‌سازی چاپ...'
-                  : `چاپ ${selectedPreparedRooms.length.toLocaleString('fa-IR')} اتاق (${paperSize})`}
+                  : `چاپ ${selectedPreparedRooms.length.toLocaleString('fa-IR')} اتاق (${paperSize} ${
+                      orientation === 'landscape' ? 'افقی' : 'عمودی'
+                    })`}
               </span>
             </button>
 
@@ -889,16 +897,22 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
           {/* ستون سمت راست: تنظیمات صفحه، فیلدهای قابل چاپ و انتخاب اتاق‌ها */}
           <div className="lg:col-span-4 border-b lg:border-b-0 lg:border-l border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 overflow-y-auto p-4 space-y-5 text-xs max-h-[38vh] lg:max-h-none">
-            {/* ۱. انتخاب اندازه کاغذ A4 یا A5 */}
-            <div className="space-y-2">
+            {/* ۱. انتخاب اندازه کاغذ، جهت صفحه و حاشیه (Margin) */}
+            <div className="space-y-3">
               <div className="font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
                 <FileText className="w-4 h-4 text-teal-600" />
-                <span>ابعاد برگه چاپ:</span>
+                <span>ابعاد، جهت و حاشیه برگه چاپ:</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setPaperSize('A4')}
+                  onClick={() => {
+                    setPaperSize('A4');
+                    setMarginTop(8);
+                    setMarginRight(8);
+                    setMarginBottom(8);
+                    setMarginLeft(8);
+                  }}
                   className={`p-2.5 rounded-xl border font-bold transition cursor-pointer text-center ${
                     paperSize === 'A4'
                       ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
@@ -913,7 +927,13 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => setPaperSize('A5')}
+                  onClick={() => {
+                    setPaperSize('A5');
+                    setMarginTop(6);
+                    setMarginRight(6);
+                    setMarginBottom(6);
+                    setMarginLeft(6);
+                  }}
                   className={`p-2.5 rounded-xl border font-bold transition cursor-pointer text-center ${
                     paperSize === 'A5'
                       ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
@@ -925,6 +945,109 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
                     ۱۴۸ × ۲۱۰ میلی‌متر (نصف A4 / نصب در اتاق)
                   </div>
                 </button>
+              </div>
+
+              {/* انتخاب جهت عمودی / افقی */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOrientation('portrait')}
+                  className={`p-2 rounded-xl border font-bold text-[11px] transition cursor-pointer text-center ${
+                    orientation === 'portrait'
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  چاپ عمودی (Portrait)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOrientation('landscape')}
+                  className={`p-2 rounded-xl border font-bold text-[11px] transition cursor-pointer text-center ${
+                    orientation === 'landscape'
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  چاپ افقی (Landscape)
+                </button>
+              </div>
+
+              {/* تنظیم حاشیه / مارجین صفحه به میلی‌متر */}
+              <div className="p-3 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-[11px] text-slate-700 dark:text-slate-200">
+                    تنظیم حاشیه صفحه (میلی‌متر):
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {[
+                      { label: 'فشرده (۴)', val: 4 },
+                      { label: 'استاندارد (۸)', val: 8 },
+                      { label: 'وسیع (۱۵)', val: 15 },
+                    ].map((preset) => (
+                      <button
+                        key={preset.val}
+                        type="button"
+                        onClick={() => {
+                          setMarginTop(preset.val);
+                          setMarginRight(preset.val);
+                          setMarginBottom(preset.val);
+                          setMarginLeft(preset.val);
+                        }}
+                        className="px-1.5 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-teal-100 dark:hover:bg-teal-900/50 text-[10px] font-bold text-slate-600 dark:text-slate-200 cursor-pointer"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+                  <label className="block">
+                    <span className="text-slate-500 block mb-0.5">بالا</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={40}
+                      value={marginTop}
+                      onChange={(e) => setMarginTop(Math.max(0, Math.min(40, Number(e.target.value) || 0)))}
+                      className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-center font-mono font-bold"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-slate-500 block mb-0.5">راست</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={40}
+                      value={marginRight}
+                      onChange={(e) => setMarginRight(Math.max(0, Math.min(40, Number(e.target.value) || 0)))}
+                      className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-center font-mono font-bold"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-slate-500 block mb-0.5">پایین</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={40}
+                      value={marginBottom}
+                      onChange={(e) => setMarginBottom(Math.max(0, Math.min(40, Number(e.target.value) || 0)))}
+                      className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-center font-mono font-bold"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-slate-500 block mb-0.5">چپ</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={40}
+                      value={marginLeft}
+                      onChange={(e) => setMarginLeft(Math.max(0, Math.min(40, Number(e.target.value) || 0)))}
+                      className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-center font-mono font-bold"
+                    />
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -1129,14 +1252,28 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
                     <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-2">
                       <span>
                         برگه {(sheetIdx + 1).toLocaleString('fa-IR')} از{' '}
-                        {selectedPreparedRooms.length.toLocaleString('fa-IR')} • ابعاد {paperSize}
+                        {selectedPreparedRooms.length.toLocaleString('fa-IR')} • ابعاد {paperSize} (
+                        {orientation === 'landscape' ? 'افقی' : 'عمودی'}) • حاشیه:{' '}
+                        {marginTop}/{marginRight}/{marginBottom}/{marginLeft} mm
                       </span>
                     </div>
 
                     {/* شبیه‌سازی دقیق برگه کاغذ سفید A4 / A5 */}
                     <div
+                      style={{
+                        paddingTop: `${Math.max(8, marginTop * 2)}px`,
+                        paddingRight: `${Math.max(8, marginRight * 2)}px`,
+                        paddingBottom: `${Math.max(8, marginBottom * 2)}px`,
+                        paddingLeft: `${Math.max(8, marginLeft * 2)}px`,
+                      }}
                       className={`w-full bg-white text-slate-900 rounded-2xl shadow-xl border border-slate-300 ${
-                        isA5 ? 'max-w-[540px] p-3.5' : 'max-w-[780px] p-5'
+                        orientation === 'landscape'
+                          ? isA5
+                            ? 'max-w-[760px]'
+                            : 'max-w-[980px]'
+                          : isA5
+                          ? 'max-w-[540px]'
+                          : 'max-w-[780px]'
                       }`}
                     >
                       {/* سربرگ برگه اتاق */}
@@ -1237,7 +1374,11 @@ export const RoomRosterPrintModal: React.FC<RoomRosterPrintModalProps> = ({
                           این اتاق در حال حاضر فاقد دانشجوی ساکن است.
                         </div>
                       ) : (
-                        <div className={`grid grid-cols-1 sm:grid-cols-2 ${isA5 ? 'gap-2' : 'gap-3'}`}>
+                        <div
+                          className={`grid grid-cols-1 ${
+                            orientation === 'landscape' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+                          } ${isA5 ? 'gap-2' : 'gap-3'}`}
+                        >
                           {prep.orderedMembers.map(
                             ({ student: st, bed, isRepresentative, isAutoDefaultRep }, idx) => (
                               <div

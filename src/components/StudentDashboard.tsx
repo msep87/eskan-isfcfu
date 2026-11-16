@@ -480,6 +480,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           <HeartHandshake className="w-4 h-4 text-emerald-200" />
           <span>درخواست مشاوره و پیام به مشاور مرکز</span>
         </button>
+
+        <button
+          onClick={onOpenMessages}
+          className="py-3.5 px-5 rounded-2xl bg-gradient-to-r from-sky-600 to-blue-700 hover:from-sky-700 hover:to-blue-800 text-white font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-sky-700/20"
+          title="طرح سوالات، مشکلات و درخواست‌های آموزشی با کارشناس آموزش"
+        >
+          <GraduationCap className="w-4 h-4 text-sky-200" />
+          <span>سوالات و مشکلات آموزشی (کارشناس آموزش)</span>
+        </button>
       </div>
 
       {/* اطلاعیه‌های دانشگاه و سرا در صفحه اول داشبورد */}

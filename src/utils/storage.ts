@@ -14,6 +14,9 @@ import {
   WarehouseStaff,
   FinanceStaff,
   ProcurementStaff,
+  EducationStaff,
+  AcademicStatusNotice,
+  AcademicNoticeType,
   StudentFinancialRecord,
   StudentFinancialStatus,
   InventoryItem,
@@ -46,6 +49,8 @@ import {
   INITIAL_WAREHOUSE_STAFF,
   INITIAL_FINANCE_STAFF,
   INITIAL_PROCUREMENT_STAFF,
+  INITIAL_EDUCATION_STAFF,
+  INITIAL_ACADEMIC_NOTICES,
   INITIAL_STUDENT_FINANCES,
   INITIAL_INVENTORY_ITEMS,
   INITIAL_INVENTORY_TRANSACTIONS,
@@ -81,6 +86,8 @@ const STORAGE_KEYS = {
   WAREHOUSE_STAFF: 'farhangian_dorm_warehouse_staff_prod',
   FINANCE_STAFF: 'farhangian_dorm_finance_staff_prod',
   PROCUREMENT_STAFF: 'farhangian_dorm_procurement_staff_prod',
+  EDUCATION_STAFF: 'farhangian_dorm_education_staff_prod',
+  ACADEMIC_NOTICES: 'farhangian_dorm_academic_notices_prod',
   STUDENT_FINANCES: 'farhangian_dorm_student_finances_prod',
   INVENTORY_ITEMS: 'farhangian_dorm_inventory_items_prod',
   INVENTORY_TRANSACTIONS: 'farhangian_dorm_inventory_transactions_prod',
@@ -180,6 +187,8 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.STUDENT_EVALUATIONS, INITIAL_STUDENT_EVALUATIONS);
   setIfMissing(STORAGE_KEYS.FINANCE_STAFF, INITIAL_FINANCE_STAFF);
   setIfMissing(STORAGE_KEYS.PROCUREMENT_STAFF, INITIAL_PROCUREMENT_STAFF);
+  setIfMissing(STORAGE_KEYS.EDUCATION_STAFF, INITIAL_EDUCATION_STAFF);
+  setIfMissing(STORAGE_KEYS.ACADEMIC_NOTICES, INITIAL_ACADEMIC_NOTICES);
   setIfMissing(STORAGE_KEYS.STUDENT_FINANCES, INITIAL_STUDENT_FINANCES);
   setIfMissing(STORAGE_KEYS.INVENTORY_TRANSACTIONS, INITIAL_INVENTORY_TRANSACTIONS);
   setIfMissing(STORAGE_KEYS.PROCUREMENT_REQUESTS, INITIAL_PROCUREMENT_REQUESTS);
@@ -309,6 +318,46 @@ function normalizeLookupKey(raw: string | number | null | undefined): string {
     .toLowerCase();
 }
 
+export function normalizeAsciiDigits(raw: string | number | null | undefined): string {
+  return String(raw ?? '')
+    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .trim();
+}
+
+export function normalizePersianSearch(raw: string | number | null | undefined): string {
+  return normalizeAsciiDigits(raw)
+    .replace(/[ي]/g, 'ی')
+    .replace(/[ك]/g, 'ک')
+    .replace(/[ۀة]/g, 'ه')
+    .replace(/\u200c/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+export function doesStudentMatchMessage(student: Student, msg: Message): boolean {
+  const sid = normalizeAsciiDigits(student.studentId);
+  if (sid && (normalizeAsciiDigits(msg.senderId) === sid || normalizeAsciiDigits(msg.receiverId) === sid)) {
+    return true;
+  }
+  if (msg.receiverType === 'student') {
+    if (msg.targetScope === 'field' && msg.targetFieldOfStudy) {
+      return (
+        normalizePersianSearch(msg.targetFieldOfStudy) !== '' &&
+        normalizePersianSearch(msg.targetFieldOfStudy) === normalizePersianSearch(student.fieldOfStudy)
+      );
+    }
+    if (msg.targetScope === 'entry_term' && msg.targetEntryTerm) {
+      return (
+        normalizeAsciiDigits(msg.targetEntryTerm) !== '' &&
+        normalizeAsciiDigits(msg.targetEntryTerm) === normalizeAsciiDigits(student.entryTerm)
+      );
+    }
+  }
+  return false;
+}
+
 export function compressAvatarImageFile(
   file: File,
   maxDim = 360,
@@ -385,6 +434,7 @@ function normalizeStudentRecord(raw: Record<string, unknown>): Student {
     previousDorm: String(r.previousDorm ?? ''),
     previousRoom: String(r.previousRoom ?? ''),
     previousScore: typeof r.previousScore === 'number' ? r.previousScore : 100,
+    password: r.password ? String(r.password) : undefined,
     isProfileCompleted: Boolean(r.isProfileCompleted),
     assignmentStatus: r.assignmentStatus || 'none',
   };
@@ -1406,7 +1456,7 @@ export const Storage = {
 
   // تطبیق و اتصال دسته‌جمعی عکس‌های پرسنل و کادر بر اساس نام/کد کاربری
   batchAssignStaffPhotos: (
-    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement',
+    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education',
     photoMap: Record<string, string>
   ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     let matchedCount = 0;
@@ -1538,6 +1588,25 @@ export const Storage = {
           if (ref) Storage.setCurrentUser({ role: 'procurement', staff: ref });
         }
       }
+    } else if (role === 'education') {
+      const list = Storage.getEducationStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setEducationStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'education') {
+          const ref = list.find((e) => e.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'education', staff: ref });
+        }
+      }
     }
 
     if (matchedCount > 0 && saved) {
@@ -1548,6 +1617,7 @@ export const Storage = {
         counselor: 'مشاوران',
         finance: 'امور مالی و حسابداری',
         procurement: 'کارپرداز و خرید',
+        education: 'کارشناسان آموزش',
       };
       Storage.addActivityLog({
         category: 'staff',
@@ -1629,7 +1699,7 @@ export const Storage = {
     messageId: string,
     reply: {
       senderName: string;
-      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement';
+      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education';
       content: string;
       date: string;
     }
@@ -1882,6 +1952,8 @@ export const Storage = {
       studentEvaluations: Storage.getStudentEvaluations(),
       financeStaff: Storage.getFinanceStaff(),
       studentFinances: Storage.getStudentFinances(),
+      educationStaff: Storage.getEducationStaff(),
+      academicNotices: Storage.getAcademicNotices(),
       guestRequests: Storage.getGuestRequests(),
       visitReports: Storage.getVisitReports(),
       exportedAt: new Date().toISOString(),
@@ -1946,6 +2018,8 @@ export const Storage = {
       if (Array.isArray(data.studentEvaluations)) Storage.setStudentEvaluations(data.studentEvaluations);
       if (Array.isArray(data.financeStaff)) Storage.setFinanceStaff(data.financeStaff);
       if (Array.isArray(data.studentFinances)) Storage.setStudentFinances(data.studentFinances);
+      if (Array.isArray(data.educationStaff)) Storage.setEducationStaff(data.educationStaff);
+      if (Array.isArray(data.academicNotices)) Storage.setAcademicNotices(data.academicNotices);
       if (Array.isArray(data.guestRequests)) Storage.setGuestRequests(data.guestRequests);
       if (Array.isArray(data.visitReports)) Storage.setVisitReports(data.visitReports);
 
@@ -2202,7 +2276,7 @@ export const Storage = {
 
   // تغییر کلمه عبور برای تمام نقش‌ها
   changePassword: (
-    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement',
+    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education',
     userId: string,
     currentPasswordInput: string,
     newPasswordInput: string
@@ -2358,17 +2432,50 @@ export const Storage = {
       return { success: true, message: 'کلمه عبور کارپرداز با موفقیت تغییر یافت.' };
     }
 
+    if (role === 'education') {
+      const staffList = Storage.getEducationStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) {
+        return { success: false, message: 'کارشناس آموزش یافت نشد.' };
+      }
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی کارشناس آموزش اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setEducationStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور کارشناس آموزش',
+        details: `کلمه عبور کارشناس آموزش ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور کارشناس آموزش با موفقیت تغییر یافت.' };
+    }
+
     if (role === 'student') {
       const students = Storage.getStudents();
-      const st = students.find((s) => s.studentId === userId);
-      if (!st) {
+      const idx = students.findIndex((s) => s.studentId === userId);
+      if (idx === -1) {
         return { success: false, message: 'دانشجو یافت نشد.' };
       }
-      if (normalizeDigits(st.nationalId) !== cleanCurrentPass) {
-        return { success: false, message: 'کلمه عبور (کد ملی) فعلی اشتباه است.' };
+      const st = students[idx];
+      const effectivePass = normalizeDigits(st.password || st.nationalId);
+      if (effectivePass !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی اشتباه است.' };
       }
-      st.nationalId = cleanNewPass;
+      const cleanNat = normalizeDigits(st.nationalId);
+      const updatedStudent: Student = { ...st };
+      if (cleanNat && cleanNewPass === cleanNat) {
+        delete updatedStudent.password;
+      } else {
+        updatedStudent.password = cleanNewPass;
+      }
+      students[idx] = updatedStudent;
       Storage.setStudents(students);
+      const currentUser = Storage.getCurrentUser();
+      if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === updatedStudent.studentId) {
+        Storage.setCurrentUser({ role: 'student', student: updatedStudent });
+      }
       Storage.addActivityLog({
         category: 'auth',
         action: 'تغییر کلمه عبور دانشجو',
@@ -2381,9 +2488,275 @@ export const Storage = {
     return { success: false, message: 'خطای نامشخص در تغییر کلمه عبور' };
   },
 
+  // تولید دو سوال امنیتی سه‌گزینه‌ای (نام پدر و تاریخ تولد) جهت بازیابی رمز عبور دانشجو
+  getStudentRecoveryQuestions: (
+    studentIdInput: string
+  ): {
+    success: boolean;
+    message: string;
+    studentId?: string;
+    studentFullName?: string;
+    fatherOptions?: string[];
+    birthDateOptions?: string[];
+  } => {
+    const toAsciiDigits = (val: string) =>
+      val
+        .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+        .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+        .trim();
+
+    const normPersian = (val: string) =>
+      val
+        .replace(/[ي]/g, 'ی')
+        .replace(/[ك]/g, 'ک')
+        .replace(/[ۀة]/g, 'ه')
+        .replace(/\u200c/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const normDate = (val: string) => {
+      const ascii = toAsciiDigits(val).replace(/[-.]/g, '/');
+      const m = ascii.match(/^(\d{2,4})\/(\d{1,2})\/(\d{1,2})$/);
+      if (!m) return ascii.replace(/\s+/g, '');
+      const y = m[1].length === 2 ? `13${m[1]}` : m[1];
+      const mo = String(Number(m[2])).padStart(2, '0');
+      const da = String(Number(m[3])).padStart(2, '0');
+      return `${y}/${mo}/${da}`;
+    };
+
+    const shuffleArray = <T,>(arr: T[]): T[] => {
+      const copy = [...arr];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    };
+
+    const cleanSid = toAsciiDigits(studentIdInput);
+    if (!cleanSid) {
+      return { success: false, message: 'لطفاً شماره دانشجویی خود را وارد نمایید.' };
+    }
+
+    const students = Storage.getStudents();
+    const student = students.find((s) => toAsciiDigits(String(s.studentId || '')) === cleanSid);
+    if (!student) {
+      return { success: false, message: 'دانشجویی با این شماره دانشجویی در سامانه یافت نشد.' };
+    }
+
+    if (!toAsciiDigits(String(student.nationalId || ''))) {
+      return {
+        success: false,
+        message: 'کد ملی برای این دانشجو در سامانه ثبت نشده است. لطفاً با سرپرست سرا یا مدیر سامانه تماس بگیرید.',
+      };
+    }
+
+    const correctFather = normPersian(String(student.fatherName || ''));
+    const rawBirthDate = String(student.birthDate || '').trim();
+    const correctBirthDate = normDate(rawBirthDate);
+
+    if (correctFather.length < 2 || !correctBirthDate) {
+      return {
+        success: false,
+        message:
+          'اطلاعات هویتی (نام پدر یا تاریخ تولد) برای این دانشجو در سامانه تکمیل نشده است. لطفاً از طریق مدیر سامانه یا سرپرست سرا رمز خود را بازنشانی نمایید.',
+      };
+    }
+
+    // گزینه‌های نام پدر (۱ صحیح + ۲ گزینه انحرافی معتبر)
+    const fallbackFatherNames = [
+      'محمد',
+      'علی',
+      'حسین',
+      'رضا',
+      'حسن',
+      'مهدی',
+      'احمد',
+      'اکبر',
+      'محمود',
+      'جواد',
+      'جعفر',
+      'حمید',
+      'ناصر',
+      'مسعود',
+      'کریم',
+      'صادق',
+      'مجید',
+      'سعید',
+      'عباس',
+      'ابراهیم',
+      'اسماعیل',
+      'مصطفی',
+      'مرتضی',
+      'باقر',
+    ];
+    const studentFatherPool = shuffleArray(
+      students
+        .map((s) => normPersian(String(s.fatherName || '')))
+        .filter((f) => f.length >= 2 && f !== correctFather)
+    );
+    const mergedFatherCandidates = [...studentFatherPool, ...shuffleArray(fallbackFatherNames)];
+    const fatherSet = new Set<string>([correctFather]);
+    const fatherDistractors: string[] = [];
+    for (const candidate of mergedFatherCandidates) {
+      const cleanCand = normPersian(candidate);
+      if (cleanCand.length >= 2 && !fatherSet.has(cleanCand)) {
+        fatherSet.add(cleanCand);
+        fatherDistractors.push(cleanCand);
+        if (fatherDistractors.length === 2) break;
+      }
+    }
+    const fatherOptions = shuffleArray([correctFather, ...fatherDistractors]);
+
+    // گزینه‌های تاریخ تولد (۱ صحیح + ۲ گزینه انحرافی نزدیک و واقعی)
+    const birthSet = new Set<string>([correctBirthDate]);
+    const birthDistractors: string[] = [];
+    const parsedMatch = correctBirthDate.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+    const baseYear = parsedMatch ? Number(parsedMatch[1]) : 1383;
+    const baseMonth = parsedMatch ? Number(parsedMatch[2]) : 4;
+    const baseDay = parsedMatch ? Number(parsedMatch[3]) : 15;
+
+    const candidateBirthPool = shuffleArray(
+      students
+        .map((s) => normDate(String(s.birthDate || '')))
+        .filter((d) => /^\d{4}\/\d{2}\/\d{2}$/.test(d) && d !== correctBirthDate)
+    );
+
+    const syntheticBirthCandidates: string[] = [];
+    const yearOffsets = shuffleArray([-2, -1, 1, 2]);
+    const monthOffsets = shuffleArray([1, 2, 3, 5, 7, 9]);
+    const dayOffsets = shuffleArray([3, 6, 9, 12, 16, 21]);
+    for (let i = 0; i < 6; i++) {
+      const y = Math.min(1388, Math.max(1372, baseYear + yearOffsets[i % yearOffsets.length]));
+      const mo = ((baseMonth - 1 + monthOffsets[i % monthOffsets.length]) % 12) + 1;
+      const da = ((baseDay - 1 + dayOffsets[i % dayOffsets.length]) % 28) + 1;
+      syntheticBirthCandidates.push(
+        `${y}/${String(mo).padStart(2, '0')}/${String(da).padStart(2, '0')}`
+      );
+    }
+
+    for (const candidate of [...syntheticBirthCandidates, ...candidateBirthPool]) {
+      const cleanDate = normDate(candidate);
+      if (cleanDate && !birthSet.has(cleanDate)) {
+        birthSet.add(cleanDate);
+        birthDistractors.push(cleanDate);
+        if (birthDistractors.length === 2) break;
+      }
+    }
+    const birthDateOptions = shuffleArray([correctBirthDate, ...birthDistractors]);
+
+    return {
+      success: true,
+      message: 'سوالات امنیتی با موفقیت آماده شد.',
+      studentId: student.studentId,
+      studentFullName: student.fullName,
+      fatherOptions,
+      birthDateOptions,
+    };
+  },
+
+  // بررسی پاسخ دو سوال امنیتی و بازنشانی رمز عبور دانشجو به همان کد ملی
+  recoverStudentPassword: (
+    studentIdInput: string,
+    selectedFatherName: string,
+    selectedBirthDate: string
+  ): { success: boolean; message: string } => {
+    const toAsciiDigits = (val: string) =>
+      val
+        .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+        .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+        .trim();
+
+    const normPersian = (val: string) =>
+      val
+        .replace(/[ي]/g, 'ی')
+        .replace(/[ك]/g, 'ک')
+        .replace(/[ۀة]/g, 'ه')
+        .replace(/\u200c/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const normDate = (val: string) => {
+      const ascii = toAsciiDigits(val).replace(/[-.]/g, '/');
+      const m = ascii.match(/^(\d{2,4})\/(\d{1,2})\/(\d{1,2})$/);
+      if (!m) return ascii.replace(/\s+/g, '');
+      const y = m[1].length === 2 ? `13${m[1]}` : m[1];
+      const mo = String(Number(m[2])).padStart(2, '0');
+      const da = String(Number(m[3])).padStart(2, '0');
+      return `${y}/${mo}/${da}`;
+    };
+
+    const cleanSid = toAsciiDigits(studentIdInput);
+    const students = Storage.getStudents();
+    const idx = students.findIndex((s) => toAsciiDigits(String(s.studentId || '')) === cleanSid);
+
+    if (idx === -1) {
+      return { success: false, message: 'دانشجویی با این شماره دانشجویی یافت نشد.' };
+    }
+
+    const student = students[idx];
+    const cleanNationalId = toAsciiDigits(String(student.nationalId || ''));
+    if (!cleanNationalId) {
+      return {
+        success: false,
+        message: 'کد ملی برای این دانشجو ثبت نشده است. لطفاً با مدیر سامانه تماس بگیرید.',
+      };
+    }
+
+    const fatherMatched =
+      normPersian(selectedFatherName) !== '' &&
+      normPersian(selectedFatherName) === normPersian(String(student.fatherName || ''));
+    const birthDateMatched =
+      normDate(selectedBirthDate) !== '' &&
+      normDate(selectedBirthDate) === normDate(String(student.birthDate || ''));
+
+    if (!fatherMatched || !birthDateMatched) {
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تلاش ناموفق بازیابی رمز دانشجو',
+        details: `پاسخ نادرست به سوالات امنیتی برای بازیابی رمز دانشجو ${student.fullName} (${student.studentId}) ثبت شد.`,
+        targetName: `${student.fullName} (${student.studentId})`,
+        severity: 'warning',
+        actorName: 'کاربر مهمان',
+        actorRole: 'system',
+        actorUsername: student.studentId,
+      });
+      return {
+        success: false,
+        message: 'پاسخ سوالات امنیتی صحیح نیست. لطفاً گزینه‌ها را با دقت بررسی و مجدداً تلاش نمایید.',
+      };
+    }
+
+    const updatedStudent: Student = { ...student };
+    delete updatedStudent.password;
+    students[idx] = updatedStudent;
+    Storage.setStudents(students);
+
+    const currentUser = Storage.getCurrentUser();
+    if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === updatedStudent.studentId) {
+      Storage.setCurrentUser({ role: 'student', student: updatedStudent });
+    }
+
+    Storage.addActivityLog({
+      category: 'auth',
+      action: 'بازیابی موفق رمز عبور دانشجو به کد ملی',
+      details: `دانشجو ${student.fullName} (${student.studentId}) پس از پاسخ صحیح به سوالات امنیتی، رمز عبور خود را به کد ملی بازنشانی کرد.`,
+      targetName: `${student.fullName} (${student.studentId})`,
+      actorName: student.fullName,
+      actorRole: 'student',
+      actorUsername: student.studentId,
+    });
+
+    return {
+      success: true,
+      message:
+        'هویت شما با موفقیت تأیید شد و رمز عبور حساب شما به «کد ملی» تغییر یافت. اکنون می‌توانید با شماره دانشجویی و کد ملی وارد سامانه شوید.',
+    };
+  },
+
   // تغییر یا ریست مستقیم رمز عبور کاربران توسط مدیر کل (بدون نیاز به رمز قبلی)
   adminResetUserPassword: (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education',
     idOrStudentId: string,
     newPasswordInput: string
   ): { success: boolean; message: string } => {
@@ -2402,12 +2775,23 @@ export const Storage = {
       const students = Storage.getStudents();
       const idx = students.findIndex((s) => s.studentId === idOrStudentId);
       if (idx === -1) return { success: false, message: 'دانشجو یافت نشد.' };
-      students[idx] = { ...students[idx], nationalId: cleanPass };
+      const cleanNat = normalize(String(students[idx].nationalId || ''));
+      const updatedStudent: Student = { ...students[idx] };
+      if (cleanNat && cleanPass === cleanNat) {
+        delete updatedStudent.password;
+      } else {
+        updatedStudent.password = cleanPass;
+      }
+      students[idx] = updatedStudent;
       Storage.setStudents(students);
+      const currentUser = Storage.getCurrentUser();
+      if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === updatedStudent.studentId) {
+        Storage.setCurrentUser({ role: 'student', student: updatedStudent });
+      }
       Storage.addActivityLog({
         category: 'auth',
         action: 'تغییر / ریست رمز دانشجو توسط مدیر',
-        details: `کلمه عبور (کد ملی ورود) دانشجو ${students[idx].fullName} (${students[idx].studentId}) توسط مدیر تنظیم شد.`,
+        details: `کلمه عبور دانشجو ${students[idx].fullName} (${students[idx].studentId}) توسط مدیر تنظیم شد.`,
         targetName: `${students[idx].fullName} (${students[idx].studentId})`,
         severity: 'warning',
       });
@@ -2528,6 +2912,25 @@ export const Storage = {
       return {
         success: true,
         message: `رمز عبور کارپرداز «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'education') {
+      const list = Storage.getEducationStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کارشناس آموزش یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setEducationStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز کارشناس آموزش توسط مدیر',
+        details: `کلمه عبور کارشناس آموزش ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور کارشناس آموزش «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
       };
     }
 
@@ -4238,6 +4641,10 @@ export const Storage = {
         actorName = currentUser.staff.fullName;
         actorRole = 'procurement';
         actorUsername = currentUser.staff.username;
+      } else if (currentUser.role === 'education') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'education';
+        actorUsername = currentUser.staff.username;
       }
     }
 
@@ -5000,6 +5407,196 @@ export const Storage = {
   },
 
   // -------------------------------------------------------------
+  // متدهای مدیریت کاربران کارشناس آموزش و اعلامیه‌های مرخصی/اخراج به مدیر
+  // -------------------------------------------------------------
+  getEducationStaff: (): EducationStaff[] =>
+    get<EducationStaff[]>(STORAGE_KEYS.EDUCATION_STAFF, INITIAL_EDUCATION_STAFF),
+
+  setEducationStaff: (staff: EducationStaff[]): boolean =>
+    set(STORAGE_KEYS.EDUCATION_STAFF, staff),
+
+  addEducationStaff: (
+    staffData: Omit<EducationStaff, 'id'>
+  ): { success: boolean; message: string; staff?: EducationStaff } => {
+    const list = Storage.getEducationStaff();
+    const cleanUsername = normalizeAsciiDigits(staffData.username).toLowerCase();
+    if (!cleanUsername) {
+      return { success: false, message: 'نام کاربری کارشناس آموزش نمی‌تواند خالی باشد.' };
+    }
+    if (list.some((s) => normalizeAsciiDigits(s.username).toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کارشناس آموزش دیگری ثبت شده است.' };
+    }
+    const newStaff: EducationStaff = {
+      ...staffData,
+      id: makeUniqueId('edu'),
+      username: cleanUsername,
+      role: 'education',
+      department: staffData.department?.trim() || 'واحد آموزش و امور دانشجویی',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setEducationStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کارشناس آموزش',
+      details: `کارشناس آموزش «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کارشناس آموزش «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateEducationStaff: (
+    id: string,
+    updates: Partial<EducationStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getEducationStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کارشناس آموزش یافت نشد.' };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizeAsciiDigits(normalizedUpdates.username).toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((e) => e.id !== id && normalizeAsciiDigits(e.username).toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کارشناس آموزش دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
+    Storage.setEducationStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'education' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'education', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کارشناس آموزش با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteEducationStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getEducationStaff();
+    const target = list.find((s) => s.id === id);
+    Storage.setEducationStaff(list.filter((s) => s.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کارشناس آموزش',
+        details: `حساب کاربری کارشناس آموزش «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کارشناس آموزش با موفقیت حذف گردید.' };
+  },
+
+  getAcademicNotices: (): AcademicStatusNotice[] =>
+    get<AcademicStatusNotice[]>(STORAGE_KEYS.ACADEMIC_NOTICES, INITIAL_ACADEMIC_NOTICES),
+
+  setAcademicNotices: (items: AcademicStatusNotice[]): boolean =>
+    set(STORAGE_KEYS.ACADEMIC_NOTICES, items),
+
+  addAcademicNotice: (payload: {
+    student: Student;
+    noticeType: AcademicNoticeType;
+    academicYear: string;
+    semester: string;
+    effectiveDate?: string;
+    letterNumber?: string;
+    description: string;
+    reportedByStaffId: string;
+    reportedByStaffName: string;
+  }): { success: boolean; message: string; notice?: AcademicStatusNotice } => {
+    if (!payload.student || !payload.description.trim()) {
+      return { success: false, message: 'انتخاب دانشجو و ثبت شرح وضعیت تحصیلی الزامی است.' };
+    }
+    const notices = Storage.getAcademicNotices();
+    const now = new Date();
+    const createdAt = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const newNotice: AcademicStatusNotice = {
+      id: makeUniqueId('acad'),
+      noticeCode: `EDU-${101 + notices.length}`,
+      studentId: payload.student.studentId,
+      studentName: payload.student.fullName,
+      studentNationalId: payload.student.nationalId,
+      studentFieldOfStudy: payload.student.fieldOfStudy,
+      studentEntryTerm: payload.student.entryTerm,
+      noticeType: payload.noticeType,
+      academicYear: payload.academicYear,
+      semester: payload.semester,
+      effectiveDate: payload.effectiveDate?.trim() || undefined,
+      letterNumber: payload.letterNumber?.trim() || undefined,
+      description: payload.description.trim(),
+      reportedByStaffId: payload.reportedByStaffId,
+      reportedByStaffName: payload.reportedByStaffName,
+      createdAt,
+      status: 'pending',
+    };
+    notices.unshift(newNotice);
+    Storage.setAcademicNotices(notices);
+
+    const typeFa = payload.noticeType === 'expulsion' ? 'اخراج / محرومیت از تحصیل' : 'مرخصی تحصیلی';
+    Storage.addActivityLog({
+      category: 'education',
+      action: `اعلام وضعیت ${typeFa} به مدیر`,
+      details: `کارشناس آموزش ${payload.reportedByStaffName} وضعیت «${typeFa}» دانشجو ${payload.student.fullName} (${payload.student.studentId}) را برای ${payload.semester} (${payload.academicYear}) به مدیر سامانه اعلام کرد.`,
+      targetName: `${payload.student.fullName} (${payload.student.studentId})`,
+      severity: payload.noticeType === 'expulsion' ? 'critical' : 'warning',
+      actorName: payload.reportedByStaffName,
+      actorRole: 'education',
+    });
+
+    return {
+      success: true,
+      message: `اعلامیه ${typeFa} برای «${payload.student.fullName}» با کد ${newNotice.noticeCode} به مدیر سامانه ارسال شد.`,
+      notice: newNotice,
+    };
+  },
+
+  updateAcademicNoticeStatus: (
+    id: string,
+    status: AcademicStatusNotice['status'],
+    adminNote?: string,
+    reviewedBy = 'مدیر کل سامانه'
+  ): { success: boolean; message: string } => {
+    const notices = Storage.getAcademicNotices();
+    const idx = notices.findIndex((n) => n.id === id);
+    if (idx === -1) return { success: false, message: 'اعلامیه مورد نظر یافت نشد.' };
+    const now = new Date();
+    const reviewedAt = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    notices[idx] = {
+      ...notices[idx],
+      status,
+      adminNote: adminNote?.trim() || notices[idx].adminNote,
+      reviewedBy,
+      reviewedAt,
+    };
+    Storage.setAcademicNotices(notices);
+    Storage.addActivityLog({
+      category: 'education',
+      action: 'بررسی اعلامیه آموزشی توسط مدیر',
+      details: `اعلامیه ${notices[idx].noticeCode} (${notices[idx].studentName}) به وضعیت «${
+        status === 'action_taken' ? 'اقدام و اعمال شد' : status === 'reviewed' ? 'بررسی‌شده' : 'در انتظار بررسی'
+      }» تغییر یافت.`,
+      targetName: notices[idx].studentName,
+    });
+    return { success: true, message: 'وضعیت اعلامیه آموزشی با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteAcademicNotice: (id: string): { success: boolean; message: string } => {
+    const notices = Storage.getAcademicNotices();
+    Storage.setAcademicNotices(notices.filter((n) => n.id !== id));
+    return { success: true, message: 'اعلامیه آموزشی حذف شد.' };
+  },
+
+  // -------------------------------------------------------------
   // توابع همگام‌سازی دوطرفه با دیتابیس ابری MongoDB Atlas
   // -------------------------------------------------------------
   fetchStudentsFromDB: async (): Promise<Student[] | null> => {
@@ -5096,7 +5693,7 @@ export const Storage = {
   },
 
   uploadPhotosToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education',
     items: Array<{ userId: string; dataUrl: string }>
   ): Promise<{
     supported: boolean;
@@ -5181,7 +5778,7 @@ export const Storage = {
   },
 
   uploadSinglePhotoToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education',
     userId: string,
     dataUrl: string
   ): Promise<{ supported: boolean; ok: boolean; url: string; errorMessage?: string }> => {

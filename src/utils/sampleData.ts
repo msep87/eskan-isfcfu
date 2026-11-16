@@ -13,6 +13,8 @@ import {
   WarehouseStaff,
   FinanceStaff,
   ProcurementStaff,
+  EducationStaff,
+  AcademicStatusNotice,
   StudentFinancialRecord,
   InventoryItem,
   InventoryTransaction,
@@ -126,3 +128,9 @@ export const INITIAL_GUEST_REQUESTS: GuestRequest[] = [];
 
 // گزارش‌های بازدید سرپرستان از سراها و اتاق‌ها (کاملاً خالی)
 export const INITIAL_VISIT_REPORTS: VisitReport[] = [];
+
+// کارشناسان آموزش (کاملاً خالی)
+export const INITIAL_EDUCATION_STAFF: EducationStaff[] = [];
+
+// اعلامیه‌های مرخصی تحصیلی و اخراج از کارشناس آموزش به مدیر (کاملاً خالی)
+export const INITIAL_ACADEMIC_NOTICES: AcademicStatusNotice[] = [];

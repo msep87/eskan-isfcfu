@@ -11,6 +11,7 @@ import {
   WarehouseStaff,
   FinanceStaff,
   ProcurementStaff,
+  EducationStaff,
   InventoryItem,
   InventoryTransaction,
   StudentFinancialRecord,
@@ -1078,6 +1079,7 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
     counselor: 'کارشناس مشاور',
     finance: 'امور مالی و حسابداری',
     procurement: 'کارپرداز و خرید',
+    education: 'کارشناس آموزش',
     system: 'سیستم',
   };
 
@@ -1091,6 +1093,7 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
     warehouse: 'انبار و تجهیزات',
     procurement: 'کارپردازی و خرید',
     finance: 'امور مالی و کسورات',
+    education: 'امور آموزشی و مرخصی/اخراج',
     warning_eval: 'تذکر، اخطار و ارزیابی',
     guest: 'درخواست مهمان',
     visit_report: 'گزارش بازدید سرپرستی',
@@ -2158,4 +2161,71 @@ export function exportVisitReportsToExcel(reports: VisitReport[]) {
   XLSX.writeFile(wb, `گزارش_بازدید_سراها_و_اتاقها_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
+// ۱۲. دانلود قالب اکسل کاربران کارشناس آموزش
+export function downloadEducationTemplate() {
+  const sampleRows = [
+    {
+      'نام و نام خانوادگی': 'فاطمه محمدی',
+      'نام کاربری': 'mohammadi_edu',
+      'کلمه عبور': '123456',
+      'شماره تماس': '09131234567',
+      'بخش / واحد': 'واحد آموزش و امور دانشجویی',
+      'وضعیت': 'فعال',
+      'توضیحات': 'کارشناس پاسخگویی امور آموزشی و اعلام مرخصی/اخراج',
+    },
+  ];
+  const ws = XLSX.utils.json_to_sheet(sampleRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'کارشناسان آموزش');
+  XLSX.writeFile(wb, 'قالب_اکسل_ثبت_کارشناسان_آموزش.xlsx');
+}
 
+// خواندن و اعتبارسنجی فایل اکسل کاربران کارشناس آموزش
+export async function parseEducationExcel(
+  file: File
+): Promise<{ staff: EducationStaff[]; skippedRows: number }> {
+  const rows = await readExcelSheetRows(file);
+  const staff: EducationStaff[] = [];
+  let skippedRows = 0;
+
+  rows.forEach((row, idx) => {
+    const fullName = getExcelCell(row, ['نام و نام خانوادگی', 'نام و نام‌خانوادگی', 'نام کارشناس', 'نام کامل', 'fullname', 'name']);
+    let username = toEnglishDigits(getExcelCell(row, ['نام کاربری', 'نام‌کاربری', 'کد کاربری', 'username', 'user'])).trim().toLowerCase();
+    const password = toEnglishDigits(getExcelCell(row, ['کلمه عبور', 'رمز عبور', 'رمز', 'password', 'pass'])).trim();
+    const phone = toEnglishDigits(getExcelCell(row, ['شماره تماس', 'شماره همراه', 'موبایل', 'تلفن', 'phone', 'mobile'])).trim();
+    const department = getExcelCell(row, ['بخش / واحد', 'بخش', 'واحد', 'سمت', 'department']);
+    const statusRaw = getExcelCell(row, ['وضعیت', 'وضعیت حساب', 'status']);
+    const notes = getExcelCell(row, ['توضیحات', 'یادداشت', 'notes']);
+
+    if (!fullName && !username) {
+      skippedRows++;
+      return;
+    }
+
+    if (!username) {
+      username = `edu_${Date.now()}_${idx + 1}`;
+    }
+
+    const status = parseExcelStaffStatus(statusRaw);
+
+    staff.push({
+      id: `edu_excel_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 5)}`,
+      fullName: fullName || username,
+      username,
+      password: password || phone || '123456',
+      phone: phone || '09130000000',
+      mobile: phone || '09130000000',
+      department: department || 'واحد آموزش و امور دانشجویی',
+      role: 'education',
+      status,
+      isActive: status === 'active',
+      notes: notes || undefined,
+    });
+  });
+
+  if (staff.length === 0) {
+    throw new Error('هیچ سطر معتبری برای ثبت کاربر کارشناس آموزش در فایل اکسل یافت نشد.');
+  }
+
+  return { staff, skippedRows };
+}

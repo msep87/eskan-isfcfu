@@ -16,6 +16,8 @@ import {
   downloadFinanceTemplate,
   parseProcurementExcel,
   downloadProcurementTemplate,
+  parseEducationExcel,
+  downloadEducationTemplate,
   toEnglishDigits,
 } from '../utils/excelUtils';
 import { Storage } from '../utils/storage';
@@ -30,6 +32,7 @@ import {
   WarehouseStaff,
   FinanceStaff,
   ProcurementStaff,
+  EducationStaff,
 } from '../types';
 import {
   FileSpreadsheet,
@@ -48,6 +51,7 @@ import {
   Package,
   Wallet,
   ShoppingBag,
+  GraduationCap,
 } from 'lucide-react';
 
 export type ExcelImportTab =
@@ -58,7 +62,8 @@ export type ExcelImportTab =
   | 'counselors'
   | 'warehouse'
   | 'procurement'
-  | 'finance';
+  | 'finance'
+  | 'education';
 
 interface ExcelImportModalProps {
   isOpen: boolean;
@@ -121,6 +126,11 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
 
   const [previewProcurement, setPreviewProcurement] = useState<{
     list: ProcurementStaff[];
+    skippedRows: number;
+  } | null>(null);
+
+  const [previewEducation, setPreviewEducation] = useState<{
+    list: EducationStaff[];
     skippedRows: number;
   } | null>(null);
 
@@ -306,6 +316,25 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
       setPreviewProcurement({ list: res.staff, skippedRows: res.skippedRows });
     } catch (err: any) {
       setErrorMsg(err.message || 'خطا در بارگذاری فایل اکسل کاربران کارپرداز');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEducationFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await parseEducationExcel(file);
+      setPreviewEducation({ list: res.staff, skippedRows: res.skippedRows });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در بارگذاری فایل اکسل کارشناسان آموزش');
     } finally {
       setLoading(false);
     }
@@ -819,6 +848,50 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
     }
   };
 
+  const handleSaveEducation = async () => {
+    if (!previewEducation) return;
+    setLoading(true);
+    setErrorMsg('');
+
+    try {
+      const incoming = previewEducation.list;
+      if (replaceMode) {
+        Storage.setEducationStaff(incoming);
+      } else {
+        const existing = Storage.getEducationStaff();
+        const mergedMap = new Map<string, EducationStaff>();
+        existing.forEach((ed) => mergedMap.set(ed.username.trim().toLowerCase(), ed));
+        incoming.forEach((ed) => {
+          const key = ed.username.trim().toLowerCase();
+          const prev = mergedMap.get(key);
+          mergedMap.set(key, prev ? { ...ed, id: prev.id } : ed);
+        });
+        Storage.setEducationStaff(Array.from(mergedMap.values()));
+      }
+
+      const syncRes = await Storage.waitForPendingCloudSync();
+
+      Storage.addActivityLog({
+        category: 'excel',
+        action: replaceMode ? 'بارگذاری و جایگزینی اکسل کارشناسان آموزش' : 'ثبت گروهی کارشناسان آموزش از اکسل',
+        details: `تعداد ${incoming.length} حساب کاربری کارشناس آموزش از فایل اکسل ثبت شد.`,
+        targetName: `${incoming.length} کارشناس آموزش`,
+      });
+
+      setSuccessMsg(
+        syncRes.success
+          ? `تعداد ${incoming.length} کارشناس آموزش با موفقیت در دیتابیس ابری ثبت و همگام‌سازی شد.`
+          : `تعداد ${incoming.length} کارشناس آموزش در مرورگر ثبت شد، اما همگام‌سازی ابری با تأخیر مواجه شد.`
+      );
+      setPreviewEducation(null);
+      setTimeout(() => onImportComplete(), 1100);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در ذخیره کارشناسان آموزش');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-4xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 relative max-h-[90vh] overflow-y-auto">
@@ -839,7 +912,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
             </h3>
             <p className="text-xs text-slate-500">
               {allowStaffTabs
-                ? 'بارگذاری مجزا برای دانشجویان، سراها و اتاق‌ها، سرپرستان، تأسیسات، مشاوران، انبارداران، کارپردازان و امور مالی'
+                ? 'بارگذاری مجزا برای دانشجویان، سراها و اتاق‌ها، سرپرستان، تأسیسات، مشاوران، انبارداران، کارپردازان، امور مالی و کارشناسان آموزش'
                 : 'بارگذاری اکسل مشخصات دانشجویان (با پشتیبانی از ستون‌های دلخواه) و سراهای خوابگاهی'}
             </p>
           </div>
@@ -955,6 +1028,19 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
               >
                 <Wallet className="w-3.5 h-3.5 shrink-0" />
                 <span>امور مالی</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => switchTab('education')}
+                className={`py-2.5 px-2 text-[11px] font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tab === 'education'
+                    ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-300 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <GraduationCap className="w-3.5 h-3.5 shrink-0" />
+                <span>کارشناس آموزش</span>
               </button>
             </>
           )}
@@ -1917,6 +2003,127 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                     className="px-6 py-2.5 bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
                   >
                     تأیید و ثبت کاربران کارپرداز در سامانه ابری
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ۹. محتوای تب کارشناسان آموزش */}
+        {allowStaffTabs && tab === 'education' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800/60">
+              <div>
+                <h4 className="text-xs font-bold text-sky-950 dark:text-sky-200">
+                  دانلود قالب اکسل ثبت گروهی کارشناسان آموزش
+                </h4>
+                <p className="text-[11px] text-sky-800 dark:text-sky-400 mt-0.5">
+                  ستون‌ها: نام و نام خانوادگی، نام کاربری، کلمه عبور، شماره تماس، بخش / واحد، وضعیت، توضیحات
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={downloadEducationTemplate}
+                className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>دانلود قالب اکسل آموزش</span>
+              </button>
+            </div>
+
+            <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-sky-500 rounded-3xl p-8 text-center transition">
+              <UploadCloud className="w-12 h-12 mx-auto text-sky-600 mb-3" />
+              <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200 mb-1">
+                فایل اکسل کارشناسان آموزش را انتخاب کنید
+              </h4>
+              <p className="text-xs text-slate-500 mb-4">فرمت‌های مجاز: .xlsx, .xls, .csv (نام کاربری تکراری بروزرسانی می‌شود)</p>
+              <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-md shadow-sky-600/20">
+                <span>انتخاب فایل اکسل کارشناسان آموزش</span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleEducationFileSelect}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {loading && <div className="text-center text-xs text-sky-600 font-bold">در حال پردازش فایل اکسل کارشناسان آموزش...</div>}
+
+            {previewEducation && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <FileCheck className="w-5 h-5 text-emerald-600" />
+                    <span className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                      پیش‌نمایش: {previewEducation.list.length} کارشناس آموزش آماده ثبت
+                    </span>
+                  </div>
+                  {previewEducation.skippedRows > 0 && (
+                    <span className="text-[11px] text-amber-600 font-semibold">
+                      ({previewEducation.skippedRows} ردیف خالی نادیده گرفته شد)
+                    </span>
+                  )}
+                </div>
+
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-60">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold sticky top-0">
+                      <tr>
+                        <th className="p-2.5">ردیف</th>
+                        <th className="p-2.5">نام و نام خانوادگی</th>
+                        <th className="p-2.5">نام کاربری</th>
+                        <th className="p-2.5">کلمه عبور</th>
+                        <th className="p-2.5">شماره تماس</th>
+                        <th className="p-2.5">بخش / واحد</th>
+                        <th className="p-2.5">وضعیت</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {previewEducation.list.map((edu, i) => (
+                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-2.5">{i + 1}</td>
+                          <td className="p-2.5 font-bold">{edu.fullName}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{edu.username}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{edu.password}</td>
+                          <td className="p-2.5 font-mono" dir="ltr">{edu.mobile || edu.phone}</td>
+                          <td className="p-2.5 text-slate-600 dark:text-slate-300">{edu.department || '-'}</td>
+                          <td className="p-2.5">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                edu.status === 'active'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {edu.status === 'active' ? 'فعال' : 'غیرفعال'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={replaceMode}
+                      onChange={(e) => setReplaceMode(e.target.checked)}
+                      className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 w-4 h-4"
+                    />
+                    <span>جایگزینی کامل لیست کارشناسان آموزش قبلی</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={handleSaveEducation}
+                    className="px-6 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                  >
+                    تأیید و ثبت کارشناسان آموزش در سامانه ابری
                   </button>
                 </div>
               </div>

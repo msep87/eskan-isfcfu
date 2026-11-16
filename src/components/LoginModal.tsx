@@ -3,24 +3,21 @@ import { Storage } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import { CurrentUser } from '../types';
 import {
-  GraduationCap,
-  Shield,
-  UserCheck,
   Building2,
-  Lock,
-  ArrowRight,
-  Sparkles,
-  Info,
   AlertCircle,
   X,
   BookOpen,
+  KeyRound,
+  CheckCircle2,
+  ArrowRight,
+  HelpCircle,
 } from 'lucide-react';
 
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (user: NonNullable<CurrentUser>) => void;
-  onOpenUserGuide?: (role?: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'student') => void;
+  onOpenUserGuide?: (role?: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' | 'student') => void;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({
@@ -29,7 +26,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onLoginSuccess,
   onOpenUserGuide,
 }) => {
-  const [tab, setTab] = useState<'student' | 'supervisor' | 'counselor' | 'maintenance' | 'warehouse' | 'procurement' | 'finance' | 'admin'>('student');
+  const [tab, setTab] = useState<'student' | 'supervisor' | 'counselor' | 'maintenance' | 'warehouse' | 'procurement' | 'finance' | 'education' | 'admin'>('student');
 
   // فرم دانشجو
   const [studentId, setStudentId] = useState('');
@@ -40,15 +37,132 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [password, setPassword] = useState('');
 
   const [errorMsg, setErrorMsg] = useState('');
+  const [recoverySuccessMsg, setRecoverySuccessMsg] = useState('');
+
+  // وضعیت بازیابی رمز عبور دانشجو (دو سوال سه‌گزینه‌ای)
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
+  const [recoveryStep, setRecoveryStep] = useState<'identify' | 'questions'>('identify');
+  const [recoveryStudentId, setRecoveryStudentId] = useState('');
+  const [recoveryData, setRecoveryData] = useState<{
+    studentId: string;
+    fatherOptions: string[];
+    birthDateOptions: string[];
+  } | null>(null);
+  const [selectedFatherName, setSelectedFatherName] = useState('');
+  const [selectedBirthDate, setSelectedBirthDate] = useState('');
 
   if (!isOpen) return null;
+
+  const resetRecoveryState = () => {
+    setIsRecoveryMode(false);
+    setRecoveryStep('identify');
+    setRecoveryStudentId('');
+    setRecoveryData(null);
+    setSelectedFatherName('');
+    setSelectedBirthDate('');
+  };
+
+  const handleCloseModal = () => {
+    resetRecoveryState();
+    setErrorMsg('');
+    setRecoverySuccessMsg('');
+    onClose();
+  };
+
+  const handleOpenRecovery = () => {
+    setErrorMsg('');
+    setRecoverySuccessMsg('');
+    setSelectedFatherName('');
+    setSelectedBirthDate('');
+    const prefillId = studentId.trim();
+    setRecoveryStudentId(prefillId);
+
+    if (prefillId) {
+      const res = Storage.getStudentRecoveryQuestions(prefillId);
+      if (res.success && res.studentId && res.fatherOptions && res.birthDateOptions) {
+        setRecoveryData({
+          studentId: res.studentId,
+          fatherOptions: res.fatherOptions,
+          birthDateOptions: res.birthDateOptions,
+        });
+        setRecoveryStep('questions');
+        setIsRecoveryMode(true);
+        return;
+      }
+      if (!res.success && prefillId) {
+        setErrorMsg(res.message);
+      }
+    }
+
+    setRecoveryData(null);
+    setRecoveryStep('identify');
+    setIsRecoveryMode(true);
+  };
+
+  const handleFetchRecoveryQuestions = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setRecoverySuccessMsg('');
+
+    const res = Storage.getStudentRecoveryQuestions(recoveryStudentId);
+    if (!res.success || !res.studentId || !res.fatherOptions || !res.birthDateOptions) {
+      setErrorMsg(res.message);
+      return;
+    }
+
+    setRecoveryData({
+      studentId: res.studentId,
+      fatherOptions: res.fatherOptions,
+      birthDateOptions: res.birthDateOptions,
+    });
+    setSelectedFatherName('');
+    setSelectedBirthDate('');
+    setRecoveryStep('questions');
+  };
+
+  const handleVerifyRecoveryAnswers = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+
+    if (!recoveryData) return;
+    if (!selectedFatherName || !selectedBirthDate) {
+      setErrorMsg('لطفاً پاسخ هر دو سوال امنیتی (نام پدر و تاریخ تولد) را انتخاب نمایید.');
+      return;
+    }
+
+    const res = Storage.recoverStudentPassword(
+      recoveryData.studentId,
+      selectedFatherName,
+      selectedBirthDate
+    );
+
+    if (res.success) {
+      setStudentId(recoveryData.studentId);
+      setNationalId('');
+      resetRecoveryState();
+      setRecoverySuccessMsg(res.message);
+    } else {
+      setErrorMsg(res.message);
+      setSelectedFatherName('');
+      setSelectedBirthDate('');
+      const refreshed = Storage.getStudentRecoveryQuestions(recoveryData.studentId);
+      if (refreshed.success && refreshed.studentId && refreshed.fatherOptions && refreshed.birthDateOptions) {
+        setRecoveryData({
+          studentId: refreshed.studentId,
+          fatherOptions: refreshed.fatherOptions,
+          birthDateOptions: refreshed.birthDateOptions,
+        });
+      }
+    }
+  };
 
   const handleStudentLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setRecoverySuccessMsg('');
 
     if (!studentId || !nationalId) {
-      setErrorMsg('لطفاً شماره دانشجویی و کد ملی را وارد نمایید.');
+      setErrorMsg('لطفاً شماره دانشجویی و کلمه عبور (کد ملی) را وارد نمایید.');
       return;
     }
 
@@ -56,13 +170,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     const cleanId = toEnglishDigits(studentId.trim());
     const cleanNat = toEnglishDigits(nationalId.trim());
 
-    const student = students.find(
-      (s) =>
-        Boolean(s.studentId) &&
-        Boolean(s.nationalId) &&
-        toEnglishDigits(String(s.studentId).trim()) === cleanId &&
-        toEnglishDigits(String(s.nationalId).trim()) === cleanNat
-    );
+    const student = students.find((s) => {
+      if (!s.studentId || toEnglishDigits(String(s.studentId).trim()) !== cleanId) {
+        return false;
+      }
+      const effectivePass = toEnglishDigits(String(s.password || s.nationalId || '').trim());
+      return Boolean(effectivePass) && effectivePass === cleanNat;
+    });
 
     if (student) {
       Storage.addActivityLog({
@@ -75,7 +189,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         actorUsername: student.studentId,
       });
       onLoginSuccess({ role: 'student', student });
-      onClose();
+      handleCloseModal();
     } else {
       Storage.addActivityLog({
         category: 'auth',
@@ -87,7 +201,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         actorRole: 'system',
         actorUsername: cleanId,
       });
-      setErrorMsg('اطلاعات وارد شده یافت نشد. شماره دانشجویی یا کد ملی نادرست است.');
+      setErrorMsg('اطلاعات وارد شده یافت نشد. شماره دانشجویی یا کلمه عبور (کد ملی) نادرست است.');
     }
   };
 
@@ -369,6 +483,54 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         });
         setErrorMsg('نام کاربری یا کلمه عبور امور مالی اشتباه است.');
       }
+    } else if (tab === 'education') {
+      const staffList = Storage.getEducationStaff();
+      const cleanU = toEnglishDigits(username.trim()).toLowerCase();
+      const cleanP = toEnglishDigits(password.trim());
+      const edu = staffList.find(
+        (s) =>
+          toEnglishDigits(s.username.trim()).toLowerCase() === cleanU &&
+          toEnglishDigits(s.password.trim()) === cleanP
+      );
+      if (edu) {
+        if (edu.status === 'inactive' || edu.isActive === false) {
+          Storage.addActivityLog({
+            category: 'auth',
+            action: 'تلاش ورود حساب غیرفعال کارشناس آموزش',
+            details: `کارشناس آموزش ${edu.fullName} (${edu.username}) با حساب غیرفعال تلاش به ورود کرد.`,
+            targetName: edu.fullName,
+            severity: 'warning',
+            actorName: edu.fullName,
+            actorRole: 'education',
+            actorUsername: edu.username,
+          });
+          setErrorMsg('حساب کاربری کارشناس آموزش غیرفعال است. لطفاً با مدیر سامانه تماس بگیرید.');
+          return;
+        }
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'ورود موفق کارشناس آموزش',
+          details: `کارشناس آموزش ${edu.fullName} (${edu.username}) وارد سامانه شد.`,
+          targetName: edu.fullName,
+          actorName: edu.fullName,
+          actorRole: 'education',
+          actorUsername: edu.username,
+        });
+        onLoginSuccess({ role: 'education', staff: edu });
+        onClose();
+      } else {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'تلاش ناموفق ورود کارشناس آموزش',
+          details: `تلاش ناموفق ورود کارشناس آموزش با نام کاربری «${cleanU || '-'}» ثبت شد.`,
+          targetName: cleanU || '-',
+          severity: 'warning',
+          actorName: 'کاربر مهمان',
+          actorRole: 'system',
+          actorUsername: cleanU,
+        });
+        setErrorMsg('نام کاربری یا کلمه عبور کارشناس آموزش اشتباه است.');
+      }
     } else if (tab === 'admin') {
       const currentAdminPass = toEnglishDigits(String(Storage.getSettings().adminPassword || '261').trim());
       const cleanAdminUser = toEnglishDigits(username.trim()).toLowerCase();
@@ -403,10 +565,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 relative">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 relative max-h-[92vh] overflow-y-auto">
         <button
-          onClick={onClose}
-          className="absolute top-5 left-5 p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+          onClick={handleCloseModal}
+          className="absolute top-5 left-5 p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -439,6 +601,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             onClick={() => {
               setTab('supervisor');
               setErrorMsg('');
+              setRecoverySuccessMsg('');
+              resetRecoveryState();
             }}
             className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
               tab === 'supervisor'
@@ -452,6 +616,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             onClick={() => {
               setTab('counselor');
               setErrorMsg('');
+              setRecoverySuccessMsg('');
+              resetRecoveryState();
             }}
             className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
               tab === 'counselor'
@@ -465,6 +631,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             onClick={() => {
               setTab('maintenance');
               setErrorMsg('');
+              setRecoverySuccessMsg('');
+              resetRecoveryState();
             }}
             className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
               tab === 'maintenance'
@@ -478,6 +646,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             onClick={() => {
               setTab('warehouse');
               setErrorMsg('');
+              setRecoverySuccessMsg('');
+              resetRecoveryState();
             }}
             className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
               tab === 'warehouse'
@@ -491,6 +661,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             onClick={() => {
               setTab('procurement');
               setErrorMsg('');
+              setRecoverySuccessMsg('');
+              resetRecoveryState();
             }}
             className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
               tab === 'procurement'
@@ -504,6 +676,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             onClick={() => {
               setTab('finance');
               setErrorMsg('');
+              setRecoverySuccessMsg('');
+              resetRecoveryState();
             }}
             className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
               tab === 'finance'
@@ -515,8 +689,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </button>
           <button
             onClick={() => {
+              setTab('education');
+              setErrorMsg('');
+              setRecoverySuccessMsg('');
+              resetRecoveryState();
+            }}
+            className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
+              tab === 'education'
+                ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-300 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+            }`}
+          >
+            آموزش
+          </button>
+          <button
+            onClick={() => {
               setTab('admin');
               setErrorMsg('');
+              setRecoverySuccessMsg('');
+              resetRecoveryState();
             }}
             className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
               tab === 'admin'
@@ -528,6 +719,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </button>
         </div>
 
+        {recoverySuccessMsg && tab === 'student' && (
+          <div className="mb-4 p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 flex items-start gap-2 text-xs text-emerald-800 dark:text-emerald-300 leading-relaxed font-medium">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 mt-0.5" />
+            <span>{recoverySuccessMsg}</span>
+          </div>
+        )}
+
         {errorMsg && (
           <div className="mb-4 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 flex items-center gap-2 text-xs text-rose-700 dark:text-rose-300">
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
@@ -535,8 +733,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
         )}
 
-        {/* فرم ورود دانشجو */}
-        {tab === 'student' && (
+        {/* فرم ورود دانشجو یا بازیابی رمز عبور دانشجو */}
+        {tab === 'student' && !isRecoveryMode && (
           <form onSubmit={handleStudentLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -553,14 +751,24 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                کد ملی
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  کلمه عبور (پیش‌فرض: کد ملی)
+                </label>
+                <button
+                  type="button"
+                  onClick={handleOpenRecovery}
+                  className="text-[11px] font-bold text-teal-600 hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300 inline-flex items-center gap-1 cursor-pointer transition"
+                >
+                  <KeyRound className="w-3 h-3" />
+                  <span>بازیابی رمز عبور</span>
+                </button>
+              </div>
               <input
                 type="password"
                 value={nationalId}
                 onChange={(e) => setNationalId(e.target.value)}
-                placeholder="کد ملی ۱۰ رقمی دانشجو"
+                placeholder="کد ملی ۱۰ رقمی یا رمز عبور"
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 text-left dir-ltr"
                 dir="ltr"
               />
@@ -575,8 +783,147 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </form>
         )}
 
-        {/* فرم سرپرست، مشاور، تأسیسات، انبار، کارپرداز، امور مالی و مدیر */}
-        {(tab === 'supervisor' || tab === 'counselor' || tab === 'admin' || tab === 'maintenance' || tab === 'warehouse' || tab === 'procurement' || tab === 'finance') && (
+        {/* بخش بازیابی رمز عبور دانشجو با دو سوال امنیتی سه‌گزینه‌ای */}
+        {tab === 'student' && isRecoveryMode && (
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-200">
+              <HelpCircle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-bold">بازیابی رمز عبور دانشجو به کد ملی</div>
+                <p className="text-[11px] text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
+                  {recoveryStep === 'identify'
+                    ? 'شماره دانشجویی خود را وارد کنید تا دو سوال امنیتی سه‌گزینه‌ای برای احراز هویت نمایش داده شود.'
+                    : 'به هر دو سوال سه‌گزینه‌ای زیر پاسخ صحیح دهید تا رمز عبور شما به همان کد ملی بازنشانی شود.'}
+                </p>
+              </div>
+            </div>
+
+            {recoveryStep === 'identify' ? (
+              <form onSubmit={handleFetchRecoveryQuestions} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    شماره دانشجویی *
+                  </label>
+                  <input
+                    type="text"
+                    value={recoveryStudentId}
+                    onChange={(e) => setRecoveryStudentId(e.target.value)}
+                    placeholder="شماره دانشجویی خود را وارد کنید"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 text-left dir-ltr"
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs shadow-md transition cursor-pointer"
+                  >
+                    نمایش سوالات امنیتی
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetRecoveryState();
+                      setErrorMsg('');
+                    }}
+                    className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-bold inline-flex items-center gap-1 cursor-pointer transition"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" />
+                    <span>بازگشت</span>
+                  </button>
+                </div>
+              </form>
+            ) : (
+              recoveryData && (
+                <form onSubmit={handleVerifyRecoveryAnswers} className="space-y-4">
+                  <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs">
+                    <span className="text-slate-500 dark:text-slate-400">شماره دانشجویی:</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white" dir="ltr">
+                      {recoveryData.studentId}
+                    </span>
+                  </div>
+
+                  {/* سوال اول: نام پدر */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                      ۱. نام پدر شما کدام گزینه است؟
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {recoveryData.fatherOptions.map((option, idx) => {
+                        const isSelected = selectedFatherName === option;
+                        return (
+                          <button
+                            key={`father_${idx}_${option}`}
+                            type="button"
+                            onClick={() => setSelectedFatherName(option)}
+                            className={`px-2.5 py-2.5 rounded-xl border text-xs font-bold transition cursor-pointer text-center ${
+                              isSelected
+                                ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                            }`}
+                          >
+                            {option}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* سوال دوم: تاریخ تولد */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                      ۲. تاریخ تولد شما کدام گزینه است؟
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {recoveryData.birthDateOptions.map((option, idx) => {
+                        const isSelected = selectedBirthDate === option;
+                        return (
+                          <button
+                            key={`birth_${idx}_${option}`}
+                            type="button"
+                            onClick={() => setSelectedBirthDate(option)}
+                            dir="ltr"
+                            className={`px-2 py-2.5 rounded-xl border text-xs font-mono font-bold transition cursor-pointer text-center ${
+                              isSelected
+                                ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                            }`}
+                          >
+                            {option}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <button
+                      type="submit"
+                      className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs shadow-md transition cursor-pointer"
+                    >
+                      تأیید و بازیابی رمز به کد ملی
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetRecoveryState();
+                        setErrorMsg('');
+                      }}
+                      className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-bold inline-flex items-center gap-1 cursor-pointer transition"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      <span>بازگشت</span>
+                    </button>
+                  </div>
+                </form>
+              )
+            )}
+          </div>
+        )}
+
+        {/* فرم سرپرست، مشاور، تأسیسات، انبار، کارپرداز، امور مالی، کارشناس آموزش و مدیر */}
+        {(tab === 'supervisor' || tab === 'counselor' || tab === 'admin' || tab === 'maintenance' || tab === 'warehouse' || tab === 'procurement' || tab === 'finance' || tab === 'education') && (
           <form onSubmit={handleStaffLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -595,6 +942,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     ? 'نام کاربری کارپرداز و خرید'
                     : tab === 'finance'
                     ? 'نام کاربری امور مالی و حسابداری'
+                    : tab === 'education'
+                    ? 'نام کاربری کارشناس آموزش'
                     : tab === 'maintenance'
                     ? 'نام کاربری تکنسین تأسیسات'
                     : tab === 'supervisor'
@@ -631,6 +980,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   ? 'bg-orange-600 hover:bg-orange-700 shadow-orange-600/25'
                   : tab === 'finance'
                   ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'
+                  : tab === 'education'
+                  ? 'bg-sky-600 hover:bg-sky-700 shadow-sky-600/25'
                   : tab === 'maintenance'
                   ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/25'
                   : 'bg-teal-600 hover:bg-teal-700 shadow-teal-600/25'
@@ -648,6 +999,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 ? 'ورود به کارتابل کارپردازی و خرید'
                 : tab === 'finance'
                 ? 'ورود به کارتابل امور مالی و حسابداری'
+                : tab === 'education'
+                ? 'ورود به کارتابل کارشناس آموزش'
                 : 'ورود مدیر کل سامانه'}
             </button>
           </form>
