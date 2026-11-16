@@ -24,8 +24,8 @@ import { DormIdCardModal } from './DormIdCardModal';
 import { StudentEvaluationModal } from './StudentEvaluationModal';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 import { SupervisorGuestRequestsPanel } from './SupervisorGuestRequestsPanel';
-import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
-import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
+import { RichTextDisplay } from './RichTextEditor';
+import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
 import {
   Building2,
   Users,
@@ -44,11 +44,7 @@ import {
   Clock,
   XCircle,
   CheckCheck,
-  Upload,
-  Trash2,
-  Image as ImageIcon,
   QrCode,
-  Edit3,
   UserMinus,
   UserPlus,
   Save,
@@ -128,15 +124,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   const [repFilterType, setRepFilterType] = useState('all');
   const [repSearchQuery, setRepSearchQuery] = useState('');
 
-  // فرم اطلاعیه جدید یا ویرایش
-  const [showAddAnnouncement, setShowAddAnnouncement] = useState(false);
-  const [editingAnnId, setEditingAnnId] = useState<string | null>(null);
-  const [newAnnTitle, setNewAnnTitle] = useState('');
-  const [newAnnContent, setNewAnnContent] = useState('');
-  const [newAnnContentHtml, setNewAnnContentHtml] = useState('');
-  const [annEditorResetKey, setAnnEditorResetKey] = useState(0);
-  const [newAnnPriority, setNewAnnPriority] = useState<Announcement['priority']>('normal');
-  const [newAnnImage, setNewAnnImage] = useState<string | null>(null);
+  // بزرگ‌نمایی تصویر اطلاعیه (فقط مشاهده)
+  const [previewAnnImage, setPreviewAnnImage] = useState<string | null>(null);
   const [viewCardStudent, setViewCardStudent] = useState<Student | null>(null);
   const [profileModalStudentId, setProfileModalStudentId] = useState<string | null>(null);
   const [rejectWarehouseTarget, setRejectWarehouseTarget] = useState<{ id: string; code: string; title: string } | null>(null);
@@ -175,42 +164,6 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   const [assigningStudent, setAssigningStudent] = useState<Student | null>(null);
   const [targetBedForStudent, setTargetBedForStudent] = useState('');
 
-  const handleStartEditAnnouncement = (ann: Announcement) => {
-    setEditingAnnId(ann.id);
-    setNewAnnTitle(ann.title);
-    setNewAnnContent(ann.content);
-    setNewAnnContentHtml(ann.contentHtml || plainTextToHtml(ann.content));
-    setAnnEditorResetKey((k) => k + 1);
-    setNewAnnPriority(ann.priority);
-    setNewAnnImage(ann.imageUrl || null);
-    setShowAddAnnouncement(true);
-  };
-
-  const handleCancelEditAnnouncement = () => {
-    setEditingAnnId(null);
-    setNewAnnTitle('');
-    setNewAnnContent('');
-    setNewAnnContentHtml('');
-    setAnnEditorResetKey((k) => k + 1);
-    setNewAnnPriority('normal');
-    setNewAnnImage(null);
-    setShowAddAnnouncement(false);
-  };
-
-  const handleDeleteAnnouncement = (id: string) => {
-    setSupConfirmDialog({
-      title: 'حذف اطلاعیه',
-      message: 'آیا از حذف این اطلاعیه اطمینان دارید؟',
-      confirmLabel: 'حذف اطلاعیه',
-      onConfirm: () => {
-        Storage.deleteAnnouncement(id);
-        setActionFeedback('اطلاعیه با موفقیت حذف گردید.');
-        onRefreshData();
-        setTimeout(() => setActionFeedback(null), 3000);
-      },
-    });
-  };
-
   // حذف دانشجو از اتاق / آزادسازی تخت
   const handleEvictStudent = (st: Student) => {
     setSupConfirmDialog({
@@ -235,23 +188,6 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
     setTargetBedForStudent('');
     onRefreshData();
     setTimeout(() => setActionFeedback(null), 3000);
-  };
-
-  const handleAnnImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setActionFeedback('خطا: حجم عکس اطلاعیه نباید بیشتر از ۵ مگابایت باشد.');
-      setTimeout(() => setActionFeedback(null), 4000);
-      e.target.value = '';
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setNewAnnImage(ev.target?.result as string);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
   };
 
   // سراهای تحت نظارت این سرپرست
@@ -505,49 +441,6 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
     });
   };
 
-  const handleCreateAnnouncement = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newAnnTitle.trim() || !newAnnContent.trim()) return;
-    const sanitizedHtml = sanitizeRichHtml(newAnnContentHtml) || plainTextToHtml(newAnnContent.trim());
-
-    if (editingAnnId) {
-      Storage.updateAnnouncement(editingAnnId, {
-        title: newAnnTitle.trim(),
-        content: newAnnContent.trim(),
-        contentHtml: sanitizedHtml,
-        priority: newAnnPriority,
-        imageUrl: newAnnImage || undefined,
-      });
-      setActionFeedback('اطلاعیه با موفقیت ویرایش شد.');
-      setEditingAnnId(null);
-    } else {
-      const currentAnn = Storage.getAnnouncements();
-      currentAnn.unshift({
-        id: `ann_${Date.now()}`,
-        title: newAnnTitle.trim(),
-        content: newAnnContent.trim(),
-        contentHtml: sanitizedHtml,
-        author: `${supervisor.fullName} (سرپرست ${currentDorm?.name || 'سرا'})`,
-        priority: newAnnPriority,
-        date: new Date().toLocaleDateString('fa-IR'),
-        targetDormId: selectedDormId === 'all' ? (myDorms[0]?.id || 'all') : selectedDormId,
-        showOnHomePage: true,
-        imageUrl: newAnnImage || undefined,
-      });
-      Storage.setAnnouncements(currentAnn);
-      setActionFeedback('اطلاعیه جدید با موفقیت ثبت و منتشر گردید.');
-    }
-
-    setNewAnnTitle('');
-    setNewAnnContent('');
-    setNewAnnContentHtml('');
-    setAnnEditorResetKey((k) => k + 1);
-    setNewAnnImage(null);
-    setShowAddAnnouncement(false);
-    onRefreshData();
-    setTimeout(() => setActionFeedback(null), 3000);
-  };
-
   const handleResolveWarning = (warningId: string) => {
     Storage.resolveWarning(warningId);
     onRefreshData();
@@ -779,14 +672,6 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           </button>
 
           <button
-            onClick={() => setShowAddAnnouncement(true)}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-amber-600/20 cursor-pointer"
-          >
-            <Bell className="w-4 h-4" />
-            <span>ارسال اطلاعیه جدید سرا</span>
-          </button>
-
-          <button
             onClick={onOpenReports}
             className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-teal-600/20 cursor-pointer"
           >
@@ -921,118 +806,6 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* فرم مدال ثبت یا ویرایش اطلاعیه */}
-      {showAddAnnouncement && (
-        <div className="p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-lg animate-in fade-in">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
-            <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              <Bell className="w-4 h-4 text-amber-500" />
-              <span>{editingAnnId ? 'ویرایش اطلاعیه رسمی سرا' : 'ارسال اطلاعیه جدید برای نمایش در داشبورد دانشجویان'}</span>
-            </h3>
-            <button onClick={handleCancelEditAnnouncement} className="text-slate-400 hover:text-slate-600">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <form onSubmit={handleCreateAnnouncement} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  عنوان اطلاعیه
-                </label>
-                <input
-                  type="text"
-                  placeholder="مثلاً تغییر ساعت ورود و خروج یا برنامه سم‌پاشی"
-                  value={newAnnTitle}
-                  onChange={(e) => setNewAnnTitle(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-teal-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  اولویت اطلاعیه
-                </label>
-                <select
-                  value={newAnnPriority}
-                  onChange={(e) => setNewAnnPriority(e.target.value as any)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-teal-500"
-                >
-                  <option value="normal">عادی</option>
-                  <option value="important">مهم (برچسب زرد)</option>
-                  <option value="urgent">فوری و ضروری (برچسب قرمز)</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                متن کامل اطلاعیه (با امکان قالب‌بندی فونت، رنگ، اندازه، بُلد و ایتالیک برای هر بخش متن)
-              </label>
-              <RichTextEditor
-                valueHtml={newAnnContentHtml}
-                onChange={(html, plain) => {
-                  setNewAnnContentHtml(html);
-                  setNewAnnContent(plain);
-                }}
-                customFonts={settings.customFonts}
-                resetKey={annEditorResetKey}
-                minHeightClass="min-h-[130px]"
-                placeholder="متن کامل پیام و دستورالعمل... می‌توانید هر کلمه یا جمله را انتخاب کرده و فونت، رنگ، اندازه، بُلد یا ایتالیک آن را تغییر دهید."
-              />
-            </div>
-
-            {/* پیوست عکس یا پوستر اطلاعیه */}
-            <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
-                <ImageIcon className="w-3.5 h-3.5 text-teal-600" />
-                <span>تصویر یا پوستر اطلاعیه (اختیاری)</span>
-              </label>
-
-              <div className="flex items-center gap-3">
-                <label className="px-3 py-1.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer hover:bg-slate-100">
-                  <Upload className="w-3.5 h-3.5 text-teal-600" />
-                  <span>انتخاب عکس</span>
-                  <input type="file" accept="image/*" onChange={handleAnnImageUpload} className="hidden" />
-                </label>
-
-                {newAnnImage && (
-                  <div className="flex items-center gap-2">
-                    <img src={newAnnImage} alt="پیش‌نمایش" className="w-10 h-10 object-cover rounded-lg border border-teal-500" />
-                    <button
-                      type="button"
-                      onClick={() => setNewAnnImage(null)}
-                      className="text-[11px] text-rose-600 hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      حذف
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
-              >
-                <Save className="w-4 h-4" />
-                <span>{editingAnnId ? 'ذخیره تغییرات اطلاعیه' : 'ثبت و انتشار اطلاعیه'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelEditAnnouncement}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-50 cursor-pointer"
-              >
-                انصراف
-              </button>
-            </div>
-          </form>
         </div>
       )}
 
@@ -1198,31 +971,18 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
 
       {activeTab === 'announcements' && (
         <div className="space-y-6">
-          {/* لیست اطلاعیه‌های فعال سرا با قابلیت ویرایش توسط سرپرست */}
+          {/* لیست اطلاعیه‌های فعال سرا (فقط قابل مشاهده توسط سرپرست؛ ثبت و انتشار اطلاعیه منحصراً در اختیار مدیر سامانه است) */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <Bell className="w-5 h-5 text-amber-500" />
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
                   اطلاعیه‌های سراهای دانشجویی ({announcements.length})
                 </h3>
               </div>
-              <button
-                onClick={() => {
-                  setEditingAnnId(null);
-                  setNewAnnTitle('');
-                  setNewAnnContent('');
-                  setNewAnnContentHtml('');
-                  setAnnEditorResetKey((k) => k + 1);
-                  setNewAnnPriority('normal');
-                  setNewAnnImage(null);
-                  setShowAddAnnouncement(true);
-                }}
-                className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <Plus className="w-4 h-4" />
-                <span>ارسال اطلاعیه جدید</span>
-              </button>
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">
+                ثبت و انتشار اطلاعیه‌ها منحصراً در اختیار مدیر سامانه است
+              </span>
             </div>
 
             {announcements.length === 0 ? (
@@ -1235,7 +995,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                     className="p-4 rounded-2xl border border-slate-200/70 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 space-y-2 text-xs"
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {ann.priority === 'urgent' ? (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-600 text-white font-extrabold">
                             فوری
@@ -1247,36 +1007,23 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                         ) : null}
                         <h4 className="font-bold text-sm text-slate-900 dark:text-white">{ann.title}</h4>
                       </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => handleStartEditAnnouncement(ann)}
-                          className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 text-xs font-bold border border-amber-300 dark:border-amber-800 transition flex items-center gap-1 cursor-pointer"
-                          title="ویرایش این اطلاعیه"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>ویرایش</span>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteAnnouncement(ann.id)}
-                          className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer"
-                          title="حذف اطلاعیه"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
                     </div>
 
                     <RichTextDisplay
                       html={ann.contentHtml}
                       fallbackText={ann.content}
                       className="text-slate-600 dark:text-slate-300 leading-relaxed"
+                      onImageClick={(src) => setPreviewAnnImage(src)}
                     />
 
                     {ann.imageUrl && (
-                      <div className="mt-2 max-w-xs overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
-                        <img src={ann.imageUrl} alt={ann.title} className="w-full max-h-36 object-cover" />
-                      </div>
+                      <AnnouncementImageBox
+                        src={ann.imageUrl}
+                        alt={ann.title}
+                        onClick={(src) => setPreviewAnnImage(src)}
+                        maxWidthClass="max-w-md"
+                        heightClass="h-44 sm:h-52"
+                      />
                     )}
 
                     <div className="text-[10px] text-slate-400 pt-1 flex justify-between">
@@ -3226,6 +2973,12 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           </form>
         </div>
       )}
+
+      <ImageLightboxModal
+        src={previewAnnImage}
+        alt="تصویر اطلاعیه"
+        onClose={() => setPreviewAnnImage(null)}
+      />
 
     </div>
   );

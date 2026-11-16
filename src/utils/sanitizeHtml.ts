@@ -19,6 +19,15 @@ const ALLOWED_TAGS = new Set([
   'H2',
   'H3',
   'H4',
+  'TABLE',
+  'THEAD',
+  'TBODY',
+  'TFOOT',
+  'TR',
+  'TH',
+  'TD',
+  'CAPTION',
+  'IMG',
 ]);
 
 const ALLOWED_STYLE_PROPS = new Set([
@@ -30,6 +39,28 @@ const ALLOWED_STYLE_PROPS = new Set([
   'font-style',
   'text-decoration',
   'text-align',
+  'list-style-type',
+  'list-style-position',
+  'border',
+  'border-collapse',
+  'border-radius',
+  'width',
+  'min-width',
+  'max-width',
+  'height',
+  'max-height',
+  'padding',
+  'padding-right',
+  'padding-left',
+  'margin',
+  'margin-top',
+  'margin-bottom',
+  'margin-left',
+  'margin-right',
+  'vertical-align',
+  'display',
+  'object-fit',
+  'cursor',
 ]);
 
 function filterInlineStyle(styleValue: string): string {
@@ -92,12 +123,37 @@ function sanitizeNode(node: Node, doc: Document): Node | null {
     return frag;
   }
 
+  if (tagName === 'IMG') {
+    const src = el.getAttribute('src');
+    if (!isSafeMediaUrl(src)) {
+      return null;
+    }
+    const cleanImg = doc.createElement('img');
+    cleanImg.setAttribute('src', src!.trim());
+    const alt = el.getAttribute('alt');
+    if (alt) cleanImg.setAttribute('alt', alt.slice(0, 200));
+    const styleAttr = el.getAttribute('style');
+    if (styleAttr) {
+      const safeStyle = filterInlineStyle(styleAttr);
+      if (safeStyle) cleanImg.setAttribute('style', safeStyle);
+    }
+    return cleanImg;
+  }
+
   const cleanEl = doc.createElement(tagName.toLowerCase());
 
   const styleAttr = el.getAttribute('style');
-  if (styleAttr) {
-    const safeStyle = filterInlineStyle(styleAttr);
-    if (safeStyle) cleanEl.setAttribute('style', safeStyle);
+  let safeStyle = styleAttr ? filterInlineStyle(styleAttr) : '';
+
+  const alignAttr = el.getAttribute('align')?.trim().toLowerCase();
+  if (alignAttr && (alignAttr === 'left' || alignAttr === 'center' || alignAttr === 'right' || alignAttr === 'justify')) {
+    if (!/text-align\s*:/i.test(safeStyle)) {
+      safeStyle = safeStyle ? `${safeStyle}; text-align: ${alignAttr}` : `text-align: ${alignAttr}`;
+    }
+  }
+
+  if (safeStyle) {
+    cleanEl.setAttribute('style', safeStyle);
   }
 
   if (tagName === 'FONT') {
@@ -109,6 +165,20 @@ function sanitizeNode(node: Node, doc: Document): Node | null {
     if (faceAttr && !/[<>;"']/.test(faceAttr)) {
       cleanEl.setAttribute('face', faceAttr.trim());
     }
+  }
+
+  if (tagName === 'OL' || tagName === 'UL') {
+    const listType = el.getAttribute('type')?.trim();
+    if (listType && /^(1|a|A|i|I|disc|circle|square)$/.test(listType)) {
+      cleanEl.setAttribute('type', listType);
+    }
+  }
+
+  if (tagName === 'TH' || tagName === 'TD') {
+    const colspan = el.getAttribute('colspan')?.trim();
+    const rowspan = el.getAttribute('rowspan')?.trim();
+    if (colspan && /^\d{1,2}$/.test(colspan)) cleanEl.setAttribute('colspan', colspan);
+    if (rowspan && /^\d{1,2}$/.test(rowspan)) cleanEl.setAttribute('rowspan', rowspan);
   }
 
   const dirAttr = el.getAttribute('dir');
@@ -150,7 +220,11 @@ export function extractPlainText(html: string): string {
   }
   const parser = new DOMParser();
   const parsed = parser.parseFromString(html, 'text/html');
-  return (parsed.body.textContent || '').replace(/\u200B/g, '').trim();
+  const text = (parsed.body.textContent || '').replace(/\u200B/g, '').trim();
+  if (text) return text;
+  if (parsed.body.querySelector('img')) return 'تصویر پیوست متن';
+  if (parsed.body.querySelector('table')) return 'جدول اطلاعات';
+  return '';
 }
 
 export function plainTextToHtml(text: string): string {

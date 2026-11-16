@@ -54,6 +54,7 @@ import { StudentEvaluationModal } from './StudentEvaluationModal';
 import { RoomRosterPrintModal } from './RoomRosterPrintModal';
 import { SupervisorGuestRequestsPanel } from './SupervisorGuestRequestsPanel';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
+import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
 import { AdminUsersPanel, UserCategoryKey } from './AdminUsersPanel';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
 import { STANDARD_FONTS, readMultipleFontFiles } from '../utils/fonts';
@@ -3004,7 +3005,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  متن و شرح کامل اطلاعیه * (با قابلیت انتخاب فونت، رنگ، اندازه، بُلد و ایتالیک برای هر قسمت از متن)
+                  متن و شرح کامل اطلاعیه * (با امکان انتخاب فونت، رنگ، اندازه، تراز وسط/چپ/راست، بولت‌های متنوع، جدول و تصویر در متن)
                 </label>
                 <RichTextEditor
                   valueHtml={newAnnContentHtml}
@@ -3015,7 +3016,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   customFonts={localSettings.customFonts}
                   resetKey={annEditorResetKey}
                   minHeightClass="min-h-[160px]"
-                  placeholder="متن کامل بخشنامه یا اطلاعیه رسمی را درج فرمایید. با انتخاب هر کلمه یا جمله می‌توانید فونت، رنگ، اندازه، بُلد یا ایتالیک آن را تغییر دهید..."
+                  placeholder="متن کامل بخشنامه یا اطلاعیه رسمی را درج فرمایید. می‌توانید متن را وسط‌چین/راست‌چین/چپ‌چین کنید، بولت‌های متنوع، جدول یا تصویر در داخل متن اضافه کنید..."
                 />
               </div>
 
@@ -3043,9 +3044,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <img
                         src={newAnnImage}
                         alt="پیش‌نمایش تصویر اطلاعیه"
-                        className="w-12 h-12 object-cover rounded-lg border border-teal-500 shadow-xs cursor-pointer hover:opacity-90"
+                        className="w-16 h-16 object-contain bg-white dark:bg-slate-900 rounded-lg border border-teal-500 shadow-xs cursor-pointer hover:opacity-90"
                         onClick={() => setAnnPreviewImage(newAnnImage)}
-                        title="مشاهده بزرگتر"
+                        title="مشاهده در ابعاد واقعی و بزرگ"
                       />
                       <div className="text-right">
                         <span className="text-[11px] font-bold text-teal-900 dark:text-teal-200 block">
@@ -3234,18 +3235,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       html={ann.contentHtml}
                       fallbackText={ann.content}
                       className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed"
+                      onImageClick={(src) => setAnnPreviewImage(src)}
                     />
 
                     {ann.imageUrl && (
-                      <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-black/5 max-w-sm">
-                        <img
-                          src={ann.imageUrl}
-                          alt={ann.title}
-                          className="w-full max-h-48 object-cover rounded-xl cursor-pointer hover:opacity-90 transition"
-                          onClick={() => setAnnPreviewImage(ann.imageUrl || null)}
-                          title="کلیک جهت مشاهده در ابعاد بزرگ"
-                        />
-                      </div>
+                      <AnnouncementImageBox
+                        src={ann.imageUrl}
+                        alt={ann.title}
+                        onClick={(src) => setAnnPreviewImage(src)}
+                        maxWidthClass="max-w-md"
+                        heightClass="h-48 sm:h-56"
+                      />
                     )}
 
                     <div className="text-[11px] text-slate-400 mt-2.5 flex items-center justify-between">
@@ -7580,32 +7580,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         />
       )}
 
-      {/* لایت‌باکس بزرگ‌نمایی تصویر اطلاعیه برای مدیر */}
-      {annPreviewImage && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xs cursor-pointer animate-in fade-in"
-          onClick={() => setAnnPreviewImage(null)}
-        >
-          <div
-            className="relative max-w-4xl max-h-[90vh] bg-white dark:bg-slate-900 rounded-3xl p-3 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <img
-              src={annPreviewImage}
-              alt="پوستر اطلاعیه"
-              className="max-h-[80vh] w-auto mx-auto rounded-2xl object-contain"
-            />
-            <div className="p-3 text-center">
-              <button
-                onClick={() => setAnnPreviewImage(null)}
-                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold cursor-pointer"
-              >
-                بستن
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* لایت‌باکس بزرگ‌نمایی و نمایش در ابعاد واقعی تصویر اطلاعیه برای مدیر */}
+      <ImageLightboxModal
+        src={annPreviewImage}
+        alt="پوستر / تصویر اطلاعیه"
+        onClose={() => setAnnPreviewImage(null)}
+      />
 
       {/* مدال تخصیص اتاق و تخت به دانشجو توسط مدیر */}
       {assigningStudent && (

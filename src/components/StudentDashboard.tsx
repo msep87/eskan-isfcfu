@@ -12,6 +12,7 @@ import { StudentProfileModal } from './StudentProfileModal';
 import { DormIdCardModal } from './DormIdCardModal';
 import { StudentGuestRequestPanel } from './StudentGuestRequestPanel';
 import { RichTextDisplay } from './RichTextEditor';
+import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
 import {
   User,
   Bed as BedIcon,
@@ -71,6 +72,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest'>('overview');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isIdCardModalOpen, setIsIdCardModalOpen] = useState(false);
+  const [previewAnnImage, setPreviewAnnImage] = useState<string | null>(null);
 
   // دریافت اتاق و تخت دانشجو
   const studentBed = beds.find((b) => b.id === student.assignedBedId);
@@ -533,15 +535,16 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   html={ann.contentHtml}
                   fallbackText={ann.content}
                   className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed"
+                  onImageClick={(src) => setPreviewAnnImage(src)}
                 />
                 {ann.imageUrl && (
-                  <div className="mt-2.5 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-black/5 max-w-md">
-                    <img
-                      src={ann.imageUrl}
-                      alt={ann.title}
-                      className="w-full max-h-48 object-cover rounded-xl"
-                    />
-                  </div>
+                  <AnnouncementImageBox
+                    src={ann.imageUrl}
+                    alt={ann.title}
+                    onClick={(src) => setPreviewAnnImage(src)}
+                    maxWidthClass="max-w-md"
+                    heightClass="h-48 sm:h-56"
+                  />
                 )}
                 <div className="text-[10px] text-slate-400 mt-2 font-medium">
                   مرجع صدور: {ann.author}
@@ -944,6 +947,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         room={studentRoom}
         bed={studentBed}
         settings={settings}
+      />
+
+      <ImageLightboxModal
+        src={previewAnnImage}
+        alt="تصویر اطلاعیه"
+        onClose={() => setPreviewAnnImage(null)}
       />
 
     </div>

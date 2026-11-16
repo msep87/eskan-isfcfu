@@ -43,6 +43,7 @@ import { AboutModal } from './components/AboutModal';
 import { UserGuideModal } from './components/UserGuideModal';
 import { AiDormAssistant } from './components/AiDormAssistant';
 import { RichTextDisplay } from './components/RichTextEditor';
+import { AnnouncementImageBox, ImageLightboxModal } from './components/ImageLightboxModal';
 import { resolveFontCssFamily } from './utils/fonts';
 import {
   DEFAULT_HOME_NOTES_TITLE,
@@ -518,18 +519,17 @@ export default function App() {
                         html={ann.contentHtml}
                         fallbackText={ann.content}
                         className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed"
+                        onImageClick={(src) => setPreviewImage(src)}
                       />
 
                       {ann.imageUrl && (
-                        <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-black/5">
-                          <img
-                            src={ann.imageUrl}
-                            alt={ann.title}
-                            onClick={() => setPreviewImage(ann.imageUrl || null)}
-                            className="w-full max-h-48 object-cover cursor-pointer hover:opacity-95 transition"
-                            title="کلیک جهت مشاهده در اندازه کامل"
-                          />
-                        </div>
+                        <AnnouncementImageBox
+                          src={ann.imageUrl}
+                          alt={ann.title}
+                          onClick={(src) => setPreviewImage(src)}
+                          maxWidthClass="w-full"
+                          heightClass="h-52 sm:h-60"
+                        />
                       )}
 
                       <div className="text-[10px] text-slate-400 mt-3 pt-2 border-t border-black/5 dark:border-white/5 font-medium flex items-center justify-between">
@@ -842,29 +842,12 @@ export default function App() {
         />
       )}
 
-      {/* مدال بزرگ‌نمایی تصویر اطلاعیه */}
-      {previewImage && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm animate-in fade-in cursor-pointer"
-          onClick={() => setPreviewImage(null)}
-        >
-          <div className="relative max-w-4xl max-h-[90vh] bg-white dark:bg-slate-900 rounded-3xl p-3 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <img
-              src={previewImage}
-              alt="پوستر اطلاعیه"
-              className="max-h-[82vh] w-auto mx-auto rounded-2xl object-contain"
-            />
-            <div className="p-3 text-center">
-              <button
-                onClick={() => setPreviewImage(null)}
-                className="px-6 py-2 bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 rounded-xl text-xs font-bold transition cursor-pointer"
-              >
-                بستن تصویر
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* مدال بزرگ‌نمایی و نمایش در ابعاد واقعی تصویر اطلاعیه */}
+      <ImageLightboxModal
+        src={previewImage}
+        alt="پوستر / تصویر اطلاعیه"
+        onClose={() => setPreviewImage(null)}
+      />
 
       {/* دستیار هوشمند خوابگاهی و آموزشی (فقط پس از ورود کاربر به کارتابل و به جز کارشناس آموزش) */}
       {currentUser && currentUser.role !== 'education' && (
