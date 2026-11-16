@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Student,
   Dormitory,
@@ -60,6 +60,10 @@ import {
   FileText,
   Wallet,
   ShoppingBag,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -168,9 +172,15 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const [stProfileFilter, setStProfileFilter] = useState<'all' | 'completed' | 'incomplete'>('all');
   const [stLocationFilter, setStLocationFilter] = useState('');
 
-  // مرتب‌سازی دانشجویان
+  // مرتب‌سازی و صفحه‌بندی دانشجویان (پیش‌فرض ۵۰ دانشجو در هر صفحه برای بارگذاری سریع)
   const [stSortBy, setStSortBy] = useState<StudentSortKey>('default');
   const [stSortDir, setStSortDir] = useState<'asc' | 'desc'>('asc');
+  const [studentPageSize, setStudentPageSize] = useState<number | 'all'>(50);
+  const [studentCurrentPage, setStudentCurrentPage] = useState<number>(1);
+
+  const deferredStQuery = useDeferredValue(stQuery);
+  const deferredStRoomFilter = useDeferredValue(stRoomFilter);
+  const deferredStLocationFilter = useDeferredValue(stLocationFilter);
 
   // مدال پرونده کامل دانشجو با کلیک روی نام (عکس، اخطار، تذکر، پیام، ارزیابی فردی و اتاق)
   const [profileModalStudentId, setProfileModalStudentId] = useState<string | null>(null);
@@ -545,30 +555,40 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const roomLookupMap = useMemo(() => new Map(rooms.map((rm) => [rm.id, rm])), [rooms]);
   const bedLookupMap = useMemo(() => new Map(beds.map((bd) => [bd.id, bd])), [beds]);
 
+  // ایندکس پیش‌محاسبه‌شده جستجوی دانشجویان برای فیلتر سریع بدون کندی تایپ
+  const studentSearchIndex = useMemo(() => {
+    const map = new Map<string, string>();
+    students.forEach((st) => {
+      const blob = [
+        st.fullName,
+        st.studentId,
+        st.nationalId,
+        st.mobile,
+        st.phone,
+        st.emergencyPhone,
+        st.parentPhone,
+        st.fatherName,
+        st.fieldOfStudy,
+        st.city,
+        st.province,
+        st.postalAddress,
+      ]
+        .map(norm)
+        .join(' ');
+      map.set(st.studentId, blob);
+    });
+    return map;
+  }, [students]);
+
   // فیلتر پیشرفته دانشجویان
   const filteredStudents = useMemo(() => {
-    const q = norm(stQuery);
-    const roomQ = norm(stRoomFilter);
-    const locQ = norm(stLocationFilter);
+    const q = norm(deferredStQuery);
+    const roomQ = norm(deferredStRoomFilter);
+    const locQ = norm(deferredStLocationFilter);
 
     return students.filter((st) => {
       if (q) {
-        const haystack = [
-          st.fullName,
-          st.studentId,
-          st.nationalId,
-          st.mobile,
-          st.phone,
-          st.emergencyPhone,
-          st.parentPhone,
-          st.fatherName,
-          st.fieldOfStudy,
-          st.city,
-          st.province,
-          st.postalAddress,
-        ]
-          .map(norm)
-          .join(' ');
+        const haystack = studentSearchIndex.get(st.studentId) || '';
         if (!haystack.includes(q)) return false;
       }
 
@@ -609,15 +629,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     });
   }, [
     students,
+    studentSearchIndex,
     roomLookupMap,
-    stQuery,
+    deferredStQuery,
     stFieldFilter,
     stEntryFilter,
     stDormFilter,
-    stRoomFilter,
+    deferredStRoomFilter,
     stAssignFilter,
     stProfileFilter,
-    stLocationFilter,
+    deferredStLocationFilter,
   ]);
 
   const sortedStudents = useMemo(() => {
@@ -626,6 +647,60 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     list.sort((a, b) => compareStudents(a, b, stSortBy, stSortDir, rooms, dorms));
     return list;
   }, [filteredStudents, stSortBy, stSortDir, rooms, dorms]);
+
+  // بازنشانی به صفحه ۱ هنگام تغییر فیلتر، مرتب‌سازی یا تعداد نمایش در صفحه
+  useEffect(() => {
+    setStudentCurrentPage(1);
+  }, [
+    deferredStQuery,
+    stFieldFilter,
+    stEntryFilter,
+    stDormFilter,
+    deferredStRoomFilter,
+    stAssignFilter,
+    stProfileFilter,
+    deferredStLocationFilter,
+    stSortBy,
+    stSortDir,
+    studentPageSize,
+  ]);
+
+  const totalStudentsCount = sortedStudents.length;
+  const effectiveStudentPageSize =
+    studentPageSize === 'all' ? Math.max(1, totalStudentsCount) : studentPageSize;
+  const totalStudentPages =
+    studentPageSize === 'all'
+      ? 1
+      : Math.max(1, Math.ceil(totalStudentsCount / effectiveStudentPageSize));
+  const safeStudentPage = Math.min(Math.max(1, studentCurrentPage), totalStudentPages);
+  const studentStartIndex =
+    studentPageSize === 'all' ? 0 : (safeStudentPage - 1) * effectiveStudentPageSize;
+  const studentEndIndex =
+    studentPageSize === 'all'
+      ? totalStudentsCount
+      : Math.min(totalStudentsCount, studentStartIndex + effectiveStudentPageSize);
+
+  const paginatedStudents = useMemo(() => {
+    if (studentPageSize === 'all') return sortedStudents;
+    return sortedStudents.slice(studentStartIndex, studentEndIndex);
+  }, [sortedStudents, studentPageSize, studentStartIndex, studentEndIndex]);
+
+  const studentPageNumbers = useMemo(() => {
+    if (totalStudentPages <= 1) return [] as Array<number | 'ellipsis-start' | 'ellipsis-end'>;
+    if (totalStudentPages <= 7) {
+      return Array.from({ length: totalStudentPages }, (_, i) => i + 1);
+    }
+    const pages: Array<number | 'ellipsis-start' | 'ellipsis-end'> = [1];
+    const windowStart = Math.max(2, safeStudentPage - 1);
+    const windowEnd = Math.min(totalStudentPages - 1, safeStudentPage + 1);
+    if (windowStart > 2) pages.push('ellipsis-start');
+    for (let p = windowStart; p <= windowEnd; p += 1) {
+      pages.push(p);
+    }
+    if (windowEnd < totalStudentPages - 1) pages.push('ellipsis-end');
+    pages.push(totalStudentPages);
+    return pages;
+  }, [totalStudentPages, safeStudentPage]);
 
   const toggleStudentSort = (key: Exclude<StudentSortKey, 'default'>) => {
     if (stSortBy === key) {
@@ -2011,7 +2086,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             )}
           </div>
 
-          {/* جدول دانشجویان */}
+          {/* جدول دانشجویان + نوار صفحه‌بندی سریع */}
           {filteredStudents.length === 0 ? (
             <div className="p-10 text-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-400 space-y-2">
               <p>هیچ دانشجویی با معیارهای جستجوی انتخاب‌شده یافت نشد.</p>
@@ -2026,131 +2101,261 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
               )}
             </div>
           ) : (
-            <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
-              <table className="w-full text-right text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
-                  <tr>
-                    <th className="p-3">
-                      <button
-                        type="button"
-                        onClick={() => toggleStudentSort('studentId')}
-                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
-                        title="مرتب‌سازی بر اساس کد دانشجویی"
-                      >
-                        <span>شماره دانشجویی</span>
-                        {renderSortIcon('studentId')}
-                      </button>
-                    </th>
-                    <th className="p-3">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => toggleStudentSort('lastName')}
-                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
-                          title="مرتب‌سازی بر اساس نام خانوادگی"
-                        >
-                          <span>نام و نام خانوادگی</span>
-                          {renderSortIcon('lastName')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toggleStudentSort('lastName')}
-                          className={`text-[10px] px-1.5 py-0.5 rounded border cursor-pointer transition ${
-                            stSortBy === 'lastName'
-                              ? 'bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-700'
-                              : 'bg-white dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700 hover:border-teal-400'
-                          }`}
-                        >
-                          فامیلی
-                        </button>
-                      </div>
-                    </th>
-                    <th className="p-3">کد ملی / رمز ورود</th>
-                    <th className="p-3">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => toggleStudentSort('fieldOfStudy')}
-                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
-                          title="مرتب‌سازی بر اساس رشته تحصیلی"
-                        >
-                          <span>رشته</span>
-                          {renderSortIcon('fieldOfStudy')}
-                        </button>
-                        <span className="text-slate-300 dark:text-slate-600">/</span>
-                        <button
-                          type="button"
-                          onClick={() => toggleStudentSort('entryTerm')}
-                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
-                          title="مرتب‌سازی بر اساس سال/ترم ورودی"
-                        >
-                          <span>ورودی</span>
-                          {renderSortIcon('entryTerm')}
-                        </button>
-                      </div>
-                    </th>
-                    <th className="p-3">وضعیت پرونده</th>
-                    <th className="p-3">
-                      <button
-                        type="button"
-                        onClick={() => toggleStudentSort('roomName')}
-                        className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
-                        title="مرتب‌سازی بر اساس نام / شماره اتاق"
-                      >
-                        <span>خوابگاه / اتاق و تخت</span>
-                        {renderSortIcon('roomName')}
-                      </button>
-                    </th>
-                    <th className="p-3">تماس و شهر</th>
-                    <th className="p-3 text-center">عملیات و مدیریت حساب</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {sortedStudents.map((st) => {
-                    const d = st.assignedDormId ? dormLookupMap.get(st.assignedDormId) : undefined;
-                    const r = st.assignedRoomId ? roomLookupMap.get(st.assignedRoomId) : undefined;
-                    const b = st.assignedBedId ? bedLookupMap.get(st.assignedBedId) : undefined;
-                    const passKey = `student_${st.studentId}`;
-                    const isShown = revealedPasswords[passKey];
+            <div className="space-y-3">
+              {/* نوار صفحه‌بندی و تنظیم تعداد نمایش در صفحه (بالای جدول) */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs">
+                <div className="flex flex-wrap items-center gap-2 text-slate-700 dark:text-slate-200 font-bold">
+                  <span>
+                    نمایش{' '}
+                    <span className="text-teal-700 dark:text-teal-300 font-black">
+                      {(studentStartIndex + 1).toLocaleString('fa-IR')}
+                    </span>{' '}
+                    تا{' '}
+                    <span className="text-teal-700 dark:text-teal-300 font-black">
+                      {studentEndIndex.toLocaleString('fa-IR')}
+                    </span>{' '}
+                    از{' '}
+                    <span className="font-black">
+                      {totalStudentsCount.toLocaleString('fa-IR')}
+                    </span>{' '}
+                    دانشجو
+                  </span>
+                  {studentPageSize !== 'all' && (
+                    <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      (صفحه {safeStudentPage.toLocaleString('fa-IR')} از{' '}
+                      {totalStudentPages.toLocaleString('fa-IR')})
+                    </span>
+                  )}
+                </div>
 
-                    return (
-                      <tr key={st.studentId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                        <td className="p-3 font-mono font-bold text-slate-800 dark:text-slate-200 tabular-nums">
-                          {st.studentId}
-                        </td>
-                        <td className="p-3 font-bold text-slate-900 dark:text-white">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                    <span>تعداد در صفحه:</span>
+                    <select
+                      value={studentPageSize}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setStudentPageSize(val === 'all' ? 'all' : Number(val));
+                        setStudentCurrentPage(1);
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100 cursor-pointer"
+                    >
+                      <option value={25}>۲۵ دانشجو</option>
+                      <option value={50}>۵۰ دانشجو (پیش‌فرض)</option>
+                      <option value={100}>۱۰۰ دانشجو</option>
+                      <option value={200}>۲۰۰ دانشجو</option>
+                      <option value={500}>۵۰۰ دانشجو</option>
+                      <option value="all">
+                        همه دانشجویان ({totalStudentsCount.toLocaleString('fa-IR')} نفر)
+                      </option>
+                    </select>
+                  </label>
+
+                  {totalStudentPages > 1 && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setStudentCurrentPage(1)}
+                        disabled={safeStudentPage <= 1}
+                        className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition"
+                        title="صفحه اول"
+                      >
+                        <ChevronsRight className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStudentCurrentPage((p) => Math.max(1, p - 1))}
+                        disabled={safeStudentPage <= 1}
+                        className="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition inline-flex items-center gap-1 font-bold text-[11px]"
+                        title="صفحه قبلی"
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                        <span>قبلی</span>
+                      </button>
+
+                      <div className="hidden sm:flex items-center gap-1">
+                        {studentPageNumbers.map((item) =>
+                          typeof item === 'string' ? (
+                            <span
+                              key={item}
+                              className="px-1.5 text-slate-400 select-none font-bold"
+                            >
+                              ...
+                            </span>
+                          ) : (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => setStudentCurrentPage(item)}
+                              className={`min-w-[28px] h-7 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
+                                item === safeStudentPage
+                                  ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
+                                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800'
+                              }`}
+                            >
+                              {item.toLocaleString('fa-IR')}
+                            </button>
+                          )
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setStudentCurrentPage((p) => Math.min(totalStudentPages, p + 1))
+                        }
+                        disabled={safeStudentPage >= totalStudentPages}
+                        className="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition inline-flex items-center gap-1 font-bold text-[11px]"
+                        title="صفحه بعدی"
+                      >
+                        <span>بعدی</span>
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStudentCurrentPage(totalStudentPages)}
+                        disabled={safeStudentPage >= totalStudentPages}
+                        className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition"
+                        title="صفحه آخر"
+                      >
+                        <ChevronsLeft className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                    <tr>
+                      <th className="p-3 w-12 text-center">ردیف</th>
+                      <th className="p-3">
+                        <button
+                          type="button"
+                          onClick={() => toggleStudentSort('studentId')}
+                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                          title="مرتب‌سازی بر اساس کد دانشجویی"
+                        >
+                          <span>شماره دانشجویی</span>
+                          {renderSortIcon('studentId')}
+                        </button>
+                      </th>
+                      <th className="p-3">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <button
                             type="button"
-                            onClick={() => setProfileModalStudentId(st.studentId)}
-                            className="flex items-center gap-2 text-right group cursor-pointer rounded-xl p-1 -m-1 hover:bg-teal-50/80 dark:hover:bg-teal-950/40 transition w-full"
-                            title="مشاهده کامل اطلاعات و عکس دانشجو، ثبت اخطار، تذکر، پیام و نمره ارزیابی"
+                            onClick={() => toggleStudentSort('lastName')}
+                            className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                            title="مرتب‌سازی بر اساس نام خانوادگی"
                           >
-                            {st.photoUrl ? (
-                              <img
-                                src={st.photoUrl}
-                                alt={st.fullName}
-                                className="w-8 h-8 rounded-full object-cover shrink-0 ring-2 ring-transparent group-hover:ring-teal-500 transition"
-                              />
-                            ) : (
-                              <div
-                                className="w-8 h-8 rounded-full text-white text-[11px] font-bold flex items-center justify-center shrink-0 ring-2 ring-transparent group-hover:ring-teal-500 transition"
-                                style={{ backgroundColor: st.avatarColor || '#0d9488' }}
-                              >
-                                {(st.fullName || 'د').slice(0, 1)}
-                              </div>
-                            )}
-                            <div className="min-w-0">
-                              <div className="text-slate-900 dark:text-white group-hover:text-teal-700 dark:group-hover:text-teal-300 underline decoration-dotted decoration-teal-500/50 underline-offset-4 transition">
-                                {st.fullName}
-                              </div>
-                              {st.fatherName && (
-                                <div className="text-[10px] text-slate-400 font-normal">
-                                  فرزند {st.fatherName}
+                            <span>نام و نام خانوادگی</span>
+                            {renderSortIcon('lastName')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleStudentSort('lastName')}
+                            className={`text-[10px] px-1.5 py-0.5 rounded border cursor-pointer transition ${
+                              stSortBy === 'lastName'
+                                ? 'bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-700'
+                                : 'bg-white dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                            }`}
+                          >
+                            فامیلی
+                          </button>
+                        </div>
+                      </th>
+                      <th className="p-3">کد ملی / رمز ورود</th>
+                      <th className="p-3">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => toggleStudentSort('fieldOfStudy')}
+                            className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                            title="مرتب‌سازی بر اساس رشته تحصیلی"
+                          >
+                            <span>رشته</span>
+                            {renderSortIcon('fieldOfStudy')}
+                          </button>
+                          <span className="text-slate-300 dark:text-slate-600">/</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleStudentSort('entryTerm')}
+                            className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                            title="مرتب‌سازی بر اساس سال/ترم ورودی"
+                          >
+                            <span>ورودی</span>
+                            {renderSortIcon('entryTerm')}
+                          </button>
+                        </div>
+                      </th>
+                      <th className="p-3">وضعیت پرونده</th>
+                      <th className="p-3">
+                        <button
+                          type="button"
+                          onClick={() => toggleStudentSort('roomName')}
+                          className="inline-flex items-center gap-1 hover:text-teal-700 dark:hover:text-teal-300 cursor-pointer transition"
+                          title="مرتب‌سازی بر اساس نام / شماره اتاق"
+                        >
+                          <span>خوابگاه / اتاق و تخت</span>
+                          {renderSortIcon('roomName')}
+                        </button>
+                      </th>
+                      <th className="p-3">تماس و شهر</th>
+                      <th className="p-3 text-center">عملیات و مدیریت حساب</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {paginatedStudents.map((st, rowIdx) => {
+                      const d = st.assignedDormId ? dormLookupMap.get(st.assignedDormId) : undefined;
+                      const r = st.assignedRoomId ? roomLookupMap.get(st.assignedRoomId) : undefined;
+                      const b = st.assignedBedId ? bedLookupMap.get(st.assignedBedId) : undefined;
+                      const passKey = `student_${st.studentId}`;
+                      const isShown = revealedPasswords[passKey];
+
+                      return (
+                        <tr key={st.studentId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 text-center text-[11px] font-bold text-slate-400 tabular-nums">
+                            {(studentStartIndex + rowIdx + 1).toLocaleString('fa-IR')}
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-800 dark:text-slate-200 tabular-nums">
+                            {st.studentId}
+                          </td>
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <button
+                              type="button"
+                              onClick={() => setProfileModalStudentId(st.studentId)}
+                              className="flex items-center gap-2 text-right group cursor-pointer rounded-xl p-1 -m-1 hover:bg-teal-50/80 dark:hover:bg-teal-950/40 transition w-full"
+                              title="مشاهده کامل اطلاعات و عکس دانشجو، ثبت اخطار، تذکر، پیام و نمره ارزیابی"
+                            >
+                              {st.photoUrl ? (
+                                <img
+                                  src={st.photoUrl}
+                                  alt={st.fullName}
+                                  loading="lazy"
+                                  decoding="async"
+                                  className="w-8 h-8 rounded-full object-cover shrink-0 ring-2 ring-transparent group-hover:ring-teal-500 transition"
+                                />
+                              ) : (
+                                <div
+                                  className="w-8 h-8 rounded-full text-white text-[11px] font-bold flex items-center justify-center shrink-0 ring-2 ring-transparent group-hover:ring-teal-500 transition"
+                                  style={{ backgroundColor: st.avatarColor || '#0d9488' }}
+                                >
+                                  {(st.fullName || 'د').slice(0, 1)}
                                 </div>
                               )}
-                            </div>
-                          </button>
-                        </td>
+                              <div className="min-w-0">
+                                <div className="text-slate-900 dark:text-white group-hover:text-teal-700 dark:group-hover:text-teal-300 underline decoration-dotted decoration-teal-500/50 underline-offset-4 transition">
+                                  {st.fullName}
+                                </div>
+                                {st.fatherName && (
+                                  <div className="text-[10px] text-slate-400 font-normal">
+                                    فرزند {st.fatherName}
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          </td>
                         <td className="p-3">
                           <div className="flex items-center gap-1.5">
                             <span className="font-mono text-[11px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
@@ -2321,8 +2526,89 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* نوار صفحه‌بندی پایین جدول */}
+              {totalStudentPages > 1 && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs">
+                  <div className="text-slate-600 dark:text-slate-300 font-bold">
+                    صفحه {safeStudentPage.toLocaleString('fa-IR')} از{' '}
+                    {totalStudentPages.toLocaleString('fa-IR')} (نمایش{' '}
+                    {(studentStartIndex + 1).toLocaleString('fa-IR')} تا{' '}
+                    {studentEndIndex.toLocaleString('fa-IR')})
+                  </div>
+
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setStudentCurrentPage(1)}
+                      disabled={safeStudentPage <= 1}
+                      className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition"
+                      title="صفحه اول"
+                    >
+                      <ChevronsRight className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStudentCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={safeStudentPage <= 1}
+                      className="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition inline-flex items-center gap-1 font-bold text-[11px]"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                      <span>قبلی</span>
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      {studentPageNumbers.map((item) =>
+                        typeof item === 'string' ? (
+                          <span
+                            key={`bottom-${item}`}
+                            className="px-1.5 text-slate-400 select-none font-bold"
+                          >
+                            ...
+                          </span>
+                        ) : (
+                          <button
+                            key={`bottom-${item}`}
+                            type="button"
+                            onClick={() => setStudentCurrentPage(item)}
+                            className={`min-w-[28px] h-7 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
+                              item === safeStudentPage
+                                ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
+                                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {item.toLocaleString('fa-IR')}
+                          </button>
+                        )
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setStudentCurrentPage((p) => Math.min(totalStudentPages, p + 1))
+                      }
+                      disabled={safeStudentPage >= totalStudentPages}
+                      className="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition inline-flex items-center gap-1 font-bold text-[11px]"
+                    >
+                      <span>بعدی</span>
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStudentCurrentPage(totalStudentPages)}
+                      disabled={safeStudentPage >= totalStudentPages}
+                      className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition"
+                      title="صفحه آخر"
+                    >
+                      <ChevronsLeft className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
