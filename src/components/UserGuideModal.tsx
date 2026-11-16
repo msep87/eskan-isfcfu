@@ -31,6 +31,7 @@ import {
   Wallet,
   HeartHandshake,
   ShoppingBag,
+  Award,
 } from 'lucide-react';
 import {
   ROLE_GUIDES,
@@ -90,6 +91,10 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         return <Wallet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />;
       case 'education':
         return <GraduationCap className="w-5 h-5 text-sky-600 dark:text-sky-400" />;
+      case 'cultural':
+        return <Sparkles className="w-5 h-5 text-fuchsia-600 dark:text-fuchsia-400" />;
+      case 'student_affairs':
+        return <Award className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />;
       case 'student':
         return <GraduationCap className="w-5 h-5 text-blue-600 dark:text-blue-400" />;
     }
@@ -146,17 +151,19 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
           </div>
 
           {/* تب‌های انتخاب نقش با استایل مشخص */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-9 gap-2 mt-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 mt-5">
             {(
               [
                 { id: 'admin', label: 'مدیر کل پردیس', role: 'admin' as UserRoleType },
                 { id: 'supervisor', label: 'سرپرست سرا', role: 'supervisor' as UserRoleType },
+                { id: 'cultural', label: 'امور فرهنگی', role: 'cultural' as UserRoleType },
+                { id: 'student_affairs', label: 'امور دانشجویی', role: 'student_affairs' as UserRoleType },
                 { id: 'counselor', label: 'مشاور و روانشناس', role: 'counselor' as UserRoleType },
+                { id: 'education', label: 'کارشناس آموزش', role: 'education' as UserRoleType },
                 { id: 'maintenance', label: 'تأسیسات و فنی', role: 'maintenance' as UserRoleType },
                 { id: 'warehouse', label: 'انبار و تجهیزات', role: 'warehouse' as UserRoleType },
                 { id: 'procurement', label: 'کارپرداز و خرید', role: 'procurement' as UserRoleType },
-                { id: 'finance', label: 'امور مالی و حسابداری', role: 'finance' as UserRoleType },
-                { id: 'education', label: 'کارشناس آموزش', role: 'education' as UserRoleType },
+                { id: 'finance', label: 'امور مالی', role: 'finance' as UserRoleType },
                 { id: 'student', label: 'دانشجومعلم', role: 'student' as UserRoleType },
               ] as const
             ).map((tab) => {
@@ -212,7 +219,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
               <span>ورود اولیه به سامانه: <strong>{currentGuide.defaultLoginHint}</strong></span>
             </div>
             <div className="text-slate-400">
-              طراحی و مستندسازی: دکتر محمد سپیانی (m.sep87@gmail.com)
+              طراحی و مستندسازی: دکتر محمد سپیانی (m.sepiani@cfu.ac.ir)
             </div>
           </div>
         </div>

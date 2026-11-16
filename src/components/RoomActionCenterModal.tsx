@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Dormitory, Room, Student, MessageCategory } from '../types';
-import { Storage } from '../utils/storage';
+import { Dormitory, Room, Student, MessageCategory, DisciplinaryViolationType } from '../types';
+import { Storage, DISCIPLINARY_VIOLATION_PRESETS } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import {
   X,
@@ -15,6 +15,7 @@ import {
   Users,
   Send,
   Save,
+  Gavel,
 } from 'lucide-react';
 
 export type RoomActionMode =
@@ -23,7 +24,8 @@ export type RoomActionMode =
   | 'warning'
   | 'summons'
   | 'negative_score'
-  | 'direct_scores';
+  | 'direct_scores'
+  | 'disciplinary_referral';
 
 interface RoomActionCenterModalProps {
   isOpen: boolean;
@@ -71,6 +73,9 @@ export const RoomActionCenterModal: React.FC<RoomActionCenterModalProps> = ({
   const [directDisciplineScore, setDirectDisciplineScore] = useState('100');
   const [directCleanlinessScore, setDirectCleanlinessScore] = useState('100');
 
+  // معرفی به شورای انضباطی (ارسال به امور دانشجویی)
+  const [violationType, setViolationType] = useState<DisciplinaryViolationType>('curfew_violation');
+
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
 
   useEffect(() => {
@@ -78,8 +83,15 @@ export const RoomActionCenterModal: React.FC<RoomActionCenterModalProps> = ({
     setMode(initialMode);
     setTargetAll(true);
     setSelectedStudentIds(occupants.map((o) => o.studentId));
-    setTitle('');
-    setDescription('');
+    if (initialMode === 'disciplinary_referral') {
+      const defPreset = DISCIPLINARY_VIOLATION_PRESETS[0];
+      setViolationType(defPreset?.type || 'curfew_violation');
+      setTitle(defPreset?.label || 'معرفی به شورای انضباطی');
+      setDescription(defPreset?.defaultText || '');
+    } else {
+      setTitle('');
+      setDescription('');
+    }
     setSendInboxMessage(true);
     setAlsoAddRoomWarning(true);
     setSummonsTarget('supervisor');
@@ -136,6 +148,16 @@ export const RoomActionCenterModal: React.FC<RoomActionCenterModalProps> = ({
       'کسر نمره بابت بی‌نظمی و تأخیر در تردد شبانه',
     ],
     direct_scores: [],
+    disciplinary_referral: [],
+  };
+
+  const applyViolationPreset = (type: DisciplinaryViolationType) => {
+    setViolationType(type);
+    const preset = DISCIPLINARY_VIOLATION_PRESETS.find((p) => p.type === type);
+    if (preset) {
+      setTitle(preset.label);
+      setDescription(preset.defaultText);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -244,6 +266,31 @@ export const RoomActionCenterModal: React.FC<RoomActionCenterModalProps> = ({
       if (res.success) {
         setTitle('');
         setDescription('');
+        onDataChanged();
+      }
+      return;
+    }
+
+    if (mode === 'disciplinary_referral') {
+      if (targetedOccupants.length === 0) {
+        setFeedback({ ok: false, msg: 'حداقل یک دانشجوی ساکن را برای معرفی به شورای انضباطی انتخاب نمایید.' });
+        return;
+      }
+      const preset = DISCIPLINARY_VIOLATION_PRESETS.find((p) => p.type === violationType);
+      const res = Storage.createDisciplinaryReferral({
+        students: targetedOccupants,
+        dorm,
+        room,
+        violationType,
+        violationLabel: cleanTitle || preset?.label,
+        referralText: cleanDesc || preset?.defaultText || cleanTitle,
+        referredById: actorId || actorRole,
+        referredByName: actorName,
+        referredByRole: actorRole,
+        notifyStudentInbox: sendInboxMessage,
+      });
+      setFeedback({ ok: res.success, msg: res.message });
+      if (res.success) {
         onDataChanged();
       }
       return;
@@ -376,7 +423,7 @@ export const RoomActionCenterModal: React.FC<RoomActionCenterModalProps> = ({
 
         <div className="p-5 sm:p-6 space-y-5 text-xs">
           {/* انتخاب نوع اقدام */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
             <button
               type="button"
               onClick={() => setMode('message')}
@@ -440,6 +487,22 @@ export const RoomActionCenterModal: React.FC<RoomActionCenterModalProps> = ({
             >
               <TrendingDown className="w-4 h-4" />
               <span>نمره منفی</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode('disciplinary_referral');
+                applyViolationPreset(violationType);
+              }}
+              className={`p-2.5 rounded-2xl border font-bold transition flex flex-col items-center gap-1 cursor-pointer ${
+                mode === 'disciplinary_referral'
+                  ? 'bg-orange-700 text-white border-orange-700 shadow-sm'
+                  : 'bg-orange-50/70 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800 text-orange-800 dark:text-orange-200'
+              }`}
+            >
+              <Gavel className="w-4 h-4" />
+              <span className="text-[11px] leading-tight text-center">شورای انضباطی</span>
             </button>
 
             <button
@@ -706,6 +769,32 @@ export const RoomActionCenterModal: React.FC<RoomActionCenterModalProps> = ({
                         className="w-24 px-2.5 py-1 rounded-xl border border-rose-300 bg-white dark:bg-slate-900 font-mono font-bold text-center"
                       />
                     </div>
+                  </div>
+                )}
+
+                {/* گزینه‌های اختصاصی معرفی به شورای انضباطی */}
+                {mode === 'disciplinary_referral' && (
+                  <div className="p-4 rounded-2xl bg-orange-50/80 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <label className="font-extrabold text-orange-950 dark:text-orange-100 flex items-center gap-1.5">
+                        <Gavel className="w-4 h-4 text-orange-600" />
+                        <span>انتخاب نوع تخلف انضباطی (ارسال مستقیم به کارتابل امور دانشجویی):</span>
+                      </label>
+                    </div>
+                    <select
+                      value={violationType}
+                      onChange={(e) => applyViolationPreset(e.target.value as DisciplinaryViolationType)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-orange-300 dark:border-orange-700 bg-white dark:bg-slate-900 text-xs font-bold focus:ring-2 focus:ring-orange-500"
+                    >
+                      {DISCIPLINARY_VIOLATION_PRESETS.map((preset) => (
+                        <option key={preset.type} value={preset.type}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-orange-800 dark:text-orange-200 leading-relaxed">
+                      با انتخاب نوع تخلف از منوی فوق، متن رسمی پیش‌فرض در کادر شرح زیر جایگذاری می‌شود که می‌توانید پیش از ارسال آن را ویرایش یا تکمیل کنید. این معرفی‌نامه بلافاصله در کارتابل واحد «امور دانشجویی و تربیت بدنی» برای تشکیل جلسه شورای انضباطی ثبت خواهد شد.
+                    </p>
                   </div>
                 )}
 

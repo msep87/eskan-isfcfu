@@ -35,6 +35,25 @@ import {
   GuestRequest,
   GuestEligibilityType,
   VisitReport,
+  PeriodicSurvey,
+  SurveyResponse,
+  SurveyAnswer,
+  CulturalStaff,
+  CulturalProgram,
+  CulturalAssociation,
+  AssociationMembership,
+  StudentAffairsStaff,
+  GuildElection,
+  GuildElectionVote,
+  DisciplinaryViolationType,
+  DisciplinaryReferral,
+  DisciplinaryReferralStatus,
+  SportsProgram,
+  SportsProgramType,
+  SportsProgramKind,
+  SportsProgramStatus,
+  SportsRegistration,
+  SportsRegistrationStatus,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -65,6 +84,18 @@ import {
   INITIAL_STUDENT_EVALUATIONS,
   INITIAL_GUEST_REQUESTS,
   INITIAL_VISIT_REPORTS,
+  INITIAL_SURVEYS,
+  INITIAL_SURVEY_RESPONSES,
+  INITIAL_CULTURAL_STAFF,
+  INITIAL_CULTURAL_PROGRAMS,
+  INITIAL_CULTURAL_ASSOCIATIONS,
+  INITIAL_ASSOCIATION_MEMBERSHIPS,
+  INITIAL_STUDENT_AFFAIRS_STAFF,
+  INITIAL_GUILD_ELECTIONS,
+  INITIAL_GUILD_ELECTION_VOTES,
+  INITIAL_DISCIPLINARY_REFERRALS,
+  INITIAL_SPORTS_PROGRAMS,
+  INITIAL_SPORTS_REGISTRATIONS,
   generateInitialRoomsAndBeds,
 } from './sampleData';
 
@@ -102,7 +133,68 @@ const STORAGE_KEYS = {
   STUDENT_EVALUATIONS: 'farhangian_dorm_student_evaluations_prod',
   GUEST_REQUESTS: 'farhangian_dorm_guest_requests_prod',
   VISIT_REPORTS: 'farhangian_dorm_visit_reports_prod',
+  SURVEYS: 'farhangian_dorm_surveys_prod',
+  SURVEY_RESPONSES: 'farhangian_dorm_survey_responses_prod',
+  CULTURAL_STAFF: 'farhangian_dorm_cultural_staff_prod',
+  CULTURAL_PROGRAMS: 'farhangian_dorm_cultural_programs_prod',
+  CULTURAL_ASSOCIATIONS: 'farhangian_dorm_cultural_associations_prod',
+  ASSOCIATION_MEMBERSHIPS: 'farhangian_dorm_association_memberships_prod',
+  STUDENT_AFFAIRS_STAFF: 'farhangian_dorm_student_affairs_staff_prod',
+  GUILD_ELECTIONS: 'farhangian_dorm_guild_elections_prod',
+  GUILD_ELECTION_VOTES: 'farhangian_dorm_guild_election_votes_prod',
+  DISCIPLINARY_REFERRALS: 'farhangian_dorm_disciplinary_referrals_prod',
+  SPORTS_PROGRAMS: 'farhangian_dorm_sports_programs_prod',
+  SPORTS_REGISTRATIONS: 'farhangian_dorm_sports_registrations_prod',
 };
+
+export const DISCIPLINARY_VIOLATION_PRESETS: Array<{
+  type: DisciplinaryViolationType;
+  label: string;
+  defaultText: string;
+}> = [
+  {
+    type: 'curfew_violation',
+    label: 'عدم رعایت قوانین و ساعات تردد شبانه',
+    defaultText:
+      'با احترام، به استحضار می‌رساند نامبرده در تاریخ‌های اخیر علی‌رغم تذکرات قبلی و ابلاغ آیین‌نامه انضباطی سراهای دانشجویی دانشگاه فرهنگیان، ساعت مقرر ورود و خروج شبانه را رعایت ننموده و بدون مجوز قانونی اقدام به تردد خارج از ضوابط کرده است. لذا جهت طرح موضوع و تصمیم‌گیری در جلسه شورای انضباطی به آن واحد محترم معرفی می‌گردد.',
+  },
+  {
+    type: 'disturbing_peace',
+    label: 'ایجاد مزاحمت و سلب آسایش هم‌اتاقی‌ها و ساکنین',
+    defaultText:
+      'با احترام، به استحضار می‌رساند نامبرده بر اساس گزارش‌های مستند سرپرستی و هم‌اتاقی‌ها، با ایجاد سر و صدا در ساعات مطالعه و استراحت یا عدم رعایت حقوق ساکنین موجب سلب آرامش و اختلال در نظم عمومی سرای دانشجویی شده است. خواهشمند است دستور فرمایید پرونده در شورای انضباطی دانشگاه بررسی گردد.',
+  },
+  {
+    type: 'property_damage',
+    label: 'تخریب یا آسیب عمدی / بی‌احتیاطی نسبت به اموال و تجهیزات سرا',
+    defaultText:
+      'با احترام، به استحضار می‌رساند نامبرده در جریان سکونت در سرا، به تجهیزات و اموال عمومی اتاق/خوابگاه خسارت وارد نموده است. مستندات و برآورد فنی خسارت پیوست سوابق بوده و پرونده جهت بررسی جبران خسارت و رسیدگی انضباطی به شورای انضباطی معرفی می‌گردد.',
+  },
+  {
+    type: 'moral_code',
+    label: 'عدم رعایت شئونات اخلاقی، تربیتی و منش معلمی',
+    defaultText:
+      'با احترام، با عنایت به ماهیت شبانه‌روزی دانشگاه فرهنگیان و شأن تربیتی دانشجومعلمان، رفتار نامبرده مغایر با آیین‌نامه انضباطی و موازین اخلاقی محیط سرای دانشجویی گزارش شده است. لذا جهت رسیدگی و تشکیل جلسه شورای انضباطی به واحد امور دانشجویی معرفی می‌گردد.',
+  },
+  {
+    type: 'unauthorized_guest',
+    label: 'حضور یا اسکان مهمان غیرمجاز و بدون اخذ مجوز رسمی',
+    defaultText:
+      'با احترام، به استحضار می‌رساند نامبرده بدون ثبت درخواست و دریافت تأییدیه رسمی سرپرستی سرا، اقدام به ورود یا اسکان فرد غیرمجاز در فضای سرای دانشجویی نموده که مغایر مقررات حفاظتی و انضباطی است. پرونده جهت رسیدگی به شورای انضباطی معرفی می‌شود.',
+  },
+  {
+    type: 'hygiene_neglect',
+    label: 'تخلف بهداشتی مکرر و بی‌توجهی به اخطارهای نظافت سرا',
+    defaultText:
+      'با احترام، نامبرده علی‌رغم ثبت تذکرات مکرر سرپرستی در خصوص رعایت بهداشت فردی و نظافت اجتماعی اتاق، هیچ‌گونه همکاری و اصلاح رفتاری انجام نداده است. لذا جهت تشکیل جلسه بررسی و تذکر انضباطی رسمی به آن شورا معرفی می‌گردد.',
+  },
+  {
+    type: 'other',
+    label: 'سایر موارد انضباطی (ثبت متن اختصاصی)',
+    defaultText:
+      'با احترام، نظر به گزارش و مستندات ثبت‌شده در دفتر وقایع سرای دانشجویی، نامبرده مرتکب تخلف انضباطی گردیده و علی‌رغم تذکر سرپرستی موضوع نیازمند طرح و بررسی در جلسه شورای انضباطی است. مراتب جهت اقدام مقتضی به امور دانشجویی معرفی می‌گردد.',
+  },
+];
 
 
 let uniqueIdSeq = 0;
@@ -194,6 +286,18 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.PROCUREMENT_REQUESTS, INITIAL_PROCUREMENT_REQUESTS);
   setIfMissing(STORAGE_KEYS.GUEST_REQUESTS, INITIAL_GUEST_REQUESTS);
   setIfMissing(STORAGE_KEYS.VISIT_REPORTS, INITIAL_VISIT_REPORTS);
+  setIfMissing(STORAGE_KEYS.SURVEYS, INITIAL_SURVEYS);
+  setIfMissing(STORAGE_KEYS.SURVEY_RESPONSES, INITIAL_SURVEY_RESPONSES);
+  setIfMissing(STORAGE_KEYS.CULTURAL_STAFF, INITIAL_CULTURAL_STAFF);
+  setIfMissing(STORAGE_KEYS.CULTURAL_PROGRAMS, INITIAL_CULTURAL_PROGRAMS);
+  setIfMissing(STORAGE_KEYS.CULTURAL_ASSOCIATIONS, INITIAL_CULTURAL_ASSOCIATIONS);
+  setIfMissing(STORAGE_KEYS.ASSOCIATION_MEMBERSHIPS, INITIAL_ASSOCIATION_MEMBERSHIPS);
+  setIfMissing(STORAGE_KEYS.STUDENT_AFFAIRS_STAFF, INITIAL_STUDENT_AFFAIRS_STAFF);
+  setIfMissing(STORAGE_KEYS.GUILD_ELECTIONS, INITIAL_GUILD_ELECTIONS);
+  setIfMissing(STORAGE_KEYS.GUILD_ELECTION_VOTES, INITIAL_GUILD_ELECTION_VOTES);
+  setIfMissing(STORAGE_KEYS.DISCIPLINARY_REFERRALS, INITIAL_DISCIPLINARY_REFERRALS);
+  setIfMissing(STORAGE_KEYS.SPORTS_PROGRAMS, INITIAL_SPORTS_PROGRAMS);
+  setIfMissing(STORAGE_KEYS.SPORTS_REGISTRATIONS, INITIAL_SPORTS_REGISTRATIONS);
 
   try {
     if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
@@ -830,6 +934,46 @@ export const Storage = {
         }
       });
       if (vrChanged) Storage.setVisitReports(visitReports);
+
+      const culturalPrograms = Storage.getCulturalPrograms();
+      let cpChanged = false;
+      culturalPrograms.forEach((cp) => {
+        if (cp.dormId === dormId) {
+          cp.dormName = cleanName;
+          cpChanged = true;
+        }
+      });
+      if (cpChanged) Storage.setCulturalPrograms(culturalPrograms);
+
+      const culturalAssocs = Storage.getCulturalAssociations();
+      let caChanged = false;
+      culturalAssocs.forEach((ca) => {
+        if (ca.dormId === dormId) {
+          ca.dormName = cleanName;
+          caChanged = true;
+        }
+      });
+      if (caChanged) Storage.setCulturalAssociations(culturalAssocs);
+
+      const discRefs = Storage.getDisciplinaryReferrals();
+      let drChanged = false;
+      discRefs.forEach((dr) => {
+        if (dr.dormId === dormId) {
+          dr.dormName = cleanName;
+          drChanged = true;
+        }
+      });
+      if (drChanged) Storage.setDisciplinaryReferrals(discRefs);
+
+      const sportsPrograms = Storage.getSportsPrograms();
+      let spChanged = false;
+      sportsPrograms.forEach((sp) => {
+        if (sp.dormId === dormId) {
+          sp.dormName = cleanName;
+          spChanged = true;
+        }
+      });
+      if (spChanged) Storage.setSportsPrograms(sportsPrograms);
     }
 
     Storage.addActivityLog({
@@ -992,6 +1136,36 @@ export const Storage = {
         }
       });
       if (tChanged) set(STORAGE_KEYS.MAINTENANCE_TASKS, tasks);
+
+      const discRefs = Storage.getDisciplinaryReferrals();
+      let drChanged = false;
+      discRefs.forEach((dr) => {
+        if (dr.roomId === roomId) {
+          dr.roomNumber = cleanRoomNumber;
+          drChanged = true;
+        }
+      });
+      if (drChanged) Storage.setDisciplinaryReferrals(discRefs);
+
+      const guestReqs = Storage.getGuestRequests();
+      let grChanged = false;
+      guestReqs.forEach((gr) => {
+        if (gr.roomId === roomId) {
+          gr.roomNumber = cleanRoomNumber;
+          grChanged = true;
+        }
+      });
+      if (grChanged) Storage.setGuestRequests(guestReqs);
+
+      const visitReports = Storage.getVisitReports();
+      let vrChanged = false;
+      visitReports.forEach((vr) => {
+        if (vr.roomId === roomId) {
+          vr.roomNumber = cleanRoomNumber;
+          vrChanged = true;
+        }
+      });
+      if (vrChanged) Storage.setVisitReports(visitReports);
 
       Storage.addActivityLog({
         category: 'dorm_structure',
@@ -1456,7 +1630,7 @@ export const Storage = {
 
   // تطبیق و اتصال دسته‌جمعی عکس‌های پرسنل و کادر بر اساس نام/کد کاربری
   batchAssignStaffPhotos: (
-    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education',
+    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs',
     photoMap: Record<string, string>
   ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     let matchedCount = 0;
@@ -1607,6 +1781,44 @@ export const Storage = {
           if (ref) Storage.setCurrentUser({ role: 'education', staff: ref });
         }
       }
+    } else if (role === 'cultural') {
+      const list = Storage.getCulturalStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setCulturalStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'cultural') {
+          const ref = list.find((c) => c.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'cultural', staff: ref });
+        }
+      }
+    } else if (role === 'student_affairs') {
+      const list = Storage.getStudentAffairsStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setStudentAffairsStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'student_affairs') {
+          const ref = list.find((sa) => sa.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'student_affairs', staff: ref });
+        }
+      }
     }
 
     if (matchedCount > 0 && saved) {
@@ -1618,6 +1830,8 @@ export const Storage = {
         finance: 'امور مالی و حسابداری',
         procurement: 'کارپرداز و خرید',
         education: 'کارشناسان آموزش',
+        cultural: 'کارشناسان امور فرهنگی',
+        student_affairs: 'کارشناسان امور دانشجویی و تربیت بدنی',
       };
       Storage.addActivityLog({
         category: 'staff',
@@ -1699,7 +1913,7 @@ export const Storage = {
     messageId: string,
     reply: {
       senderName: string;
-      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education';
+      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs';
       content: string;
       date: string;
     }
@@ -1870,6 +2084,66 @@ export const Storage = {
         return t;
       });
       if (taskChanged) Storage.setMaintenanceTasks(nextTasks);
+
+      const academicNotices = Storage.getAcademicNotices();
+      let anChanged = false;
+      academicNotices.forEach((n) => {
+        if (n.studentId === studentId) {
+          n.studentId = nextStudentId;
+          anChanged = true;
+        }
+      });
+      if (anChanged) Storage.setAcademicNotices(academicNotices);
+
+      const surveyResponses = Storage.getSurveyResponses();
+      let srChanged = false;
+      surveyResponses.forEach((r) => {
+        if (r.studentId === studentId) {
+          r.studentId = nextStudentId;
+          srChanged = true;
+        }
+      });
+      if (srChanged) Storage.setSurveyResponses(surveyResponses);
+
+      const assocMemberships = Storage.getAssociationMemberships();
+      let amChanged = false;
+      assocMemberships.forEach((m) => {
+        if (m.studentId === studentId) {
+          m.studentId = nextStudentId;
+          amChanged = true;
+        }
+      });
+      if (amChanged) Storage.setAssociationMemberships(assocMemberships);
+
+      const electionVotes = Storage.getGuildElectionVotes();
+      let evChanged = false;
+      electionVotes.forEach((v) => {
+        if (v.studentId === studentId) {
+          v.studentId = nextStudentId;
+          evChanged = true;
+        }
+      });
+      if (evChanged) Storage.setGuildElectionVotes(electionVotes);
+
+      const discRefs = Storage.getDisciplinaryReferrals();
+      let drChanged = false;
+      discRefs.forEach((d) => {
+        if (d.studentId === studentId) {
+          d.studentId = nextStudentId;
+          drChanged = true;
+        }
+      });
+      if (drChanged) Storage.setDisciplinaryReferrals(discRefs);
+
+      const sportsRegs = Storage.getSportsRegistrations();
+      let spRegChanged = false;
+      sportsRegs.forEach((reg) => {
+        if (reg.studentId === studentId) {
+          reg.studentId = nextStudentId;
+          spRegChanged = true;
+        }
+      });
+      if (spRegChanged) Storage.setSportsRegistrations(sportsRegs);
     }
 
     Storage.addActivityLog({
@@ -1956,6 +2230,18 @@ export const Storage = {
       academicNotices: Storage.getAcademicNotices(),
       guestRequests: Storage.getGuestRequests(),
       visitReports: Storage.getVisitReports(),
+      surveys: Storage.getSurveys(),
+      surveyResponses: Storage.getSurveyResponses(),
+      culturalStaff: Storage.getCulturalStaff(),
+      culturalPrograms: Storage.getCulturalPrograms(),
+      culturalAssociations: Storage.getCulturalAssociations(),
+      associationMemberships: Storage.getAssociationMemberships(),
+      studentAffairsStaff: Storage.getStudentAffairsStaff(),
+      guildElections: Storage.getGuildElections(),
+      guildElectionVotes: Storage.getGuildElectionVotes(),
+      disciplinaryReferrals: Storage.getDisciplinaryReferrals(),
+      sportsPrograms: Storage.getSportsPrograms(),
+      sportsRegistrations: Storage.getSportsRegistrations(),
       exportedAt: new Date().toISOString(),
       appName: 'سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
     };
@@ -2022,6 +2308,18 @@ export const Storage = {
       if (Array.isArray(data.academicNotices)) Storage.setAcademicNotices(data.academicNotices);
       if (Array.isArray(data.guestRequests)) Storage.setGuestRequests(data.guestRequests);
       if (Array.isArray(data.visitReports)) Storage.setVisitReports(data.visitReports);
+      if (Array.isArray(data.surveys)) Storage.setSurveys(data.surveys);
+      if (Array.isArray(data.surveyResponses)) Storage.setSurveyResponses(data.surveyResponses);
+      if (Array.isArray(data.culturalStaff)) Storage.setCulturalStaff(data.culturalStaff);
+      if (Array.isArray(data.culturalPrograms)) Storage.setCulturalPrograms(data.culturalPrograms);
+      if (Array.isArray(data.culturalAssociations)) Storage.setCulturalAssociations(data.culturalAssociations);
+      if (Array.isArray(data.associationMemberships)) Storage.setAssociationMemberships(data.associationMemberships);
+      if (Array.isArray(data.studentAffairsStaff)) Storage.setStudentAffairsStaff(data.studentAffairsStaff);
+      if (Array.isArray(data.guildElections)) Storage.setGuildElections(data.guildElections);
+      if (Array.isArray(data.guildElectionVotes)) Storage.setGuildElectionVotes(data.guildElectionVotes);
+      if (Array.isArray(data.disciplinaryReferrals)) Storage.setDisciplinaryReferrals(data.disciplinaryReferrals);
+      if (Array.isArray(data.sportsPrograms)) Storage.setSportsPrograms(data.sportsPrograms);
+      if (Array.isArray(data.sportsRegistrations)) Storage.setSportsRegistrations(data.sportsRegistrations);
 
       Storage.addActivityLog({
         category: 'backup',
@@ -2276,7 +2574,7 @@ export const Storage = {
 
   // تغییر کلمه عبور برای تمام نقش‌ها
   changePassword: (
-    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education',
+    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs',
     userId: string,
     currentPasswordInput: string,
     newPasswordInput: string
@@ -2450,6 +2748,46 @@ export const Storage = {
         targetName: staff.fullName,
       });
       return { success: true, message: 'کلمه عبور کارشناس آموزش با موفقیت تغییر یافت.' };
+    }
+
+    if (role === 'cultural') {
+      const staffList = Storage.getCulturalStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) {
+        return { success: false, message: 'کاربر امور فرهنگی یافت نشد.' };
+      }
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی کاربر امور فرهنگی اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setCulturalStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور امور فرهنگی',
+        details: `کلمه عبور کارشناس امور فرهنگی ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور امور فرهنگی با موفقیت تغییر یافت.' };
+    }
+
+    if (role === 'student_affairs') {
+      const staffList = Storage.getStudentAffairsStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) {
+        return { success: false, message: 'کاربر امور دانشجویی یافت نشد.' };
+      }
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی امور دانشجویی اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setStudentAffairsStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور امور دانشجویی',
+        details: `کلمه عبور کارشناس امور دانشجویی ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور امور دانشجویی با موفقیت تغییر یافت.' };
     }
 
     if (role === 'student') {
@@ -2756,7 +3094,7 @@ export const Storage = {
 
   // تغییر یا ریست مستقیم رمز عبور کاربران توسط مدیر کل (بدون نیاز به رمز قبلی)
   adminResetUserPassword: (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs',
     idOrStudentId: string,
     newPasswordInput: string
   ): { success: boolean; message: string } => {
@@ -2931,6 +3269,44 @@ export const Storage = {
       return {
         success: true,
         message: `رمز عبور کارشناس آموزش «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'cultural') {
+      const list = Storage.getCulturalStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر امور فرهنگی یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setCulturalStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز امور فرهنگی توسط مدیر',
+        details: `کلمه عبور کارشناس امور فرهنگی ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور امور فرهنگی «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'student_affairs') {
+      const list = Storage.getStudentAffairsStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر امور دانشجویی یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setStudentAffairsStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز امور دانشجویی توسط مدیر',
+        details: `کلمه عبور کارشناس امور دانشجویی ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور امور دانشجویی «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
       };
     }
 
@@ -4645,6 +5021,14 @@ export const Storage = {
         actorName = currentUser.staff.fullName;
         actorRole = 'education';
         actorUsername = currentUser.staff.username;
+      } else if (currentUser.role === 'cultural') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'cultural';
+        actorUsername = currentUser.staff.username;
+      } else if (currentUser.role === 'student_affairs') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'student_affairs';
+        actorUsername = currentUser.staff.username;
       }
     }
 
@@ -5597,6 +5981,1323 @@ export const Storage = {
   },
 
   // -------------------------------------------------------------
+  // نظرسنجی‌های دوره‌ای دانشجویان (خدمات سراها، تأسیسات، نظافت، سلف و سرپرستان)
+  // -------------------------------------------------------------
+  getSurveys: (): PeriodicSurvey[] =>
+    get<PeriodicSurvey[]>(STORAGE_KEYS.SURVEYS, INITIAL_SURVEYS),
+
+  setSurveys: (items: PeriodicSurvey[]): boolean =>
+    set(STORAGE_KEYS.SURVEYS, items),
+
+  addSurvey: (
+    payload: Omit<PeriodicSurvey, 'id' | 'surveyCode' | 'createdAt'>
+  ): { success: boolean; message: string; survey?: PeriodicSurvey } => {
+    if (!payload.title.trim() || !payload.questions || payload.questions.length === 0) {
+      return { success: false, message: 'عنوان نظرسنجی و حداقل یک سوال الزامی است.' };
+    }
+    const surveys = Storage.getSurveys();
+    const now = new Date();
+    const createdAt = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const newSurvey: PeriodicSurvey = {
+      ...payload,
+      id: makeUniqueId('srv'),
+      surveyCode: `SRV-${101 + surveys.length}`,
+      createdAt,
+    };
+    surveys.unshift(newSurvey);
+    Storage.setSurveys(surveys);
+    Storage.addActivityLog({
+      category: 'survey',
+      action: 'ایجاد نظرسنجی دوره‌ای جدید',
+      details: `نظرسنجی «${newSurvey.title}» (${newSurvey.surveyCode}) برای دوره ${newSurvey.periodLabel} با ${newSurvey.questions.length} سوال توسط مدیر ثبت شد.`,
+      targetName: newSurvey.title,
+    });
+    return { success: true, message: `نظرسنجی دوره‌ای «${newSurvey.title}» با کد ${newSurvey.surveyCode} با موفقیت ایجاد شد.`, survey: newSurvey };
+  },
+
+  updateSurvey: (id: string, updates: Partial<PeriodicSurvey>): { success: boolean; message: string } => {
+    const surveys = Storage.getSurveys();
+    const idx = surveys.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'نظرسنجی مورد نظر یافت نشد.' };
+    surveys[idx] = { ...surveys[idx], ...updates };
+    Storage.setSurveys(surveys);
+    Storage.addActivityLog({
+      category: 'survey',
+      action: 'ویرایش نظرسنجی دوره‌ای',
+      details: `نظرسنجی «${surveys[idx].title}» (${surveys[idx].surveyCode}) بروزرسانی شد.`,
+      targetName: surveys[idx].title,
+    });
+    return { success: true, message: 'نظرسنجی با موفقیت بروزرسانی شد.' };
+  },
+
+  toggleSurveyStatus: (id: string, status: PeriodicSurvey['status']): { success: boolean; message: string } => {
+    const surveys = Storage.getSurveys();
+    const idx = surveys.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'نظرسنجی یافت نشد.' };
+    surveys[idx] = { ...surveys[idx], status };
+    Storage.setSurveys(surveys);
+    return {
+      success: true,
+      message: status === 'active' ? 'نظرسنجی برای دانشجویان فعال شد.' : status === 'closed' ? 'نظرسنجی بسته شد.' : 'نظرسنجی به حالت پیش‌نویس تغییر یافت.',
+    };
+  },
+
+  deleteSurvey: (id: string): { success: boolean; message: string } => {
+    const surveys = Storage.getSurveys();
+    const target = surveys.find((s) => s.id === id);
+    Storage.setSurveys(surveys.filter((s) => s.id !== id));
+    const responses = Storage.getSurveyResponses();
+    Storage.setSurveyResponses(responses.filter((r) => r.surveyId !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'survey',
+        action: 'حذف نظرسنجی دوره‌ای',
+        details: `نظرسنجی «${target.title}» (${target.surveyCode}) و پاسخ‌های آن حذف گردید.`,
+        targetName: target.title,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'نظرسنجی و پاسخ‌های مرتبط حذف شد.' };
+  },
+
+  getSurveyResponses: (): SurveyResponse[] =>
+    get<SurveyResponse[]>(STORAGE_KEYS.SURVEY_RESPONSES, INITIAL_SURVEY_RESPONSES),
+
+  setSurveyResponses: (items: SurveyResponse[]): boolean =>
+    set(STORAGE_KEYS.SURVEY_RESPONSES, items),
+
+  getResponsesBySurvey: (surveyId: string): SurveyResponse[] =>
+    Storage.getSurveyResponses().filter((r) => r.surveyId === surveyId),
+
+  hasStudentRespondedToSurvey: (surveyId: string, studentId: string): boolean =>
+    Storage.getSurveyResponses().some((r) => r.surveyId === surveyId && r.studentId === studentId),
+
+  submitSurveyResponse: (payload: {
+    survey: PeriodicSurvey;
+    student: Student;
+    answers: SurveyAnswer[];
+    overallComment?: string;
+    targetSupervisorId?: string;
+    targetSupervisorName?: string;
+    targetMaintenanceId?: string;
+    targetMaintenanceName?: string;
+  }): { success: boolean; message: string; response?: SurveyResponse } => {
+    const { survey, student, answers } = payload;
+    if (survey.status !== 'active') {
+      return { success: false, message: 'این نظرسنجی در حال حاضر فعال نیست.' };
+    }
+    const existing = Storage.getSurveyResponses();
+    if (existing.some((r) => r.surveyId === survey.id && r.studentId === student.studentId)) {
+      return { success: false, message: 'شما پیش‌تر در این نظرسنجی شرکت کرده‌اید.' };
+    }
+
+    const ratings = answers
+      .filter((a) => a.type === 'rating_5' && typeof a.ratingValue === 'number' && a.ratingValue > 0)
+      .map((a) => a.ratingValue as number);
+    const overallRating =
+      ratings.length > 0
+        ? Math.round((ratings.reduce((acc, val) => acc + val, 0) / ratings.length) * 100) / 100
+        : undefined;
+
+    const dorms = Storage.getDormitories();
+    const rooms = Storage.getRooms();
+    const dormName = student.assignedDormId
+      ? dorms.find((d) => d.id === student.assignedDormId)?.name || student.assignedDormName
+      : undefined;
+    const roomNumber = student.assignedRoomId
+      ? rooms.find((r) => r.id === student.assignedRoomId)?.roomNumber || student.assignedRoomNumber
+      : undefined;
+
+    const now = new Date();
+    const submittedAt = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const newResp: SurveyResponse = {
+      id: makeUniqueId('sres'),
+      surveyId: survey.id,
+      studentId: student.studentId,
+      studentName: student.fullName,
+      studentFieldOfStudy: student.fieldOfStudy,
+      studentEntryTerm: student.entryTerm,
+      dormId: student.assignedDormId || undefined,
+      dormName,
+      roomNumber,
+      targetSupervisorId: payload.targetSupervisorId,
+      targetSupervisorName: payload.targetSupervisorName,
+      targetMaintenanceId: payload.targetMaintenanceId,
+      targetMaintenanceName: payload.targetMaintenanceName,
+      overallRating,
+      answers,
+      overallComment: payload.overallComment?.trim() || undefined,
+      submittedAt,
+    };
+
+    existing.unshift(newResp);
+    Storage.setSurveyResponses(existing);
+
+    Storage.addActivityLog({
+      category: 'survey',
+      action: 'ثبت پاسخ دانشجو در نظرسنجی',
+      details: `پاسخ نظرسنجی «${survey.title}» (${survey.surveyCode}) ثبت گردید.`,
+      targetName: survey.title,
+      actorName: survey.isAnonymous ? 'دانشجوی شرکت‌کننده (ناشناس)' : student.fullName,
+      actorRole: 'student',
+      actorUsername: survey.isAnonymous ? undefined : student.studentId,
+    });
+
+    return { success: true, message: 'پاسخ شما با موفقیت ثبت شد. از مشارکت ارزشمند شما سپاسگزاریم!', response: newResp };
+  },
+
+  // -------------------------------------------------------------
+  // متدهای مدیریت کاربران امور فرهنگی، جدول زمانی هفتگی برنامه‌ها و تشکل‌ها
+  // -------------------------------------------------------------
+  getCulturalStaff: (): CulturalStaff[] =>
+    get<CulturalStaff[]>(STORAGE_KEYS.CULTURAL_STAFF, INITIAL_CULTURAL_STAFF),
+
+  setCulturalStaff: (staff: CulturalStaff[]): boolean =>
+    set(STORAGE_KEYS.CULTURAL_STAFF, staff),
+
+  addCulturalStaff: (
+    staffData: Omit<CulturalStaff, 'id'>
+  ): { success: boolean; message: string; staff?: CulturalStaff } => {
+    const list = Storage.getCulturalStaff();
+    const cleanUsername = normalizeAsciiDigits(staffData.username).toLowerCase();
+    if (!cleanUsername) {
+      return { success: false, message: 'نام کاربری کارشناس امور فرهنگی نمی‌تواند خالی باشد.' };
+    }
+    if (list.some((s) => normalizeAsciiDigits(s.username).toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کارشناس امور فرهنگی دیگری ثبت شده است.' };
+    }
+    const newStaff: CulturalStaff = {
+      ...staffData,
+      id: makeUniqueId('cul'),
+      username: cleanUsername,
+      role: 'cultural',
+      department: staffData.department?.trim() || 'واحد امور فرهنگی و اجتماعی سراها',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setCulturalStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کارشناس امور فرهنگی',
+      details: `کارشناس امور فرهنگی «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کارشناس امور فرهنگی «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateCulturalStaff: (
+    id: string,
+    updates: Partial<CulturalStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getCulturalStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر امور فرهنگی یافت نشد.' };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizeAsciiDigits(normalizedUpdates.username).toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((c) => c.id !== id && normalizeAsciiDigits(c.username).toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر امور فرهنگی دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
+    Storage.setCulturalStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'cultural' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'cultural', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کارشناس امور فرهنگی با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteCulturalStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getCulturalStaff();
+    const target = list.find((s) => s.id === id);
+    Storage.setCulturalStaff(list.filter((s) => s.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کارشناس امور فرهنگی',
+        details: `حساب کاربری امور فرهنگی «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کارشناس امور فرهنگی با موفقیت حذف گردید.' };
+  },
+
+  getCulturalPrograms: (): CulturalProgram[] =>
+    get<CulturalProgram[]>(STORAGE_KEYS.CULTURAL_PROGRAMS, INITIAL_CULTURAL_PROGRAMS),
+
+  setCulturalPrograms: (items: CulturalProgram[]): boolean =>
+    set(STORAGE_KEYS.CULTURAL_PROGRAMS, items),
+
+  addCulturalProgram: (
+    payload: Omit<CulturalProgram, 'id' | 'programCode' | 'createdAt'>
+  ): { success: boolean; message: string; program?: CulturalProgram } => {
+    if (!payload.title.trim() || !payload.startTime.trim() || !payload.endTime.trim()) {
+      return { success: false, message: 'عنوان برنامه، ساعت شروع و ساعت پایان الزامی است.' };
+    }
+    const items = Storage.getCulturalPrograms();
+    const now = new Date();
+    const createdAt = `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const newItem: CulturalProgram = {
+      ...payload,
+      id: makeUniqueId('cprg'),
+      programCode: `CL-${101 + items.length}`,
+      createdAt,
+      approvedAt: payload.status === 'approved' ? createdAt : undefined,
+      approvedBy: payload.status === 'approved' ? payload.createdByName : undefined,
+    };
+    items.unshift(newItem);
+    Storage.setCulturalPrograms(items);
+    Storage.addActivityLog({
+      category: 'cultural',
+      action: 'ثبت برنامه فرهنگی در جدول زمانی هفتگی',
+      details: `برنامه «${newItem.title}» (${newItem.programCode}) برای ${newItem.dormName} ثبت شد (${newItem.status === 'approved' ? 'تأیید و منتشرشده' : 'پیش‌نویس'}).`,
+      targetName: newItem.title,
+    });
+    return {
+      success: true,
+      message: `برنامه فرهنگی «${newItem.title}» با کد ${newItem.programCode} ثبت شد.`,
+      program: newItem,
+    };
+  },
+
+  updateCulturalProgram: (
+    id: string,
+    updates: Partial<CulturalProgram>
+  ): { success: boolean; message: string } => {
+    const items = Storage.getCulturalPrograms();
+    const idx = items.findIndex((p) => p.id === id);
+    if (idx === -1) return { success: false, message: 'برنامه فرهنگی یافت نشد.' };
+    items[idx] = { ...items[idx], ...updates };
+    Storage.setCulturalPrograms(items);
+    return { success: true, message: 'برنامه فرهنگی با موفقیت بروزرسانی شد.' };
+  },
+
+  toggleCulturalProgramApproval: (
+    id: string,
+    actorName = 'واحد امور فرهنگی'
+  ): { success: boolean; message: string; status?: CulturalProgram['status'] } => {
+    const items = Storage.getCulturalPrograms();
+    const idx = items.findIndex((p) => p.id === id);
+    if (idx === -1) return { success: false, message: 'برنامه فرهنگی یافت نشد.' };
+    const nextStatus: CulturalProgram['status'] =
+      items[idx].status === 'approved' ? 'draft' : 'approved';
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    items[idx] = {
+      ...items[idx],
+      status: nextStatus,
+      approvedAt: nextStatus === 'approved' ? nowStr : undefined,
+      approvedBy: nextStatus === 'approved' ? actorName : undefined,
+    };
+    Storage.setCulturalPrograms(items);
+    Storage.addActivityLog({
+      category: 'cultural',
+      action: nextStatus === 'approved' ? 'تأیید و انتشار برنامه فرهنگی' : 'لغو انتشار برنامه فرهنگی',
+      details: `وضعیت برنامه «${items[idx].title}» (${items[idx].programCode}) به «${
+        nextStatus === 'approved' ? 'تأییدشده (نمایش برای دانشجویان)' : 'پیش‌نویس'
+      }» تغییر یافت.`,
+      targetName: items[idx].title,
+    });
+    return {
+      success: true,
+      status: nextStatus,
+      message:
+        nextStatus === 'approved'
+          ? 'برنامه تأیید شد و اکنون در جدول هفتگی کارتابل دانشجویان نمایش داده می‌شود.'
+          : 'برنامه به حالت پیش‌نویس بازگشت و از کارتابل دانشجویان پنهان شد.',
+    };
+  },
+
+  deleteCulturalProgram: (id: string): { success: boolean; message: string } => {
+    const items = Storage.getCulturalPrograms();
+    const target = items.find((p) => p.id === id);
+    Storage.setCulturalPrograms(items.filter((p) => p.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'cultural',
+        action: 'حذف برنامه فرهنگی',
+        details: `برنامه «${target.title}» (${target.programCode}) حذف گردید.`,
+        targetName: target.title,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'برنامه فرهنگی حذف شد.' };
+  },
+
+  getCulturalAssociations: (): CulturalAssociation[] =>
+    get<CulturalAssociation[]>(STORAGE_KEYS.CULTURAL_ASSOCIATIONS, INITIAL_CULTURAL_ASSOCIATIONS),
+
+  setCulturalAssociations: (items: CulturalAssociation[]): boolean =>
+    set(STORAGE_KEYS.CULTURAL_ASSOCIATIONS, items),
+
+  addCulturalAssociation: (
+    payload: Omit<CulturalAssociation, 'id' | 'associationCode' | 'createdAt'>
+  ): { success: boolean; message: string; association?: CulturalAssociation } => {
+    if (!payload.name.trim()) {
+      return { success: false, message: 'نام تشکل یا انجمن نمی‌تواند خالی باشد.' };
+    }
+    const items = Storage.getCulturalAssociations();
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const newAssoc: CulturalAssociation = {
+      ...payload,
+      id: makeUniqueId('assoc'),
+      associationCode: `AS-${101 + items.length}`,
+      createdAt: nowStr,
+    };
+    items.unshift(newAssoc);
+    Storage.setCulturalAssociations(items);
+    Storage.addActivityLog({
+      category: 'cultural',
+      action: 'ایجاد تشکل / انجمن دانشجویی جدید',
+      details: `تشکل «${newAssoc.name}» (${newAssoc.associationCode}) توسط واحد امور فرهنگی ثبت شد.`,
+      targetName: newAssoc.name,
+    });
+    return {
+      success: true,
+      message: `تشکل / انجمن «${newAssoc.name}» با موفقیت ایجاد شد.`,
+      association: newAssoc,
+    };
+  },
+
+  updateCulturalAssociation: (
+    id: string,
+    updates: Partial<CulturalAssociation>
+  ): { success: boolean; message: string } => {
+    const items = Storage.getCulturalAssociations();
+    const idx = items.findIndex((a) => a.id === id);
+    if (idx === -1) return { success: false, message: 'تشکل یافت نشد.' };
+    items[idx] = { ...items[idx], ...updates };
+    Storage.setCulturalAssociations(items);
+    return { success: true, message: 'اطلاعات تشکل / انجمن بروزرسانی شد.' };
+  },
+
+  deleteCulturalAssociation: (id: string): { success: boolean; message: string } => {
+    const items = Storage.getCulturalAssociations();
+    const target = items.find((a) => a.id === id);
+    Storage.setCulturalAssociations(items.filter((a) => a.id !== id));
+    const mems = Storage.getAssociationMemberships();
+    Storage.setAssociationMemberships(mems.filter((m) => m.associationId !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'cultural',
+        action: 'حذف تشکل / انجمن',
+        details: `تشکل «${target.name}» و سوابق عضویت آن حذف گردید.`,
+        targetName: target.name,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'تشکل و سوابق عضویت مرتبط حذف شد.' };
+  },
+
+  getAssociationMemberships: (): AssociationMembership[] =>
+    get<AssociationMembership[]>(STORAGE_KEYS.ASSOCIATION_MEMBERSHIPS, INITIAL_ASSOCIATION_MEMBERSHIPS),
+
+  setAssociationMemberships: (items: AssociationMembership[]): boolean =>
+    set(STORAGE_KEYS.ASSOCIATION_MEMBERSHIPS, items),
+
+  requestOrJoinAssociation: (payload: {
+    association: CulturalAssociation;
+    student: Student;
+    dormName?: string;
+    requestNote?: string;
+  }): { success: boolean; message: string; membership?: AssociationMembership } => {
+    const { association, student, dormName, requestNote } = payload;
+    if (association.status !== 'active') {
+      return { success: false, message: 'عضویت در این تشکل در حال حاضر غیرفعال است.' };
+    }
+    const list = Storage.getAssociationMemberships();
+    const existing = list.find(
+      (m) => m.associationId === association.id && m.studentId === student.studentId && m.status !== 'rejected'
+    );
+    if (existing) {
+      return {
+        success: false,
+        message:
+          existing.status === 'approved'
+            ? 'شما هم‌اکنون عضو این تشکل هستید.'
+            : 'درخواست عضویت شما قبلاً ثبت شده و در انتظار تأیید امور فرهنگی است.',
+      };
+    }
+
+    if (association.maxCapacity && association.maxCapacity > 0) {
+      const approvedCount = list.filter(
+        (m) => m.associationId === association.id && m.status === 'approved'
+      ).length;
+      if (approvedCount >= association.maxCapacity) {
+        return { success: false, message: 'ظرفیت عضویت این تشکل تکمیل شده است.' };
+      }
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const isInstant = association.membershipMode === 'open_instant';
+    const membership: AssociationMembership = {
+      id: makeUniqueId('amem'),
+      associationId: association.id,
+      associationName: association.name,
+      studentId: student.studentId,
+      studentName: student.fullName,
+      studentFieldOfStudy: student.fieldOfStudy,
+      studentEntryTerm: student.entryTerm,
+      dormName: dormName || student.assignedDormName || 'دانشجوی ترددی / فاقد سرا',
+      status: isInstant ? 'approved' : 'pending',
+      requestNote: requestNote?.trim() || undefined,
+      requestedAt: nowStr,
+      reviewedAt: isInstant ? nowStr : undefined,
+      reviewedBy: isInstant ? 'عضویت خودکار (تشکل آزاد)' : undefined,
+    };
+    list.unshift(membership);
+    Storage.setAssociationMemberships(list);
+    Storage.addActivityLog({
+      category: 'cultural',
+      action: isInstant ? 'عضویت مستقیم در تشکل' : 'ثبت درخواست عضویت در تشکل',
+      details: `${student.fullName} (${student.studentId}) برای تشکل «${association.name}» ${
+        isInstant ? 'عضو شد' : 'درخواست عضویت ثبت کرد'
+      }.`,
+      targetName: association.name,
+      actorName: student.fullName,
+      actorRole: 'student',
+      actorUsername: student.studentId,
+    });
+    return {
+      success: true,
+      message: isInstant
+        ? `عضویت شما در «${association.name}» با موفقیت ثبت شد.`
+        : `درخواست عضویت شما در «${association.name}» ثبت و جهت تأیید به کارتابل امور فرهنگی ارسال شد.`,
+      membership,
+    };
+  },
+
+  reviewAssociationMembership: (
+    membershipId: string,
+    decision: 'approved' | 'rejected',
+    reviewerName: string,
+    reviewNote?: string
+  ): { success: boolean; message: string } => {
+    const list = Storage.getAssociationMemberships();
+    const idx = list.findIndex((m) => m.id === membershipId);
+    if (idx === -1) return { success: false, message: 'درخواست عضویت یافت نشد.' };
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    list[idx] = {
+      ...list[idx],
+      status: decision,
+      reviewNote: reviewNote?.trim() || undefined,
+      reviewedAt: nowStr,
+      reviewedBy: reviewerName,
+    };
+    Storage.setAssociationMemberships(list);
+
+    const messages = Storage.getMessages();
+    messages.unshift({
+      id: makeUniqueId('msg_cul_mem'),
+      senderId: 'cultural',
+      senderName: `${reviewerName} (امور فرهنگی)`,
+      senderRole: 'cultural',
+      receiverType: 'student',
+      receiverId: list[idx].studentId,
+      subject:
+        decision === 'approved'
+          ? `تأیید عضویت در «${list[idx].associationName}»`
+          : `نتیجه بررسی عضویت در «${list[idx].associationName}»`,
+      content:
+        decision === 'approved'
+          ? `دانشجوی گرامی ${list[idx].studentName}، درخواست عضویت شما در تشکل/انجمن «${list[idx].associationName}» تأیید شد.${
+              reviewNote?.trim() ? `\nتوضیحات: ${reviewNote.trim()}` : ''
+            }`
+          : `دانشجوی گرامی ${list[idx].studentName}، درخواست عضویت شما در تشکل/انجمن «${list[idx].associationName}» مورد تأیید قرار نگرفت.${
+              reviewNote?.trim() ? `\nعلت/توضیحات: ${reviewNote.trim()}` : ''
+            }`,
+      category: 'cultural',
+      date: nowStr,
+      status: 'answered',
+      replies: [],
+    });
+    Storage.setMessages(messages);
+
+    Storage.addActivityLog({
+      category: 'cultural',
+      action: decision === 'approved' ? 'تأیید عضویت دانشجو در تشکل' : 'رد درخواست عضویت در تشکل',
+      details: `درخواست ${list[idx].studentName} برای عضویت در «${list[idx].associationName}» ${
+        decision === 'approved' ? 'تأیید' : 'رد'
+      } شد.`,
+      targetName: list[idx].associationName,
+    });
+    return {
+      success: true,
+      message:
+        decision === 'approved'
+          ? 'عضویت دانشجو با موفقیت تأیید و پیام اطلاع‌رسانی ارسال شد.'
+          : 'درخواست عضویت رد و نتیجه به دانشجو اطلاع داده شد.',
+    };
+  },
+
+  // -------------------------------------------------------------
+  // متدهای مدیریت کاربران امور دانشجویی و تربیت بدنی، انتخابات شورای صنفی و شورای انضباطی
+  // -------------------------------------------------------------
+  getStudentAffairsStaff: (): StudentAffairsStaff[] =>
+    get<StudentAffairsStaff[]>(STORAGE_KEYS.STUDENT_AFFAIRS_STAFF, INITIAL_STUDENT_AFFAIRS_STAFF),
+
+  setStudentAffairsStaff: (staff: StudentAffairsStaff[]): boolean =>
+    set(STORAGE_KEYS.STUDENT_AFFAIRS_STAFF, staff),
+
+  addStudentAffairsStaff: (
+    staffData: Omit<StudentAffairsStaff, 'id'>
+  ): { success: boolean; message: string; staff?: StudentAffairsStaff } => {
+    const list = Storage.getStudentAffairsStaff();
+    const cleanUsername = normalizeAsciiDigits(staffData.username).toLowerCase();
+    if (!cleanUsername) {
+      return { success: false, message: 'نام کاربری کارشناس امور دانشجویی نمی‌تواند خالی باشد.' };
+    }
+    if (list.some((s) => normalizeAsciiDigits(s.username).toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کاربر امور دانشجویی دیگری ثبت شده است.' };
+    }
+    const newStaff: StudentAffairsStaff = {
+      ...staffData,
+      id: makeUniqueId('sa'),
+      username: cleanUsername,
+      role: 'student_affairs',
+      department: staffData.department?.trim() || 'اداره امور دانشجویی، تربیت بدنی و رفاهی',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setStudentAffairsStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کارشناس امور دانشجویی و تربیت بدنی',
+      details: `کارشناس امور دانشجویی «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کارشناس امور دانشجویی «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateStudentAffairsStaff: (
+    id: string,
+    updates: Partial<StudentAffairsStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getStudentAffairsStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر امور دانشجویی یافت نشد.' };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizeAsciiDigits(normalizedUpdates.username).toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((sa) => sa.id !== id && normalizeAsciiDigits(sa.username).toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر امور دانشجویی دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
+    Storage.setStudentAffairsStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'student_affairs' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'student_affairs', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کارشناس امور دانشجویی با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteStudentAffairsStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getStudentAffairsStaff();
+    const target = list.find((s) => s.id === id);
+    Storage.setStudentAffairsStaff(list.filter((s) => s.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کارشناس امور دانشجویی',
+        details: `حساب کاربری امور دانشجویی «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کارشناس امور دانشجویی با موفقیت حذف گردید.' };
+  },
+
+  getGuildElections: (): GuildElection[] =>
+    get<GuildElection[]>(STORAGE_KEYS.GUILD_ELECTIONS, INITIAL_GUILD_ELECTIONS),
+
+  setGuildElections: (items: GuildElection[]): boolean =>
+    set(STORAGE_KEYS.GUILD_ELECTIONS, items),
+
+  addGuildElection: (
+    payload: Omit<GuildElection, 'id' | 'electionCode' | 'createdAt'>
+  ): { success: boolean; message: string; election?: GuildElection } => {
+    if (!payload.title.trim() || payload.candidates.length === 0) {
+      return { success: false, message: 'عنوان انتخابات و معرفی حداقل یک کاندیدا الزامی است.' };
+    }
+    const items = Storage.getGuildElections();
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const newElection: GuildElection = {
+      ...payload,
+      id: makeUniqueId('elec'),
+      electionCode: `EL-${101 + items.length}`,
+      createdAt: nowStr,
+      announcedAt: payload.isActiveWindow ? nowStr : undefined,
+    };
+    items.unshift(newElection);
+    Storage.setGuildElections(items);
+    Storage.addActivityLog({
+      category: 'election',
+      action: 'ایجاد دوره انتخابات شورای صنفی',
+      details: `انتخابات «${newElection.title}» (${newElection.electionCode}) با ${newElection.candidates.length} کاندیدا ایجاد شد.`,
+      targetName: newElection.title,
+    });
+    return {
+      success: true,
+      message: `انتخابات «${newElection.title}» با کد ${newElection.electionCode} ثبت شد.`,
+      election: newElection,
+    };
+  },
+
+  updateGuildElection: (
+    id: string,
+    updates: Partial<GuildElection>
+  ): { success: boolean; message: string } => {
+    const items = Storage.getGuildElections();
+    const idx = items.findIndex((e) => e.id === id);
+    if (idx === -1) return { success: false, message: 'دوره انتخابات یافت نشد.' };
+    items[idx] = { ...items[idx], ...updates };
+    Storage.setGuildElections(items);
+    return { success: true, message: 'اطلاعات انتخابات با موفقیت بروزرسانی شد.' };
+  },
+
+  toggleGuildElectionWindow: (
+    electionId: string,
+    isActive: boolean,
+    actorName: string,
+    publishAnnouncement = true
+  ): { success: boolean; message: string } => {
+    const items = Storage.getGuildElections();
+    const idx = items.findIndex((e) => e.id === electionId);
+    if (idx === -1) return { success: false, message: 'دوره انتخابات یافت نشد.' };
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    items[idx] = {
+      ...items[idx],
+      isActiveWindow: isActive,
+      announcedAt: isActive ? nowStr : items[idx].announcedAt,
+    };
+    Storage.setGuildElections(items);
+
+    if (isActive && publishAnnouncement) {
+      const el = items[idx];
+      Storage.addAnnouncement({
+        title: `فراخوان و آغاز بازه رأی‌گیری: ${el.title}`,
+        content:
+          (el.noticeText?.trim() ? `${el.noticeText.trim()}\n` : '') +
+          `بازه زمانی مجاز رأی‌گیری: ${el.startDate} ${el.startTime || ''} تا ${el.endDate} ${el.endTime || ''}. دانشجویان گرامی می‌توانند از تب «انتخابات شورای صنفی» در کارتابل خود رأی خود را ثبت نمایند.`,
+        author: `${actorName} (امور دانشجویی و تربیت بدنی)`,
+        targetDormId: 'all',
+        priority: 'important',
+        date: nowStr,
+        pinned: true,
+        showOnHomePage: true,
+      });
+    }
+
+    Storage.addActivityLog({
+      category: 'election',
+      action: isActive ? 'فعال‌سازی و اطلاع‌رسانی بازه رأی‌گیری شورای صنفی' : 'بستن بازه رأی‌گیری شورای صنفی',
+      details: `بازه رأی‌گیری «${items[idx].title}» (${items[idx].electionCode}) توسط ${actorName} ${
+        isActive ? 'فعال و اطلاع‌رسانی' : 'بسته'
+      } شد.`,
+      targetName: items[idx].title,
+    });
+
+    return {
+      success: true,
+      message: isActive
+        ? 'بازه رأی‌گیری فعال شد و در صورت انتخاب، اطلاعیه رسمی برای دانشجویان منتشر گردید.'
+        : 'بازه رأی‌گیری بسته شد و امکان ثبت رأی جدید متوقف گردید.',
+    };
+  },
+
+  deleteGuildElection: (id: string): { success: boolean; message: string } => {
+    const items = Storage.getGuildElections();
+    const target = items.find((e) => e.id === id);
+    Storage.setGuildElections(items.filter((e) => e.id !== id));
+    const votes = Storage.getGuildElectionVotes();
+    Storage.setGuildElectionVotes(votes.filter((v) => v.electionId !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'election',
+        action: 'حذف دوره انتخابات شورای صنفی',
+        details: `انتخابات «${target.title}» و آرای آن حذف گردید.`,
+        targetName: target.title,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'دوره انتخابات و آرای مرتبط حذف شد.' };
+  },
+
+  getGuildElectionVotes: (): GuildElectionVote[] =>
+    get<GuildElectionVote[]>(STORAGE_KEYS.GUILD_ELECTION_VOTES, INITIAL_GUILD_ELECTION_VOTES),
+
+  setGuildElectionVotes: (items: GuildElectionVote[]): boolean =>
+    set(STORAGE_KEYS.GUILD_ELECTION_VOTES, items),
+
+  hasStudentVotedInElection: (electionId: string, studentId: string): boolean =>
+    Storage.getGuildElectionVotes().some(
+      (v) => v.electionId === electionId && v.studentId === studentId
+    ),
+
+  castGuildElectionVote: (payload: {
+    election: GuildElection;
+    student: Student;
+    candidateIds: string[];
+    dormName?: string;
+  }): { success: boolean; message: string; vote?: GuildElectionVote } => {
+    const { election, student, candidateIds, dormName } = payload;
+    if (!election.isActiveWindow) {
+      return {
+        success: false,
+        message:
+          'بازه زمانی رأی‌گیری این انتخابات در حال حاضر توسط واحد امور دانشجویی فعال نیست و ثبت رأی امکان‌پذیر نمی‌باشد.',
+      };
+    }
+    const isDormResident = Boolean(student.assignedBedId && student.assignmentStatus !== 'none');
+    if (election.targetEligibility === 'dorm_only' && !isDormResident) {
+      return {
+        success: false,
+        message: 'این انتخابات ویژه دانشجویان خوابگاهی تعریف شده است.',
+      };
+    }
+    const uniqueSelected = Array.from(new Set(candidateIds)).filter((cid) =>
+      election.candidates.some((c) => c.id === cid)
+    );
+    if (uniqueSelected.length === 0) {
+      return { success: false, message: 'لطفاً حداقل یک کاندیدا را انتخاب نمایید.' };
+    }
+    if (uniqueSelected.length > Math.max(1, election.maxSelections)) {
+      return {
+        success: false,
+        message: `حداکثر تعداد انتخاب مجاز در این انتخابات ${election.maxSelections} نفر است.`,
+      };
+    }
+    const votes = Storage.getGuildElectionVotes();
+    if (votes.some((v) => v.electionId === election.id && v.studentId === student.studentId)) {
+      return { success: false, message: 'رأی شما پیش‌تر در این انتخابات ثبت شده است.' };
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const newVote: GuildElectionVote = {
+      id: makeUniqueId('vote'),
+      electionId: election.id,
+      studentId: student.studentId,
+      studentName: student.fullName,
+      isDormResident,
+      dormName: dormName || student.assignedDormName || undefined,
+      candidateIds: uniqueSelected,
+      castAt: nowStr,
+    };
+    votes.unshift(newVote);
+    Storage.setGuildElectionVotes(votes);
+    Storage.addActivityLog({
+      category: 'election',
+      action: 'ثبت رأی دانشجو در انتخابات شورای صنفی',
+      details: `رأی دانشجو در انتخابات «${election.title}» (${election.electionCode}) ثبت گردید.`,
+      targetName: election.title,
+      actorName: student.fullName,
+      actorRole: 'student',
+      actorUsername: student.studentId,
+    });
+    return {
+      success: true,
+      message: 'رأی شما با موفقیت در صندوق الکترونیکی انتخابات شورای صنفی ثبت گردید.',
+      vote: newVote,
+    };
+  },
+
+  // معرفی دانشجویان متخلف به شورای انضباطی نزد امور دانشجویی و مدیریت جلسات شورا
+  getDisciplinaryReferrals: (): DisciplinaryReferral[] =>
+    get<DisciplinaryReferral[]>(STORAGE_KEYS.DISCIPLINARY_REFERRALS, INITIAL_DISCIPLINARY_REFERRALS),
+
+  setDisciplinaryReferrals: (items: DisciplinaryReferral[]): boolean =>
+    set(STORAGE_KEYS.DISCIPLINARY_REFERRALS, items),
+
+  createDisciplinaryReferral: (payload: {
+    students: Student[];
+    dorm?: Dormitory;
+    room?: Room;
+    violationType: DisciplinaryViolationType;
+    violationLabel?: string;
+    referralText: string;
+    referredById: string;
+    referredByName: string;
+    referredByRole: 'supervisor' | 'admin';
+    notifyStudentInbox?: boolean;
+  }): { success: boolean; message: string; referrals?: DisciplinaryReferral[] } => {
+    if (!payload.students || payload.students.length === 0) {
+      return { success: false, message: 'حداقل یک دانشجو برای معرفی به شورای انضباطی باید انتخاب شود.' };
+    }
+    if (!payload.referralText.trim()) {
+      return { success: false, message: 'متن معرفی‌نامه تخلف انضباطی نمی‌تواند خالی باشد.' };
+    }
+
+    const list = Storage.getDisciplinaryReferrals();
+    const dorms = Storage.getDormitories();
+    const rooms = Storage.getRooms();
+    const preset = DISCIPLINARY_VIOLATION_PRESETS.find((p) => p.type === payload.violationType);
+    const resolvedLabel = payload.violationLabel?.trim() || preset?.label || 'تخلف انضباطی';
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const created: DisciplinaryReferral[] = [];
+
+    payload.students.forEach((st, idx) => {
+      const stDorm = payload.dorm || dorms.find((d) => d.id === st.assignedDormId);
+      const stRoom = payload.room || rooms.find((r) => r.id === st.assignedRoomId);
+      const isDormResident = Boolean(st.assignedBedId && st.assignmentStatus !== 'none');
+
+      const ref: DisciplinaryReferral = {
+        id: makeUniqueId('dref'),
+        referralCode: `DC-${101 + list.length + idx}`,
+        studentId: st.studentId,
+        studentName: st.fullName,
+        studentNationalId: st.nationalId,
+        studentMobile: st.mobile,
+        studentFieldOfStudy: st.fieldOfStudy,
+        studentEntryTerm: st.entryTerm,
+        isDormResident,
+        dormId: stDorm?.id || st.assignedDormId,
+        dormName: stDorm?.name || st.assignedDormName,
+        roomId: stRoom?.id || st.assignedRoomId,
+        roomNumber: stRoom?.roomNumber || st.assignedRoomNumber,
+        violationType: payload.violationType,
+        violationLabel: resolvedLabel,
+        referralText: payload.referralText.trim(),
+        referredById: payload.referredById,
+        referredByName: payload.referredByName,
+        referredByRole: payload.referredByRole,
+        referredAt: nowStr,
+        status: 'pending_review',
+      };
+      created.push(ref);
+    });
+
+    const updatedList = [...created, ...list];
+    Storage.setDisciplinaryReferrals(updatedList);
+
+    if (payload.notifyStudentInbox !== false) {
+      const messages = Storage.getMessages();
+      created.forEach((ref) => {
+        messages.unshift({
+          id: makeUniqueId('msg_disc_ref'),
+          senderId: payload.referredById || payload.referredByRole,
+          senderName: payload.referredByName,
+          senderRole: payload.referredByRole,
+          receiverType: 'student',
+          receiverId: ref.studentId,
+          subject: `ابلاغ معرفی به شورای انضباطی (${ref.referralCode})`,
+          content: `دانشجوی گرامی ${ref.studentName}، پرونده شما با موضوع «${ref.violationLabel}» جهت تشکیل جلسه و بررسی به شورای انضباطی (واحد امور دانشجویی) معرفی گردید.\nشرح گزارش:\n${ref.referralText}`,
+          category: 'discipline',
+          date: nowStr,
+          status: 'answered',
+          replies: [],
+        });
+      });
+      Storage.setMessages(messages);
+    }
+
+    Storage.addActivityLog({
+      category: 'disciplinary',
+      action: 'معرفی دانشجو به شورای انضباطی (امور دانشجویی)',
+      details: `${created.length} دانشجو (${created.map((c) => c.studentName).join('، ')}) با موضوع «${resolvedLabel}» توسط ${payload.referredByName} به کارتابل امور دانشجویی معرفی شد.`,
+      targetName: created.length === 1 ? created[0].studentName : `${created.length} دانشجو`,
+      severity: 'warning',
+      actorName: payload.referredByName,
+      actorRole: payload.referredByRole,
+    });
+
+    return {
+      success: true,
+      message: `${created.length} معرفی‌نامه شورای انضباطی با موفقیت به کارتابل امور دانشجویی ارسال شد.`,
+      referrals: created,
+    };
+  },
+
+  updateDisciplinaryReferral: (
+    id: string,
+    updates: Partial<DisciplinaryReferral>,
+    actorName = 'واحد امور دانشجویی',
+    notifyStudent = false
+  ): { success: boolean; message: string } => {
+    const list = Storage.getDisciplinaryReferrals();
+    const idx = list.findIndex((r) => r.id === id);
+    if (idx === -1) return { success: false, message: 'پرونده ارجاعی یافت نشد.' };
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    list[idx] = {
+      ...list[idx],
+      ...updates,
+      handledByStaffName: actorName,
+      updatedAt: nowStr,
+    };
+    Storage.setDisciplinaryReferrals(list);
+
+    if (notifyStudent) {
+      const ref = list[idx];
+      const statusFa: Record<DisciplinaryReferralStatus, string> = {
+        pending_review: 'در انتظار بررسی',
+        session_scheduled: 'تعیین وقت جلسه شورای انضباطی',
+        verdict_issued: 'صدور رأی / تصمیم شورای انضباطی',
+        closed: 'مختومه‌شده',
+      };
+      const messages = Storage.getMessages();
+      messages.unshift({
+        id: makeUniqueId('msg_disc_upd'),
+        senderId: 'student_affairs',
+        senderName: `${actorName} (امور دانشجویی و شورای انضباطی)`,
+        senderRole: 'student_affairs',
+        receiverType: 'student',
+        receiverId: ref.studentId,
+        subject: `وضعیت پرونده شورای انضباطی ${ref.referralCode}: ${statusFa[ref.status]}`,
+        content:
+          `دانشجوی گرامی ${ref.studentName}، آخرین وضعیت پرونده انضباطی شما (${ref.referralCode}):\n` +
+          `وضعیت: ${statusFa[ref.status]}` +
+          (ref.sessionDate ? `\nتاریخ و ساعت جلسه: ${ref.sessionDate} ${ref.sessionTime || ''}` : '') +
+          (ref.sessionLocation ? `\nمحل برگزاری: ${ref.sessionLocation}` : '') +
+          (ref.verdict ? `\nرأی / تصمیم شورا: ${ref.verdict}` : '') +
+          (ref.councilNotes ? `\nتوضیحات شورا: ${ref.councilNotes}` : ''),
+        category: 'student_affairs',
+        date: nowStr,
+        status: 'answered',
+        replies: [],
+      });
+      Storage.setMessages(messages);
+    }
+
+    Storage.addActivityLog({
+      category: 'disciplinary',
+      action: 'بروزرسانی پرونده شورای انضباطی',
+      details: `پرونده ${list[idx].referralCode} (${list[idx].studentName}) توسط ${actorName} بروزرسانی شد.`,
+      targetName: list[idx].studentName,
+    });
+    return { success: true, message: 'پرونده شورای انضباطی با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteDisciplinaryReferral: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getDisciplinaryReferrals();
+    Storage.setDisciplinaryReferrals(list.filter((r) => r.id !== id));
+    return { success: true, message: 'پرونده ارجاعی حذف شد.' };
+  },
+
+  // -------------------------------------------------------------
+  // برنامه‌ریزی ورزشی و تربیت بدنی (کارتابل امور دانشجویی و تربیت بدنی)
+  // -------------------------------------------------------------
+  getSportsPrograms: (): SportsProgram[] =>
+    get<SportsProgram[]>(STORAGE_KEYS.SPORTS_PROGRAMS, INITIAL_SPORTS_PROGRAMS),
+
+  setSportsPrograms: (items: SportsProgram[]): boolean =>
+    set(STORAGE_KEYS.SPORTS_PROGRAMS, items),
+
+  addSportsProgram: (payload: {
+    title: string;
+    sportType: SportsProgramType;
+    programKind: SportsProgramKind;
+    genderScope: 'all' | 'brothers' | 'sisters';
+    dormId: string;
+    dormName: string;
+    dayOfWeek?: SportsProgram['dayOfWeek'];
+    scheduleDate?: string;
+    startTime: string;
+    endTime: string;
+    venue: string;
+    coachName?: string;
+    maxCapacity?: number;
+    eligibility?: string;
+    equipmentNeeded?: string;
+    description?: string;
+    status?: SportsProgramStatus;
+    isPublishedToStudents?: boolean;
+    createdById: string;
+    createdByName: string;
+  }): { success: boolean; message: string; program?: SportsProgram } => {
+    if (!payload.title.trim() || !payload.venue.trim()) {
+      return { success: false, message: 'عنوان برنامه ورزشی و مکان برگزاری الزامی است.' };
+    }
+    const list = Storage.getSportsPrograms();
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const newProgram: SportsProgram = {
+      id: makeUniqueId('sp'),
+      programCode: `SP-${101 + list.length}`,
+      title: payload.title.trim(),
+      sportType: payload.sportType,
+      programKind: payload.programKind,
+      genderScope: payload.genderScope,
+      dormId: payload.dormId || 'all',
+      dormName: payload.dormName || 'کلیه سراها و پردیس',
+      dayOfWeek: payload.dayOfWeek,
+      scheduleDate: payload.scheduleDate?.trim() || undefined,
+      startTime: payload.startTime.trim() || '۱۶:۰۰',
+      endTime: payload.endTime.trim() || '۱۷:۳۰',
+      venue: payload.venue.trim(),
+      coachName: payload.coachName?.trim() || undefined,
+      maxCapacity:
+        payload.maxCapacity && Number(payload.maxCapacity) > 0
+          ? Number(payload.maxCapacity)
+          : undefined,
+      eligibility: payload.eligibility?.trim() || undefined,
+      equipmentNeeded: payload.equipmentNeeded?.trim() || undefined,
+      description: payload.description?.trim() || undefined,
+      status: payload.status || 'registration_open',
+      isPublishedToStudents: payload.isPublishedToStudents !== false,
+      createdById: payload.createdById,
+      createdByName: payload.createdByName,
+      createdAt: nowStr,
+    };
+    list.unshift(newProgram);
+    Storage.setSportsPrograms(list);
+    Storage.addActivityLog({
+      category: 'sports',
+      action: 'ثبت برنامه ورزشی و تربیت بدنی جدید',
+      details: `برنامه «${newProgram.title}» (${newProgram.programCode}) در ${newProgram.venue} توسط ${payload.createdByName} ثبت شد.`,
+      targetName: newProgram.title,
+      actorName: payload.createdByName,
+      actorRole: 'student_affairs',
+    });
+    return {
+      success: true,
+      message: `برنامه ورزشی «${newProgram.title}» با کد ${newProgram.programCode} با موفقیت ثبت شد.`,
+      program: newProgram,
+    };
+  },
+
+  updateSportsProgram: (
+    id: string,
+    updates: Partial<SportsProgram>,
+    actorName = 'امور دانشجویی و تربیت بدنی'
+  ): { success: boolean; message: string } => {
+    const list = Storage.getSportsPrograms();
+    const idx = list.findIndex((p) => p.id === id);
+    if (idx === -1) return { success: false, message: 'برنامه ورزشی یافت نشد.' };
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    list[idx] = {
+      ...list[idx],
+      ...updates,
+      updatedAt: nowStr,
+    };
+    Storage.setSportsPrograms(list);
+
+    if (updates.title && updates.title.trim()) {
+      const regs = Storage.getSportsRegistrations();
+      let regsChanged = false;
+      regs.forEach((r) => {
+        if (r.programId === id && r.programTitle !== updates.title!.trim()) {
+          r.programTitle = updates.title!.trim();
+          regsChanged = true;
+        }
+      });
+      if (regsChanged) Storage.setSportsRegistrations(regs);
+    }
+
+    Storage.addActivityLog({
+      category: 'sports',
+      action: 'بروزرسانی برنامه ورزشی',
+      details: `برنامه «${list[idx].title}» (${list[idx].programCode}) توسط ${actorName} بروزرسانی شد.`,
+      targetName: list[idx].title,
+      actorName,
+      actorRole: 'student_affairs',
+    });
+    return { success: true, message: 'برنامه ورزشی با موفقیت بروزرسانی شد.' };
+  },
+
+  toggleSportsProgramPublish: (
+    id: string,
+    isPublishedToStudents: boolean,
+    actorName = 'امور دانشجویی و تربیت بدنی'
+  ): { success: boolean; message: string } => {
+    return Storage.updateSportsProgram(id, { isPublishedToStudents }, actorName);
+  },
+
+  deleteSportsProgram: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getSportsPrograms();
+    const target = list.find((p) => p.id === id);
+    Storage.setSportsPrograms(list.filter((p) => p.id !== id));
+    const regs = Storage.getSportsRegistrations();
+    Storage.setSportsRegistrations(regs.filter((r) => r.programId !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'sports',
+        action: 'حذف برنامه ورزشی',
+        details: `برنامه ورزشی «${target.title}» (${target.programCode}) حذف گردید.`,
+        targetName: target.title,
+        severity: 'warning',
+        actorRole: 'student_affairs',
+      });
+    }
+    return { success: true, message: 'برنامه ورزشی و ثبت‌نام‌های مرتبط حذف گردید.' };
+  },
+
+  getSportsRegistrations: (): SportsRegistration[] =>
+    get<SportsRegistration[]>(STORAGE_KEYS.SPORTS_REGISTRATIONS, INITIAL_SPORTS_REGISTRATIONS),
+
+  setSportsRegistrations: (items: SportsRegistration[]): boolean =>
+    set(STORAGE_KEYS.SPORTS_REGISTRATIONS, items),
+
+  registerForSportsProgram: (payload: {
+    program: SportsProgram;
+    student: Student;
+    dormName?: string;
+    roomNumber?: string;
+    skillLevel?: SportsRegistration['skillLevel'];
+    healthConfirmed: boolean;
+    note?: string;
+  }): { success: boolean; message: string; registration?: SportsRegistration } => {
+    const { program, student, dormName, roomNumber, skillLevel, healthConfirmed, note } = payload;
+    if (!program.isPublishedToStudents || program.status === 'cancelled' || program.status === 'completed') {
+      return { success: false, message: 'امکان ثبت‌نام در این برنامه ورزشی در حال حاضر فعال نیست.' };
+    }
+    if (program.status === 'planned') {
+      return { success: false, message: 'ثبت‌نام این برنامه هنوز آغاز نشده است.' };
+    }
+    if (!healthConfirmed) {
+      return { success: false, message: 'تأیید آمادگی جسمانی و سلامت برای ثبت‌نام ورزشی الزامی است.' };
+    }
+
+    const regs = Storage.getSportsRegistrations();
+    const existingActive = regs.find(
+      (r) => r.programId === program.id && r.studentId === student.studentId && r.status !== 'cancelled'
+    );
+    if (existingActive) {
+      return { success: false, message: 'شما پیش‌تر در این برنامه ورزشی ثبت‌نام کرده‌اید.' };
+    }
+
+    const activeCount = regs.filter(
+      (r) => r.programId === program.id && r.status !== 'cancelled'
+    ).length;
+    if (program.maxCapacity && program.maxCapacity > 0 && activeCount >= program.maxCapacity) {
+      return { success: false, message: 'ظرفیت این برنامه ورزشی تکمیل شده است.' };
+    }
+
+    const isDormResident = Boolean(student.assignedBedId && student.assignmentStatus !== 'none');
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const newReg: SportsRegistration = {
+      id: makeUniqueId('spreg'),
+      programId: program.id,
+      programTitle: program.title,
+      studentId: student.studentId,
+      studentName: student.fullName,
+      studentNationalId: student.nationalId,
+      studentMobile: student.mobile || student.phone,
+      studentFieldOfStudy: student.fieldOfStudy,
+      studentEntryTerm: student.entryTerm,
+      isDormResident,
+      dormName: dormName || student.assignedDormName || undefined,
+      roomNumber: roomNumber || student.assignedRoomNumber || undefined,
+      skillLevel: skillLevel || 'beginner',
+      healthConfirmed: true,
+      note: note?.trim() || undefined,
+      status: 'registered',
+      registeredAt: nowStr,
+    };
+    regs.unshift(newReg);
+    Storage.setSportsRegistrations(regs);
+    Storage.addActivityLog({
+      category: 'sports',
+      action: 'ثبت‌نام دانشجو در برنامه ورزشی',
+      details: `دانشجو ${student.fullName} در برنامه «${program.title}» (${program.programCode}) ثبت‌نام کرد.`,
+      targetName: program.title,
+      actorName: student.fullName,
+      actorRole: 'student',
+      actorUsername: student.studentId,
+    });
+    return {
+      success: true,
+      message: `ثبت‌نام شما در برنامه ورزشی «${program.title}» با موفقیت انجام شد.`,
+      registration: newReg,
+    };
+  },
+
+  cancelSportsRegistration: (
+    programId: string,
+    studentId: string
+  ): { success: boolean; message: string } => {
+    const regs = Storage.getSportsRegistrations();
+    const idx = regs.findIndex(
+      (r) => r.programId === programId && r.studentId === studentId && r.status !== 'cancelled'
+    );
+    if (idx === -1) return { success: false, message: 'ثبت‌نام فعالی برای لغو یافت نشد.' };
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    regs[idx] = { ...regs[idx], status: 'cancelled', updatedAt: nowStr };
+    Storage.setSportsRegistrations(regs);
+    return { success: true, message: 'انصراف شما از برنامه ورزشی ثبت شد.' };
+  },
+
+  updateSportsRegistrationStatus: (
+    regId: string,
+    status: SportsRegistrationStatus
+  ): { success: boolean; message: string } => {
+    const regs = Storage.getSportsRegistrations();
+    const idx = regs.findIndex((r) => r.id === regId);
+    if (idx === -1) return { success: false, message: 'رکورد ثبت‌نام یافت نشد.' };
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    regs[idx] = { ...regs[idx], status, updatedAt: nowStr };
+    Storage.setSportsRegistrations(regs);
+    return { success: true, message: 'وضعیت حضور و ثبت‌نام دانشجو بروزرسانی شد.' };
+  },
+
+  // -------------------------------------------------------------
   // توابع همگام‌سازی دوطرفه با دیتابیس ابری MongoDB Atlas
   // -------------------------------------------------------------
   fetchStudentsFromDB: async (): Promise<Student[] | null> => {
@@ -5693,7 +7394,7 @@ export const Storage = {
   },
 
   uploadPhotosToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs',
     items: Array<{ userId: string; dataUrl: string }>
   ): Promise<{
     supported: boolean;
@@ -5778,7 +7479,7 @@ export const Storage = {
   },
 
   uploadSinglePhotoToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs',
     userId: string,
     dataUrl: string
   ): Promise<{ supported: boolean; ok: boolean; url: string; errorMessage?: string }> => {

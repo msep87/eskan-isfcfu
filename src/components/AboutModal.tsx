@@ -1,22 +1,18 @@
 import React from 'react';
 import {
   X,
-  GraduationCap,
-  Sparkles,
   School,
-  Building2,
-  ShieldCheck,
-  Code2,
-  Mail,
   UserCheck,
   CheckCircle,
-  HeartHandshake,
+  Mail,
   Layers,
   FileDown,
   FileText,
+  Printer,
+  Sparkles,
 } from 'lucide-react';
 import { FarhangianEmblem } from './FarhangianEmblem';
-import { downloadSystemWordDocument } from '../utils/docExportUtils';
+import { downloadSystemPdfDocument } from '../utils/docExportUtils';
 
 interface AboutModalProps {
   isOpen: boolean;
@@ -33,7 +29,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200">
-      <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-6">
+      <div className="relative w-full max-w-3xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-6">
 
         {/* سربرگ مودال */}
         <div className="relative bg-gradient-to-r from-teal-700 via-teal-800 to-emerald-900 text-white p-6 sm:p-7 overflow-hidden">
@@ -42,7 +38,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
 
           <div className="flex items-start justify-between relative z-10">
             <div className="flex items-center gap-3.5">
-              <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur-md p-2 border border-white/20 flex items-center justify-center shadow-lg">
+              <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur-md p-2 border border-white/20 flex items-center justify-center shadow-lg shrink-0">
                 <FarhangianEmblem size={36} customLogoUrl={customLogoUrl} />
               </div>
               <div>
@@ -53,7 +49,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
                   سامانه جامع سراهای دانشجویی
                 </h3>
                 <p className="text-xs text-teal-200/90 font-medium">
-                  پلتفرم یکپارچه هوشمند خدمات اسکان، پایش، شیفت‌بندی، انبار و تأسیسات سراها
+                  زیست‌بوم هوشمند اسکان، تربیت معلم، امور فرهنگی، دانشجویی، مشاوره، آموزش، مالی و تأسیسات
                 </p>
               </div>
             </div>
@@ -77,96 +73,108 @@ export const AboutModal: React.FC<AboutModalProps> = ({
                 <UserCheck className="w-6 h-6" />
               </div>
               <div className="space-y-1 text-right flex-1">
-                <div className="flex flex-wrap items-center justify-between gap-1">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400">
-                    طراح، تحلیل‌گر و سازنده سامانه:
+                    طراح، معمار سامانه و تحلیل‌گر ارشد:
                   </span>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-500 dark:text-slate-400" dir="ltr">
+                  <a
+                    href="mailto:m.sepiani@cfu.ac.ir"
+                    className="inline-flex items-center gap-1.5 text-[11px] font-mono text-teal-700 dark:text-teal-300 bg-white/80 dark:bg-slate-800 px-2.5 py-0.5 rounded-lg border border-teal-200 dark:border-teal-800 hover:underline"
+                    dir="ltr"
+                  >
                     <Mail className="w-3 h-3 text-teal-600" />
-                    <span>m.sep87@gmail.com</span>
-                  </span>
+                    <span>m.sepiani@cfu.ac.ir</span>
+                  </a>
                 </div>
                 <h4 className="font-black text-base text-slate-900 dark:text-white">
                   دکتر محمد سپیانی
                 </h4>
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed pt-1">
-                  طراحی و پیاده‌سازی شده با بهره‌گیری از معماری مدرن نرم‌افزاری جهت بهینه‌سازی فرآیندهای زیست دانشجویی و هوشمندسازی مدیریت خوابگاه‌های دانشگاه فرهنگیان.
+                  طراحی و پیاده‌سازی‌شده بر پایه شناخت میدانی زیست‌بوم شبانه‌روزی دانشگاه فرهنگیان، با هدف یکپارچه‌سازی کامل فرآیندهای اسکان، امور تربیتی و فرهنگی، خدمات دانشجویی، سلامت روان، پشتیبانی فنی و شفافیت مدیریتی.
                 </p>
               </div>
             </div>
           </div>
 
-          {/* دکمه اختصاصی دانلود فایل ورد جامع و کامل مستندات سامانه */}
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border border-blue-200 dark:border-blue-800/60 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 text-right">
+          {/* دکمه اختصاصی دانلود فایل PDF سند جامع تحلیلی، فنی و راهنمای عملیاتی سامانه */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-50 via-blue-50 to-indigo-50 dark:from-rose-950/30 dark:via-blue-950/40 dark:to-indigo-950/40 border border-blue-200 dark:border-blue-800/60 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 text-right">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md">
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-rose-600 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md">
                 <FileText className="w-6 h-6" />
               </div>
               <div>
                 <h5 className="font-extrabold text-sm text-slate-900 dark:text-white">
-                  دانلود سند جامع تحلیلی، فنی و راهنمای عملیاتی سامانه (فایل Word)
+                  دریافت سند جامع تحلیلی، فنی و راهنمای عملیاتی سامانه (فایل PDF)
                 </h5>
-                <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                  فایل کامل و دقیق شامل تشریح تمامی ۱۰ ماژول، ماتریس دسترسی‌ها، ماهیت شبانه‌روزی و مشخصات سازنده
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed mt-0.5">
+                  مستند کامل و دسته‌بندی‌شده شامل فلسفه شبانه‌روزی و رسالت تربیت معلم، تشریح ۱۸ ماژول، ماتریس ۱۱ نقش کاربری، سناریوهای عملیاتی و معماری فنی
                 </p>
               </div>
             </div>
 
             <button
-              onClick={downloadSystemWordDocument}
-              className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-md hover:shadow-lg cursor-pointer shrink-0"
+              onClick={downloadSystemPdfDocument}
+              className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-md hover:shadow-lg cursor-pointer shrink-0"
             >
-              <FileDown className="w-4 h-4" />
-              <span>دانلود فایل ورد (.doc)</span>
+              <Printer className="w-4 h-4" />
+              <span>چاپ / ذخیره PDF</span>
             </button>
           </div>
 
-          {/* ۲. درباره دانشگاه فرهنگیان و ویژگی شبانه‌روزی بودن */}
+          {/* ۲. درباره دانشگاه فرهنگیان و ویژگی شبانه‌روزی بودن و رسالت تربیت معلم */}
           <div className="space-y-2.5 text-right">
             <div className="flex items-center gap-2">
               <School className="w-4 h-4 text-teal-600 dark:text-teal-400" />
               <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
-                درباره دانشگاه فرهنگیان و ماهیت شبانه‌روزی سراهای دانشجویی
+                ماهیت شبانه‌روزی دانشگاه فرهنگیان و رسالت بنیادین تربیت معلم
               </h4>
             </div>
-            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed text-justify bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-800">
-              دانشگاه فرهنگیان، به عنوان دانشگاه استراتژیک، مادر و مأموریت‌محور در جمهوری اسلامی ایران، عهده‌دار رسالت خطیر تأمین، تربیت و توانمندسازی معلمان و مربیان صالح و شایسته برای نسل آینده کشور است.
-              یکی از ویژگی‌های بنیادین و منحصر‌به‌فرد این دانشگاه، <strong className="text-teal-700 dark:text-teal-300 font-bold">شبانه‌روزی بودن</strong> آن است. در دانشگاه فرهنگیان، سراهای دانشجویی صرفاً محلی برای خواب و استراحت فیزیکی نیستند؛ بلکه یک <strong className="text-teal-700 dark:text-teal-300 font-bold">زیست‌بوم تربیتی، فرهنگی، علمی و مهارتی پویا</strong> هستند که در آن منش معلمی، مسئولیت‌پذیری جمعی، اخلاق‌مداری و مهارت‌های همزیستی در بستر تعاملات شبانه‌روزی دانشجومعلمان شکل می‌گیرد.
-            </p>
+            <div className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed text-justify bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+              <p>
+                دانشگاه فرهنگیان به عنوان دانشگاه راهبردی، مادر و مأموریت‌محور کشور در نظام آموزش عالی و سند تحول بنیادین، عهده‌دار خطیرترین مسئولیت ملی یعنی <strong className="text-teal-700 dark:text-teal-300 font-bold">جذب، آموزش و تربیت معلمان و مربیان آینده ایران اسلامی</strong> است.
+              </p>
+              <p>
+                یکی از ارکان هویتی و منحصر‌به‌فرد این دانشگاه، <strong className="text-teal-700 dark:text-teal-300 font-bold">شبانه‌روزی بودن (Boarding Nature)</strong> آن است. در دانشگاه فرهنگیان، سراهای دانشجویی صرفاً خوابگاه یا محل استراحت شبانه نیستند؛ بلکه ادامه طبیعی کلاس تربیت و یک <strong className="text-teal-700 dark:text-teal-300 font-bold">«زیست‌بوم تربیتی، فرهنگی، اخلاقی، اجتماعی و مهارتی پیوسته»</strong> محسوب می‌شوند که در آن منش معلمی، قانون‌مداری، همزیستی مسئولانه، مشارکت فرهنگی و صنفی و سلامت جسم و روان دانشجومعلمان شکل می‌گیرد.
+              </p>
+            </div>
           </div>
 
-          {/* ۳. درباره اهداف و قابلیت‌های سامانه جامع سراها */}
-          <div className="space-y-2.5 text-right">
+          {/* ۳. درباره اهداف و قابلیت‌های دسته‌بندی‌شده سامانه جامع سراها */}
+          <div className="space-y-3 text-right">
             <div className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
-                اهداف و دستاوردهای سامانه جامع سراهای دانشجویی
+                اهداف و منظومه قابلیت‌های یکپارچه سامانه (۱۱ نقش تخصصی)
               </h4>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-slate-700 dark:text-slate-300">
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 flex items-start gap-2">
                 <CheckCircle className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
-                <span>انتخاب اتاق و تخت هوشمند با نمای گرافیکی و رعایت ظرفیت و شرایط رشته‌ها</span>
+                <span>انتخاب گرافیکی اتاق و تخت، حریم خصوصی کامل اطلاعات هم‌اتاقی‌ها، کارت هوشمند CR-80 با کیوآرکد، درخواست جابجایی، مهمان و انصراف</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 flex items-start gap-2">
                 <CheckCircle className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
-                <span>کارت شناسایی اسکان هوشمند در ابعاد استاندارد بانکی (CR80) با کیوآرکد اصالت</span>
+                <span>مدیریت تفکیکی اتاق‌ها با امتیاز دوگانه انضباط و نظافت، مرکز اقدام بالای هر اتاق، گزارش بازدید سرپرستان و چاپ عمودی/افقی با تنظیم حاشیه</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 flex items-start gap-2">
                 <CheckCircle className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
-                <span>شیفت‌بندی خودکار و تقویمی سرپرستان سراها همراه با بارگذاری مستقیم فایل اکسل</span>
+                <span>کارتابل امور فرهنگی: جدول زمانی هفتگی برنامه‌های فرهنگی (برنامه کلاسی) پس از تأیید، تشکل‌ها و انجمن‌های دانشجویی و پیام‌رسانی بدون دسترسی به اطلاعات شخصی</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 flex items-start gap-2">
                 <CheckCircle className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
-                <span>دفتر وقایع روزانه و ثبت گزارش شیفت‌های سرپرستی جهت تبادل پیوسته اطلاعات بین شیفت‌ها</span>
+                <span>کارتابل امور دانشجویی و تربیت بدنی: پایش دانشجویان خوابگاهی و ترددی، انتخابات شورای صنفی در بازه زمانی فعال، و رسیدگی به پرونده‌های ارجاعی شورای انضباطی</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 flex items-start gap-2">
                 <CheckCircle className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
-                <span>زنجیره پیوسته درخواست قطعه تأسیساتی، تأیید سرپرست و صدور حواله کسر از انبار</span>
+                <span>کارشناس آموزش (پیام‌رسانی تکی و گروهی به رشته/ورودی و اعلام مرخصی/اخراج به مدیر) و مرکز مشاوره و صیانت محرمانه</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 flex items-start gap-2">
                 <CheckCircle className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
-                <span>گزارش‌گیری تحلیلی چندحوزه‌ای در بازه‌های زمانی دلخواه با خروجی اکسل و چاپ</span>
+                <span>نظرسنجی‌های دوره‌ای کیفیت خدمات (سراها، سلف، تأسیسات و سرپرستان) با اکسل، اطلاعیه‌های غنی صفحه اول با لایت‌باکس تصویر و بازیابی دوعاملی رمز دانشجو</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 flex items-start gap-2 sm:col-span-2">
+                <Sparkles className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <span>زنجیره یکپارچه تأسیسات، انبارداری و کارپردازی خرید، واحد امور مالی (۴۵٪ خوابگاهی / ۲۵٪ ترددی و اکسل بدهی)، شیفت‌بندی سرپرستان، دفتر وقایع روزانه و لاگ امنیتی فعالیت‌ها</span>
               </div>
             </div>
           </div>
@@ -176,16 +184,16 @@ export const AboutModal: React.FC<AboutModalProps> = ({
         {/* نوار پایین مودال */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
           <div className="text-[11px] text-slate-400">
-            سال تحصیلی فعال: ۱۴۰۵-۱۴۰۶ • نسخه جامع مدیریت سراها
+            سال تحصیلی فعال: ۱۴۰۵-۱۴۰۶ • نسخه جامع ۱۱ نقشه مدیریت سراهای دانشگاه فرهنگیان
           </div>
 
           <div className="flex items-center gap-2">
             <button
-              onClick={downloadSystemWordDocument}
-              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              onClick={downloadSystemPdfDocument}
+              className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
               <FileDown className="w-3.5 h-3.5" />
-              <span>دانلود مستندات (Word)</span>
+              <span>دریافت مستندات (PDF)</span>
             </button>
 
             <button

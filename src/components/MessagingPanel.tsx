@@ -41,7 +41,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const [activeTab, setActiveTab] = useState<'inbox' | 'compose'>('inbox');
 
   // فرم پیام جدید
-  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor' | 'finance' | 'warehouse' | 'procurement' | 'education' | 'student'>('supervisor');
+  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor' | 'finance' | 'warehouse' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'student'>('supervisor');
   const [category, setCategory] = useState<Message['category']>('accommodation');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
@@ -144,6 +144,12 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     if (currentUser.role === 'education') {
       return !m.isConfidential && (m.receiverType === 'education' || m.category === 'education' || m.senderRole === 'education');
     }
+    if (currentUser.role === 'cultural') {
+      return !m.isConfidential && (m.receiverType === 'cultural' || m.category === 'cultural' || m.senderRole === 'cultural');
+    }
+    if (currentUser.role === 'student_affairs') {
+      return !m.isConfidential && (m.receiverType === 'student_affairs' || m.category === 'student_affairs' || m.senderRole === 'student_affairs' || m.receiverType === 'all');
+    }
     return true; // admin sees all
   });
 
@@ -224,7 +230,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
 
     let senderName = '';
     let senderId = '';
-    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' = 'student';
+    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' | 'cultural' | 'student_affairs' = 'student';
 
     if (currentUser.role === 'student') {
       senderName = currentUser.student.fullName;
@@ -254,6 +260,14 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       senderName = `${currentUser.staff.fullName} (امور مالی و حسابداری)`;
       senderId = currentUser.staff.id;
       senderRole = 'finance';
+    } else if (currentUser.role === 'cultural') {
+      senderName = `${currentUser.staff.fullName} (امور فرهنگی)`;
+      senderId = currentUser.staff.id;
+      senderRole = 'cultural';
+    } else if (currentUser.role === 'student_affairs') {
+      senderName = `${currentUser.staff.fullName} (امور دانشجویی و تربیت بدنی)`;
+      senderId = currentUser.staff.id;
+      senderRole = 'student_affairs';
     } else {
       senderName = currentUser.name;
       senderId = currentUser.username;
@@ -283,7 +297,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     if (!replyText.trim()) return;
 
     let senderName = '';
-    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' = 'supervisor';
+    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' | 'cultural' | 'student_affairs' = 'supervisor';
 
     if (currentUser.role === 'student') {
       senderName = currentUser.student.fullName;
@@ -309,6 +323,12 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     } else if (currentUser.role === 'education') {
       senderName = `${currentUser.staff.fullName} (کارشناس آموزش)`;
       senderRole = 'education';
+    } else if (currentUser.role === 'cultural') {
+      senderName = `${currentUser.staff.fullName} (امور فرهنگی)`;
+      senderRole = 'cultural';
+    } else if (currentUser.role === 'student_affairs') {
+      senderName = `${currentUser.staff.fullName} (امور دانشجویی و تربیت بدنی)`;
+      senderRole = 'student_affairs';
     } else {
       senderName = 'مدیریت کل سراها';
       senderRole = 'admin';
@@ -621,7 +641,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                         type="button"
                         onClick={() => {
                           setReceiverType('counselor');
-                          setCategory('counseling' as any);
+                          setCategory('counseling');
                         }}
                         className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
                           receiverType === 'counselor'
@@ -675,6 +695,34 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                       </button>
                       <button
                         type="button"
+                        onClick={() => {
+                          setReceiverType('cultural');
+                          setCategory('cultural');
+                        }}
+                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                          receiverType === 'cultural'
+                            ? 'border-fuchsia-500 bg-fuchsia-50 dark:bg-fuchsia-950/40 text-fuchsia-700 dark:text-fuchsia-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                        }`}
+                      >
+                        امور فرهنگی و تشکل‌ها
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReceiverType('student_affairs');
+                          setCategory('student_affairs');
+                        }}
+                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                          receiverType === 'student_affairs'
+                            ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                        }`}
+                      >
+                        امور دانشجویی و شورای صنفی
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setReceiverType('admin')}
                         className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
                           receiverType === 'admin'
@@ -697,10 +745,12 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                     </label>
                     <select
                       value={category}
-                      onChange={(e) => setCategory(e.target.value as any)}
+                      onChange={(e) => setCategory(e.target.value as Message['category'])}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-teal-500 mb-2 font-medium"
                     >
                       <option value="education">🎓 سوالات، مشکلات و امور آموزشی (کارشناس آموزش)</option>
+                      <option value="cultural">🎭 امور فرهنگی، برنامه‌های هفتگی و تشکل‌های دانشجویی</option>
+                      <option value="student_affairs">🏅 امور دانشجویی، شورای صنفی و تربیت بدنی</option>
                       <option value="financial">💳 امور مالی، کسورات ۴۵٪ / ۲۵٪، بدهی و حسابداری</option>
                       <option value="counseling">🧠 مشاوره روانشناختی، سلامت روان، دوری از خانه و استرس تحصیلی</option>
                       <option value="accommodation">🏠 امور اسکان، رزرو و انتخاب اتاق یا جابجایی تخت</option>
@@ -784,6 +834,8 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                   >
                     <option value="all">همه دسته‌ها ({userMessages.length})</option>
                     <option value="education">امور آموزشی (کارشناس آموزش)</option>
+                    <option value="cultural">امور فرهنگی و تشکل‌ها</option>
+                    <option value="student_affairs">امور دانشجویی و شورای صنفی</option>
                     <option value="financial">امور مالی و حسابداری</option>
                     <option value="counseling">مشاوره روانشناختی و فردی</option>
                     <option value="maintenance">تأسیسات و تعمیرات</option>
@@ -841,6 +893,10 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                           <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
                             {msg.category === 'education'
                               ? 'امور آموزشی'
+                              : msg.category === 'cultural'
+                              ? 'امور فرهنگی'
+                              : msg.category === 'student_affairs'
+                              ? 'امور دانشجویی'
                               : msg.category === 'financial'
                               ? 'امور مالی'
                               : msg.category === 'maintenance'
@@ -891,6 +947,10 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                               ? 'امور مالی'
                               : selectedMsg.senderRole === 'education'
                               ? 'کارشناس آموزش'
+                              : selectedMsg.senderRole === 'cultural'
+                              ? 'امور فرهنگی'
+                              : selectedMsg.senderRole === 'student_affairs'
+                              ? 'امور دانشجویی'
                               : 'مدیر'}
                           </span>
                           {selectedMsg.receiverName && (
@@ -1119,7 +1179,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                     </label>
                     <select
                       value={referPriority}
-                      onChange={(e) => setReferPriority(e.target.value as any)}
+                      onChange={(e) => setReferPriority(e.target.value as 'normal' | 'urgent' | 'emergency')}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-amber-500"
                     >
                       <option value="normal">عادی</option>

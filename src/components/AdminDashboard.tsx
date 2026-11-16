@@ -28,6 +28,8 @@ import {
   ProcurementRequest,
   HomeNoteItem,
   EducationStaff,
+  CulturalStaff,
+  StudentAffairsStaff,
   AcademicStatusNotice,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
@@ -56,6 +58,7 @@ import { SupervisorGuestRequestsPanel } from './SupervisorGuestRequestsPanel';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
 import { AdminUsersPanel, UserCategoryKey } from './AdminUsersPanel';
+import { AdminSurveyManager } from './AdminSurveyManager';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
 import { STANDARD_FONTS, readMultipleFontFiles } from '../utils/fonts';
 import {
@@ -128,6 +131,7 @@ import {
   Info,
   AlertCircle,
   FileWarning,
+  ClipboardList,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -147,7 +151,20 @@ interface AdminDashboardProps {
   onOpenAppearance: () => void;
   onOpenChangePassword: () => void;
   onUpdateSettings: (newSettings: AppSettings) => void;
-  onOpenUserGuide?: (role: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' | 'student') => void;
+  onOpenUserGuide?: (
+    role:
+      | 'admin'
+      | 'supervisor'
+      | 'maintenance'
+      | 'warehouse'
+      | 'procurement'
+      | 'counselor'
+      | 'finance'
+      | 'education'
+      | 'cultural'
+      | 'student_affairs'
+      | 'student'
+  ) => void;
   cloudSyncTick?: number;
 }
 
@@ -172,7 +189,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   cloudSyncTick = 0,
 }) => {
   // تب‌های اصلی داشبورد مدیر
-  const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'warehouse' | 'shifts' | 'counseling' | 'activity_log' | 'settings'>('cartable');
+  const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'warehouse' | 'shifts' | 'counseling' | 'surveys' | 'activity_log' | 'settings'>('cartable');
   const [usersCategory, setUsersCategory] = useState<UserCategoryKey>('students');
 
   // وضعیت مشاهده فقط-خواندنی انبار و کارپردازی برای مدیر کل
@@ -228,11 +245,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [shiftDayFilter, setShiftDayFilter] = useState('all');
   const [shiftFeedback, setShiftFeedback] = useState<string | null>(null);
 
-  // فهرست پرسنل انبار، کارپردازی، امور مالی و کارشناسان آموزش
+  // فهرست پرسنل انبار، کارپردازی، امور مالی، کارشناسان آموزش، امور فرهنگی و امور دانشجویی
   const [warehouseStaffList, setWarehouseStaffList] = useState<WarehouseStaff[]>(Storage.getWarehouseStaff());
   const [procurementStaffList, setProcurementStaffList] = useState<ProcurementStaff[]>(Storage.getProcurementStaff());
   const [financeStaffList, setFinanceStaffList] = useState<FinanceStaff[]>(Storage.getFinanceStaff());
   const [educationStaffList, setEducationStaffList] = useState<EducationStaff[]>(Storage.getEducationStaff());
+  const [culturalStaffList, setCulturalStaffList] = useState<CulturalStaff[]>(Storage.getCulturalStaff());
+  const [studentAffairsStaffList, setStudentAffairsStaffList] = useState<StudentAffairsStaff[]>(Storage.getStudentAffairsStaff());
   const [academicNotices, setAcademicNotices] = useState<AcademicStatusNotice[]>(Storage.getAcademicNotices());
   const [academicNoticeFilter, setAcademicNoticeFilter] = useState<'all' | 'pending' | 'reviewed' | 'action_taken'>('all');
   const [academicNoticeNotes, setAcademicNoticeNotes] = useState<Record<string, string>>({});
@@ -243,6 +262,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setProcurementStaffList(Storage.getProcurementStaff());
     setFinanceStaffList(Storage.getFinanceStaff());
     setEducationStaffList(Storage.getEducationStaff());
+    setCulturalStaffList(Storage.getCulturalStaff());
+    setStudentAffairsStaffList(Storage.getStudentAffairsStaff());
     setAcademicNotices(Storage.getAcademicNotices());
     onRefreshData();
   };
@@ -261,6 +282,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setProcurementStaffList(Storage.getProcurementStaff());
     setFinanceStaffList(Storage.getFinanceStaff());
     setEducationStaffList(Storage.getEducationStaff());
+    setCulturalStaffList(Storage.getCulturalStaff());
+    setStudentAffairsStaffList(Storage.getStudentAffairsStaff());
     setAcademicNotices(Storage.getAcademicNotices());
   }, [cloudSyncTick]);
 
@@ -2029,7 +2052,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <Users className="w-4 h-4 text-teal-600" />
           <span>مدیریت کاربران سامانه</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
-            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length + educationStaffList.length}
+            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length + educationStaffList.length + culturalStaffList.length + studentAffairsStaffList.length}
           </span>
         </button>
 
@@ -2131,6 +2154,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </span>
         </button>
 
+        {/* ۷-ب. تب نظرسنجی‌های دوره‌ای دانشجویان */}
+        <button
+          onClick={() => setMainTab('surveys')}
+          className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+            mainTab === 'surveys'
+              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-md'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <ClipboardList className="w-4 h-4 text-indigo-600" />
+          <span>نظرسنجی‌های دوره‌ای</span>
+          {Storage.getSurveys().filter((s) => s.status === 'active').length > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 font-extrabold">
+              {Storage.getSurveys().filter((s) => s.status === 'active').length} فعال
+            </span>
+          )}
+        </button>
+
         {/* ۸. تب گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران */}
         <button
           onClick={() => {
@@ -2183,6 +2224,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           financeStaff={financeStaffList}
           procurementStaff={procurementStaffList}
           educationStaff={educationStaffList}
+          culturalStaff={culturalStaffList}
+          studentAffairsStaff={studentAffairsStaffList}
           onRefreshData={handleUsersRefresh}
           onOpenExcelModal={onOpenExcelModal}
           onOpenReports={onOpenReports}
@@ -5767,6 +5810,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       })()}
 
       {/* ========================================================= */}
+      {/* ۷-ب. تب نظرسنجی‌های دوره‌ای دانشجویان (خدمات، سلف، تأسیسات، سرپرستان) */}
+      {/* ========================================================= */}
+      {mainTab === 'surveys' && (
+        <AdminSurveyManager
+          dorms={dorms}
+          supervisors={supervisors}
+          maintenanceStaff={campusStaff}
+          settings={settings}
+          onRefreshData={onRefreshData}
+        />
+      )}
+
+      {/* ========================================================= */}
       {/* ۶. تب گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران (Activity Log) */}
       {/* ========================================================= */}
       {mainTab === 'activity_log' && (() => {
@@ -5779,6 +5835,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           procurement: 'کارپرداز و خرید',
           counselor: 'مشاور',
           finance: 'امور مالی و حسابداری',
+          education: 'کارشناس آموزش',
+          cultural: 'امور فرهنگی',
+          student_affairs: 'امور دانشجویی و تربیت بدنی',
           system: 'سیستم / مهمان',
         };
         const categoryLabelMap: Record<string, string> = {
@@ -5794,6 +5853,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           warning_eval: 'تذکر، اخطار و ارزیابی',
           visit_report: 'گزارش بازدید سرپرستی',
           guest: 'درخواست مهمان',
+          survey: 'نظرسنجی‌های دوره‌ای',
+          cultural: 'امور فرهنگی و تشکل‌ها',
+          education: 'امور آموزشی',
+          sports: 'امور ورزشی و تربیت بدنی',
+          election: 'انتخابات شورای صنفی',
+          disciplinary: 'شورای انضباطی',
           settings: 'تنظیمات و اطلاعیه‌ها',
           backup: 'پشتیبان و بازنشانی',
           excel: 'ورود اطلاعات اکسل',
@@ -6068,6 +6133,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { key: 'counselors' as const, label: `مشاوران (${counselorsList.length})` },
                 { key: 'finance' as const, label: `امور مالی (${financeStaffList.length})` },
                 { key: 'education' as const, label: `کارشناس آموزش (${educationStaffList.length})` },
+                { key: 'cultural' as const, label: `امور فرهنگی (${culturalStaffList.length})` },
+                { key: 'student_affairs' as const, label: `امور دانشجویی (${studentAffairsStaffList.length})` },
               ].map((item) => (
                 <button
                   key={item.key}

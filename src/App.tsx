@@ -39,6 +39,8 @@ import { ProcurementDashboard } from './components/ProcurementDashboard';
 import { CounselorDashboard } from './components/CounselorDashboard';
 import { FinanceDashboard } from './components/FinanceDashboard';
 import { EducationDashboard } from './components/EducationDashboard';
+import { CulturalDashboard } from './components/CulturalDashboard';
+import { StudentAffairsDashboard } from './components/StudentAffairsDashboard';
 import { AboutModal } from './components/AboutModal';
 import { UserGuideModal } from './components/UserGuideModal';
 import { AiDormAssistant } from './components/AiDormAssistant';
@@ -151,6 +153,16 @@ export default function App() {
       const refreshedEdu = Storage.getEducationStaff().find((e) => e.id === user.staff.id);
       if (refreshedEdu) {
         setCurrentUser({ role: 'education', staff: refreshedEdu });
+      }
+    } else if (user && user.role === 'cultural') {
+      const refreshedCul = Storage.getCulturalStaff().find((c) => c.id === user.staff.id);
+      if (refreshedCul) {
+        setCurrentUser({ role: 'cultural', staff: refreshedCul });
+      }
+    } else if (user && user.role === 'student_affairs') {
+      const refreshedSa = Storage.getStudentAffairsStaff().find((sa) => sa.id === user.staff.id);
+      if (refreshedSa) {
+        setCurrentUser({ role: 'student_affairs', staff: refreshedSa });
       }
     } else if (user && user.role === 'counselor') {
       const refreshedCns = Storage.getCounselors().find((c) => c.id === user.counselor.id);
@@ -322,7 +334,13 @@ export default function App() {
         messages={messages}
         onOpenAppearance={() => setIsAppearanceModalOpen(true)}
         onOpenReports={() => {
-          if (currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance' && currentUser.role !== 'education') {
+          if (
+            currentUser &&
+            currentUser.role !== 'student' &&
+            currentUser.role !== 'finance' &&
+            currentUser.role !== 'education' &&
+            currentUser.role !== 'cultural'
+          ) {
             setIsReportsModalOpen(true);
           }
         }}
@@ -713,9 +731,39 @@ export default function App() {
             students={students}
             messages={messages}
             settings={settings}
+            cloudSyncTick={cloudSyncTick}
             onRefreshData={refreshAllData}
             onOpenMessages={() => setIsMessagesModalOpen(true)}
             onOpenUserGuide={(r) => handleOpenUserGuide(r || 'education')}
+          />
+        )}
+
+        {/* ۱۰. در صورتی که کاربر امور فرهنگی است (برنامه‌های زمان‌بندی هفتگی، تشکل‌ها و پیام‌های فرهنگی بدون دسترسی به اطلاعات دانشجویان) */}
+        {currentUser?.role === 'cultural' && (
+          <CulturalDashboard
+            staff={currentUser.staff}
+            dorms={dorms}
+            cloudSyncTick={cloudSyncTick}
+            onRefreshData={refreshAllData}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
+            onOpenUserGuide={(r) => handleOpenUserGuide(r || 'cultural')}
+          />
+        )}
+
+        {/* ۱۱. در صورتی که کاربر امور دانشجویی و تربیت بدنی است (مشاهده/گزارش خوابگاهی و ترددی، برنامه‌ریزی ورزشی، انتخابات شورای صنفی و شورای انضباطی) */}
+        {currentUser?.role === 'student_affairs' && (
+          <StudentAffairsDashboard
+            staff={currentUser.staff}
+            students={students}
+            dorms={dorms}
+            rooms={rooms}
+            cloudSyncTick={cloudSyncTick}
+            onRefreshData={refreshAllData}
+            onOpenReports={() => setIsReportsModalOpen(true)}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
+            onOpenUserGuide={(r) => handleOpenUserGuide(r || 'student_affairs')}
           />
         )}
 
@@ -733,7 +781,7 @@ export default function App() {
             <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع سراهای دانشجویی</span>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3 text-[11px]">
-            {currentUser && currentUser.role !== 'education' && (
+            {currentUser && currentUser.role !== 'education' && currentUser.role !== 'cultural' && (
               <>
                 <button
                   type="button"
@@ -800,7 +848,11 @@ export default function App() {
         />
       )}
 
-      {currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance' && currentUser.role !== 'education' && (
+      {currentUser &&
+        currentUser.role !== 'student' &&
+        currentUser.role !== 'finance' &&
+        currentUser.role !== 'education' &&
+        currentUser.role !== 'cultural' && (
         <ReportsView
           isOpen={isReportsModalOpen}
           onClose={() => setIsReportsModalOpen(false)}
@@ -849,8 +901,8 @@ export default function App() {
         onClose={() => setPreviewImage(null)}
       />
 
-      {/* دستیار هوشمند خوابگاهی و آموزشی (فقط پس از ورود کاربر به کارتابل و به جز کارشناس آموزش) */}
-      {currentUser && currentUser.role !== 'education' && (
+      {/* دستیار هوشمند خوابگاهی و آموزشی (فقط پس از ورود کاربر به کارتابل و به جز کارشناس آموزش و امور فرهنگی) */}
+      {currentUser && currentUser.role !== 'education' && currentUser.role !== 'cultural' && (
         <AiDormAssistant
           isOpen={isAiChatOpen}
           onClose={() => setIsAiChatOpen(false)}

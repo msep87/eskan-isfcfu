@@ -18,11 +18,24 @@ import {
   StudentFinancialStatus,
   GuestRequest,
   VisitReport,
+  PeriodicSurvey,
+  SurveyResponse,
+  SurveyCategory,
+  SurveyFrequency,
+  CulturalProgram,
+  CulturalAssociation,
+  AssociationMembership,
+  GuildElection,
+  GuildElectionVote,
+  DisciplinaryReferral,
+  SportsProgram,
+  SportsRegistration,
 } from '../types';
 import {
   computeStudentFinancialInfo,
   FINANCIAL_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
+  isStudentDormResident,
   normalizePersianText,
 } from './financeUtils';
 
@@ -1097,6 +1110,7 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
     warning_eval: 'تذکر، اخطار و ارزیابی',
     guest: 'درخواست مهمان',
     visit_report: 'گزارش بازدید سرپرستی',
+    survey: 'نظرسنجی‌های دوره‌ای',
     settings: 'تنظیمات و اطلاعیه‌ها',
     backup: 'پشتیبان و بازنشانی',
     excel: 'ورود اطلاعات اکسل',
@@ -2229,3 +2243,579 @@ export async function parseEducationExcel(
 
   return { staff, skippedRows };
 }
+
+export const SURVEY_CATEGORY_LABELS: Record<SurveyCategory, string> = {
+  dorm_services: 'کیفیت خدمات سراها (تأسیسات و نظافت)',
+  cleanliness: 'نظافت و بهداشت سراها',
+  maintenance: 'عملکرد واحد تأسیسات و تعمیرات',
+  cafeteria: 'کیفیت غذاهای سلف و تغذیه',
+  supervisors: 'ارزیابی عملکرد سرپرستان سراها',
+  comprehensive: 'نظرسنجی جامع دوره‌ای سراها',
+};
+
+export const SURVEY_FREQUENCY_LABELS: Record<SurveyFrequency, string> = {
+  weekly: 'هفتگی',
+  monthly: 'ماهانه',
+  midterm: 'میان‌ترم',
+  semester: 'پایان ترم / نیمسال',
+  custom: 'دوره‌ای / موردی',
+};
+
+// ۱۳. خروجی اکسل کامل نتایج یک نظرسنجی دوره‌ای
+export function exportSurveyResultsToExcel(
+  survey: PeriodicSurvey,
+  responses: SurveyResponse[]
+) {
+  const wb = XLSX.utils.book_new();
+
+  const statusLabel =
+    survey.status === 'active' ? 'فعال' : survey.status === 'closed' ? 'بسته شده' : 'پیش‌نویس';
+
+  const ratedResponses = responses.filter((r) => typeof r.overallRating === 'number');
+  const globalAvg =
+    ratedResponses.length > 0
+      ? Math.round(
+          (ratedResponses.reduce((sum, r) => sum + (r.overallRating || 0), 0) / ratedResponses.length) *
+            100
+        ) / 100
+      : 0;
+
+  // شیت ۱: خلاصه آماری نظرسنجی و سوالات
+  const summaryRows: Array<Record<string, unknown>> = [
+    { 'شاخص / عنوان': 'کد نظرسنجی', 'مقدار / آمار': survey.surveyCode },
+    { 'شاخص / عنوان': 'عنوان نظرسنجی', 'مقدار / آمار': survey.title },
+    { 'شاخص / عنوان': 'موضوع / دسته‌بندی', 'مقدار / آمار': SURVEY_CATEGORY_LABELS[survey.category] },
+    { 'شاخص / عنوان': 'دوره برگزاری', 'مقدار / آمار': `${SURVEY_FREQUENCY_LABELS[survey.frequency]} (${survey.periodLabel})` },
+    { 'شاخص / عنوان': 'بازه زمانی', 'مقدار / آمار': `${survey.startDate} تا ${survey.endDate}` },
+    { 'شاخص / عنوان': 'وضعیت', 'مقدار / آمار': statusLabel },
+    { 'شاخص / عنوان': 'نحوه ثبت پاسخ', 'مقدار / آمار': survey.isAnonymous ? 'ناشناس (محرمانه)' : 'با نام دانشجو' },
+    { 'شاخص / عنوان': 'تعداد کل شرکت‌کنندگان', 'مقدار / آمار': responses.length },
+    { 'شاخص / عنوان': 'میانگین کل رضایت (از ۵)', 'مقدار / آمار': ratedResponses.length > 0 ? globalAvg : '-' },
+    { 'شاخص / عنوان': 'درصد رضایت کل', 'مقدار / آمار': ratedResponses.length > 0 ? `${Math.round((globalAvg / 5) * 100)}٪` : '-' },
+    { 'شاخص / عنوان': '---', 'مقدار / آمار': '--- تحلیل تک‌تک سوالات ---' },
+  ];
+
+  survey.questions.forEach((q, idx) => {
+    const qAnswers = responses
+      .map((r) => r.answers.find((a) => a.questionId === q.id))
+      .filter((a): a is NonNullable<typeof a> => Boolean(a));
+
+    if (q.type === 'rating_5') {
+      const nums = qAnswers
+        .map((a) => a.ratingValue)
+        .filter((v): v is number => typeof v === 'number' && v > 0);
+      const avg =
+        nums.length > 0
+          ? Math.round((nums.reduce((s, v) => s + v, 0) / nums.length) * 100) / 100
+          : 0;
+      const dist = [5, 4, 3, 2, 1]
+        .map((star) => `${star} ستاره: ${nums.filter((v) => v === star).length}`)
+        .join(' | ');
+      summaryRows.push({
+        'شاخص / عنوان': `سوال ${idx + 1}: ${q.text}`,
+        'مقدار / آمار': nums.length > 0 ? `میانگین: ${avg} از ۵ (${Math.round((avg / 5) * 100)}٪) • ${nums.length} پاسخ (${dist})` : 'بدون پاسخ',
+      });
+    } else if (q.type === 'choice') {
+      const counts = new Map<string, number>();
+      qAnswers.forEach((a) => {
+        if (a.selectedOption) {
+          counts.set(a.selectedOption, (counts.get(a.selectedOption) || 0) + 1);
+        }
+      });
+      const dist = Array.from(counts.entries())
+        .map(([opt, cnt]) => `${opt}: ${cnt} نفر`)
+        .join(' | ');
+      summaryRows.push({
+        'شاخص / عنوان': `سوال ${idx + 1}: ${q.text}`,
+        'مقدار / آمار': dist || 'بدون پاسخ',
+      });
+    } else {
+      const texts = qAnswers.filter((a) => (a.textValue || '').trim().length > 0).length;
+      summaryRows.push({
+        'شاخص / عنوان': `سوال ${idx + 1}: ${q.text}`,
+        'مقدار / آمار': `${texts} نظر متنی ثبت شده (در شیت پاسخ‌های تفصیلی قابل مشاهده است)`,
+      });
+    }
+  });
+
+  const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'خلاصه آماری نتایج');
+
+  // شیت ۲: تحلیل بر اساس سرا / سرپرست / تأسیسات (در صورت وجود داده)
+  const dormGroups = new Map<string, number[]>();
+  const supGroups = new Map<string, number[]>();
+  const maintGroups = new Map<string, number[]>();
+
+  responses.forEach((r) => {
+    if (typeof r.overallRating !== 'number') return;
+    const dKey = r.dormName || 'نامشخص';
+    dormGroups.set(dKey, [...(dormGroups.get(dKey) || []), r.overallRating]);
+    if (r.targetSupervisorName) {
+      supGroups.set(r.targetSupervisorName, [...(supGroups.get(r.targetSupervisorName) || []), r.overallRating]);
+    }
+    if (r.targetMaintenanceName) {
+      maintGroups.set(r.targetMaintenanceName, [...(maintGroups.get(r.targetMaintenanceName) || []), r.overallRating]);
+    }
+  });
+
+  const breakdownRows: Array<Record<string, unknown>> = [];
+  dormGroups.forEach((vals, name) => {
+    const avg = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
+    breakdownRows.push({
+      'بخش': 'به تفکیک سرای دانشجویی',
+      'عنوان / نام': name,
+      'تعداد مشارکت': vals.length,
+      'میانگین امتیاز (از ۵)': avg,
+      'درصد رضایت': `${Math.round((avg / 5) * 100)}٪`,
+    });
+  });
+  supGroups.forEach((vals, name) => {
+    const avg = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
+    breakdownRows.push({
+      'بخش': 'به تفکیک سرپرست سرا',
+      'عنوان / نام': name,
+      'تعداد مشارکت': vals.length,
+      'میانگین امتیاز (از ۵)': avg,
+      'درصد رضایت': `${Math.round((avg / 5) * 100)}٪`,
+    });
+  });
+  maintGroups.forEach((vals, name) => {
+    const avg = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
+    breakdownRows.push({
+      'بخش': 'به تفکیک کارشناس / واحد تأسیسات',
+      'عنوان / نام': name,
+      'تعداد مشارکت': vals.length,
+      'میانگین امتیاز (از ۵)': avg,
+      'درصد رضایت': `${Math.round((avg / 5) * 100)}٪`,
+    });
+  });
+  if (breakdownRows.length > 0) {
+    const wsBreakdown = XLSX.utils.json_to_sheet(breakdownRows);
+    XLSX.utils.book_append_sheet(wb, wsBreakdown, 'تفکیک سرا و مسئولان');
+  }
+
+  // شیت ۳: پاسخ‌های تفصیلی دانشجویان
+  const detailRows = responses.map((r, idx) => {
+    const row: Record<string, unknown> = {
+      'ردیف': idx + 1,
+      'تاریخ و ساعت ثبت': r.submittedAt,
+      'نام دانشجو': survey.isAnonymous ? 'ناشناس (محرمانه)' : r.studentName,
+      'کد دانشجویی': survey.isAnonymous ? '***' : r.studentId,
+      'رشته تحصیلی': r.studentFieldOfStudy || '-',
+      'سرای محل اسکان': r.dormName || 'فاقد اسکان / نامشخص',
+      'شماره اتاق': survey.isAnonymous ? '-' : r.roomNumber || '-',
+      'سرپرست مورد ارزیابی': r.targetSupervisorName || survey.targetSupervisorName || '-',
+      'تأسیسات مورد ارزیابی': r.targetMaintenanceName || survey.targetMaintenanceName || '-',
+      'میانگین امتیاز کل پاسخ (از ۵)': typeof r.overallRating === 'number' ? r.overallRating : '-',
+    };
+
+    survey.questions.forEach((q, qIdx) => {
+      const ans = r.answers.find((a) => a.questionId === q.id);
+      const colKey = `س${qIdx + 1}: ${q.text}`;
+      if (!ans) {
+        row[colKey] = '-';
+      } else if (ans.type === 'rating_5') {
+        row[colKey] = typeof ans.ratingValue === 'number' ? ans.ratingValue : '-';
+      } else if (ans.type === 'choice') {
+        row[colKey] = ans.selectedOption || '-';
+      } else {
+        row[colKey] = ans.textValue || '-';
+      }
+    });
+
+    row['توضیحات و پیشنهاد کلی دانشجو'] = r.overallComment || '-';
+    return row;
+  });
+
+  const wsDetails = XLSX.utils.json_to_sheet(
+    detailRows.length > 0
+      ? detailRows
+      : [{ 'پیام': 'هنوز هیچ پاسخی برای این نظرسنجی ثبت نشده است.' }]
+  );
+  XLSX.utils.book_append_sheet(wb, wsDetails, 'پاسخ‌های تفصیلی');
+
+  XLSX.writeFile(
+    wb,
+    `نتایج_نظرسنجی_${survey.surveyCode}_${new Date().toISOString().slice(0, 10)}.xlsx`
+  );
+}
+
+// خروجی اکسل تجمیعی کلیه نظرسنجی‌های دوره‌ای
+export function exportAllSurveysSummaryToExcel(
+  surveys: PeriodicSurvey[],
+  allResponses: SurveyResponse[]
+) {
+  const rows = surveys.map((s, idx) => {
+    const resps = allResponses.filter((r) => r.surveyId === s.id);
+    const rated = resps.filter((r) => typeof r.overallRating === 'number');
+    const avg =
+      rated.length > 0
+        ? Math.round((rated.reduce((sum, r) => sum + (r.overallRating || 0), 0) / rated.length) * 100) / 100
+        : '-';
+    return {
+      'ردیف': idx + 1,
+      'کد نظرسنجی': s.surveyCode,
+      'عنوان': s.title,
+      'موضوع': SURVEY_CATEGORY_LABELS[s.category],
+      'دوره': `${SURVEY_FREQUENCY_LABELS[s.frequency]} - ${s.periodLabel}`,
+      'وضعیت': s.status === 'active' ? 'فعال' : s.status === 'closed' ? 'بسته' : 'پیش‌نویس',
+      'تعداد سوالات': s.questions.length,
+      'تعداد شرکت‌کنندگان': resps.length,
+      'میانگین رضایت (از ۵)': avg,
+      'بازه زمانی': `${s.startDate} تا ${s.endDate}`,
+      'تاریخ ایجاد': s.createdAt,
+    };
+  });
+
+  const ws = XLSX.utils.json_to_sheet(
+    rows.length > 0 ? rows : [{ 'پیام': 'هیچ نظرسنجی ثبت نشده است.' }]
+  );
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'گزارش کلی نظرسنجی‌ها');
+  XLSX.writeFile(wb, `گزارش_کلی_نظرسنجیهای_دوره_ای_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// =========================================================================
+// خروجی اکسل برنامه‌های فرهنگی هفتگی و تشکل‌ها (کارتابل امور فرهنگی)
+// =========================================================================
+const CULTURAL_DAY_FA: Record<string, string> = {
+  saturday: 'شنبه',
+  sunday: 'یکشنبه',
+  monday: 'دوشنبه',
+  tuesday: 'سه‌شنبه',
+  wednesday: 'چهارشنبه',
+  thursday: 'پنج‌شنبه',
+  friday: 'جمعه',
+};
+
+const CULTURAL_CAT_FA: Record<string, string> = {
+  cultural: 'فرهنگی و تربیتی',
+  religious: 'مذهبی و قرآنی',
+  scientific: 'علمی و پژوهشی',
+  artistic: 'هنری و ادبی',
+  sports: 'ورزشی و سلامت',
+  social: 'اجتماعی و جهادی',
+  skill: 'مهارتی و کارگاهی',
+};
+
+export function exportCulturalProgramsToExcel(programs: CulturalProgram[]) {
+  const rows = programs.map((p, idx) => ({
+    'ردیف': idx + 1,
+    'کد برنامه': p.programCode,
+    'عنوان برنامه': p.title,
+    'حوزه موضوعی': CULTURAL_CAT_FA[p.category] || p.category,
+    'سرا': p.dormName,
+    'روز هفته': CULTURAL_DAY_FA[p.dayOfWeek] || p.dayOfWeek,
+    'ساعت شروع': p.startTime,
+    'ساعت پایان': p.endTime,
+    'محل برگزاری': p.location,
+    'مجری / مدرس': p.presenter || '-',
+    'مخاطبان': p.targetAudience || 'همه دانشجویان',
+    'وضعیت انتشار': p.status === 'approved' ? 'تأییدشده (نمایش برای دانشجویان)' : 'پیش‌نویس',
+    'ثبت‌کننده': p.createdByName,
+    'تاریخ ثبت': p.createdAt,
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(
+    rows.length > 0 ? rows : [{ 'پیام': 'هیچ برنامه فرهنگی ثبت نشده است.' }]
+  );
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'برنامه هفتگی فرهنگی');
+  XLSX.writeFile(wb, `جدول_زمانی_برنامه_های_فرهنگی_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+export function exportCulturalAssociationsToExcel(
+  associations: CulturalAssociation[],
+  memberships: AssociationMembership[]
+) {
+  const assocRows = associations.map((a, idx) => {
+    const mForA = memberships.filter((m) => m.associationId === a.id);
+    return {
+      'ردیف': idx + 1,
+      'کد تشکل': a.associationCode,
+      'نام تشکل / انجمن': a.name,
+      'حوزه': CULTURAL_CAT_FA[a.category] || a.category,
+      'نوع عضویت': a.membershipMode === 'open_instant' ? 'عضویت آزاد مستقیم' : 'نیازمند تأیید امور فرهنگی',
+      'مسئول / دبیر / استاد': a.mentorName || '-',
+      'سرا': a.dormName || 'کل پردیس',
+      'زمان جلسات': a.meetingSchedule || '-',
+      'تعداد اعضای تأییدشده': mForA.filter((m) => m.status === 'approved').length,
+      'در انتظار تأیید': mForA.filter((m) => m.status === 'pending').length,
+      'ظرفیت': a.maxCapacity ? a.maxCapacity : 'نامحدود',
+      'وضعیت': a.status === 'active' ? 'فعال' : 'غیرفعال',
+    };
+  });
+
+  const memRows = memberships.map((m, idx) => ({
+    'ردیف': idx + 1,
+    'نام تشکل': m.associationName,
+    'نام و نام خانوادگی دانشجو': m.studentName,
+    'شماره دانشجویی': m.studentId,
+    'رشته تحصیلی': m.studentFieldOfStudy || '-',
+    'ورودی': m.studentEntryTerm || '-',
+    'وضعیت عضویت':
+      m.status === 'approved' ? 'تأییدشده' : m.status === 'pending' ? 'در انتظار تأیید' : 'رد شده',
+    'تاریخ درخواست': m.requestedAt,
+    'تاریخ بررسی': m.reviewedAt || '-',
+    'توضیحات دانشجو': m.requestNote || '-',
+    'یادداشت امور فرهنگی': m.reviewNote || '-',
+  }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(assocRows.length > 0 ? assocRows : [{ 'پیام': 'تشکلی ثبت نشده است.' }]),
+    'تشکل‌ها و انجمن‌ها'
+  );
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(memRows.length > 0 ? memRows : [{ 'پیام': 'عضویت یا درخواستی ثبت نشده است.' }]),
+    'اعضا و درخواست‌های عضویت'
+  );
+  XLSX.writeFile(wb, `گزارش_تشکل_ها_و_عضویت_ها_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// =========================================================================
+// خروجی اکسل جامع دانشجویان خوابگاهی و ترددی (امور دانشجویی و تربیت بدنی)
+// =========================================================================
+export function exportStudentAffairsDirectoryToExcel(
+  students: Student[],
+  dorms: Dormitory[],
+  rooms: Room[],
+  filterLabel = 'همه_دانشجویان'
+) {
+  const rows = students.map((s, idx) => {
+    const resident = isStudentDormResident(s);
+    const dorm = dorms.find((d) => d.id === s.assignedDormId);
+    const room = rooms.find((r) => r.id === s.assignedRoomId);
+    return {
+      'ردیف': idx + 1,
+      'شماره دانشجویی': s.studentId,
+      'کد ملی': s.nationalId,
+      'نام و نام خانوادگی': s.fullName,
+      'نام پدر': s.fatherName || '-',
+      'نوع اسکان': resident ? 'خوابگاهی' : 'ترددی (غیرخوابگاهی)',
+      'وضعیت تخصیص':
+        s.assignmentStatus === 'confirmed'
+          ? 'اسکان قطعی'
+          : s.assignmentStatus === 'temporary'
+          ? 'تخصیص موقت'
+          : 'فاقد اتاق (ترددی)',
+      'نام سرا': dorm?.name || s.assignedDormName || '-',
+      'شماره اتاق': room?.roomNumber || s.assignedRoomNumber || '-',
+      'رشته تحصیلی': s.fieldOfStudy,
+      'ورودی / نیمسال': s.entryTerm,
+      'استان': s.province,
+      'شهر': s.city,
+      'موبایل': s.mobile || s.phone || '-',
+      'تلفن اضطراری': s.emergencyPhone || '-',
+      'سابقه بیماری': String(s.customFields?.['بیماری خاص'] || 'ندارد'),
+      'رشته ورزشی / علاقه‌مندی':
+        [
+          s.customFields?.['رشته ورزشی'],
+          s.customFields?.['علاقه‌مندی‌ها'] || s.customFields?.['علایق'],
+        ]
+          .filter(Boolean)
+          .join(' / ') || '-',
+      'امتیاز فعلی': typeof s.previousScore === 'number' ? s.previousScore : 100,
+    };
+  });
+
+  const ws = XLSX.utils.json_to_sheet(
+    rows.length > 0 ? rows : [{ 'پیام': 'هیچ دانشجویی مطابق فیلتر یافت نشد.' }]
+  );
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'دانشجویان خوابگاهی و ترددی');
+  XLSX.writeFile(wb, `گزارش_امور_دانشجویی_${filterLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// =========================================================================
+// خروجی اکسل نتایج انتخابات شورای صنفی (امور دانشجویی)
+// =========================================================================
+export function exportGuildElectionResultsToExcel(
+  election: GuildElection,
+  votes: GuildElectionVote[]
+) {
+  const elVotes = votes.filter((v) => v.electionId === election.id);
+  const totalVoters = elVotes.length;
+
+  const candidateRows = election.candidates
+    .map((c) => {
+      const cVotes = elVotes.filter((v) => v.candidateIds.includes(c.id));
+      const dormVotes = cVotes.filter((v) => v.isDormResident).length;
+      const commuterVotes = cVotes.filter((v) => !v.isDormResident).length;
+      const pct = totalVoters > 0 ? Math.round((cVotes.length / totalVoters) * 1000) / 10 : 0;
+      return {
+        'نام کاندیدا': c.fullName,
+        'شماره دانشجویی': c.studentId || '-',
+        'رشته تحصیلی': c.fieldOfStudy || '-',
+        'ورودی': c.entryTerm || '-',
+        'سرا': c.dormName || '-',
+        'شعار انتخاباتی': c.slogan || '-',
+        'تعداد کل آرا': cVotes.length,
+        'آرای خوابگاهی': dormVotes,
+        'آرای ترددی': commuterVotes,
+        'درصد از شرکت‌کنندگان': `${pct}٪`,
+      };
+    })
+    .sort((a, b) => b['تعداد کل آرا'] - a['تعداد کل آرا'])
+    .map((r, i) => ({ 'رتبه': i + 1, ...r }));
+
+  const ballotLogRows = elVotes.map((v, idx) => ({
+    'ردیف': idx + 1,
+    'نام رأی‌دهنده': v.studentName,
+    'شماره دانشجویی': v.studentId,
+    'نوع دانشجو': v.isDormResident ? 'خوابگاهی' : 'ترددی',
+    'سرا': v.dormName || '-',
+    'کاندیداهای انتخابی': v.candidateIds
+      .map((cid) => election.candidates.find((c) => c.id === cid)?.fullName || cid)
+      .join('، '),
+    'زمان ثبت رأی': v.castAt,
+  }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(candidateRows.length > 0 ? candidateRows : [{ 'پیام': 'کاندیدایی وجود ندارد.' }]),
+    'نتایج و آرای کاندیداها'
+  );
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(ballotLogRows.length > 0 ? ballotLogRows : [{ 'پیام': 'هنوز رأیی ثبت نشده است.' }]),
+    'فهرست مشارکت‌کنندگان'
+  );
+  XLSX.writeFile(wb, `نتایج_انتخابات_شورای_صنفی_${election.electionCode}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// =========================================================================
+// خروجی اکسل پرونده‌های ارجاعی به شورای انضباطی (امور دانشجویی)
+// =========================================================================
+const DISC_STATUS_FA: Record<string, string> = {
+  pending_review: 'در انتظار بررسی امور دانشجویی',
+  session_scheduled: 'تعیین وقت جلسه شورا',
+  verdict_issued: 'صدور رأی شورا',
+  closed: 'مختومه',
+};
+
+export function exportDisciplinaryReferralsToExcel(referrals: DisciplinaryReferral[]) {
+  const rows = referrals.map((r, idx) => ({
+    'ردیف': idx + 1,
+    'کد پرونده': r.referralCode,
+    'نام و نام خانوادگی دانشجو': r.studentName,
+    'شماره دانشجویی': r.studentId,
+    'نوع اسکان': r.isDormResident ? 'خوابگاهی' : 'ترددی',
+    'سرا / اتاق': r.dormName ? `${r.dormName} - اتاق ${r.roomNumber || '-'}` : '-',
+    'نوع تخلف': r.violationLabel,
+    'متن معرفی‌نامه': r.referralText,
+    'معرفی‌کننده': `${r.referredByName} (${r.referredByRole === 'admin' ? 'مدیر' : 'سرپرست'})`,
+    'تاریخ معرفی': r.referredAt,
+    'وضعیت رسیدگی': DISC_STATUS_FA[r.status] || r.status,
+    'تاریخ و ساعت جلسه': r.sessionDate ? `${r.sessionDate} ${r.sessionTime || ''}`.trim() : '-',
+    'محل جلسه': r.sessionLocation || '-',
+    'رأی / تصمیم شورای انضباطی': r.verdict || '-',
+    'توضیحات شورا': r.councilNotes || '-',
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(
+    rows.length > 0 ? rows : [{ 'پیام': 'هیچ پرونده ارجاعی ثبت نشده است.' }]
+  );
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'پرونده‌های شورای انضباطی');
+  XLSX.writeFile(wb, `پرونده_های_شورای_انضباطی_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// =========================================================================
+// خروجی اکسل برنامه‌های ورزشی، تربیت بدنی و فهرست ثبت‌نام‌کنندگان (امور دانشجویی)
+// =========================================================================
+const SPORT_TYPE_FA: Record<string, string> = {
+  futsal: 'فوتسال',
+  volleyball: 'والیبال',
+  basketball: 'بسکتبال',
+  table_tennis: 'تنیس روی میز',
+  badminton: 'بدمینتون',
+  chess: 'شطرنج',
+  track_field: 'دو و میدانی',
+  swimming: 'شنا',
+  fitness_morning: 'ورزش صبحگاهی و همگانی',
+  hiking: 'کوهپیمایی و طبیعت‌گردی',
+  martial_arts: 'ورزش‌های رزمی',
+  other: 'سایر رشته‌ها',
+};
+
+const SPORT_KIND_FA: Record<string, string> = {
+  training: 'کلاس و تمرین آموزشی',
+  tournament: 'مسابقه و المپیاد درون‌دانشگاهی',
+  recreation: 'اردو، کوهپیمایی و تفریحی',
+  morning_exercise: 'ورزش صبحگاهی و نشاط همگانی',
+};
+
+const SPORT_STATUS_FA: Record<string, string> = {
+  planned: 'برنامه‌ریزی‌شده (پیش‌ثبت‌نام بسته)',
+  registration_open: 'ثبت‌نام باز',
+  ongoing: 'در حال برگزاری',
+  completed: 'برگزار شده / پایان‌یافته',
+  cancelled: 'لغو شده',
+};
+
+export function exportSportsProgramsToExcel(
+  programs: SportsProgram[],
+  registrations: SportsRegistration[]
+) {
+  const progRows = programs.map((p, idx) => {
+    const activeRegs = registrations.filter(
+      (r) => r.programId === p.id && r.status !== 'cancelled'
+    );
+    const attendedCount = activeRegs.filter((r) => r.status === 'attended').length;
+    return {
+      'ردیف': idx + 1,
+      'کد برنامه': p.programCode,
+      'عنوان برنامه ورزشی': p.title,
+      'رشته ورزشی': SPORT_TYPE_FA[p.sportType] || p.sportType,
+      'نوع برنامه': SPORT_KIND_FA[p.programKind] || p.programKind,
+      'سرا / محدوده': p.dormName || 'کلیه سراها',
+      'جنسیت مجاز':
+        p.genderScope === 'brothers' ? 'برادران' : p.genderScope === 'sisters' ? 'خواهران' : 'عمومی',
+      'روز هفته': p.dayOfWeek ? DAY_FA_MAP[p.dayOfWeek] || p.dayOfWeek : '-',
+      'تاریخ برگزاری': p.scheduleDate || '-',
+      'ساعت': `${p.startTime} تا ${p.endTime}`,
+      'مکان / سالن': p.venue,
+      'مربی / سرپرست فنی': p.coachName || '-',
+      'ظرفیت': p.maxCapacity ? p.maxCapacity : 'نامحدود',
+      'ثبت‌نام فعال': activeRegs.length,
+      'حاضرین تاییدشده': attendedCount,
+      'وضعیت': SPORT_STATUS_FA[p.status] || p.status,
+      'نمایش برای دانشجو': p.isPublishedToStudents ? 'منتشرشده' : 'پیش‌نویس/مخفی',
+    };
+  });
+
+  const regRows = registrations.map((r, idx) => ({
+    'ردیف': idx + 1,
+    'برنامه ورزشی': r.programTitle,
+    'نام و نام خانوادگی': r.studentName,
+    'شماره دانشجویی': r.studentId,
+    'نوع اسکان': r.isDormResident ? 'خوابگاهی' : 'ترددی',
+    'سرا / اتاق': r.dormName ? `${r.dormName} ${r.roomNumber ? `- اتاق ${r.roomNumber}` : ''}` : '-',
+    'رشته تحصیلی': r.studentFieldOfStudy || '-',
+    'موبایل': r.studentMobile || '-',
+    'سطح مهارت':
+      r.skillLevel === 'advanced' ? 'حرفه‌ای' : r.skillLevel === 'intermediate' ? 'متوسط' : 'مبتدی',
+    'وضعیت حضور':
+      r.status === 'attended' ? 'حاضر در برنامه' : r.status === 'cancelled' ? 'انصراف / لغو' : 'ثبت‌نام‌شده',
+    'زمان ثبت‌نام': r.registeredAt,
+  }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(progRows.length > 0 ? progRows : [{ 'پیام': 'هیچ برنامه ورزشی ثبت نشده است.' }]),
+    'برنامه‌های ورزشی'
+  );
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(regRows.length > 0 ? regRows : [{ 'پیام': 'هیچ ثبت‌نام ورزشی ثبت نشده است.' }]),
+    'شرکت‌کنندگان ورزشی'
+  );
+  XLSX.writeFile(wb, `گزارش_برنامه_های_ورزشی_و_تربیت_بدنی_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+

@@ -101,6 +101,8 @@ export interface Announcement {
 
 export type MessageCategory =
   | 'education' // امور آموزشی، مرخصی تحصیلی، انتخاب واحد و مسائل دانشجویی
+  | 'cultural' // امور فرهنگی، فوق‌برنامه، تشکل‌ها و انجمن‌های دانشجویی
+  | 'student_affairs' // امور دانشجویی، تربیت بدنی، شورای صنفی و شورای انضباطی
   | 'accommodation' // امور اسکان و انتخاب اتاق
   | 'maintenance' // خرابی تأسیسات و تعمیرات
   | 'services_cleaning' // خدمات، نظافت و بهداشت سرا
@@ -115,7 +117,7 @@ export type MessageCategory =
 export interface MessageReply {
   id: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs';
   content: string;
   date: string;
 }
@@ -124,8 +126,8 @@ export interface Message {
   id: string;
   senderId: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education';
-  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'all';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs';
+  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'all';
   receiverId?: string;
   receiverName?: string;
   targetScope?: 'single' | 'field' | 'entry_term';
@@ -224,6 +226,36 @@ export interface EducationStaff {
   photoUrl?: string; // تصویر پروفایل کارشناس آموزش
   department?: string; // واحد آموزش و امور دانشجویی
   role: 'education';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
+export interface CulturalStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل کارشناس امور فرهنگی
+  department?: string; // واحد امور فرهنگی و اجتماعی سراها
+  role: 'cultural';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
+export interface StudentAffairsStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل کارشناس امور دانشجویی و تربیت بدنی
+  department?: string; // اداره امور دانشجویی، تربیت بدنی و رفاهی
+  role: 'student_affairs';
   status: 'active' | 'inactive';
   isActive?: boolean;
   notes?: string;
@@ -502,6 +534,8 @@ export type CurrentUser =
   | { role: 'finance'; staff: FinanceStaff }
   | { role: 'procurement'; staff: ProcurementStaff }
   | { role: 'education'; staff: EducationStaff }
+  | { role: 'cultural'; staff: CulturalStaff }
+  | { role: 'student_affairs'; staff: StudentAffairsStaff }
   | null;
 
 export type DayOfWeek = 'saturday' | 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
@@ -593,9 +627,15 @@ export type ActivityLogCategory =
   | 'procurement'
   | 'finance'
   | 'education'
+  | 'cultural'
+  | 'student_affairs'
+  | 'sports'
+  | 'disciplinary'
+  | 'election'
   | 'warning_eval'
   | 'guest'
   | 'visit_report'
+  | 'survey'
   | 'settings'
   | 'backup'
   | 'excel';
@@ -667,7 +707,7 @@ export interface ActivityLog {
   timestamp: string; // ISO string برای مرتب‌سازی دقیق
   date: string; // تاریخ و ساعت شمسی خوانا
   actorName: string;
-  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'system';
+  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'system';
   actorUsername?: string;
   category: ActivityLogCategory;
   action: string;
@@ -725,3 +765,316 @@ export interface VisitReport {
   recommendations?: string;
   createdAt: string;
 }
+
+export type SurveyCategory =
+  | 'dorm_services' // کیفیت خدمات سراها (تأسیسات و نظافت)
+  | 'cleanliness' // نظافت و بهداشت سراها
+  | 'maintenance' // عملکرد واحد تأسیسات و تعمیرات
+  | 'cafeteria' // کیفیت غذاهای سلف و تغذیه
+  | 'supervisors' // عملکرد سرپرستان سراها
+  | 'comprehensive'; // نظرسنجی جامع دوره‌ای (همه بخش‌ها)
+
+export type SurveyFrequency = 'weekly' | 'monthly' | 'midterm' | 'semester' | 'custom';
+
+export type SurveyQuestionType = 'rating_5' | 'choice' | 'text';
+
+export interface SurveyQuestion {
+  id: string;
+  text: string;
+  type: SurveyQuestionType;
+  required?: boolean;
+  options?: string[];
+  aspectTag?: 'facilities' | 'cleanliness' | 'cafeteria' | 'supervisor' | 'general';
+}
+
+export interface PeriodicSurvey {
+  id: string;
+  surveyCode: string; // مثلاً SRV-101
+  title: string;
+  description?: string;
+  category: SurveyCategory;
+  frequency: SurveyFrequency;
+  periodLabel: string; // مثلاً آذر ۱۴۰۵ / نیمسال اول ۱۴۰۵-۱۴۰۶
+  targetDormId: string; // 'all' یا شناسه سرای خاص
+  targetSupervisorId?: string; // 'all' یا شناسه سرپرست خاص
+  targetSupervisorName?: string;
+  targetMaintenanceId?: string; // 'all' یا شناسه کارشناس تأسیسات خاص
+  targetMaintenanceName?: string;
+  startDate: string;
+  endDate: string;
+  status: 'active' | 'closed' | 'draft';
+  isAnonymous?: boolean; // مخفی‌سازی هویت دانشجو در نمایش نتایج و اکسل
+  questions: SurveyQuestion[];
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface SurveyAnswer {
+  questionId: string;
+  questionText: string;
+  type: SurveyQuestionType;
+  ratingValue?: number; // ۱ تا ۵
+  selectedOption?: string;
+  textValue?: string;
+}
+
+export interface SurveyResponse {
+  id: string;
+  surveyId: string;
+  studentId: string;
+  studentName: string;
+  studentFieldOfStudy?: string;
+  studentEntryTerm?: string;
+  dormId?: string;
+  dormName?: string;
+  roomNumber?: string;
+  targetSupervisorId?: string;
+  targetSupervisorName?: string;
+  targetMaintenanceId?: string;
+  targetMaintenanceName?: string;
+  overallRating?: number;
+  answers: SurveyAnswer[];
+  overallComment?: string;
+  submittedAt: string;
+}
+
+// -------------------------------------------------------------
+// امور فرهنگی سراها: جدول زمانی هفتگی برنامه‌ها و تشکل‌ها / انجمن‌ها
+// -------------------------------------------------------------
+export type CulturalProgramCategory =
+  | 'cultural'
+  | 'religious'
+  | 'scientific'
+  | 'artistic'
+  | 'sports'
+  | 'social'
+  | 'skill';
+
+export interface CulturalProgram {
+  id: string;
+  programCode: string; // مثلاً CL-101
+  title: string;
+  category: CulturalProgramCategory;
+  dormId: string; // 'all' یا شناسه سرای مشخص
+  dormName: string;
+  dayOfWeek: DayOfWeek; // روز هفته در جدول زمانی کلاسی
+  startTime: string; // مثلاً ۱۶:۰۰
+  endTime: string; // مثلاً ۱۷:۳۰
+  location: string; // محل برگزاری (نمازخانه، سالن مطالعه، حیاط سرا، سالن اجتماعات...)
+  presenter?: string; // مجری، استاد یا مدرس کارگاه
+  description?: string;
+  targetAudience?: string;
+  status: 'draft' | 'approved'; // فقط برنامه‌های تایید شده در کارتابل دانشجو نمایش داده می‌شوند
+  approvedAt?: string;
+  approvedBy?: string;
+  createdById: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface CulturalAssociation {
+  id: string;
+  associationCode: string; // مثلاً AS-101
+  name: string;
+  category: CulturalProgramCategory;
+  description: string;
+  mentorName?: string;
+  meetingSchedule?: string;
+  location?: string;
+  dormId?: string; // 'all' یا سرا
+  dormName?: string;
+  membershipMode: 'open_instant' | 'requires_approval';
+  maxCapacity?: number;
+  status: 'active' | 'inactive';
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface AssociationMembership {
+  id: string;
+  associationId: string;
+  associationName: string;
+  studentId: string;
+  studentName: string;
+  studentFieldOfStudy?: string;
+  studentEntryTerm?: string;
+  dormName?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requestNote?: string;
+  reviewNote?: string;
+  requestedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+}
+
+// -------------------------------------------------------------
+// امور دانشجویی و تربیت بدنی: انتخابات شورای صنفی و شورای انضباطی
+// -------------------------------------------------------------
+export interface GuildElectionCandidate {
+  id: string;
+  studentId?: string;
+  fullName: string;
+  fieldOfStudy?: string;
+  entryTerm?: string;
+  dormName?: string;
+  slogan?: string;
+  bio?: string;
+  photoUrl?: string;
+}
+
+export interface GuildElection {
+  id: string;
+  electionCode: string; // مثلاً EL-101
+  title: string;
+  description?: string;
+  noticeText?: string; // متن اطلاع‌رسانی رسمی به دانشجویان
+  academicYear: string;
+  semester: string;
+  targetEligibility: 'all_students' | 'dorm_only';
+  maxSelections: number; // حداکثر تعداد انتخاب مجاز برای هر رأی‌دهنده
+  startDate: string;
+  endDate: string;
+  startTime?: string;
+  endTime?: string;
+  isActiveWindow: boolean; // رأی‌گیری منحصراً در زمانی که این پرچم فعال و اطلاع‌رسانی شده مجاز است
+  announcedAt?: string;
+  candidates: GuildElectionCandidate[];
+  createdById: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface GuildElectionVote {
+  id: string;
+  electionId: string;
+  studentId: string;
+  studentName: string;
+  isDormResident: boolean;
+  dormName?: string;
+  candidateIds: string[];
+  castAt: string;
+}
+
+export type DisciplinaryViolationType =
+  | 'curfew_violation'
+  | 'disturbing_peace'
+  | 'property_damage'
+  | 'moral_code'
+  | 'unauthorized_guest'
+  | 'hygiene_neglect'
+  | 'other';
+
+export type DisciplinaryReferralStatus =
+  | 'pending_review'
+  | 'session_scheduled'
+  | 'verdict_issued'
+  | 'closed';
+
+export interface DisciplinaryReferral {
+  id: string;
+  referralCode: string; // مثلاً DC-101
+  studentId: string;
+  studentName: string;
+  studentNationalId?: string;
+  studentMobile?: string;
+  studentFieldOfStudy?: string;
+  studentEntryTerm?: string;
+  isDormResident: boolean;
+  dormId?: string;
+  dormName?: string;
+  roomId?: string;
+  roomNumber?: string;
+  violationType: DisciplinaryViolationType;
+  violationLabel: string;
+  referralText: string;
+  referredById: string;
+  referredByName: string;
+  referredByRole: 'supervisor' | 'admin';
+  referredAt: string;
+  status: DisciplinaryReferralStatus;
+  sessionDate?: string;
+  sessionTime?: string;
+  sessionLocation?: string;
+  councilNotes?: string;
+  verdict?: string;
+  handledByStaffName?: string;
+  updatedAt?: string;
+}
+
+// -------------------------------------------------------------
+// برنامه‌ریزی ورزشی و تربیت بدنی (کارتابل امور دانشجویی و تربیت بدنی)
+// -------------------------------------------------------------
+export type SportsProgramType =
+  | 'futsal'
+  | 'volleyball'
+  | 'basketball'
+  | 'table_tennis'
+  | 'badminton'
+  | 'chess'
+  | 'track_field'
+  | 'swimming'
+  | 'fitness_morning'
+  | 'hiking'
+  | 'martial_arts'
+  | 'other';
+
+export type SportsProgramKind = 'training' | 'tournament' | 'recreation' | 'morning_exercise';
+
+export type SportsProgramStatus =
+  | 'planned'
+  | 'registration_open'
+  | 'ongoing'
+  | 'completed'
+  | 'cancelled';
+
+export interface SportsProgram {
+  id: string;
+  programCode: string; // مثلاً SP-101
+  title: string;
+  sportType: SportsProgramType;
+  programKind: SportsProgramKind;
+  genderScope: 'all' | 'brothers' | 'sisters';
+  dormId: string; // 'all' یا شناسه سرای مشخص
+  dormName: string;
+  dayOfWeek?: DayOfWeek | 'multiple';
+  scheduleDate?: string; // تاریخ شروع / برگزاری شمسی
+  startTime: string;
+  endTime: string;
+  venue: string; // سالن ورزشی، چمن، محوطه سرا، استخر...
+  coachName?: string;
+  maxCapacity?: number;
+  eligibility?: string;
+  equipmentNeeded?: string;
+  description?: string;
+  status: SportsProgramStatus;
+  isPublishedToStudents: boolean;
+  createdById: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type SportsRegistrationStatus = 'registered' | 'attended' | 'cancelled';
+
+export interface SportsRegistration {
+  id: string;
+  programId: string;
+  programTitle: string;
+  studentId: string;
+  studentName: string;
+  studentNationalId?: string;
+  studentMobile?: string;
+  studentFieldOfStudy?: string;
+  studentEntryTerm?: string;
+  isDormResident: boolean;
+  dormName?: string;
+  roomNumber?: string;
+  skillLevel?: 'beginner' | 'intermediate' | 'advanced';
+  healthConfirmed: boolean;
+  note?: string;
+  status: SportsRegistrationStatus;
+  registeredAt: string;
+  updatedAt?: string;
+}
+
+

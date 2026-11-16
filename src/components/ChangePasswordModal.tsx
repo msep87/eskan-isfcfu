@@ -46,6 +46,8 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     else if (currentUser.role === 'procurement') userId = currentUser.staff.id;
     else if (currentUser.role === 'finance') userId = currentUser.staff.id;
     else if (currentUser.role === 'education') userId = currentUser.staff.id;
+    else if (currentUser.role === 'cultural') userId = currentUser.staff.id;
+    else if (currentUser.role === 'student_affairs') userId = currentUser.staff.id;
     else userId = currentUser.username;
 
     const result = Storage.changePassword(
@@ -105,6 +107,10 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
                 ? `تغییر رمز امور مالی (${currentUser.staff.fullName})`
                 : currentUser.role === 'education'
                 ? `تغییر رمز کارشناس آموزش (${currentUser.staff.fullName})`
+                : currentUser.role === 'cultural'
+                ? `تغییر رمز امور فرهنگی (${currentUser.staff.fullName})`
+                : currentUser.role === 'student_affairs'
+                ? `تغییر رمز امور دانشجویی و تربیت بدنی (${currentUser.staff.fullName})`
                 : `تغییر رمز ورود دانشجو (${currentUser.student.fullName})`}
             </p>
           </div>

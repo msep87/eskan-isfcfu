@@ -56,13 +56,17 @@ export const Navbar: React.FC<NavbarProps> = ({
       );
     }
     if (currentUser?.role === 'maintenance') {
-      return m.category === 'maintenance' && m.status !== 'answered';
+      return (
+        (m.category === 'maintenance' || m.receiverType === 'all' || m.senderRole === 'maintenance') &&
+        m.status !== 'answered'
+      );
     }
     if (currentUser?.role === 'counselor') {
       return (
         (m.receiverType === 'counselor' ||
           m.category === 'counseling' ||
-          m.category === 'social_personal') &&
+          m.category === 'social_personal' ||
+          m.senderRole === 'counselor') &&
         m.status !== 'answered'
       );
     }
@@ -79,6 +83,23 @@ export const Navbar: React.FC<NavbarProps> = ({
         m.status !== 'answered'
       );
     }
+    if (currentUser?.role === 'cultural') {
+      return (
+        !m.isConfidential &&
+        (m.receiverType === 'cultural' || m.category === 'cultural' || m.senderRole === 'cultural') &&
+        m.status !== 'answered'
+      );
+    }
+    if (currentUser?.role === 'student_affairs') {
+      return (
+        !m.isConfidential &&
+        (m.receiverType === 'student_affairs' ||
+          m.category === 'student_affairs' ||
+          m.senderRole === 'student_affairs' ||
+          m.receiverType === 'all') &&
+        m.status !== 'answered'
+      );
+    }
     if (currentUser?.role === 'warehouse') {
       return (
         (m.receiverType === 'warehouse' || m.senderRole === 'warehouse') &&
@@ -88,6 +109,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (currentUser?.role === 'procurement') {
       return (
         (m.receiverType === 'procurement' || m.senderRole === 'procurement') &&
+        m.status !== 'answered'
+      );
+    }
+    if (currentUser?.role === 'supervisor') {
+      return (
+        (m.receiverType === 'supervisor' || m.senderRole === 'supervisor' || m.receiverType === 'all') &&
         m.status !== 'answered'
       );
     }
@@ -151,8 +178,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>راهنمای کاربری (PDF)</span>
             </button>
 
-            {/* گزارش‌ها و آمار - فقط برای مدیر، سرپرست و کادر فنی/انبار/مشاور (نه دانشجو، امور مالی و کارشناس آموزش) */}
-            {currentUser && currentUser.role !== 'student' && currentUser.role !== 'finance' && currentUser.role !== 'education' && (
+            {/* گزارش‌ها و آمار - فقط برای مدیر، سرپرست و کادر فنی/انبار/مشاور/امور دانشجویی (نه دانشجو، امور مالی، کارشناس آموزش و امور فرهنگی) */}
+            {currentUser &&
+              currentUser.role !== 'student' &&
+              currentUser.role !== 'finance' &&
+              currentUser.role !== 'education' &&
+              currentUser.role !== 'cultural' && (
               <button
                 onClick={onOpenReports}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition cursor-pointer"
@@ -210,6 +241,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ? currentUser.staff.photoUrl
                       : currentUser.role === 'education'
                       ? currentUser.staff.photoUrl
+                      : currentUser.role === 'cultural'
+                      ? currentUser.staff.photoUrl
+                      : currentUser.role === 'student_affairs'
+                      ? currentUser.staff.photoUrl
                       : currentUser.role === 'counselor'
                       ? currentUser.counselor.photoUrl
                       : undefined;
@@ -232,6 +267,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       {currentUser.role === 'procurement' && currentUser.staff.fullName}
                       {currentUser.role === 'finance' && currentUser.staff.fullName}
                       {currentUser.role === 'education' && currentUser.staff.fullName}
+                      {currentUser.role === 'cultural' && currentUser.staff.fullName}
+                      {currentUser.role === 'student_affairs' && currentUser.staff.fullName}
                       {currentUser.role === 'admin' && 'مدیر امور خوابگاه‌ها'}
                     </span>
                     {currentUser.role === 'counselor' && (
@@ -264,6 +301,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                         کارشناس آموزش
                       </span>
                     )}
+                    {currentUser.role === 'cultural' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-950 dark:text-fuchsia-300 font-bold">
+                        امور فرهنگی
+                      </span>
+                    )}
+                    {currentUser.role === 'student_affairs' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 font-bold">
+                        امور دانشجویی و تربیت بدنی
+                      </span>
+                    )}
                     {currentUser.role === 'student' && (
                       currentUser.student.isProfileCompleted ? (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
@@ -285,6 +332,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentUser.role === 'procurement' && (currentUser.staff.department || 'واحد کارپردازی و خرید')}
                     {currentUser.role === 'finance' && (currentUser.staff.department || 'واحد امور مالی و حسابداری')}
                     {currentUser.role === 'education' && (currentUser.staff.department || 'واحد امور آموزشی')}
+                    {currentUser.role === 'cultural' && (currentUser.staff.department || 'واحد امور فرهنگی و اجتماعی سراها')}
+                    {currentUser.role === 'student_affairs' && (currentUser.staff.department || 'اداره امور دانشجویی، تربیت بدنی و رفاهی')}
                     {currentUser.role === 'admin' && 'مدیر کل سامانه'}
                   </div>
                 </div>

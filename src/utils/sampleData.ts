@@ -29,6 +29,18 @@ import {
   StudentEvaluation,
   GuestRequest,
   VisitReport,
+  PeriodicSurvey,
+  SurveyResponse,
+  CulturalStaff,
+  CulturalProgram,
+  CulturalAssociation,
+  AssociationMembership,
+  StudentAffairsStaff,
+  GuildElection,
+  GuildElectionVote,
+  DisciplinaryReferral,
+  SportsProgram,
+  SportsRegistration,
 } from '../types';
 
 export const INITIAL_SETTINGS: AppSettings = {
@@ -134,3 +146,40 @@ export const INITIAL_EDUCATION_STAFF: EducationStaff[] = [];
 
 // اعلامیه‌های مرخصی تحصیلی و اخراج از کارشناس آموزش به مدیر (کاملاً خالی)
 export const INITIAL_ACADEMIC_NOTICES: AcademicStatusNotice[] = [];
+
+// نظرسنجی‌های دوره‌ای رضایت‌سنجی از دانشجویان (کاملاً خالی)
+export const INITIAL_SURVEYS: PeriodicSurvey[] = [];
+
+// پاسخ‌های ثبت‌شده دانشجویان در نظرسنجی‌ها (کاملاً خالی)
+export const INITIAL_SURVEY_RESPONSES: SurveyResponse[] = [];
+
+// کارشناسان امور فرهنگی (کاملاً خالی)
+export const INITIAL_CULTURAL_STAFF: CulturalStaff[] = [];
+
+// برنامه‌های فرهنگی زمان‌بندی شده هفتگی (کاملاً خالی)
+export const INITIAL_CULTURAL_PROGRAMS: CulturalProgram[] = [];
+
+// تشکل‌ها و انجمن‌های دانشجویی (کاملاً خالی)
+export const INITIAL_CULTURAL_ASSOCIATIONS: CulturalAssociation[] = [];
+
+// درخواست‌ها و سوابق عضویت در تشکل‌ها و انجمن‌ها (کاملاً خالی)
+export const INITIAL_ASSOCIATION_MEMBERSHIPS: AssociationMembership[] = [];
+
+// کارشناسان امور دانشجویی و تربیت بدنی (کاملاً خالی)
+export const INITIAL_STUDENT_AFFAIRS_STAFF: StudentAffairsStaff[] = [];
+
+// دوره‌های انتخابات شورای صنفی دانشجویان (کاملاً خالی)
+export const INITIAL_GUILD_ELECTIONS: GuildElection[] = [];
+
+// آرای ثبت‌شده در انتخابات شورای صنفی (کاملاً خالی)
+export const INITIAL_GUILD_ELECTION_VOTES: GuildElectionVote[] = [];
+
+// پرونده‌های معرفی‌شده به شورای انضباطی نزد امور دانشجویی (کاملاً خالی)
+export const INITIAL_DISCIPLINARY_REFERRALS: DisciplinaryReferral[] = [];
+
+// برنامه‌های ورزشی و تربیت بدنی (کاملاً خالی)
+export const INITIAL_SPORTS_PROGRAMS: SportsProgram[] = [];
+
+// ثبت‌نام و حضور و غیاب دانشجویان در برنامه‌های ورزشی (کاملاً خالی)
+export const INITIAL_SPORTS_REGISTRATIONS: SportsRegistration[] = [];
+

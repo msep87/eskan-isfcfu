@@ -28,6 +28,7 @@ const ALLOWED_TAGS = new Set([
   'TD',
   'CAPTION',
   'IMG',
+  'MARK',
 ]);
 
 const ALLOWED_STYLE_PROPS = new Set([

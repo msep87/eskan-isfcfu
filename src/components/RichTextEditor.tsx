@@ -8,9 +8,12 @@ import {
   AlignLeft,
   AlignJustify,
   List,
+  ListX,
   Eraser,
   Type,
   Palette,
+  Highlighter,
+  Smile,
   Table as TableIcon,
   ImagePlus,
   Upload,
@@ -67,6 +70,35 @@ const BULLET_STYLES: Array<{
   { id: 'decimal', tag: 'ol', cssType: 'decimal', preview: '1, 2', label: 'شماره‌گذاری عددی' },
   { id: 'lower-alpha', tag: 'ol', cssType: 'lower-alpha', preview: 'a, b', label: 'حروف انگلیسی کوچک' },
   { id: 'upper-roman', tag: 'ol', cssType: 'upper-roman', preview: 'I, II', label: 'اعداد رومی' },
+];
+
+const HIGHLIGHT_COLORS = [
+  { label: 'زرد کلاسیک', value: '#fef08a' },
+  { label: 'سبز ملایم', value: '#bbf7d0' },
+  { label: 'آبی آسمانی', value: '#bae6fd' },
+  { label: 'نارنجی گرم', value: '#fed7aa' },
+  { label: 'صورتی روشن', value: '#fbcfe8' },
+  { label: 'بنفش یاسی', value: '#e9d5ff' },
+  { label: 'خاکستری روشن', value: '#e2e8f0' },
+];
+
+const EMOJI_GROUPS: Array<{ label: string; emojis: string[] }> = [
+  {
+    label: 'رسمی و اطلاعیه',
+    emojis: ['📢', '📌', '📍', '📝', '📋', '📄', '✅', '☑️', '✔️', '⚠️', '🚨', '❗', '❓', '🔔', '📣', '🏛️'],
+  },
+  {
+    label: 'آموزشی و فرهنگی',
+    emojis: ['🎓', '📚', '📖', '✏️', '🖋️', '🏫', '🎭', '🎨', '🕌', '🤲', '🌟', '✨', '💡', '🤝', '👥', '🎤'],
+  },
+  {
+    label: 'ورزشی و تربیت بدنی',
+    emojis: ['⚽', '🏐', '🏀', '🏓', '🏸', '♟️', '🏃', '🏊', '🥾', '⛰️', '🥇', '🏆', '🏅', '💪', '🎯', '🩺'],
+  },
+  {
+    label: 'زمان، سرا و ارتباط',
+    emojis: ['🗓️', '📅', '⏰', '⏳', '🏠', '🛏️', '🔑', '🍽️', '☕', '📞', '📱', '✉️', '💬', '🙏', '🌹', '💚'],
+  },
 ];
 
 const compressInlineImage = (file: File): Promise<string> =>
@@ -126,6 +158,7 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
   const [selectedFont, setSelectedFont] = useState('');
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColor, setSelectedColor] = useState('#0f172a');
+  const [selectedHighlight, setSelectedHighlight] = useState('#fef08a');
   const [activeFormats, setActiveFormats] = useState({
     bold: false,
     italic: false,
@@ -135,10 +168,16 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
     justifyLeft: false,
     justifyFull: false,
   });
+  const [activeListStyle, setActiveListStyle] = useState<{
+    tag: 'ul' | 'ol';
+    cssType: string;
+  } | null>(null);
   const [isEmpty, setIsEmpty] = useState(!hasRichVisualContent(valueHtml));
 
-  // پنل‌های کشویی ابزارهای پیشرفته (بولت متنوع، جدول، تصویر داخل متن)
-  const [openToolMenu, setOpenToolMenu] = useState<'bullets' | 'table' | 'image' | null>(null);
+  // پنل‌های کشویی ابزارهای پیشرفته (بولت متنوع، هایلایت، ایموجی، جدول، تصویر داخل متن)
+  const [openToolMenu, setOpenToolMenu] = useState<
+    'bullets' | 'highlight' | 'emoji' | 'table' | 'image' | null
+  >(null);
 
   // تنظیمات درج جدول
   const [tableRows, setTableRows] = useState(3);
@@ -184,6 +223,28 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
       });
     } catch {
       // ignore in environments without command state support
+    }
+    try {
+      const editor = editorRef.current;
+      const sel = window.getSelection();
+      if (!editor || !sel || sel.rangeCount === 0) {
+        setActiveListStyle(null);
+        return;
+      }
+      let node: Node | null = sel.anchorNode;
+      let found: { tag: 'ul' | 'ol'; cssType: string } | null = null;
+      while (node && node !== editor) {
+        if (node instanceof HTMLElement && (node.tagName === 'UL' || node.tagName === 'OL')) {
+          const tag = node.tagName.toLowerCase() as 'ul' | 'ol';
+          const cssType = node.style.listStyleType || (tag === 'ul' ? 'disc' : 'decimal');
+          found = { tag, cssType };
+          break;
+        }
+        node = node.parentNode;
+      }
+      setActiveListStyle(found);
+    } catch {
+      setActiveListStyle(null);
     }
   };
 
@@ -241,6 +302,145 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
     emitChange();
   };
 
+  const unwrapListItemsToParagraphs = (listEl: HTMLElement, targetItems: HTMLElement[]) => {
+    const parent = listEl.parentNode;
+    if (!parent || targetItems.length === 0) return;
+    const allItems = Array.from(listEl.children).filter(
+      (c): c is HTMLElement => c instanceof HTMLElement && c.tagName === 'LI'
+    );
+    const targetSet = new Set(targetItems);
+    const createdParagraphs: HTMLElement[] = [];
+
+    let bufferList: HTMLElement | null = null;
+    const createSubList = () => {
+      const clone = document.createElement(listEl.tagName.toLowerCase());
+      const styleAttr = listEl.getAttribute('style');
+      if (styleAttr) clone.setAttribute('style', styleAttr);
+      return clone;
+    };
+
+    allItems.forEach((li) => {
+      if (targetSet.has(li)) {
+        if (bufferList) {
+          parent.insertBefore(bufferList, listEl);
+          bufferList = null;
+        }
+        const p = document.createElement('p');
+        while (li.firstChild) {
+          p.appendChild(li.firstChild);
+        }
+        if (!p.innerHTML.trim()) {
+          p.innerHTML = '<br />';
+        }
+        parent.insertBefore(p, listEl);
+        createdParagraphs.push(p);
+      } else {
+        if (!bufferList) bufferList = createSubList();
+        bufferList.appendChild(li);
+      }
+    });
+
+    if (bufferList) {
+      parent.insertBefore(bufferList, listEl);
+    }
+    parent.removeChild(listEl);
+
+    if (createdParagraphs.length > 0) {
+      const sel = window.getSelection();
+      if (sel) {
+        const lastP = createdParagraphs[createdParagraphs.length - 1];
+        const newRange = document.createRange();
+        newRange.selectNodeContents(lastP);
+        newRange.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+        savedRangeRef.current = newRange.cloneRange();
+      }
+    }
+  };
+
+  const removeBulletListFromSelection = (removeEntireList = false) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const range = restoreSelection();
+    const sel = window.getSelection();
+    if (!range || !sel) return;
+
+    const listsToProcess = new Map<HTMLElement, Set<HTMLElement>>();
+
+    const registerLi = (li: HTMLElement) => {
+      const listEl = li.closest('ul, ol');
+      if (listEl instanceof HTMLElement && editor.contains(listEl)) {
+        if (!listsToProcess.has(listEl)) {
+          listsToProcess.set(listEl, new Set());
+        }
+        listsToProcess.get(listEl)!.add(li);
+      }
+    };
+
+    if (range.collapsed) {
+      let node: Node | null = range.startContainer;
+      while (node && node !== editor) {
+        if (node instanceof HTMLElement && node.tagName === 'LI') {
+          if (removeEntireList) {
+            const listEl = node.closest('ul, ol');
+            if (listEl instanceof HTMLElement && editor.contains(listEl)) {
+              Array.from(listEl.children).forEach((c) => {
+                if (c instanceof HTMLElement && c.tagName === 'LI') registerLi(c);
+              });
+            }
+          } else {
+            registerLi(node);
+          }
+          break;
+        }
+        node = node.parentNode;
+      }
+    } else {
+      editor.querySelectorAll('li').forEach((li) => {
+        try {
+          if (range.intersectsNode(li)) {
+            if (removeEntireList) {
+              const listEl = li.closest('ul, ol');
+              if (listEl instanceof HTMLElement) {
+                Array.from(listEl.children).forEach((c) => {
+                  if (c instanceof HTMLElement && c.tagName === 'LI') registerLi(c);
+                });
+              }
+            } else {
+              registerLi(li);
+            }
+          }
+        } catch {
+          // ignore range intersection edge cases
+        }
+      });
+    }
+
+    if (listsToProcess.size === 0) {
+      let node: Node | null = sel.anchorNode;
+      while (node && node !== editor) {
+        if (node instanceof HTMLElement && (node.tagName === 'UL' || node.tagName === 'OL')) {
+          const allLi = Array.from(node.children).filter(
+            (c): c is HTMLElement => c instanceof HTMLElement && c.tagName === 'LI'
+          );
+          unwrapListItemsToParagraphs(node, allLi);
+          break;
+        }
+        node = node.parentNode;
+      }
+    } else {
+      listsToProcess.forEach((itemsSet, listEl) => {
+        unwrapListItemsToParagraphs(listEl, Array.from(itemsSet));
+      });
+    }
+
+    setOpenToolMenu(null);
+    updateToolbarState();
+    saveSelection();
+    emitChange();
+  };
+
   const applyBulletListStyle = (tag: 'ul' | 'ol', cssType: string) => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -260,6 +460,16 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
     };
 
     const existingList = findClosestList();
+    if (
+      existingList &&
+      existingList.tagName.toLowerCase() === tag &&
+      (existingList.style.listStyleType || (tag === 'ul' ? 'disc' : 'decimal')) === cssType
+    ) {
+      // اگر بولت فعلی دوباره انتخاب شد، بولت برداشته و به متن عادی تبدیل می‌شود
+      removeBulletListFromSelection(false);
+      return;
+    }
+
     if (!existingList) {
       document.execCommand(tag === 'ul' ? 'insertUnorderedList' : 'insertOrderedList', false);
     } else if (existingList.tagName.toLowerCase() !== tag) {
@@ -296,7 +506,142 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
     }
 
     setOpenToolMenu(null);
+    updateToolbarState();
     saveSelection();
+    emitChange();
+  };
+
+  const applyHighlightToSelection = (bgColor: string) => {
+    const range = restoreSelection();
+    const editor = editorRef.current;
+    const sel = window.getSelection();
+    if (!range || !editor || !sel) return;
+
+    const mark = document.createElement('mark');
+    mark.style.backgroundColor = bgColor;
+    mark.style.color = '#0f172a';
+    mark.style.padding = '1px 4px';
+    mark.style.borderRadius = '4px';
+
+    if (range.collapsed) {
+      const zeroWidth = document.createTextNode('\u200B');
+      mark.appendChild(zeroWidth);
+      range.insertNode(mark);
+      const caret = document.createRange();
+      caret.setStart(zeroWidth, 1);
+      caret.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(caret);
+      savedRangeRef.current = caret.cloneRange();
+    } else {
+      const fragment = range.extractContents();
+      const temp = document.createElement('div');
+      temp.appendChild(fragment);
+      temp.querySelectorAll('mark').forEach((m) => {
+        const parent = m.parentNode;
+        if (!parent) return;
+        while (m.firstChild) parent.insertBefore(m.firstChild, m);
+        parent.removeChild(m);
+      });
+      temp.querySelectorAll('span').forEach((s) => {
+        if (s instanceof HTMLElement && s.style.backgroundColor) {
+          s.style.backgroundColor = '';
+        }
+      });
+      while (temp.firstChild) {
+        mark.appendChild(temp.firstChild);
+      }
+      range.insertNode(mark);
+      const newRange = document.createRange();
+      newRange.selectNodeContents(mark);
+      sel.removeAllRanges();
+      sel.addRange(newRange);
+      savedRangeRef.current = newRange.cloneRange();
+    }
+
+    setSelectedHighlight(bgColor);
+    setOpenToolMenu(null);
+    emitChange();
+  };
+
+  const removeHighlightFromSelection = () => {
+    const range = restoreSelection();
+    const editor = editorRef.current;
+    const sel = window.getSelection();
+    if (!range || !editor || !sel) return;
+
+    let handled = false;
+    if (range.collapsed) {
+      let node: Node | null = range.startContainer;
+      while (node && node !== editor) {
+        if (node instanceof HTMLElement && node.tagName === 'MARK') {
+          const parent = node.parentNode;
+          if (parent) {
+            const first = node.firstChild;
+            while (node.firstChild) parent.insertBefore(node.firstChild, node);
+            parent.removeChild(node);
+            if (first) {
+              const caret = document.createRange();
+              caret.selectNodeContents(first);
+              caret.collapse(false);
+              sel.removeAllRanges();
+              sel.addRange(caret);
+              savedRangeRef.current = caret.cloneRange();
+            }
+            handled = true;
+          }
+          break;
+        }
+        node = node.parentNode;
+      }
+    } else {
+      const marks = Array.from(editor.querySelectorAll('mark'));
+      marks.forEach((m) => {
+        try {
+          if (range.intersectsNode(m) && m.parentNode) {
+            const parent = m.parentNode;
+            while (m.firstChild) parent.insertBefore(m.firstChild, m);
+            parent.removeChild(m);
+            handled = true;
+          }
+        } catch {
+          // ignore
+        }
+      });
+      editor.querySelectorAll('span').forEach((sp) => {
+        try {
+          if (sp instanceof HTMLElement && sp.style.backgroundColor && range.intersectsNode(sp)) {
+            sp.style.backgroundColor = '';
+            handled = true;
+          }
+        } catch {
+          // ignore
+        }
+      });
+    }
+
+    if (handled) {
+      emitChange();
+    }
+    setOpenToolMenu(null);
+  };
+
+  const insertEmojiAtCursor = (emoji: string) => {
+    const range = restoreSelection();
+    const sel = window.getSelection();
+    if (!range || !sel) return;
+
+    range.deleteContents();
+    const textNode = document.createTextNode(emoji);
+    range.insertNode(textNode);
+
+    const caret = document.createRange();
+    caret.setStartAfter(textNode);
+    caret.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(caret);
+    savedRangeRef.current = caret.cloneRange();
+
     emitChange();
   };
 
@@ -498,9 +843,22 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
 
   const handleClearFormatting = () => {
     const range = restoreSelection();
-    if (!range) return;
+    const editor = editorRef.current;
+    if (!range || !editor) return;
     document.execCommand('removeFormat', false);
     if (!range.collapsed) {
+      // حذف تگ‌های هایلایت یا بولت در صورت وجود در محدوده انتخابی
+      editor.querySelectorAll('mark').forEach((m) => {
+        try {
+          if (range.intersectsNode(m) && m.parentNode) {
+            const p = m.parentNode;
+            while (m.firstChild) p.insertBefore(m.firstChild, m);
+            p.removeChild(m);
+          }
+        } catch {
+          // ignore
+        }
+      });
       const text = range.toString();
       range.deleteContents();
       const textNode = document.createTextNode(text);
@@ -513,6 +871,8 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
         sel.addRange(newRange);
         savedRangeRef.current = newRange.cloneRange();
       }
+    } else {
+      removeHighlightFromSelection();
     }
     updateToolbarState();
     emitChange();
@@ -742,8 +1102,8 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
 
         <span className="h-5 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" />
 
-        {/* بولت‌های متنوع و فهرست شماره‌ای */}
-        <div className="relative">
+        {/* بولت‌های متنوع، فهرست شماره‌ای و حذف بولت */}
+        <div className="relative flex items-center gap-1">
           <button
             type="button"
             onMouseDown={(e) => {
@@ -751,9 +1111,9 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
               saveSelection();
               setOpenToolMenu((prev) => (prev === 'bullets' ? null : 'bullets'));
             }}
-            title="ایجاد فهرست با بولت‌های متنوع و شماره‌گذاری"
+            title="ایجاد فهرست با بولت‌های متنوع و شماره‌گذاری (برای لغو، روی بولت فعال کلیک کنید)"
             className={`px-2 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
-              openToolMenu === 'bullets'
+              openToolMenu === 'bullets' || activeListStyle
                 ? 'bg-teal-600 text-white shadow-xs'
                 : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
             }`}
@@ -763,8 +1123,25 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
             <ChevronDown className="w-3 h-3" />
           </button>
 
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              saveSelection();
+              removeBulletListFromSelection(false);
+            }}
+            title="حذف بولت / تبدیل بند فهرست به متن عادی"
+            className={`p-1.5 rounded-lg text-xs transition cursor-pointer ${
+              activeListStyle
+                ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-700 hover:bg-rose-100'
+                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+            }`}
+          >
+            <ListX className="w-3.5 h-3.5" />
+          </button>
+
           {openToolMenu === 'bullets' && (
-            <div className="absolute right-0 top-full mt-1.5 z-30 w-56 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl p-2 space-y-1">
+            <div className="absolute right-0 top-full mt-1.5 z-30 w-64 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl p-2 space-y-1">
               <div className="flex items-center justify-between px-2 py-1 text-[10px] font-bold text-slate-400">
                 <span>انتخاب نوع بولت / فهرست</span>
                 <button
@@ -775,21 +1152,200 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
-              {BULLET_STYLES.map((b) => (
+              {BULLET_STYLES.map((b) => {
+                const isActiveStyle =
+                  activeListStyle?.tag === b.tag && activeListStyle?.cssType === b.cssType;
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      applyBulletListStyle(b.tag, b.cssType);
+                    }}
+                    className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center justify-between cursor-pointer ${
+                      isActiveStyle
+                        ? 'bg-teal-600 text-white shadow-xs'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-teal-950/50 hover:text-teal-700 dark:hover:text-teal-300'
+                    }`}
+                  >
+                    <span>{b.label}{isActiveStyle ? ' (فعال — کلیک = حذف)' : ''}</span>
+                    <span
+                      className={`font-mono text-[11px] px-1.5 py-0.5 rounded ${
+                        isActiveStyle
+                          ? 'bg-white/20 text-white'
+                          : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                      }`}
+                    >
+                      {b.preview}
+                    </span>
+                  </button>
+                );
+              })}
+
+              <div className="pt-1.5 mt-1 border-t border-slate-200 dark:border-slate-700 space-y-1">
                 <button
-                  key={b.id}
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    applyBulletListStyle(b.tag, b.cssType);
+                    removeBulletListFromSelection(false);
                   }}
-                  className="w-full px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-teal-950/50 hover:text-teal-700 dark:hover:text-teal-300 transition flex items-center justify-between cursor-pointer"
+                  className="w-full px-2.5 py-1.5 rounded-xl text-xs font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition flex items-center justify-center gap-1.5 cursor-pointer"
                 >
-                  <span>{b.label}</span>
-                  <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
-                    {b.preview}
-                  </span>
+                  <ListX className="w-3.5 h-3.5" />
+                  <span>حذف بولت از متن انتخاب‌شده</span>
                 </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    removeBulletListFromSelection(true);
+                  }}
+                  className="w-full px-2.5 py-1 rounded-xl text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
+                >
+                  تبدیل کل فهرست جاری به متن عادی
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* هایلایت بخشی از متن */}
+        <div className="relative">
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              saveSelection();
+              setOpenToolMenu((prev) => (prev === 'highlight' ? null : 'highlight'));
+            }}
+            title="هایلایت کردن بخش انتخاب‌شده از متن"
+            className={`px-2 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+              openToolMenu === 'highlight'
+                ? 'bg-amber-500 text-slate-950 shadow-xs'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+            }`}
+          >
+            <Highlighter className="w-3.5 h-3.5 text-amber-500" />
+            <span>هایلایت</span>
+          </button>
+
+          {openToolMenu === 'highlight' && (
+            <div className="absolute right-0 top-full mt-1.5 z-30 w-64 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl p-3 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between font-extrabold text-slate-800 dark:text-slate-100">
+                <span>رنگ پس‌زمینه (هایلایت متن)</span>
+                <button
+                  type="button"
+                  onClick={() => setOpenToolMenu(null)}
+                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-7 gap-1.5">
+                {HIGHLIGHT_COLORS.map((hc) => (
+                  <button
+                    key={hc.value}
+                    type="button"
+                    title={hc.label}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      applyHighlightToSelection(hc.value);
+                    }}
+                    className={`w-7 h-7 rounded-lg border transition cursor-pointer hover:scale-110 ${
+                      selectedHighlight === hc.value
+                        ? 'ring-2 ring-teal-500 border-slate-900'
+                        : 'border-slate-300 dark:border-slate-600'
+                    }`}
+                    style={{ backgroundColor: hc.value }}
+                  />
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200 dark:border-slate-700">
+                <label
+                  onMouseDown={saveSelection}
+                  className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300 cursor-pointer"
+                >
+                  <input
+                    type="color"
+                    value={selectedHighlight}
+                    onMouseDown={saveSelection}
+                    onChange={(e) => applyHighlightToSelection(e.target.value)}
+                    className="w-6 h-6 p-0 border-0 bg-transparent cursor-pointer rounded"
+                  />
+                  <span>رنگ دلخواه</span>
+                </label>
+
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    removeHighlightFromSelection();
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 font-bold text-[11px] hover:bg-rose-100 cursor-pointer"
+                >
+                  حذف هایلایت
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* افزودن ایموجی */}
+        <div className="relative">
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              saveSelection();
+              setOpenToolMenu((prev) => (prev === 'emoji' ? null : 'emoji'));
+            }}
+            title="درج ایموجی و نشانه‌های گرافیکی در متن"
+            className={`px-2 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+              openToolMenu === 'emoji'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+            }`}
+          >
+            <Smile className="w-3.5 h-3.5 text-amber-500" />
+            <span>ایموجی</span>
+          </button>
+
+          {openToolMenu === 'emoji' && (
+            <div className="absolute left-0 sm:right-0 top-full mt-1.5 z-30 w-72 max-h-72 overflow-y-auto rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl p-3 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between font-extrabold text-slate-800 dark:text-slate-100 sticky top-0 bg-white dark:bg-slate-800 pb-1 border-b border-slate-100 dark:border-slate-700">
+                <span>انتخاب و درج ایموجی در متن</span>
+                <button
+                  type="button"
+                  onClick={() => setOpenToolMenu(null)}
+                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {EMOJI_GROUPS.map((grp) => (
+                <div key={grp.label} className="space-y-1">
+                  <div className="text-[10px] font-bold text-slate-400">{grp.label}</div>
+                  <div className="grid grid-cols-8 gap-1">
+                    {grp.emojis.map((em) => (
+                      <button
+                        key={em}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          insertEmojiAtCursor(em);
+                        }}
+                        className="h-7 rounded-lg hover:bg-teal-50 dark:hover:bg-teal-950/50 text-base flex items-center justify-center transition hover:scale-115 cursor-pointer"
+                        title={`درج ${em}`}
+                      >
+                        {em}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -1000,14 +1556,14 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
           onMouseUp={saveSelection}
           onBlur={saveSelection}
           onFocus={updateToolbarState}
-          className={`${minHeightClass} max-h-96 overflow-y-auto px-4 py-3 text-sm text-slate-900 dark:text-slate-100 leading-relaxed focus:outline-none [&_ul:not([style*='list-style-type'])]:list-disc [&_ol:not([style*='list-style-type'])]:list-decimal [&_ul]:pr-6 [&_ol]:pr-6 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_p]:mb-1.5 [&_table]:w-full [&_table]:border-collapse [&_table]:my-2.5 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-600 [&_th]:bg-slate-100 dark:[&_th]:bg-slate-800 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:font-bold [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-600 [&_td]:px-2.5 [&_td]:py-1.5 [&_img]:max-w-full [&_img]:rounded-xl`}
+          className={`${minHeightClass} max-h-96 overflow-y-auto px-4 py-3 text-sm text-slate-900 dark:text-slate-100 leading-relaxed focus:outline-none [&_ul:not([style*='list-style-type'])]:list-disc [&_ol:not([style*='list-style-type'])]:list-decimal [&_ul]:pr-6 [&_ol]:pr-6 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_p]:mb-1.5 [&_mark]:text-slate-900 [&_mark]:px-1 [&_mark]:rounded [&_table]:w-full [&_table]:border-collapse [&_table]:my-2.5 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-600 [&_th]:bg-slate-100 dark:[&_th]:bg-slate-800 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:font-bold [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-600 [&_td]:px-2.5 [&_td]:py-1.5 [&_img]:max-w-full [&_img]:rounded-xl`}
         />
       </div>
 
       {/* راهنمای کوتاه پایین ویرایشگر */}
       <div className="px-3.5 py-1.5 bg-slate-50/70 dark:bg-slate-900/50 border-t border-slate-200/70 dark:border-slate-700/70 rounded-b-2xl text-[10px] text-slate-500 dark:text-slate-400 flex flex-wrap items-center justify-between gap-2">
         <span>
-          نکته: می‌توانید متن را انتخاب کرده و فونت، رنگ، تراز (راست/وسط/چپ)، بولت‌های متنوع، جدول یا تصویر داخل متن را اضافه کنید.
+          نکته: می‌توانید متن را انتخاب کرده و فونت، رنگ، هایلایت، ایموجی، تراز (راست/وسط/چپ)، بولت‌های قابل حذف، جدول یا تصویر داخل متن را اضافه کنید.
         </span>
       </div>
     </div>
@@ -1050,7 +1606,7 @@ export const RichTextDisplay: React.FC<RichTextDisplayProps> = ({
         <div
           dir="rtl"
           onClick={handleContainerClick}
-          className={`${className} break-words overflow-x-auto [&_ul:not([style*='list-style-type'])]:list-disc [&_ol:not([style*='list-style-type'])]:list-decimal [&_ul]:pr-6 [&_ol]:pr-6 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_p]:mb-1.5 [&_table]:w-full [&_table]:border-collapse [&_table]:my-2.5 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-600 [&_th]:bg-slate-100 dark:[&_th]:bg-slate-800/80 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:font-bold [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-600 [&_td]:px-2.5 [&_td]:py-1.5 [&_img]:max-w-full [&_img]:rounded-xl [&_img]:cursor-zoom-in [&_img]:transition-opacity hover:[&_img]:opacity-95`}
+          className={`${className} break-words overflow-x-auto [&_ul:not([style*='list-style-type'])]:list-disc [&_ol:not([style*='list-style-type'])]:list-decimal [&_ul]:pr-6 [&_ol]:pr-6 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_p]:mb-1.5 [&_mark]:text-slate-900 [&_mark]:px-1 [&_mark]:rounded [&_table]:w-full [&_table]:border-collapse [&_table]:my-2.5 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-600 [&_th]:bg-slate-100 dark:[&_th]:bg-slate-800/80 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:font-bold [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-600 [&_td]:px-2.5 [&_td]:py-1.5 [&_img]:max-w-full [&_img]:rounded-xl [&_img]:cursor-zoom-in [&_img]:transition-opacity hover:[&_img]:opacity-95`}
           dangerouslySetInnerHTML={{ __html: safeHtml }}
         />
         {!onImageClick && internalLightboxSrc && (

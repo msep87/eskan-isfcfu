@@ -7,8 +7,9 @@ import {
   StudentEvaluation,
   Message,
   MessageCategory,
+  DisciplinaryViolationType,
 } from '../types';
-import { Storage } from '../utils/storage';
+import { Storage, DISCIPLINARY_VIOLATION_PRESETS } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import {
   X,
@@ -32,6 +33,7 @@ import {
   Lock,
   MessageSquare,
   Edit3,
+  Gavel,
 } from 'lucide-react';
 
 interface StudentRoomProfileModalProps {
@@ -50,7 +52,7 @@ interface StudentRoomProfileModalProps {
   onEditStudent?: (student: Student) => void;
 }
 
-type ModalTab = 'report_warning' | 'evaluation' | 'message' | 'history';
+type ModalTab = 'report_warning' | 'evaluation' | 'message' | 'disciplinary' | 'history';
 
 const MESSAGE_CATEGORIES: { value: MessageCategory; label: string }[] = [
   { value: 'accommodation', label: 'امور اسکان و اتاق' },
@@ -105,6 +107,11 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
   const [msgContent, setMsgContent] = useState('');
   const [msgConfidential, setMsgConfidential] = useState(false);
 
+  // تب ۴: معرفی به شورای انضباطی (ارسال به امور دانشجویی)
+  const [violationType, setViolationType] = useState<DisciplinaryViolationType>('curfew_violation');
+  const [referralText, setReferralText] = useState(DISCIPLINARY_VIOLATION_PRESETS[0]?.defaultText || '');
+  const [referralNotifyInbox, setReferralNotifyInbox] = useState(true);
+
   useEffect(() => {
     if (!isOpen || !student) return;
     setActiveTab('report_warning');
@@ -125,6 +132,9 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
     setMsgSubject('');
     setMsgContent('');
     setMsgConfidential(false);
+    setViolationType('curfew_violation');
+    setReferralText(DISCIPLINARY_VIOLATION_PRESETS[0]?.defaultText || '');
+    setReferralNotifyInbox(true);
   }, [isOpen, student?.studentId]);
 
   const studentEvaluations = useMemo<StudentEvaluation[]>(() => {
@@ -336,6 +346,41 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
     setMsgConfidential(false);
     setRefreshTick((t) => t + 1);
     onDataChanged();
+  };
+
+  const handleSelectViolationType = (type: DisciplinaryViolationType) => {
+    setViolationType(type);
+    const preset = DISCIPLINARY_VIOLATION_PRESETS.find((p) => p.type === type);
+    if (preset) {
+      setReferralText(preset.defaultText);
+    }
+  };
+
+  const handleSubmitDisciplinaryReferral = (e: React.FormEvent) => {
+    e.preventDefault();
+    setFeedback(null);
+    if (!referralText.trim()) {
+      setFeedback({ ok: false, msg: 'لطفاً متن معرفی‌نامه تخلف انضباطی را وارد نمایید.' });
+      return;
+    }
+    const preset = DISCIPLINARY_VIOLATION_PRESETS.find((p) => p.type === violationType);
+    const res = Storage.createDisciplinaryReferral({
+      students: [student],
+      dorm: dorm || undefined,
+      room: room || undefined,
+      violationType,
+      violationLabel: preset?.label,
+      referralText: referralText.trim(),
+      referredById: actorId || actorRole,
+      referredByName: actorName || effectiveRoleLabel,
+      referredByRole: actorRole,
+      notifyStudentInbox: referralNotifyInbox,
+    });
+    setFeedback({ ok: res.success, msg: res.message });
+    if (res.success) {
+      setRefreshTick((t) => t + 1);
+      onDataChanged();
+    }
   };
 
   const customFieldEntries = student.customFields
@@ -615,6 +660,22 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
             >
               <Send className="w-4 h-4" />
               <span>ارسال پیام به دانشجو</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('disciplinary');
+                setFeedback(null);
+              }}
+              className={`flex-1 min-w-[140px] py-2.5 px-3 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'disciplinary'
+                  ? 'bg-white dark:bg-slate-900 text-orange-700 dark:text-orange-300 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-700'
+              }`}
+            >
+              <Gavel className="w-4 h-4" />
+              <span>معرفی به شورای انضباطی</span>
             </button>
 
             <button
@@ -1066,6 +1127,72 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                 >
                   <Send className="w-4 h-4" />
                   <span>ارسال پیام به دانشجو</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* تب معرفی به شورای انضباطی */}
+          {activeTab === 'disciplinary' && (
+            <form onSubmit={handleSubmitDisciplinaryReferral} className="space-y-4">
+              <div className="p-4 rounded-2xl bg-orange-50/80 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 space-y-2 text-xs">
+                <div className="font-extrabold text-orange-950 dark:text-orange-100 flex items-center gap-1.5">
+                  <Gavel className="w-4 h-4 text-orange-600" />
+                  <span>ارجاع رسمی پرونده تخلف دانشجو به کارتابل «امور دانشجویی و تربیت بدنی» جهت تشکیل شورای انضباطی</span>
+                </div>
+                <p className="text-[11px] text-orange-800 dark:text-orange-200 leading-relaxed">
+                  با انتخاب موضوع تخلف از منوی زیر، متن حقوقی و رسمی پیش‌فرض به صورت خودکار درج می‌گردد و در صورت نیاز می‌توانید پیش از ثبت آن را ویرایش یا جزئیات بیشتری به آن اضافه کنید.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  نوع تخلف (منوی پیش‌فرض) *
+                </label>
+                <select
+                  value={violationType}
+                  onChange={(e) => handleSelectViolationType(e.target.value as DisciplinaryViolationType)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-orange-300 dark:border-orange-700 bg-white dark:bg-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-orange-500"
+                >
+                  {DISCIPLINARY_VIOLATION_PRESETS.map((preset) => (
+                    <option key={preset.type} value={preset.type}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  متن رسمی معرفی‌نامه به شورای انضباطی (قابل ویرایش) *
+                </label>
+                <textarea
+                  rows={5}
+                  value={referralText}
+                  onChange={(e) => setReferralText(e.target.value)}
+                  placeholder="متن معرفی‌نامه تخلف جهت بررسی در جلسه شورای انضباطی..."
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  required
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3.5 py-2.5 rounded-xl cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={referralNotifyInbox}
+                  onChange={(e) => setReferralNotifyInbox(e.target.checked)}
+                  className="w-4 h-4 accent-orange-600 cursor-pointer"
+                />
+                <span className="font-bold">ارسال همزمان ابلاغیه معرفی به صندوق پیام دانشجو</span>
+              </label>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-extrabold shadow-md transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <Gavel className="w-4 h-4" />
+                  <span>ثبت و ارسال به امور دانشجویی (شورای انضباطی)</span>
                 </button>
               </div>
             </form>

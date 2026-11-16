@@ -1,5 +1,23 @@
 import React, { useState } from 'react';
-import { Student, Dormitory, Room, Bed, Announcement, RoomWarning, AppSettings, StudentEvaluation } from '../types';
+import {
+  Student,
+  Dormitory,
+  Room,
+  Bed,
+  Announcement,
+  RoomWarning,
+  AppSettings,
+  StudentEvaluation,
+  DayOfWeek,
+  CulturalProgram,
+  CulturalAssociation,
+  GuildElection,
+  SportsProgram,
+  SportsProgramType,
+  SportsProgramKind,
+  SportsProgramStatus,
+  SportsRegistration,
+} from '../types';
 import { Storage } from '../utils/storage';
 import {
   computeStudentFinancialInfo,
@@ -11,6 +29,7 @@ import { VisualBedPicker } from './VisualBedPicker';
 import { StudentProfileModal } from './StudentProfileModal';
 import { DormIdCardModal } from './DormIdCardModal';
 import { StudentGuestRequestPanel } from './StudentGuestRequestPanel';
+import { StudentSurveyPanel } from './StudentSurveyPanel';
 import { RichTextDisplay } from './RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
 import {
@@ -39,6 +58,12 @@ import {
   MessageSquareWarning,
   Wallet,
   UserPlus,
+  ClipboardList,
+  Vote,
+  Send,
+  Dumbbell,
+  Activity,
+  XCircle,
 } from 'lucide-react';
 
 interface StudentDashboardProps {
@@ -69,10 +94,22 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onOpenUserGuide,
 }) => {
   // تب‌های داشبورد
-  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections'>('overview');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isIdCardModalOpen, setIsIdCardModalOpen] = useState(false);
   const [previewAnnImage, setPreviewAnnImage] = useState<string | null>(null);
+
+  // وضعیت تعاملات فرهنگی، برنامه‌های ورزشی و انتخابات شورای صنفی
+  const [assocNotes, setAssocNotes] = useState<Record<string, string>>({});
+  const [culturalFeedback, setCulturalFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [sportsTypeFilter, setSportsTypeFilter] = useState<string>('all');
+  const [sportsKindFilter, setSportsKindFilter] = useState<string>('all');
+  const [sportsSkillByProg, setSportsSkillByProg] = useState<Record<string, 'beginner' | 'intermediate' | 'advanced'>>({});
+  const [sportsNotesByProg, setSportsNotesByProg] = useState<Record<string, string>>({});
+  const [sportsHealthByProg, setSportsHealthByProg] = useState<Record<string, boolean>>({});
+  const [sportsFeedback, setSportsFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [selectedCandidatesByElection, setSelectedCandidatesByElection] = useState<Record<string, string[]>>({});
+  const [electionFeedback, setElectionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // دریافت اتاق و تخت دانشجو
   const studentBed = beds.find((b) => b.id === student.assignedBedId);
@@ -131,6 +168,43 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const approvedAwaitingDocsGuests = myGuestRequests.filter(
     (g) => g.status === 'approved' && !g.documentsSubmittedToSupervisor
   );
+
+  const activeMatchingSurveys = Storage.getSurveys().filter(
+    (s) =>
+      s.status === 'active' &&
+      (s.targetDormId === 'all' || s.targetDormId === student.assignedDormId)
+  );
+  const pendingSurveysCount = activeMatchingSurveys.filter(
+    (s) => !Storage.hasStudentRespondedToSurvey(s.id, student.studentId)
+  ).length;
+
+  // برنامه‌های فرهنگی تأییدشده (فقط تأییدشده‌ها به دانشجو نمایش داده می‌شوند)
+  const approvedCulturalPrograms: CulturalProgram[] = Storage.getCulturalPrograms().filter(
+    (p) => p.status === 'approved' && (p.dormId === 'all' || p.dormId === student.assignedDormId)
+  );
+  const activeCulturalAssociations: CulturalAssociation[] = Storage.getCulturalAssociations().filter(
+    (a) => a.status === 'active' && (!a.dormId || a.dormId === 'all' || a.dormId === student.assignedDormId)
+  );
+  const myAssociationMemberships = Storage.getAssociationMemberships().filter(
+    (m) => m.studentId === student.studentId
+  );
+
+  // انتخابات شورای صنفی (رأی‌گیری منحصراً در بازه فعال isActiveWindow مجاز است)
+  const allGuildElections: GuildElection[] = Storage.getGuildElections();
+  const activeGuildElectionsCount = allGuildElections.filter((e) => e.isActiveWindow).length;
+  const isStudentDormResident = Boolean(student.assignedBedId && student.assignmentStatus !== 'none');
+
+  // برنامه‌های ورزشی و تربیت بدنی منتشرشده و متناسب با سرا و جنسیت دانشجو
+  const allSportsRegistrations: SportsRegistration[] = Storage.getSportsRegistrations();
+  const publishedSportsPrograms: SportsProgram[] = Storage.getSportsPrograms().filter(
+    (p) =>
+      p.isPublishedToStudents &&
+      (p.dormId === 'all' || !student.assignedDormId || p.dormId === student.assignedDormId) &&
+      (p.genderScope === 'all' || !studentDorm?.gender || p.genderScope === studentDorm.gender)
+  );
+  const openSportsCount = publishedSportsPrograms.filter(
+    (p) => p.status === 'registration_open' || p.status === 'ongoing'
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -454,6 +528,74 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           {approvedAwaitingDocsGuests.length > 0 && (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-black">
               موافقت شده
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('surveys')}
+          className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+            activeTab === 'surveys'
+              ? 'bg-violet-600 text-white shadow-violet-600/20'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <ClipboardList className={`w-4 h-4 ${activeTab === 'surveys' ? 'text-white' : 'text-violet-600'}`} />
+          <span>نظرسنجی‌های دوره‌ای</span>
+          {pendingSurveysCount > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black animate-pulse">
+              {pendingSurveysCount} جدید
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('cultural')}
+          className={`flex-1 min-w-[190px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+            activeTab === 'cultural'
+              ? 'bg-fuchsia-600 text-white shadow-fuchsia-600/20'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <Sparkles className={`w-4 h-4 ${activeTab === 'cultural' ? 'text-white' : 'text-fuchsia-600'}`} />
+          <span>برنامه فرهنگی و تشکل‌ها</span>
+          {approvedCulturalPrograms.length > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-950 dark:text-fuchsia-300 font-black">
+              {approvedCulturalPrograms.length} برنامه
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('sports')}
+          className={`flex-1 min-w-[190px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+            activeTab === 'sports'
+              ? 'bg-emerald-600 text-white shadow-emerald-600/20'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <Dumbbell className={`w-4 h-4 ${activeTab === 'sports' ? 'text-white' : 'text-emerald-600'}`} />
+          <span>برنامه‌های ورزشی و تربیت بدنی</span>
+          {openSportsCount > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-black">
+              {openSportsCount} برنامه فعال
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('elections')}
+          className={`flex-1 min-w-[190px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+            activeTab === 'elections'
+              ? 'bg-indigo-700 text-white shadow-indigo-700/20'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <Vote className={`w-4 h-4 ${activeTab === 'elections' ? 'text-white' : 'text-indigo-600'}`} />
+          <span>انتخابات شورای صنفی</span>
+          {activeGuildElectionsCount > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-black animate-pulse">
+              {activeGuildElectionsCount} رأی‌گیری فعال
             </span>
           )}
         </button>
@@ -936,6 +1078,823 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           roommatesCount={roommates.length}
           onDataChanged={onRefreshData}
         />
+      )}
+
+      {activeTab === 'surveys' && (
+        <StudentSurveyPanel
+          student={student}
+          onSubmitted={onRefreshData}
+        />
+      )}
+
+      {/* تب برنامه فرهنگی هفتگی (تأییدشده‌ها) و عضویت در تشکل‌ها/انجمن‌ها */}
+      {activeTab === 'cultural' && (() => {
+        const weekDays: { key: DayOfWeek; label: string }[] = [
+          { key: 'saturday', label: 'شنبه' },
+          { key: 'sunday', label: 'یکشنبه' },
+          { key: 'monday', label: 'دوشنبه' },
+          { key: 'tuesday', label: 'سه‌شنبه' },
+          { key: 'wednesday', label: 'چهارشنبه' },
+          { key: 'thursday', label: 'پنج‌شنبه' },
+          { key: 'friday', label: 'جمعه' },
+        ];
+        const catLabels: Record<CulturalProgram['category'], string> = {
+          cultural: 'فرهنگی و تربیتی',
+          religious: 'معارف و قرآنی',
+          scientific: 'علمی و پژوهشی',
+          artistic: 'هنری و ادبی',
+          sports: 'تربیت بدنی و نشاط',
+          social: 'اجتماعی و جهادی',
+          skill: 'مهارتی و کارگاه',
+        };
+
+        return (
+          <div className="space-y-6 animate-in fade-in duration-200">
+            {culturalFeedback && (
+              <div
+                className={`p-3.5 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
+                  culturalFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                    : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                }`}
+              >
+                {culturalFeedback.type === 'success' ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span>{culturalFeedback.text}</span>
+              </div>
+            )}
+
+            {/* جدول زمانی کلاسی هفتگی برنامه‌های فرهنگی و اجتماعی */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-fuchsia-50 dark:bg-fuchsia-950/40 text-fuchsia-600">
+                    <Calendar className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
+                      جدول زمانی هفتگی برنامه‌های فرهنگی و اجتماعی سراها
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      برنامه‌های تأییدشده توسط واحد امور فرهنگی به تفکیک روزهای هفته و بازه زمانی
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenMessages}
+                  className="px-3.5 py-2 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>ارسال پیام به امور فرهنگی</span>
+                </button>
+              </div>
+
+              {approvedCulturalPrograms.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                  در حال حاضر برنامه فرهنگی تأییدشده‌ای برای جدول هفتگی سراها منتشر نشده است.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {weekDays.map((wd) => {
+                    const dayItems = approvedCulturalPrograms
+                      .filter((p) => p.dayOfWeek === wd.key)
+                      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+                    return (
+                      <div
+                        key={wd.key}
+                        className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 overflow-hidden flex flex-col"
+                      >
+                        <div className="px-3.5 py-2.5 bg-fuchsia-700 text-white font-extrabold text-xs flex items-center justify-between">
+                          <span>{wd.label}</span>
+                          <span className="px-2 py-0.5 rounded-full bg-white/20 text-[10px]">
+                            {dayItems.length} برنامه
+                          </span>
+                        </div>
+                        <div className="p-2.5 space-y-2 flex-1">
+                          {dayItems.length === 0 ? (
+                            <div className="text-[11px] text-slate-400 text-center py-4">
+                              برنامه‌ای ثبت نشده
+                            </div>
+                          ) : (
+                            dayItems.map((prog) => (
+                              <div
+                                key={prog.id}
+                                className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-fuchsia-200/80 dark:border-fuchsia-900/50 space-y-1.5 shadow-xs"
+                              >
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-fuchsia-100 dark:bg-fuchsia-950 text-fuchsia-800 dark:text-fuchsia-300 font-bold">
+                                    {catLabels[prog.category]}
+                                  </span>
+                                  <span className="text-[10px] font-mono font-bold text-slate-500" dir="ltr">
+                                    {prog.startTime} - {prog.endTime}
+                                  </span>
+                                </div>
+                                <div className="font-extrabold text-xs text-slate-900 dark:text-white">
+                                  {prog.title}
+                                </div>
+                                <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                                  <MapPin className="w-3 h-3 text-fuchsia-600 shrink-0" />
+                                  <span>{prog.location} ({prog.dormName})</span>
+                                </div>
+                                {prog.presenter && (
+                                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    مجری/استاد: <strong className="text-slate-700 dark:text-slate-200">{prog.presenter}</strong>
+                                  </div>
+                                )}
+                                {prog.description && (
+                                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed pt-1 border-t border-slate-100 dark:border-slate-800">
+                                    {prog.description}
+                                  </p>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* تشکل‌ها، کانون‌ها و انجمن‌های دانشجویی */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+              <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="p-2.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
+                    تشکل‌ها، کانون‌ها و انجمن‌های دانشجویی سراها
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    مشاهده تشکل‌های فعال، عضویت مستقیم یا ثبت درخواست عضویت برای تأیید امور فرهنگی
+                  </p>
+                </div>
+              </div>
+
+              {activeCulturalAssociations.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                  در حال حاضر تشکل یا انجمن فعالی ثبت نشده است.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {activeCulturalAssociations.map((assoc) => {
+                    const myMem = myAssociationMemberships.find(
+                      (m) => m.associationId === assoc.id && m.status !== 'rejected'
+                    );
+                    const rejectedMem = !myMem
+                      ? myAssociationMemberships.find(
+                          (m) => m.associationId === assoc.id && m.status === 'rejected'
+                        )
+                      : undefined;
+                    const approvedCount = Storage.getAssociationMemberships().filter(
+                      (m) => m.associationId === assoc.id && m.status === 'approved'
+                    ).length;
+
+                    return (
+                      <div
+                        key={assoc.id}
+                        className="p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 space-y-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                                {assoc.name}
+                              </h4>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-950 dark:text-fuchsia-300 font-bold">
+                                {catLabels[assoc.category]}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap gap-2">
+                              <span>{assoc.membershipMode === 'open_instant' ? 'عضویت آزاد و فوری' : 'نیازمند تأیید امور فرهنگی'}</span>
+                              <span>•</span>
+                              <span>اعضای تأییدشده: {approvedCount}{assoc.maxCapacity ? ` از ${assoc.maxCapacity}` : ''} نفر</span>
+                            </div>
+                          </div>
+
+                          {myMem && (
+                            <span
+                              className={`text-[11px] px-2.5 py-1 rounded-xl font-extrabold ${
+                                myMem.status === 'approved'
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                              }`}
+                            >
+                              {myMem.status === 'approved' ? 'عضو فعال' : 'در انتظار تأیید امور فرهنگی'}
+                            </span>
+                          )}
+                        </div>
+
+                        {assoc.description && (
+                          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                            {assoc.description}
+                          </p>
+                        )}
+
+                        <div className="flex flex-wrap gap-3 text-[11px] text-slate-500">
+                          {assoc.mentorName && <span>مسئول/دبیر: <strong>{assoc.mentorName}</strong></span>}
+                          {assoc.meetingSchedule && <span>زمان جلسات: <strong>{assoc.meetingSchedule}</strong></span>}
+                          {assoc.location && <span>محل: <strong>{assoc.location}</strong></span>}
+                        </div>
+
+                        {rejectedMem && (
+                          <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-[11px] text-rose-700 dark:text-rose-300">
+                            درخواست قبلی شما تأیید نشد{rejectedMem.reviewNote ? `: ${rejectedMem.reviewNote}` : '.'}
+                          </div>
+                        )}
+
+                        {!myMem && (
+                          <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                            {assoc.membershipMode === 'requires_approval' && (
+                              <input
+                                type="text"
+                                value={assocNotes[assoc.id] || ''}
+                                onChange={(e) =>
+                                  setAssocNotes((prev) => ({ ...prev, [assoc.id]: e.target.value }))
+                                }
+                                placeholder="توضیح یا سوابق علاقه‌مندی شما جهت بررسی امور فرهنگی (اختیاری)..."
+                                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const res = Storage.requestOrJoinAssociation({
+                                  association: assoc,
+                                  student,
+                                  dormName: studentDorm?.name || student.assignedDormName,
+                                  requestNote: assocNotes[assoc.id],
+                                });
+                                setCulturalFeedback({
+                                  type: res.success ? 'success' : 'error',
+                                  text: res.message,
+                                });
+                                if (res.success) {
+                                  setAssocNotes((prev) => ({ ...prev, [assoc.id]: '' }));
+                                  onRefreshData();
+                                }
+                              }}
+                              className="w-full py-2.5 px-4 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <UserPlus className="w-4 h-4" />
+                              <span>
+                                {assoc.membershipMode === 'open_instant'
+                                  ? 'عضویت فوری در این تشکل'
+                                  : 'ارسال درخواست عضویت جهت تأیید'}
+                              </span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* تب برنامه‌های ورزشی و تربیت بدنی (ثبت‌نام و پیگیری فعالیت‌های ورزشی) */}
+      {activeTab === 'sports' && (() => {
+        const sportTypeLabels: Record<SportsProgramType, string> = {
+          futsal: 'فوتسال',
+          volleyball: 'والیبال',
+          basketball: 'بسکتبال',
+          table_tennis: 'تنیس روی میز',
+          badminton: 'بدمینتون',
+          chess: 'شطرنج',
+          track_field: 'دو و میدانی',
+          swimming: 'شنا',
+          fitness_morning: 'ورزش صبحگاهی و همگانی',
+          hiking: 'کوهپیمایی و طبیعت‌گردی',
+          martial_arts: 'ورزش‌های رزمی',
+          other: 'سایر رشته‌ها',
+        };
+        const sportKindLabels: Record<SportsProgramKind, string> = {
+          training: 'کلاس و تمرین آموزشی',
+          tournament: 'مسابقه و المپیاد درون‌سرایی',
+          recreation: 'اردو و برنامه تفریحی',
+          morning_exercise: 'ورزش صبحگاهی و نشاط همگانی',
+        };
+        const sportStatusMeta: Record<SportsProgramStatus, { label: string; cls: string }> = {
+          planned: { label: 'به‌زودی (برنامه‌ریزی‌شده)', cls: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
+          registration_open: { label: 'ثبت‌نام باز است', cls: 'bg-emerald-600 text-white' },
+          ongoing: { label: 'در حال برگزاری', cls: 'bg-cyan-600 text-white' },
+          completed: { label: 'پایان‌یافته', cls: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300' },
+          cancelled: { label: 'لغوشده', cls: 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300' },
+        };
+        const dayLabels: Record<DayOfWeek | 'multiple', string> = {
+          saturday: 'شنبه',
+          sunday: 'یکشنبه',
+          monday: 'دوشنبه',
+          tuesday: 'سه‌شنبه',
+          wednesday: 'چهارشنبه',
+          thursday: 'پنج‌شنبه',
+          friday: 'جمعه',
+          multiple: 'چند روز در هفته',
+        };
+
+        const filteredProgs = publishedSportsPrograms.filter((p) => {
+          if (sportsTypeFilter !== 'all' && p.sportType !== sportsTypeFilter) return false;
+          if (sportsKindFilter !== 'all' && p.programKind !== sportsKindFilter) return false;
+          return true;
+        });
+
+        return (
+          <div className="space-y-5 animate-in fade-in duration-200">
+            {sportsFeedback && (
+              <div
+                className={`p-3.5 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
+                  sportsFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                    : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                }`}
+              >
+                {sportsFeedback.type === 'success' ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span>{sportsFeedback.text}</span>
+              </div>
+            )}
+
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700">
+                    <Activity className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
+                      برنامه‌های متنوع ورزشی و تربیت بدنی سراهای دانشجویی
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      مشاهده برنامه‌های ورزشی برنامه‌ریزی‌شده توسط امور دانشجویی و تربیت بدنی، انتخاب سطح مهارت و ثبت‌نام آنلاین
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={sportsTypeFilter}
+                    onChange={(e) => setSportsTypeFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                  >
+                    <option value="all">همه رشته‌های ورزشی</option>
+                    {(Object.keys(sportTypeLabels) as SportsProgramType[]).map((k) => (
+                      <option key={k} value={k}>
+                        {sportTypeLabels[k]}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={sportsKindFilter}
+                    onChange={(e) => setSportsKindFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                  >
+                    <option value="all">همه انواع برنامه</option>
+                    {(Object.keys(sportKindLabels) as SportsProgramKind[]).map((k) => (
+                      <option key={k} value={k}>
+                        {sportKindLabels[k]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {filteredProgs.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                  در حال حاضر برنامه ورزشی منطبق با فیلتر شما منتشر نشده است.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {filteredProgs.map((prog) => {
+                    const activeRegs = allSportsRegistrations.filter(
+                      (r) => r.programId === prog.id && r.status !== 'cancelled'
+                    );
+                    const myReg = activeRegs.find((r) => r.studentId === student.studentId);
+                    const isFull =
+                      Boolean(prog.maxCapacity && prog.maxCapacity > 0 && activeRegs.length >= prog.maxCapacity);
+                    const canRegister =
+                      (prog.status === 'registration_open' || prog.status === 'ongoing') &&
+                      !myReg &&
+                      !isFull;
+                    const statusBadge = sportStatusMeta[prog.status];
+
+                    return (
+                      <div
+                        key={prog.id}
+                        className="p-5 rounded-3xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 space-y-3 flex flex-col justify-between"
+                      >
+                        <div className="space-y-2.5">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
+                                  {prog.programCode}
+                                </span>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300 font-bold">
+                                  {sportTypeLabels[prog.sportType]}
+                                </span>
+                                <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold ${statusBadge.cls}`}>
+                                  {statusBadge.label}
+                                </span>
+                              </div>
+                              <h4 className="font-black text-sm text-slate-900 dark:text-white">
+                                {prog.title}
+                              </h4>
+                            </div>
+
+                            {myReg && (
+                              <span className="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 text-[11px] font-extrabold inline-flex items-center gap-1 border border-emerald-300 dark:border-emerald-700">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>
+                                  {myReg.status === 'attended' ? 'حضور تأییدشده' : 'ثبت‌نام‌شدید'}
+                                </span>
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200/70 dark:border-slate-700">
+                            <div>
+                              <strong>نوع:</strong> {sportKindLabels[prog.programKind]}
+                            </div>
+                            <div>
+                              <strong>محدوده:</strong> {prog.dormName}
+                            </div>
+                            <div>
+                              <strong>زمان:</strong>{' '}
+                              {[prog.dayOfWeek ? dayLabels[prog.dayOfWeek] : '', prog.scheduleDate]
+                                .filter(Boolean)
+                                .join(' • ')}{' '}
+                              ({prog.startTime} تا {prog.endTime})
+                            </div>
+                            <div>
+                              <strong>ظرفیت:</strong> {activeRegs.length} /{' '}
+                              {prog.maxCapacity ? prog.maxCapacity : 'نامحدود'}
+                            </div>
+                            <div className="sm:col-span-2 flex items-center gap-1">
+                              <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>
+                                <strong>مکان:</strong> {prog.venue}
+                                {prog.coachName ? ` • مربی: ${prog.coachName}` : ''}
+                              </span>
+                            </div>
+                          </div>
+
+                          {prog.description && (
+                            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                              {prog.description}
+                            </p>
+                          )}
+                          {(prog.eligibility || prog.equipmentNeeded) && (
+                            <div className="text-[11px] text-slate-500 flex flex-wrap gap-3">
+                              {prog.eligibility && <span>شرایط: {prog.eligibility}</span>}
+                              {prog.equipmentNeeded && <span>لوازم: {prog.equipmentNeeded}</span>}
+                            </div>
+                          )}
+                        </div>
+
+                        {myReg ? (
+                          <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
+                            <span className="text-[11px] text-slate-500">
+                              زمان ثبت‌نام: {myReg.registeredAt}
+                            </span>
+                            {myReg.status !== 'attended' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = Storage.cancelSportsRegistration(
+                                    prog.id,
+                                    student.studentId
+                                  );
+                                  setSportsFeedback({
+                                    type: res.success ? 'success' : 'error',
+                                    text: res.message,
+                                  });
+                                  if (res.success) onRefreshData();
+                                }}
+                                className="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                <span>انصراف از برنامه</span>
+                              </button>
+                            )}
+                          </div>
+                        ) : canRegister ? (
+                          <div className="pt-3 border-t border-slate-200 dark:border-slate-700 space-y-2.5">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                              <select
+                                value={sportsSkillByProg[prog.id] || 'beginner'}
+                                onChange={(e) =>
+                                  setSportsSkillByProg((prev) => ({
+                                    ...prev,
+                                    [prog.id]: e.target.value as 'beginner' | 'intermediate' | 'advanced',
+                                  }))
+                                }
+                                className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                              >
+                                <option value="beginner">سطح مهارت: مبتدی</option>
+                                <option value="intermediate">سطح مهارت: متوسط</option>
+                                <option value="advanced">سطح مهارت: حرفه‌ای / تیمی</option>
+                              </select>
+                              <input
+                                type="text"
+                                value={sportsNotesByProg[prog.id] || ''}
+                                onChange={(e) =>
+                                  setSportsNotesByProg((prev) => ({
+                                    ...prev,
+                                    [prog.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="توضیح یا پست بازی (اختیاری)..."
+                                className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                              />
+                            </div>
+
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(sportsHealthByProg[prog.id])}
+                                onChange={(e) =>
+                                  setSportsHealthByProg((prev) => ({
+                                    ...prev,
+                                    [prog.id]: e.target.checked,
+                                  }))
+                                }
+                              />
+                              <span>آمادگی جسمانی و سلامت خود برای شرکت در این فعالیت ورزشی را تأیید می‌کنم.</span>
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const res = Storage.registerForSportsProgram({
+                                  program: prog,
+                                  student,
+                                  dormName: studentDorm?.name || student.assignedDormName,
+                                  roomNumber: studentRoom?.roomNumber || student.assignedRoomNumber,
+                                  skillLevel: sportsSkillByProg[prog.id] || 'beginner',
+                                  healthConfirmed: Boolean(sportsHealthByProg[prog.id]),
+                                  note: sportsNotesByProg[prog.id] || '',
+                                });
+                                setSportsFeedback({
+                                  type: res.success ? 'success' : 'error',
+                                  text: res.message,
+                                });
+                                if (res.success) {
+                                  setSportsNotesByProg((prev) => ({ ...prev, [prog.id]: '' }));
+                                  onRefreshData();
+                                }
+                              }}
+                              className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <Dumbbell className="w-4 h-4" />
+                              <span>ثبت‌نام قطعی در برنامه ورزشی</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="pt-2 border-t border-slate-200 dark:border-slate-700 text-[11px] font-bold text-amber-700 dark:text-amber-300">
+                            {isFull
+                              ? 'ظرفیت ثبت‌نام این برنامه تکمیل شده است.'
+                              : prog.status === 'planned'
+                              ? 'ثبت‌نام این برنامه به‌زودی توسط امور دانشجویی باز خواهد شد.'
+                              : 'مهلت ثبت‌نام این برنامه به پایان رسیده است.'}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* تب انتخابات شورای صنفی (رأی‌گیری منحصراً در بازه زمانی فعال‌شده مجاز است) */}
+      {activeTab === 'elections' && (
+        <div className="space-y-5 animate-in fade-in duration-200">
+          {electionFeedback && (
+            <div
+              className={`p-3.5 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
+                electionFeedback.type === 'success'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                  : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+              }`}
+            >
+              {electionFeedback.type === 'success' ? (
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              )}
+              <span>{electionFeedback.text}</span>
+            </div>
+          )}
+
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700">
+                  <Vote className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
+                    صندوق الکترونیکی انتخابات شورای صنفی دانشجویان
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    رأی‌گیری منحصراً در بازه زمانی فعال‌شده و اطلاع‌رسانی‌شده توسط امور دانشجویی امکان‌پذیر است
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {allGuildElections.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                در حال حاضر هیچ دوره انتخاباتی برای شورای صنفی ثبت نشده است.
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {allGuildElections.map((el) => {
+                  const hasVoted = Storage.hasStudentVotedInElection(el.id, student.studentId);
+                  const isEligible = el.targetEligibility === 'all_students' || isStudentDormResident;
+                  const canVoteNow = el.isActiveWindow && isEligible && !hasVoted;
+                  const selectedIds = selectedCandidatesByElection[el.id] || [];
+
+                  return (
+                    <div
+                      key={el.id}
+                      className={`p-5 rounded-3xl border space-y-4 ${
+                        el.isActiveWindow
+                          ? 'bg-indigo-50/40 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800'
+                          : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="font-black text-sm sm:text-base text-slate-900 dark:text-white">
+                              {el.title}
+                            </h4>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
+                              {el.electionCode}
+                            </span>
+                            {el.isActiveWindow ? (
+                              <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-600 text-white font-extrabold">
+                                بازه رأی‌گیری فعال است
+                              </span>
+                            ) : (
+                              <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-extrabold inline-flex items-center gap-1">
+                                <Lock className="w-3 h-3" />
+                                <span>بازه رأی‌گیری غیرفعال / بسته است</span>
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-3">
+                            <span>بازه زمانی: {el.startDate} {el.startTime || ''} تا {el.endDate} {el.endTime || ''}</span>
+                            <span>•</span>
+                            <span>سقف انتخاب: حداکثر {el.maxSelections} کاندیدا</span>
+                            <span>•</span>
+                            <span>جامعه هدف: {el.targetEligibility === 'dorm_only' ? 'دانشجویان خوابگاهی' : 'کلیه دانشجویان (خوابگاهی و ترددی)'}</span>
+                          </div>
+                        </div>
+
+                        {hasVoted && (
+                          <span className="px-3 py-1.5 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 text-xs font-extrabold inline-flex items-center gap-1.5 border border-emerald-300 dark:border-emerald-700">
+                            <CheckCircle className="w-4 h-4 text-emerald-600" />
+                            <span>رأی شما ثبت شده است</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {el.noticeText && (
+                        <div className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                          {el.noticeText}
+                        </div>
+                      )}
+
+                      {!el.isActiveWindow && !hasVoted && (
+                        <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 font-bold flex items-center gap-2">
+                          <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span>
+                            ثبت رأی فقط در بازه زمانی که واحد امور دانشجویی رأی‌گیری را فعال و اطلاع‌رسانی کند امکان‌پذیر است.
+                          </span>
+                        </div>
+                      )}
+
+                      {!isEligible && (
+                        <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-200 font-bold">
+                          این انتخابات ویژه دانشجویان دارای اسکان خوابگاهی تعریف شده است.
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {el.candidates.map((cand) => {
+                          const isChecked = selectedIds.includes(cand.id);
+                          return (
+                            <button
+                              key={cand.id}
+                              type="button"
+                              disabled={!canVoteNow}
+                              onClick={() => {
+                                if (!canVoteNow) return;
+                                setSelectedCandidatesByElection((prev) => {
+                                  const curr = prev[el.id] || [];
+                                  if (curr.includes(cand.id)) {
+                                    return { ...prev, [el.id]: curr.filter((c) => c !== cand.id) };
+                                  }
+                                  if (el.maxSelections <= 1) {
+                                    return { ...prev, [el.id]: [cand.id] };
+                                  }
+                                  if (curr.length >= el.maxSelections) {
+                                    return prev;
+                                  }
+                                  return { ...prev, [el.id]: [...curr, cand.id] };
+                                });
+                              }}
+                              className={`p-3.5 rounded-2xl border text-right transition flex flex-col justify-between gap-2 ${
+                                !canVoteNow
+                                  ? 'opacity-70 cursor-not-allowed bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                                  : isChecked
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md cursor-pointer'
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-indigo-400 cursor-pointer'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="font-extrabold text-xs sm:text-sm">{cand.fullName}</div>
+                                  {(cand.fieldOfStudy || cand.dormName) && (
+                                    <div className={`text-[11px] mt-0.5 ${isChecked ? 'text-indigo-100' : 'text-slate-500'}`}>
+                                      {[cand.fieldOfStudy, cand.entryTerm, cand.dormName].filter(Boolean).join(' • ')}
+                                    </div>
+                                  )}
+                                </div>
+                                <span
+                                  className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 text-[10px] font-black ${
+                                    isChecked
+                                      ? 'bg-white text-indigo-700 border-white'
+                                      : 'border-slate-300 dark:border-slate-600'
+                                  }`}
+                                >
+                                  {isChecked ? '✓' : ''}
+                                </span>
+                              </div>
+                              {cand.slogan && (
+                                <p className={`text-[11px] leading-relaxed ${isChecked ? 'text-indigo-50' : 'text-slate-600 dark:text-slate-400'}`}>
+                                  «{cand.slogan}»
+                                </p>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {canVoteNow && (
+                        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-indigo-200/70 dark:border-indigo-800/50">
+                          <div className="text-xs text-slate-600 dark:text-slate-300">
+                            تعداد کاندیدای انتخاب‌شده: <strong>{selectedIds.length}</strong> از {el.maxSelections}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={selectedIds.length === 0}
+                            onClick={() => {
+                              const res = Storage.castGuildElectionVote({
+                                election: el,
+                                student,
+                                candidateIds: selectedIds,
+                                dormName: studentDorm?.name || student.assignedDormName,
+                              });
+                              setElectionFeedback({
+                                type: res.success ? 'success' : 'error',
+                                text: res.message,
+                              });
+                              if (res.success) {
+                                onRefreshData();
+                              }
+                            }}
+                            className="px-6 py-2.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md"
+                          >
+                            <Send className="w-4 h-4" />
+                            <span>ثبت نهایی رأی در صندوق انتخابات</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* مدال کارت شناسایی و مجوز اسکان سرا */}

@@ -17,7 +17,20 @@ interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (user: NonNullable<CurrentUser>) => void;
-  onOpenUserGuide?: (role?: 'admin' | 'supervisor' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' | 'student') => void;
+  onOpenUserGuide?: (
+    role?:
+      | 'admin'
+      | 'supervisor'
+      | 'maintenance'
+      | 'warehouse'
+      | 'procurement'
+      | 'counselor'
+      | 'finance'
+      | 'education'
+      | 'cultural'
+      | 'student_affairs'
+      | 'student'
+  ) => void;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({
@@ -26,7 +39,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onLoginSuccess,
   onOpenUserGuide,
 }) => {
-  const [tab, setTab] = useState<'student' | 'supervisor' | 'counselor' | 'maintenance' | 'warehouse' | 'procurement' | 'finance' | 'education' | 'admin'>('student');
+  const [tab, setTab] = useState<
+    | 'student'
+    | 'supervisor'
+    | 'counselor'
+    | 'maintenance'
+    | 'warehouse'
+    | 'procurement'
+    | 'finance'
+    | 'education'
+    | 'cultural'
+    | 'student_affairs'
+    | 'admin'
+  >('student');
 
   // فرم دانشجو
   const [studentId, setStudentId] = useState('');
@@ -531,6 +556,102 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         });
         setErrorMsg('نام کاربری یا کلمه عبور کارشناس آموزش اشتباه است.');
       }
+    } else if (tab === 'cultural') {
+      const staffList = Storage.getCulturalStaff();
+      const cleanU = toEnglishDigits(username.trim()).toLowerCase();
+      const cleanP = toEnglishDigits(password.trim());
+      const cul = staffList.find(
+        (s) =>
+          toEnglishDigits(s.username.trim()).toLowerCase() === cleanU &&
+          toEnglishDigits(s.password.trim()) === cleanP
+      );
+      if (cul) {
+        if (cul.status === 'inactive' || cul.isActive === false) {
+          Storage.addActivityLog({
+            category: 'auth',
+            action: 'تلاش ورود حساب غیرفعال امور فرهنگی',
+            details: `کارشناس امور فرهنگی ${cul.fullName} (${cul.username}) با حساب غیرفعال تلاش به ورود کرد.`,
+            targetName: cul.fullName,
+            severity: 'warning',
+            actorName: cul.fullName,
+            actorRole: 'cultural',
+            actorUsername: cul.username,
+          });
+          setErrorMsg('حساب کاربری امور فرهنگی غیرفعال است. لطفاً با مدیر سامانه تماس بگیرید.');
+          return;
+        }
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'ورود موفق کارشناس امور فرهنگی',
+          details: `کارشناس امور فرهنگی ${cul.fullName} (${cul.username}) وارد سامانه شد.`,
+          targetName: cul.fullName,
+          actorName: cul.fullName,
+          actorRole: 'cultural',
+          actorUsername: cul.username,
+        });
+        onLoginSuccess({ role: 'cultural', staff: cul });
+        onClose();
+      } else {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'تلاش ناموفق ورود امور فرهنگی',
+          details: `تلاش ناموفق ورود امور فرهنگی با نام کاربری «${cleanU || '-'}» ثبت شد.`,
+          targetName: cleanU || '-',
+          severity: 'warning',
+          actorName: 'کاربر مهمان',
+          actorRole: 'system',
+          actorUsername: cleanU,
+        });
+        setErrorMsg('نام کاربری یا کلمه عبور کارشناس امور فرهنگی اشتباه است.');
+      }
+    } else if (tab === 'student_affairs') {
+      const staffList = Storage.getStudentAffairsStaff();
+      const cleanU = toEnglishDigits(username.trim()).toLowerCase();
+      const cleanP = toEnglishDigits(password.trim());
+      const sa = staffList.find(
+        (s) =>
+          toEnglishDigits(s.username.trim()).toLowerCase() === cleanU &&
+          toEnglishDigits(s.password.trim()) === cleanP
+      );
+      if (sa) {
+        if (sa.status === 'inactive' || sa.isActive === false) {
+          Storage.addActivityLog({
+            category: 'auth',
+            action: 'تلاش ورود حساب غیرفعال امور دانشجویی',
+            details: `کارشناس امور دانشجویی ${sa.fullName} (${sa.username}) با حساب غیرفعال تلاش به ورود کرد.`,
+            targetName: sa.fullName,
+            severity: 'warning',
+            actorName: sa.fullName,
+            actorRole: 'student_affairs',
+            actorUsername: sa.username,
+          });
+          setErrorMsg('حساب کاربری امور دانشجویی غیرفعال است. لطفاً با مدیر سامانه تماس بگیرید.');
+          return;
+        }
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'ورود موفق امور دانشجویی و تربیت بدنی',
+          details: `کارشناس امور دانشجویی ${sa.fullName} (${sa.username}) وارد سامانه شد.`,
+          targetName: sa.fullName,
+          actorName: sa.fullName,
+          actorRole: 'student_affairs',
+          actorUsername: sa.username,
+        });
+        onLoginSuccess({ role: 'student_affairs', staff: sa });
+        onClose();
+      } else {
+        Storage.addActivityLog({
+          category: 'auth',
+          action: 'تلاش ناموفق ورود امور دانشجویی',
+          details: `تلاش ناموفق ورود امور دانشجویی با نام کاربری «${cleanU || '-'}» ثبت شد.`,
+          targetName: cleanU || '-',
+          severity: 'warning',
+          actorName: 'کاربر مهمان',
+          actorRole: 'system',
+          actorUsername: cleanU,
+        });
+        setErrorMsg('نام کاربری یا کلمه عبور امور دانشجویی اشتباه است.');
+      }
     } else if (tab === 'admin') {
       const currentAdminPass = toEnglishDigits(String(Storage.getSettings().adminPassword || '261').trim());
       const cleanAdminUser = toEnglishDigits(username.trim()).toLowerCase();
@@ -701,6 +822,36 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             }`}
           >
             آموزش
+          </button>
+          <button
+            onClick={() => {
+              setTab('cultural');
+              setErrorMsg('');
+              setRecoverySuccessMsg('');
+              resetRecoveryState();
+            }}
+            className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
+              tab === 'cultural'
+                ? 'bg-white dark:bg-slate-700 text-fuchsia-700 dark:text-fuchsia-300 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+            }`}
+          >
+            امور فرهنگی
+          </button>
+          <button
+            onClick={() => {
+              setTab('student_affairs');
+              setErrorMsg('');
+              setRecoverySuccessMsg('');
+              resetRecoveryState();
+            }}
+            className={`py-2 text-[10px] sm:text-[11px] font-bold rounded-xl transition text-center cursor-pointer ${
+              tab === 'student_affairs'
+                ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+            }`}
+          >
+            امور دانشجویی
           </button>
           <button
             onClick={() => {
@@ -922,8 +1073,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
         )}
 
-        {/* فرم سرپرست، مشاور، تأسیسات، انبار، کارپرداز، امور مالی، کارشناس آموزش و مدیر */}
-        {(tab === 'supervisor' || tab === 'counselor' || tab === 'admin' || tab === 'maintenance' || tab === 'warehouse' || tab === 'procurement' || tab === 'finance' || tab === 'education') && (
+        {/* فرم سرپرست، مشاور، تأسیسات، انبار، کارپرداز، امور مالی، کارشناس آموزش، امور فرهنگی، امور دانشجویی و مدیر */}
+        {(tab === 'supervisor' ||
+          tab === 'counselor' ||
+          tab === 'admin' ||
+          tab === 'maintenance' ||
+          tab === 'warehouse' ||
+          tab === 'procurement' ||
+          tab === 'finance' ||
+          tab === 'education' ||
+          tab === 'cultural' ||
+          tab === 'student_affairs') && (
           <form onSubmit={handleStaffLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -944,6 +1104,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     ? 'نام کاربری امور مالی و حسابداری'
                     : tab === 'education'
                     ? 'نام کاربری کارشناس آموزش'
+                    : tab === 'cultural'
+                    ? 'نام کاربری امور فرهنگی'
+                    : tab === 'student_affairs'
+                    ? 'نام کاربری امور دانشجویی و تربیت بدنی'
                     : tab === 'maintenance'
                     ? 'نام کاربری تکنسین تأسیسات'
                     : tab === 'supervisor'
@@ -982,6 +1146,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'
                   : tab === 'education'
                   ? 'bg-sky-600 hover:bg-sky-700 shadow-sky-600/25'
+                  : tab === 'cultural'
+                  ? 'bg-fuchsia-600 hover:bg-fuchsia-700 shadow-fuchsia-600/25'
+                  : tab === 'student_affairs'
+                  ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/25'
                   : tab === 'maintenance'
                   ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/25'
                   : 'bg-teal-600 hover:bg-teal-700 shadow-teal-600/25'
@@ -1001,6 +1169,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 ? 'ورود به کارتابل امور مالی و حسابداری'
                 : tab === 'education'
                 ? 'ورود به کارتابل کارشناس آموزش'
+                : tab === 'cultural'
+                ? 'ورود به کارتابل امور فرهنگی و تشکل‌ها'
+                : tab === 'student_affairs'
+                ? 'ورود به کارتابل امور دانشجویی و تربیت بدنی'
                 : 'ورود مدیر کل سامانه'}
             </button>
           </form>

@@ -35,6 +35,7 @@ interface EducationDashboardProps {
   students: Student[];
   messages: Message[];
   settings: AppSettings;
+  cloudSyncTick?: number;
   onRefreshData: () => void;
   onOpenMessages: () => void;
   onOpenUserGuide: (role?: 'education') => void;
@@ -45,6 +46,7 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
   students,
   messages,
   settings,
+  cloudSyncTick,
   onRefreshData,
   onOpenMessages,
   onOpenUserGuide,
@@ -202,11 +204,11 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
   const academicNotices = useMemo(() => {
     const all = Storage.getAcademicNotices();
     return all.filter((n) => noticeListFilter === 'all' || n.status === noticeListFilter);
-  }, [noticeListFilter, messages, students]);
+  }, [noticeListFilter, messages, students, cloudSyncTick]);
 
   const pendingNoticesCount = useMemo(
     () => Storage.getAcademicNotices().filter((n) => n.status === 'pending').length,
-    [messages, students]
+    [messages, students, cloudSyncTick]
   );
 
   const handleSendEducationMessage = (e: React.FormEvent) => {
