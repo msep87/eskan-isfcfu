@@ -14,6 +14,7 @@ import {
   CulturalStaff,
   StudentAffairsStaff,
   SecurityStaff,
+  ViceDeanStaff,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
@@ -66,6 +67,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Landmark,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -79,7 +81,8 @@ export type UserCategoryKey =
   | 'education'
   | 'cultural'
   | 'student_affairs'
-  | 'security';
+  | 'security'
+  | 'vice_dean';
 
 interface AdminUsersPanelProps {
   activeCategory: UserCategoryKey;
@@ -98,6 +101,7 @@ interface AdminUsersPanelProps {
   culturalStaff?: CulturalStaff[];
   studentAffairsStaff?: StudentAffairsStaff[];
   securityStaff?: SecurityStaff[];
+  viceDeanStaff?: ViceDeanStaff[];
   onRefreshData: () => void;
   onOpenExcelModal: (tab: ExcelImportTab) => void;
   onOpenReports: () => void;
@@ -122,7 +126,8 @@ type StaffRole =
   | 'education'
   | 'cultural'
   | 'student_affairs'
-  | 'security';
+  | 'security'
+  | 'vice_dean';
 type StudentSortKey =
   | 'default'
   | 'lastName'
@@ -149,6 +154,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   culturalStaff = [],
   studentAffairsStaff = [],
   securityStaff = [],
+  viceDeanStaff = [],
   onRefreshData,
   onOpenExcelModal,
   onOpenReports,
@@ -336,6 +342,12 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           showToast('error', res.message);
           return;
         }
+      } else if (role === 'vice_dean') {
+        const res = Storage.updateViceDeanStaff(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
       }
 
       const syncRes = await Storage.waitForPendingCloudSync();
@@ -430,6 +442,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             ? studentAffairsStaff
             : targetRole === 'security'
             ? securityStaff
+            : targetRole === 'vice_dean'
+            ? viceDeanStaff
             : counselors;
         const found = pool.find((u) => normKey(u.username) === nk || normKey(u.id) === nk);
         if (found) {
@@ -948,6 +962,22 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     });
   }, [securityStaff, staffQuery, staffStatusFilter, staffDormFilter]);
 
+  const filteredViceDean = useMemo(() => {
+    const q = norm(staffQuery);
+    return viceDeanStaff.filter((vd) => {
+      const isActive = vd.status !== 'inactive' && vd.isActive !== false;
+      if (staffStatusFilter === 'active' && !isActive) return false;
+      if (staffStatusFilter === 'inactive' && isActive) return false;
+      if (q) {
+        const txt = `${norm(vd.fullName)} ${norm(vd.username)} ${norm(vd.mobile || vd.phone)} ${norm(
+          vd.department
+        )} ${norm(vd.title)} ${norm(vd.notes)}`;
+        if (!txt.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [viceDeanStaff, staffQuery, staffStatusFilter]);
+
   // باز کردن مدال افزودن کاربر پرسنل
   const openAddStaffModal = (role: StaffRole) => {
     setStaffModalRole(role);
@@ -970,9 +1000,11 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         ? 'اداره امور دانشجویی، تربیت بدنی و رفاهی'
         : role === 'security'
         ? 'واحد حراست و انتظامات'
+        : role === 'vice_dean'
+        ? 'معاونت دانشجویی دانشگاه فرهنگیان'
         : ''
     );
-    setFormOfficeLocation('');
+    setFormOfficeLocation(role === 'vice_dean' ? 'معاون دانشجویی' : '');
     setFormNotes('');
     setFormActive(true);
     setFormPhotoUrl('');
@@ -1001,6 +1033,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       | CulturalStaff
       | StudentAffairsStaff
       | SecurityStaff
+      | ViceDeanStaff
   ) => {
     setStaffModalRole(role);
     setEditingStaffId(user.id);
@@ -1073,6 +1106,12 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormActive(sec.status !== 'inactive' && sec.isActive !== false);
       const rawIds = sec.coveredDormIds || [];
       setFormDormIds(rawIds.length === 0 || rawIds.includes('all') ? dorms.map((d) => d.id) : rawIds);
+    } else if (role === 'vice_dean') {
+      const vd = user as ViceDeanStaff;
+      setFormDepartment(vd.department || 'معاونت دانشجویی دانشگاه فرهنگیان');
+      setFormOfficeLocation(vd.title || 'معاون دانشجویی');
+      setFormNotes(vd.notes || '');
+      setFormActive(vd.status !== 'inactive' && vd.isActive !== false);
     }
 
     setStaffModalOpen(true);
@@ -1525,6 +1564,47 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         }
         showToast('success', res.message);
       }
+    } else if (staffModalRole === 'vice_dean') {
+      if (editingStaffId) {
+        const res = Storage.updateViceDeanStaff(editingStaffId, {
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'معاونت دانشجویی دانشگاه فرهنگیان',
+          title: formOfficeLocation.trim() || 'معاون دانشجویی',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      } else {
+        const res = Storage.addViceDeanStaff({
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'معاونت دانشجویی دانشگاه فرهنگیان',
+          title: formOfficeLocation.trim() || 'معاون دانشجویی',
+          role: 'vice_dean',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      }
     }
 
     await Storage.waitForPendingCloudSync();
@@ -1600,6 +1680,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       showToast('success', res.message);
     } else if (deleteTarget.role === 'security') {
       const res = Storage.deleteSecurityStaff(deleteTarget.id);
+      showToast('success', res.message);
+    } else if (deleteTarget.role === 'vice_dean') {
+      const res = Storage.deleteViceDeanStaff(deleteTarget.id);
       showToast('success', res.message);
     }
     setDeleteTarget(null);
@@ -1706,6 +1789,15 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       activeBg: 'bg-slate-800 text-amber-300 border-slate-700 shadow-lg shadow-slate-900/25',
       badgeBg: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-amber-300',
     },
+    {
+      key: 'vice_dean' as const,
+      title: 'معاونت دانشجویی',
+      subtitle: 'تجمیع سرپرستی، امور دانشجویی و فرهنگی، گزارش جامع و پایش پیام‌ها',
+      count: viceDeanStaff.length,
+      icon: Landmark,
+      activeBg: 'bg-indigo-900 text-cyan-200 border-indigo-700 shadow-lg shadow-indigo-900/25',
+      badgeBg: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-cyan-300',
+    },
   ];
 
   const roleLabels: Record<StaffRole, string> = {
@@ -1719,6 +1811,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     cultural: 'کارشناس امور فرهنگی',
     student_affairs: 'کارشناس امور دانشجویی و تربیت بدنی',
     security: 'کارشناس حراست و انتظامات',
+    vice_dean: 'معاونت دانشجویی',
   };
 
   return (
@@ -1753,7 +1846,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 educationStaff.length +
                 culturalStaff.length +
                 studentAffairsStaff.length +
-                securityStaff.length}
+                securityStaff.length +
+                viceDeanStaff.length}
             </span>
           </div>
         </div>
@@ -2738,6 +2832,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 {activeCategory === 'cultural' && <FileText className="w-5 h-5 text-fuchsia-600" />}
                 {activeCategory === 'student_affairs' && <Award className="w-5 h-5 text-indigo-700" />}
                 {activeCategory === 'security' && <Shield className="w-5 h-5 text-amber-600" />}
+                {activeCategory === 'vice_dean' && <Landmark className="w-5 h-5 text-indigo-700" />}
               </div>
               <div>
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
@@ -2751,6 +2846,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'cultural' && `مدیریت کاربران امور فرهنگی (${filteredCultural.length} از ${culturalStaff.length})`}
                   {activeCategory === 'student_affairs' && `مدیریت کاربران امور دانشجویی و تربیت بدنی (${filteredStudentAffairs.length} از ${studentAffairsStaff.length})`}
                   {activeCategory === 'security' && `مدیریت کارشناسان حراست و انتظامات (${filteredSecurity.length} از ${securityStaff.length})`}
+                  {activeCategory === 'vice_dean' && `مدیریت کاربران معاونت دانشجویی (${filteredViceDean.length} از ${viceDeanStaff.length})`}
                 </h3>
                 <p className="text-xs text-slate-400">
                   مشاهده، جستجوی پیشرفته، ویرایش مشخصات، تغییر یا ریست رمز عبور و ورود تکی یا گروهی
@@ -2781,6 +2877,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       ? 'student_affairs'
                       : activeCategory === 'security'
                       ? 'security'
+                      : activeCategory === 'vice_dean'
+                      ? 'vice_dean'
                       : 'counselor'
                   )
                 }
@@ -2798,12 +2896,14 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'cultural' && 'افزودن کاربر امور فرهنگی جدید'}
                   {activeCategory === 'student_affairs' && 'افزودن کاربر امور دانشجویی جدید'}
                   {activeCategory === 'security' && 'افزودن کاربر حراست جدید'}
+                  {activeCategory === 'vice_dean' && 'افزودن کاربر معاونت دانشجویی'}
                 </span>
               </button>
 
               {activeCategory !== 'cultural' &&
                 activeCategory !== 'student_affairs' &&
-                activeCategory !== 'security' && (
+                activeCategory !== 'security' &&
+                activeCategory !== 'vice_dean' && (
                 <button
                   type="button"
                   onClick={() =>
@@ -2850,6 +2950,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     ? 'student_affairs'
                     : activeCategory === 'security'
                     ? 'security'
+                    : activeCategory === 'vice_dean'
+                    ? 'vice_dean'
                     : 'counselor';
                 return (
                   <>
@@ -2915,7 +3017,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
               activeCategory !== 'procurement' &&
               activeCategory !== 'education' &&
               activeCategory !== 'cultural' &&
-              activeCategory !== 'student_affairs' && (
+              activeCategory !== 'student_affairs' &&
+              activeCategory !== 'vice_dean' && (
               <div className="flex items-center gap-1.5">
                 <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <select
@@ -2962,7 +3065,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     activeCategory !== 'procurement' &&
                     activeCategory !== 'education' &&
                     activeCategory !== 'cultural' &&
-                    activeCategory !== 'student_affairs' && (
+                    activeCategory !== 'student_affairs' &&
+                    activeCategory !== 'vice_dean' && (
                     <th className="p-3">محدوده سرا / تخصص</th>
                   )}
                   {(activeCategory === 'warehouse' ||
@@ -2970,7 +3074,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     activeCategory === 'procurement' ||
                     activeCategory === 'education' ||
                     activeCategory === 'cultural' ||
-                    activeCategory === 'student_affairs') && (
+                    activeCategory === 'student_affairs' ||
+                    activeCategory === 'vice_dean') && (
                     <th className="p-3">بخش / سمت و توضیحات</th>
                   )}
                   {activeCategory !== 'supervisors' && <th className="p-3">وضعیت</th>}
@@ -4446,6 +4551,153 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       );
                     })
                   ))}
+
+                {activeCategory === 'vice_dean' &&
+                  (filteredViceDean.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-slate-400">
+                        هیچ کاربر معاونت دانشجویی با مشخصات جستجوشده یافت نشد.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredViceDean.map((vd) => {
+                      const isActive = vd.status !== 'inactive' && vd.isActive !== false;
+                      const passKey = `vd_${vd.id}`;
+                      const isShown = revealedPasswords[passKey];
+
+                      return (
+                        <tr key={vd.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {vd.photoUrl ? (
+                                <img
+                                  src={vd.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-indigo-300 dark:border-indigo-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-indigo-900 text-cyan-200 text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(vd.fullName || 'م').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{vd.fullName}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
+                            {vd.username}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                {isShown ? vd.password : '••••••'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => toggleRevealPassword(passKey)}
+                                className="p-1 text-slate-400 hover:text-indigo-600 cursor-pointer"
+                                title={isShown ? 'مخفی کردن رمز' : 'نمایش رمز'}
+                              >
+                                {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono" dir="ltr">
+                            {vd.mobile || vd.phone || '-'}
+                          </td>
+                          <td className="p-3 space-y-1">
+                            <div className="flex flex-wrap items-center gap-1">
+                              <span className="inline-block px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-200 text-[10px] font-bold">
+                                {vd.title || 'معاون دانشجویی'}
+                              </span>
+                              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                                {vd.department || 'معاونت دانشجویی دانشگاه فرهنگیان'}
+                              </span>
+                            </div>
+                            {vd.notes && <div className="text-[11px] text-slate-500">{vd.notes}</div>}
+                          </td>
+                          <td className="p-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextStatus = isActive ? 'inactive' : 'active';
+                                Storage.updateViceDeanStaff(vd.id, {
+                                  status: nextStatus,
+                                  isActive: nextStatus === 'active',
+                                });
+                                onRefreshData();
+                              }}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                                isActive
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                              }`}
+                            >
+                              {isActive ? 'فعال' : 'غیرفعال'}
+                            </button>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <label
+                                className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                title="بارگذاری یا تغییر عکس کاربر معاونت"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('vice_dean', vd.id, vd.fullName, e, vd.username)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => openEditStaffModal('vice_dean', vd)}
+                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                                title="ویرایش مشخصات معاونت دانشجویی"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPasswordError('');
+                                  setNewPasswordInput('');
+                                  setPasswordModalTarget({
+                                    role: 'vice_dean',
+                                    id: vd.id,
+                                    fullName: vd.fullName,
+                                    usernameOrCode: vd.username,
+                                    defaultResetValue: '123456',
+                                    defaultResetLabel: 'ریست فوری به 123456',
+                                  });
+                                }}
+                                className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                                title="تغییر یا ریست رمز عبور"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({
+                                    role: 'vice_dean',
+                                    id: vd.id,
+                                    fullName: vd.fullName,
+                                  })
+                                }
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                                title="حذف کاربر معاونت دانشجویی"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ))}
               </tbody>
             </table>
           </div>
@@ -4601,16 +4853,26 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   </div>
                 )}
 
-                {(staffModalRole === 'counselor' || staffModalRole === 'security') && (
+                {(staffModalRole === 'counselor' || staffModalRole === 'security' || staffModalRole === 'vice_dean') && (
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      {staffModalRole === 'security' ? 'کد پرسنلی / شناسه سازمانی حراست (اختیاری)' : 'دفتر / اتاق مشاوره'}
+                      {staffModalRole === 'security'
+                        ? 'کد پرسنلی / شناسه سازمانی حراست (اختیاری)'
+                        : staffModalRole === 'vice_dean'
+                        ? 'عنوان سازمانی (مثلاً معاون دانشجویی)'
+                        : 'دفتر / اتاق مشاوره'}
                     </label>
                     <input
                       type="text"
                       value={formOfficeLocation}
                       onChange={(e) => setFormOfficeLocation(e.target.value)}
-                      placeholder={staffModalRole === 'security' ? 'مثلاً SEC-101' : 'مرکز مشاوره پردیس'}
+                      placeholder={
+                        staffModalRole === 'security'
+                          ? 'مثلاً SEC-101'
+                          : staffModalRole === 'vice_dean'
+                          ? 'معاون دانشجویی'
+                          : 'مرکز مشاوره پردیس'
+                      }
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
                     />
                   </div>
@@ -4621,7 +4883,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   staffModalRole === 'education' ||
                   staffModalRole === 'cultural' ||
                   staffModalRole === 'student_affairs' ||
-                  staffModalRole === 'security') && (
+                  staffModalRole === 'security' ||
+                  staffModalRole === 'vice_dean') && (
                   <div className="sm:col-span-2">
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       {staffModalRole === 'procurement'
@@ -4634,6 +4897,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                         ? 'بخش / اداره امور دانشجویی و تربیت بدنی'
                         : staffModalRole === 'security'
                         ? 'بخش / واحد حراست و انتظامات'
+                        : staffModalRole === 'vice_dean'
+                        ? 'حوزه / معاونت دانشجویی'
                         : 'بخش / واحد مالی'}
                     </label>
                     <input
@@ -4651,6 +4916,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'اداره امور دانشجویی، تربیت بدنی و رفاهی'
                           : staffModalRole === 'security'
                           ? 'واحد حراست و انتظامات پردیس'
+                          : staffModalRole === 'vice_dean'
+                          ? 'معاونت دانشجویی دانشگاه فرهنگیان'
                           : 'واحد امور مالی و حسابداری پردیس'
                       }
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
@@ -4680,6 +4947,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'کارشناس امور دانشجویی، شورای صنفی و شورای انضباطی...'
                           : staffModalRole === 'security'
                           ? 'کارشناس حراست و انتظامات / شیفت گشت و صیانت سراها...'
+                          : staffModalRole === 'vice_dean'
+                          ? 'معاونت دانشجویی — نظارت جامع بر سراها، امور دانشجویی و فرهنگی...'
                           : staffModalRole === 'maintenance'
                           ? 'سرپرست شیفت تأسیسات / تکنسین فنی...'
                           : staffModalRole === 'counselor'
@@ -4698,6 +4967,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 staffModalRole !== 'education' &&
                 staffModalRole !== 'cultural' &&
                 staffModalRole !== 'student_affairs' &&
+                staffModalRole !== 'vice_dean' &&
                 dorms.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">

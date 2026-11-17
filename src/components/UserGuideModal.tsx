@@ -33,6 +33,7 @@ import {
   ShoppingBag,
   Award,
   ShieldAlert,
+  Landmark,
 } from 'lucide-react';
 import {
   ROLE_GUIDES,
@@ -84,6 +85,8 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
     switch (role) {
       case 'admin':
         return <Shield className="w-5 h-5 text-purple-600 dark:text-purple-400" />;
+      case 'vice_dean':
+        return <Landmark className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />;
       case 'supervisor':
         return <Building2 className="w-5 h-5 text-teal-600 dark:text-teal-400" />;
       case 'maintenance':
@@ -164,6 +167,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
             {(
               [
                 { id: 'admin', label: 'مدیر کل پردیس', role: 'admin' as UserRoleType },
+                { id: 'vice_dean', label: 'معاونت دانشجویی', role: 'vice_dean' as UserRoleType },
                 { id: 'supervisor', label: 'سرپرست سرا', role: 'supervisor' as UserRoleType },
                 { id: 'cultural', label: 'امور فرهنگی', role: 'cultural' as UserRoleType },
                 { id: 'student_affairs', label: 'امور دانشجویی', role: 'student_affairs' as UserRoleType },

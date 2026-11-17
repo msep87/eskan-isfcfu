@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import {
   Student,
   Dormitory,
@@ -175,6 +174,7 @@ export async function parseStudentExcel(file: File): Promise<{
   customColumns: string[];
   totalRows: number;
 }> {
+  const XLSX = await import('xlsx');
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -310,6 +310,7 @@ export async function parseDormitoryExcel(file: File): Promise<{
   rooms: Room[];
   beds: Bed[];
 }> {
+  const XLSX = await import('xlsx');
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -428,7 +429,8 @@ export async function parseDormitoryExcel(file: File): Promise<{
 }
 
 // دانلود فایل اکسل نمونه دانشجویان با ستون‌های اسکان اختیاری
-export function downloadStudentTemplate() {
+export async function downloadStudentTemplate() {
+  const XLSX = await import('xlsx');
   const sampleData = [
     {
       'کد دانشجویی': '4021234001',
@@ -575,7 +577,8 @@ export function downloadStudentTemplate() {
 }
 
 // دانلود فایل اکسل نمونه سراها و اتاق‌ها
-export function downloadDormitoryTemplate() {
+export async function downloadDormitoryTemplate() {
+  const XLSX = await import('xlsx');
   const sampleDormData = [
     {
       'نام سرا': 'سرای شهید باهنر - بلوک سینا',
@@ -622,7 +625,7 @@ export function downloadDormitoryTemplate() {
 }
 
 // خروجی گزارش تخت‌های خالی به اکسل
-export function exportVacantBedsToExcel(
+export async function exportVacantBedsToExcel(
   vacantBeds: {
     dormName: string;
     campus: string;
@@ -634,6 +637,7 @@ export function exportVacantBedsToExcel(
     allowedFields?: string;
   }[]
 ) {
+  const XLSX = await import('xlsx');
   const data = vacantBeds.map((b, idx) => ({
     'ردیف': idx + 1,
     'نام سرا': b.dormName,
@@ -653,7 +657,8 @@ export function exportVacantBedsToExcel(
 }
 
 // خروجی لیست کلیه دانشجویان با فیلدهای پویا
-export function exportStudentsToExcel(students: Student[], dormsMap: Map<string, string>, roomsMap: Map<string, string>) {
+export async function exportStudentsToExcel(students: Student[], dormsMap: Map<string, string>, roomsMap: Map<string, string>) {
+  const XLSX = await import('xlsx');
   const data = students.map((s, idx) => {
     const base: Record<string, any> = {
       'ردیف': idx + 1,
@@ -690,7 +695,7 @@ export function exportStudentsToExcel(students: Student[], dormsMap: Map<string,
 }
 
 // خروجی اکسل گزارش ارجاعی و عملکرد حوزه‌ها در بازه زمانی دلخواه
-export function exportDomainReportToExcel(
+export async function exportDomainReportToExcel(
   items: Array<{
     trackingCode: string;
     domainName: string;
@@ -708,6 +713,7 @@ export function exportDomainReportToExcel(
   domainFilterName: string,
   dateRangeLabel: string
 ) {
+  const XLSX = await import('xlsx');
   const data = items.map((item, idx) => ({
     'ردیف': idx + 1,
     'کد پیگیری': item.trackingCode,
@@ -780,7 +786,8 @@ const SHIFT_EN_MAP: Record<string, any> = {
 };
 
 // خروجی اکسل جدول شیفت‌بندی سرپرستان
-export function exportShiftScheduleToExcel(schedules: any[]) {
+export async function exportShiftScheduleToExcel(schedules: any[]) {
+  const XLSX = await import('xlsx');
   const data = schedules.map((s, idx) => ({
     'ردیف': idx + 1,
     'نام و نام خانوادگی سرپرست': s.supervisorName,
@@ -800,7 +807,8 @@ export function exportShiftScheduleToExcel(schedules: any[]) {
 }
 
 // دانلود فایل نمونه و قالب خام اکسل شیفت‌بندی جهت بارگذاری توسط مدیر
-export function exportShiftTemplateToExcel() {
+export async function exportShiftTemplateToExcel() {
+  const XLSX = await import('xlsx');
   const templateRows = [
     {
       'نام و نام خانوادگی سرپرست': 'استاد علی قربانی',
@@ -843,6 +851,7 @@ export async function importShiftScheduleFromExcel(
   supervisors: any[],
   dorms: any[]
 ): Promise<{ success: boolean; count: number; message: string; schedules: any[] }> {
+  const XLSX = await import('xlsx');
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -911,7 +920,8 @@ export async function importShiftScheduleFromExcel(
 }
 
 // خروجی اکسل گزارش‌های ثبت‌شده شیفت و وقایع سرپرستان
-export function exportShiftReportsToExcel(reports: any[]) {
+export async function exportShiftReportsToExcel(reports: any[]) {
+  const XLSX = await import('xlsx');
   const data = reports.map((r, idx) => ({
     'ردیف': idx + 1,
     'کد گزارش': r.reportCode,
@@ -938,7 +948,8 @@ export function exportShiftReportsToExcel(reports: any[]) {
 // =============================================================
 
 // خروجی اکسل جدول شیفت‌های کاری مشاوران
-export function exportCounselorShiftScheduleToExcel(schedules: any[]) {
+export async function exportCounselorShiftScheduleToExcel(schedules: any[]) {
+  const XLSX = await import('xlsx');
   const data = schedules.map((s, idx) => ({
     'ردیف': idx + 1,
     'نام و نام خانوادگی مشاور': s.counselorName,
@@ -957,7 +968,8 @@ export function exportCounselorShiftScheduleToExcel(schedules: any[]) {
 }
 
 // دانلود فایل نمونه خام (Template) برای بارگذاری شیفت‌های مشاوران
-export function exportCounselorShiftTemplateToExcel() {
+export async function exportCounselorShiftTemplateToExcel() {
+  const XLSX = await import('xlsx');
   const templateRows = [
     {
       'نام و نام خانوادگی مشاور': 'دکتر سارا محمودی',
@@ -997,6 +1009,7 @@ export async function importCounselorShiftScheduleFromExcel(
   counselors: any[],
   dorms: any[]
 ): Promise<{ success: boolean; count: number; message: string; schedules: any[] }> {
+  const XLSX = await import('xlsx');
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -1060,7 +1073,8 @@ export async function importCounselorShiftScheduleFromExcel(
 }
 
 // خروجی اکسل گزارش‌های فعالیت مشاوران
-export function exportCounselorReportsToExcel(reports: any[]) {
+export async function exportCounselorReportsToExcel(reports: any[]) {
+  const XLSX = await import('xlsx');
   const data = reports.map((r, idx) => ({
     'ردیف': idx + 1,
     'کد گزارش': r.reportCode,
@@ -1082,9 +1096,11 @@ export function exportCounselorReportsToExcel(reports: any[]) {
 }
 
 // خروجی اکسل گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران
-export function exportActivityLogsToExcel(logs: ActivityLog[]) {
+export async function exportActivityLogsToExcel(logs: ActivityLog[]) {
+  const XLSX = await import('xlsx');
   const roleMap: Record<string, string> = {
     admin: 'مدیر کل',
+    vice_dean: 'معاونت دانشجویی',
     supervisor: 'سرپرست سرا',
     student: 'دانشجو',
     maintenance: 'کارشناس تأسیسات',
@@ -1093,6 +1109,9 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
     finance: 'امور مالی و حسابداری',
     procurement: 'کارپرداز و خرید',
     education: 'کارشناس آموزش',
+    cultural: 'امور فرهنگی',
+    student_affairs: 'امور دانشجویی و تربیت بدنی',
+    security: 'حراست و انتظامات',
     system: 'سیستم',
   };
 
@@ -1111,6 +1130,11 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
     guest: 'درخواست مهمان',
     visit_report: 'گزارش بازدید سرپرستی',
     survey: 'نظرسنجی‌های دوره‌ای',
+    cultural: 'امور فرهنگی و تشکل‌ها',
+    sports: 'امور ورزشی و تربیت بدنی',
+    election: 'انتخابات شورای صنفی',
+    disciplinary: 'شورای انضباطی',
+    security: 'حراست و انتظامات',
     settings: 'تنظیمات و اطلاعیه‌ها',
     backup: 'پشتیبان و بازنشانی',
     excel: 'ورود اطلاعات اکسل',
@@ -1146,6 +1170,7 @@ export function exportActivityLogsToExcel(logs: ActivityLog[]) {
 // =============================================================
 
 async function readExcelSheetRows(file: File): Promise<Record<string, any>[]> {
+  const XLSX = await import('xlsx');
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -1253,7 +1278,8 @@ function parseExcelStaffStatus(rawStatus: string): 'active' | 'inactive' {
 }
 
 // ۱. دانلود قالب اکسل کاربران سرپرست
-export function downloadSupervisorTemplate() {
+export async function downloadSupervisorTemplate() {
+  const XLSX = await import('xlsx');
   const sampleRows = [
     {
       'نام و نام خانوادگی': 'استاد محسن رضایی',
@@ -1324,7 +1350,8 @@ export async function parseSupervisorExcel(
 }
 
 // ۲. دانلود قالب اکسل کاربران تأسیسات
-export function downloadMaintenanceTemplate() {
+export async function downloadMaintenanceTemplate() {
+  const XLSX = await import('xlsx');
   const sampleRows = [
     {
       'نام و نام خانوادگی': 'مهندس علی اکبری',
@@ -1409,7 +1436,8 @@ export async function parseMaintenanceExcel(
 }
 
 // ۳. دانلود قالب اکسل کاربران مشاور
-export function downloadCounselorTemplate() {
+export async function downloadCounselorTemplate() {
+  const XLSX = await import('xlsx');
   const sampleRows = [
     {
       'نام و نام خانوادگی': 'دکتر سارا محمودی',
@@ -1505,7 +1533,8 @@ export async function parseCounselorExcel(
 }
 
 // ۴. دانلود قالب اکسل کاربران انبار
-export function downloadWarehouseTemplate() {
+export async function downloadWarehouseTemplate() {
+  const XLSX = await import('xlsx');
   const sampleRows = [
     {
       'نام و نام خانوادگی': 'مهدی کریمی',
@@ -1579,7 +1608,8 @@ export async function parseWarehouseExcel(
 }
 
 // ۵. دانلود قالب اکسل کاربران امور مالی و حسابداری
-export function downloadFinanceTemplate() {
+export async function downloadFinanceTemplate() {
+  const XLSX = await import('xlsx');
   const sampleRows = [
     {
       'نام و نام خانوادگی': 'حمیدرضا صادقی',
@@ -1668,7 +1698,8 @@ export interface ParsedStudentDebtRow {
 }
 
 // ۶. دانلود فایل نمونه اکسل بارگذاری میزان بدهی دانشجویان برای امور مالی
-export function downloadStudentDebtTemplate() {
+export async function downloadStudentDebtTemplate() {
+  const XLSX = await import('xlsx');
   const sampleRows = [
     {
       'شماره دانشجویی': '40212345',
@@ -1783,12 +1814,13 @@ export async function parseStudentDebtExcel(
 }
 
 // ۷. گزارش اکسل اختصاصی امور مالی (فقط دانشجویان خوابگاهی و فقط فیلدهای مجاز و مرتبط با حسابداری)
-export function exportDormStudentsForFinanceExcel(
+export async function exportDormStudentsForFinanceExcel(
   students: Student[],
   dorms: Dormitory[],
   rooms: Room[],
   finances: StudentFinancialRecord[]
 ) {
+  const XLSX = await import('xlsx');
   const financeMap = new Map(finances.map((f) => [f.studentId, f]));
   const dormStudents = students.filter((s) => Boolean(s.assignedBedId && s.assignmentStatus !== 'none'));
 
@@ -1835,7 +1867,8 @@ export function exportDormStudentsForFinanceExcel(
 }
 
 // ۸. دانلود قالب اکسل کاربران کارپرداز
-export function downloadProcurementTemplate() {
+export async function downloadProcurementTemplate() {
+  const XLSX = await import('xlsx');
   const sampleRows = [
     {
       'نام و نام خانوادگی': 'رضا بهرامی',
@@ -1913,7 +1946,8 @@ export async function parseProcurementExcel(
 }
 
 // ۹. دانلود قالب اکسل لیست کالاها و وسایل انبار (اختصاصی کاربر انبار)
-export function downloadInventoryTemplate() {
+export async function downloadInventoryTemplate() {
+  const XLSX = await import('xlsx');
   const sampleRows = [
     {
       'کد کالا': 'PLM-101',
@@ -2021,10 +2055,11 @@ export async function parseInventoryExcel(
 }
 
 // خروجی اکسل موجودی انبار و کاردکس ورودی/خروجی
-export function exportInventoryToExcel(
+export async function exportInventoryToExcel(
   items: InventoryItem[],
   transactions?: InventoryTransaction[]
 ) {
+  const XLSX = await import('xlsx');
   const catLabelMap: Record<InventoryItem['category'], string> = {
     plumbing: 'لوله‌کشی و تأسیسات آبی',
     electrical: 'برق و روشنایی',
@@ -2086,7 +2121,8 @@ export function exportInventoryToExcel(
 }
 
 // ۱۰. خروجی اکسل گزارش درخواست‌های مهمان دانشجویان
-export function exportGuestRequestsToExcel(requests: GuestRequest[]) {
+export async function exportGuestRequestsToExcel(requests: GuestRequest[]) {
+  const XLSX = await import('xlsx');
   const statusMap: Record<GuestRequest['status'], string> = {
     pending_supervisor: 'در انتظار بررسی سرپرست',
     approved: 'موافقت شده (مراجعه به سرپرستی)',
@@ -2137,7 +2173,8 @@ export function exportGuestRequestsToExcel(requests: GuestRequest[]) {
 }
 
 // ۱۱. خروجی اکسل گزارش‌های بازدید سرپرستان از سراها و اتاق‌ها
-export function exportVisitReportsToExcel(reports: VisitReport[]) {
+export async function exportVisitReportsToExcel(reports: VisitReport[]) {
+  const XLSX = await import('xlsx');
   const cleanMap: Record<VisitReport['cleanlinessCondition'], string> = {
     excellent: 'بسیار مطلوب',
     good: 'قابل قبول',
@@ -2176,7 +2213,8 @@ export function exportVisitReportsToExcel(reports: VisitReport[]) {
 }
 
 // ۱۲. دانلود قالب اکسل کاربران کارشناس آموزش
-export function downloadEducationTemplate() {
+export async function downloadEducationTemplate() {
+  const XLSX = await import('xlsx');
   const sampleRows = [
     {
       'نام و نام خانوادگی': 'فاطمه محمدی',
@@ -2262,10 +2300,11 @@ export const SURVEY_FREQUENCY_LABELS: Record<SurveyFrequency, string> = {
 };
 
 // ۱۳. خروجی اکسل کامل نتایج یک نظرسنجی دوره‌ای
-export function exportSurveyResultsToExcel(
+export async function exportSurveyResultsToExcel(
   survey: PeriodicSurvey,
   responses: SurveyResponse[]
 ) {
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
   const statusLabel =
@@ -2441,10 +2480,11 @@ export function exportSurveyResultsToExcel(
 }
 
 // خروجی اکسل تجمیعی کلیه نظرسنجی‌های دوره‌ای
-export function exportAllSurveysSummaryToExcel(
+export async function exportAllSurveysSummaryToExcel(
   surveys: PeriodicSurvey[],
   allResponses: SurveyResponse[]
 ) {
+  const XLSX = await import('xlsx');
   const rows = surveys.map((s, idx) => {
     const resps = allResponses.filter((r) => r.surveyId === s.id);
     const rated = resps.filter((r) => typeof r.overallRating === 'number');
@@ -2498,7 +2538,8 @@ const CULTURAL_CAT_FA: Record<string, string> = {
   skill: 'مهارتی و کارگاهی',
 };
 
-export function exportCulturalProgramsToExcel(programs: CulturalProgram[]) {
+export async function exportCulturalProgramsToExcel(programs: CulturalProgram[]) {
+  const XLSX = await import('xlsx');
   const rows = programs.map((p, idx) => ({
     'ردیف': idx + 1,
     'کد برنامه': p.programCode,
@@ -2524,10 +2565,11 @@ export function exportCulturalProgramsToExcel(programs: CulturalProgram[]) {
   XLSX.writeFile(wb, `جدول_زمانی_برنامه_های_فرهنگی_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-export function exportCulturalAssociationsToExcel(
+export async function exportCulturalAssociationsToExcel(
   associations: CulturalAssociation[],
   memberships: AssociationMembership[]
 ) {
+  const XLSX = await import('xlsx');
   const assocRows = associations.map((a, idx) => {
     const mForA = memberships.filter((m) => m.associationId === a.id);
     return {
@@ -2578,12 +2620,13 @@ export function exportCulturalAssociationsToExcel(
 // =========================================================================
 // خروجی اکسل جامع دانشجویان خوابگاهی و ترددی (امور دانشجویی و تربیت بدنی)
 // =========================================================================
-export function exportStudentAffairsDirectoryToExcel(
+export async function exportStudentAffairsDirectoryToExcel(
   students: Student[],
   dorms: Dormitory[],
   rooms: Room[],
   filterLabel = 'همه_دانشجویان'
 ) {
+  const XLSX = await import('xlsx');
   const rows = students.map((s, idx) => {
     const resident = isStudentDormResident(s);
     const dorm = dorms.find((d) => d.id === s.assignedDormId);
@@ -2632,10 +2675,11 @@ export function exportStudentAffairsDirectoryToExcel(
 // =========================================================================
 // خروجی اکسل نتایج انتخابات شورای صنفی (امور دانشجویی)
 // =========================================================================
-export function exportGuildElectionResultsToExcel(
+export async function exportGuildElectionResultsToExcel(
   election: GuildElection,
   votes: GuildElectionVote[]
 ) {
+  const XLSX = await import('xlsx');
   const elVotes = votes.filter((v) => v.electionId === election.id);
   const totalVoters = elVotes.length;
 
@@ -2697,7 +2741,8 @@ const DISC_STATUS_FA: Record<string, string> = {
   closed: 'مختومه',
 };
 
-export function exportDisciplinaryReferralsToExcel(referrals: DisciplinaryReferral[]) {
+export async function exportDisciplinaryReferralsToExcel(referrals: DisciplinaryReferral[]) {
+  const XLSX = await import('xlsx');
   const rows = referrals.map((r, idx) => ({
     'ردیف': idx + 1,
     'کد پرونده': r.referralCode,
@@ -2707,7 +2752,7 @@ export function exportDisciplinaryReferralsToExcel(referrals: DisciplinaryReferr
     'سرا / اتاق': r.dormName ? `${r.dormName} - اتاق ${r.roomNumber || '-'}` : '-',
     'نوع تخلف': r.violationLabel,
     'متن معرفی‌نامه': r.referralText,
-    'معرفی‌کننده': `${r.referredByName} (${r.referredByRole === 'admin' ? 'مدیر' : 'سرپرست'})`,
+    'معرفی‌کننده': `${r.referredByName} (${r.referredByRole === 'admin' ? 'مدیر' : r.referredByRole === 'vice_dean' ? 'معاونت دانشجویی' : 'سرپرست'})`,
     'تاریخ معرفی': r.referredAt,
     'وضعیت رسیدگی': DISC_STATUS_FA[r.status] || r.status,
     'تاریخ و ساعت جلسه': r.sessionDate ? `${r.sessionDate} ${r.sessionTime || ''}`.trim() : '-',
@@ -2757,10 +2802,11 @@ const SPORT_STATUS_FA: Record<string, string> = {
   cancelled: 'لغو شده',
 };
 
-export function exportSportsProgramsToExcel(
+export async function exportSportsProgramsToExcel(
   programs: SportsProgram[],
   registrations: SportsRegistration[]
 ) {
+  const XLSX = await import('xlsx');
   const progRows = programs.map((p, idx) => {
     const activeRegs = registrations.filter(
       (r) => r.programId === p.id && r.status !== 'cancelled'

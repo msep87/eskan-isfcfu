@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react';
 import {
   Student,
   Dormitory,
@@ -15,38 +15,40 @@ import {
   WarehouseStaff,
   InventoryItem,
   WarehouseRequest,
-  CounselorStaff,
-  CounselorShiftSchedule,
-  CounselorShiftReport,
   FinanceStaff,
   StudentFinancialRecord,
   EducationStaff,
 } from './types';
 import { Storage, initializeStorageIfNeeded } from './utils/storage';
 import { Navbar } from './components/Navbar';
-import { LoginModal } from './components/LoginModal';
-import { AppearanceModal } from './components/AppearanceModal';
-import { ReportsView } from './components/ReportsView';
-import { ExcelImportModal, ExcelImportTab } from './components/ExcelImportModal';
-import { MessagingPanel } from './components/MessagingPanel';
-import { ChangePasswordModal } from './components/ChangePasswordModal';
-import { StudentDashboard } from './components/StudentDashboard';
-import { SupervisorDashboard } from './components/SupervisorDashboard';
-import { AdminDashboard } from './components/AdminDashboard';
-import { MaintenanceDashboard } from './components/MaintenanceDashboard';
-import { WarehouseDashboard } from './components/WarehouseDashboard';
-import { ProcurementDashboard } from './components/ProcurementDashboard';
-import { CounselorDashboard } from './components/CounselorDashboard';
-import { FinanceDashboard } from './components/FinanceDashboard';
-import { EducationDashboard } from './components/EducationDashboard';
-import { CulturalDashboard } from './components/CulturalDashboard';
-import { StudentAffairsDashboard } from './components/StudentAffairsDashboard';
-import { SecurityDashboard } from './components/SecurityDashboard';
-import { AboutModal } from './components/AboutModal';
-import { UserGuideModal } from './components/UserGuideModal';
-import { AiDormAssistant } from './components/AiDormAssistant';
+import type { ExcelImportTab } from './components/ExcelImportModal';
 import { RichTextDisplay } from './components/RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './components/ImageLightboxModal';
+
+// بارگذاری تنبل (Code-Splitting) داشبوردها و مودال‌های سنگین برای افزایش چشمگیر سرعت لود اولیه سایت
+const LoginModal = lazy(() => import('./components/LoginModal').then((m) => ({ default: m.LoginModal })));
+const AppearanceModal = lazy(() => import('./components/AppearanceModal').then((m) => ({ default: m.AppearanceModal })));
+const ReportsView = lazy(() => import('./components/ReportsView').then((m) => ({ default: m.ReportsView })));
+const ExcelImportModal = lazy(() => import('./components/ExcelImportModal').then((m) => ({ default: m.ExcelImportModal })));
+const MessagingPanel = lazy(() => import('./components/MessagingPanel').then((m) => ({ default: m.MessagingPanel })));
+const ChangePasswordModal = lazy(() => import('./components/ChangePasswordModal').then((m) => ({ default: m.ChangePasswordModal })));
+const AboutModal = lazy(() => import('./components/AboutModal').then((m) => ({ default: m.AboutModal })));
+const UserGuideModal = lazy(() => import('./components/UserGuideModal').then((m) => ({ default: m.UserGuideModal })));
+const AiDormAssistant = lazy(() => import('./components/AiDormAssistant').then((m) => ({ default: m.AiDormAssistant })));
+
+const StudentDashboard = lazy(() => import('./components/StudentDashboard').then((m) => ({ default: m.StudentDashboard })));
+const SupervisorDashboard = lazy(() => import('./components/SupervisorDashboard').then((m) => ({ default: m.SupervisorDashboard })));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
+const MaintenanceDashboard = lazy(() => import('./components/MaintenanceDashboard').then((m) => ({ default: m.MaintenanceDashboard })));
+const WarehouseDashboard = lazy(() => import('./components/WarehouseDashboard').then((m) => ({ default: m.WarehouseDashboard })));
+const ProcurementDashboard = lazy(() => import('./components/ProcurementDashboard').then((m) => ({ default: m.ProcurementDashboard })));
+const CounselorDashboard = lazy(() => import('./components/CounselorDashboard').then((m) => ({ default: m.CounselorDashboard })));
+const FinanceDashboard = lazy(() => import('./components/FinanceDashboard').then((m) => ({ default: m.FinanceDashboard })));
+const EducationDashboard = lazy(() => import('./components/EducationDashboard').then((m) => ({ default: m.EducationDashboard })));
+const CulturalDashboard = lazy(() => import('./components/CulturalDashboard').then((m) => ({ default: m.CulturalDashboard })));
+const StudentAffairsDashboard = lazy(() => import('./components/StudentAffairsDashboard').then((m) => ({ default: m.StudentAffairsDashboard })));
+const SecurityDashboard = lazy(() => import('./components/SecurityDashboard').then((m) => ({ default: m.SecurityDashboard })));
+const ViceDeanDashboard = lazy(() => import('./components/ViceDeanDashboard').then((m) => ({ default: m.ViceDeanDashboard })));
 import { resolveFontCssFamily } from './utils/fonts';
 import {
   DEFAULT_HOME_NOTES_TITLE,
@@ -95,8 +97,8 @@ export default function App() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(Storage.getInventoryItems());
   const [warehouseRequests, setWarehouseRequests] = useState<WarehouseRequest[]>(Storage.getWarehouseRequests());
 
-  const [isCloudLoading, setIsCloudLoading] = useState<boolean>(true);
   const [cloudSyncTick, setCloudSyncTick] = useState<number>(0);
+  const lastSyncCheckRef = useRef<number>(0);
 
   // بروزرسانی داده‌ها از storage
   const refreshAllData = useCallback(() => {
@@ -170,6 +172,11 @@ export default function App() {
       if (refreshedSec) {
         setCurrentUser({ role: 'security', staff: refreshedSec });
       }
+    } else if (user && user.role === 'vice_dean') {
+      const refreshedVd = Storage.getViceDeanStaff().find((vd) => vd.id === user.staff.id);
+      if (refreshedVd) {
+        setCurrentUser({ role: 'vice_dean', staff: refreshedVd });
+      }
     } else if (user && user.role === 'counselor') {
       const refreshedCns = Storage.getCounselors().find((c) => c.id === user.counselor.id);
       if (refreshedCns) {
@@ -178,27 +185,28 @@ export default function App() {
     }
   }, []);
 
-  // مقداردهی اولیه داده‌ها و همگام‌سازی خودکار با دیتابیس ابری MongoDB Atlas
+  // مقداردهی اولیه فوری داده‌های محلی (نمایش آنی صفحه) + همگام‌سازی پس‌زمینه با دیتابیس ابری
   useEffect(() => {
     let isMounted = true;
     initializeStorageIfNeeded();
+    refreshAllData();
 
     const performInitialSync = async () => {
-      try {
-        await Storage.syncFromCloud();
-        if (isMounted) {
-          refreshAllData();
-        }
-      } finally {
-        if (isMounted) {
-          setIsCloudLoading(false);
-        }
+      lastSyncCheckRef.current = Date.now();
+      const changed = await Storage.syncFromCloud();
+      if (changed && isMounted) {
+        refreshAllData();
       }
     };
 
     void performInitialSync();
 
     const handleBackgroundSync = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      const now = Date.now();
+      if (now - lastSyncCheckRef.current < 12000) return;
+      lastSyncCheckRef.current = now;
       const ok = await Storage.syncFromCloud();
       if (ok && isMounted) {
         refreshAllData();
@@ -206,7 +214,7 @@ export default function App() {
     };
 
     window.addEventListener('focus', handleBackgroundSync);
-    const intervalId = window.setInterval(handleBackgroundSync, 25000);
+    const intervalId = window.setInterval(handleBackgroundSync, 30000);
 
     return () => {
       isMounted = false;
@@ -370,19 +378,6 @@ export default function App() {
 
       {/* بدنه اصلی */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {isCloudLoading && (
-          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl px-7 py-6 shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col items-center gap-3 text-center max-w-xs w-full">
-              <div className="w-10 h-10 rounded-full border-4 border-teal-500/30 border-t-teal-600 animate-spin" />
-              <div className="text-sm font-extrabold text-slate-900 dark:text-white">
-                در حال دریافت آخرین اطلاعات از سرور ابری...
-              </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                همگام‌سازی با پایگاه داده مرکزی سامانه جامع سراهای دانشجویی
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* ۱. صفحه فرود برای مراجعین قبل از ورود به سامانه (بدون نمایش آمار به عموم) */}
         {!currentUser && (() => {
@@ -601,6 +596,16 @@ export default function App() {
           );
         })()}
 
+        <Suspense
+          fallback={
+            currentUser ? (
+              <div className="py-20 flex flex-col items-center justify-center gap-3 text-slate-500 dark:text-slate-400">
+                <div className="w-9 h-9 rounded-full border-4 border-teal-500/25 border-t-teal-600 animate-spin" />
+                <span className="text-xs font-bold">در حال بارگذاری کارتابل کاربری...</span>
+              </div>
+            ) : null
+          }
+        >
         {/* ۲. در صورتی که کاربر دانشجو است */}
         {currentUser?.role === 'student' && (
           <StudentDashboard
@@ -801,6 +806,30 @@ export default function App() {
           />
         )}
 
+        {/* ۱۳. در صورتی که کاربر معاونت دانشجویی است (تلفیق سرپرستی + امور دانشجویی + فرهنگی + گزارش تحلیلی + پایش پیام‌ها بجز دانشجو) */}
+        {currentUser?.role === 'vice_dean' && (
+          <ViceDeanDashboard
+            staff={currentUser.staff}
+            dorms={dorms}
+            rooms={rooms}
+            beds={beds}
+            students={students}
+            announcements={announcements}
+            warnings={warnings}
+            settings={settings}
+            maintenanceTasks={maintenanceTasks}
+            maintenanceStaff={maintenanceStaff}
+            cloudSyncTick={cloudSyncTick}
+            onRefreshData={refreshAllData}
+            onOpenReports={() => setIsReportsModalOpen(true)}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onOpenExcelModal={() => handleOpenExcelModal('students')}
+            onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
+            onOpenUserGuide={(r) => handleOpenUserGuide(r || 'vice_dean')}
+          />
+        )}
+        </Suspense>
+
       </main>
 
       {/* فوتر سایت */}
@@ -849,90 +878,119 @@ export default function App() {
         </div>
       </footer>
 
-      {/* مودال‌های مشترک */}
-      <AboutModal
-        isOpen={isAboutModalOpen}
-        onClose={() => setIsAboutModalOpen(false)}
-        customLogoUrl={settings.customLogoUrl}
-        settings={settings}
-        isAdmin={currentUser?.role === 'admin'}
-        onOpenAdminEdit={() => {
-          setIsAboutModalOpen(false);
-          setFocusAboutEditorTick((t) => t + 1);
-        }}
-      />
+      {/* مودال‌های مشترک با بارگذاری تنبل (تنها هنگام باز شدن) */}
+      <Suspense fallback={null}>
+        {isAboutModalOpen && (
+          <AboutModal
+            isOpen={isAboutModalOpen}
+            onClose={() => setIsAboutModalOpen(false)}
+            customLogoUrl={settings.customLogoUrl}
+            settings={settings}
+            isAdmin={currentUser?.role === 'admin'}
+            onOpenAdminEdit={() => {
+              setIsAboutModalOpen(false);
+              setFocusAboutEditorTick((t) => t + 1);
+            }}
+          />
+        )}
 
-      <UserGuideModal
-        isOpen={isUserGuideOpen}
-        onClose={() => setIsUserGuideOpen(false)}
-        initialRole={userGuideInitialRole}
-        customLogoUrl={settings.customLogoUrl}
-      />
+        {isUserGuideOpen && (
+          <UserGuideModal
+            isOpen={isUserGuideOpen}
+            onClose={() => setIsUserGuideOpen(false)}
+            initialRole={userGuideInitialRole}
+            customLogoUrl={settings.customLogoUrl}
+          />
+        )}
 
-      <LoginModal
-        isOpen={isLoginModalOpen}
-        onClose={() => setIsLoginModalOpen(false)}
-        onLoginSuccess={handleLoginSuccess}
-        onOpenUserGuide={(r) => handleOpenUserGuide(r)}
-      />
+        {isLoginModalOpen && (
+          <LoginModal
+            isOpen={isLoginModalOpen}
+            onClose={() => setIsLoginModalOpen(false)}
+            onLoginSuccess={handleLoginSuccess}
+            onOpenUserGuide={(r) => handleOpenUserGuide(r)}
+          />
+        )}
 
-      {currentUser?.role === 'admin' && (
-        <AppearanceModal
-          isOpen={isAppearanceModalOpen}
-          onClose={() => setIsAppearanceModalOpen(false)}
-          settings={settings}
-          onUpdateSettings={(newSt) => {
-            setSettings(newSt);
-            Storage.setSettings(newSt);
-          }}
-        />
-      )}
+        {currentUser?.role === 'admin' && isAppearanceModalOpen && (
+          <AppearanceModal
+            isOpen={isAppearanceModalOpen}
+            onClose={() => setIsAppearanceModalOpen(false)}
+            settings={settings}
+            onUpdateSettings={(newSt) => {
+              setSettings(newSt);
+              Storage.setSettings(newSt);
+            }}
+          />
+        )}
 
-      {currentUser &&
-        currentUser.role !== 'student' &&
-        currentUser.role !== 'finance' &&
-        currentUser.role !== 'education' &&
-        currentUser.role !== 'cultural' && (
-        <ReportsView
-          isOpen={isReportsModalOpen}
-          onClose={() => setIsReportsModalOpen(false)}
-          dorms={dorms}
-          rooms={rooms}
-          beds={beds}
-          students={students}
-          cloudSyncTick={cloudSyncTick}
-        />
-      )}
+        {currentUser &&
+          currentUser.role !== 'student' &&
+          currentUser.role !== 'finance' &&
+          currentUser.role !== 'education' &&
+          currentUser.role !== 'cultural' &&
+          isReportsModalOpen && (
+            <ReportsView
+              isOpen={isReportsModalOpen}
+              onClose={() => setIsReportsModalOpen(false)}
+              dorms={dorms}
+              rooms={rooms}
+              beds={beds}
+              students={students}
+              cloudSyncTick={cloudSyncTick}
+            />
+          )}
 
-      <ExcelImportModal
-        isOpen={isExcelModalOpen}
-        onClose={() => setIsExcelModalOpen(false)}
-        initialTab={excelModalInitialTab}
-        allowStaffTabs={currentUser?.role === 'admin'}
-        onImportComplete={() => {
-          setIsExcelModalOpen(false);
-          refreshAllData();
-        }}
-      />
+        {isExcelModalOpen && (
+          <ExcelImportModal
+            isOpen={isExcelModalOpen}
+            onClose={() => setIsExcelModalOpen(false)}
+            initialTab={excelModalInitialTab}
+            allowStaffTabs={currentUser?.role === 'admin'}
+            onImportComplete={() => {
+              setIsExcelModalOpen(false);
+              refreshAllData();
+            }}
+          />
+        )}
 
-      {currentUser && (
-        <MessagingPanel
-          isOpen={isMessagesModalOpen}
-          onClose={() => setIsMessagesModalOpen(false)}
-          currentUser={currentUser}
-          messages={messages}
-          onMessagesUpdated={refreshAllData}
-        />
-      )}
+        {currentUser && isMessagesModalOpen && (
+          <MessagingPanel
+            isOpen={isMessagesModalOpen}
+            onClose={() => setIsMessagesModalOpen(false)}
+            currentUser={currentUser}
+            messages={messages}
+            onMessagesUpdated={refreshAllData}
+          />
+        )}
 
-      {currentUser && (
-        <ChangePasswordModal
-          isOpen={isChangePasswordModalOpen}
-          onClose={() => setIsChangePasswordModalOpen(false)}
-          currentUser={currentUser}
-          onPasswordChanged={refreshAllData}
-        />
-      )}
+        {currentUser && isChangePasswordModalOpen && (
+          <ChangePasswordModal
+            isOpen={isChangePasswordModalOpen}
+            onClose={() => setIsChangePasswordModalOpen(false)}
+            currentUser={currentUser}
+            onPasswordChanged={refreshAllData}
+          />
+        )}
+
+        {/* دستیار هوشمند خوابگاهی و آموزشی */}
+        {currentUser &&
+          currentUser.role !== 'education' &&
+          currentUser.role !== 'cultural' &&
+          isAiChatOpen && (
+            <AiDormAssistant
+              isOpen={isAiChatOpen}
+              onClose={() => setIsAiChatOpen(false)}
+              currentUser={currentUser}
+              settings={settings}
+              dorms={dorms}
+              rooms={rooms}
+              beds={beds}
+              students={students}
+              announcements={announcements}
+            />
+          )}
+      </Suspense>
 
       {/* مدال بزرگ‌نمایی و نمایش در ابعاد واقعی تصویر اطلاعیه */}
       <ImageLightboxModal
@@ -940,21 +998,6 @@ export default function App() {
         alt="پوستر / تصویر اطلاعیه"
         onClose={() => setPreviewImage(null)}
       />
-
-      {/* دستیار هوشمند خوابگاهی و آموزشی (فقط پس از ورود کاربر به کارتابل و به جز کارشناس آموزش و امور فرهنگی) */}
-      {currentUser && currentUser.role !== 'education' && currentUser.role !== 'cultural' && (
-        <AiDormAssistant
-          isOpen={isAiChatOpen}
-          onClose={() => setIsAiChatOpen(false)}
-          currentUser={currentUser}
-          settings={settings}
-          dorms={dorms}
-          rooms={rooms}
-          beds={beds}
-          students={students}
-          announcements={announcements}
-        />
-      )}
 
     </div>
   );

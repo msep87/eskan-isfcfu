@@ -1,5 +1,4 @@
 import React, { useState, useMemo } from 'react';
-import * as XLSX from 'xlsx';
 import {
   ProcurementStaff,
   ProcurementRequest,
@@ -229,7 +228,8 @@ export const ProcurementDashboard: React.FC<ProcurementDashboardProps> = ({
     }
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
+    const XLSX = await import('xlsx');
     const rows = filteredRequests.map((r, idx) => ({
       'ردیف': idx + 1,
       'کد پیگیری خرید': r.trackingCode,

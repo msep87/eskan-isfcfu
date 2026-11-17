@@ -32,6 +32,7 @@ import {
   StudentAffairsStaff,
   AcademicStatusNotice,
   SecurityStaff,
+  ViceDeanStaff,
   AboutCapabilityItem,
   AboutAttachmentFile,
   AboutContentSettings,
@@ -143,6 +144,8 @@ import {
   FileWarning,
   ClipboardList,
   Paperclip,
+  Database,
+  Loader2,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -175,6 +178,7 @@ interface AdminDashboardProps {
       | 'cultural'
       | 'student_affairs'
       | 'security'
+      | 'vice_dean'
       | 'student'
   ) => void;
   cloudSyncTick?: number;
@@ -267,6 +271,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [culturalStaffList, setCulturalStaffList] = useState<CulturalStaff[]>(Storage.getCulturalStaff());
   const [studentAffairsStaffList, setStudentAffairsStaffList] = useState<StudentAffairsStaff[]>(Storage.getStudentAffairsStaff());
   const [securityStaffList, setSecurityStaffList] = useState<SecurityStaff[]>(Storage.getSecurityStaff());
+  const [viceDeanStaffList, setViceDeanStaffList] = useState<ViceDeanStaff[]>(Storage.getViceDeanStaff());
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
   const [academicNotices, setAcademicNotices] = useState<AcademicStatusNotice[]>(Storage.getAcademicNotices());
   const [academicNoticeFilter, setAcademicNoticeFilter] = useState<'all' | 'pending' | 'reviewed' | 'action_taken'>('all');
@@ -281,6 +286,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setCulturalStaffList(Storage.getCulturalStaff());
     setStudentAffairsStaffList(Storage.getStudentAffairsStaff());
     setSecurityStaffList(Storage.getSecurityStaff());
+    setViceDeanStaffList(Storage.getViceDeanStaff());
     setAcademicNotices(Storage.getAcademicNotices());
     onRefreshData();
   };
@@ -302,6 +308,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setCulturalStaffList(Storage.getCulturalStaff());
     setStudentAffairsStaffList(Storage.getStudentAffairsStaff());
     setSecurityStaffList(Storage.getSecurityStaff());
+    setViceDeanStaffList(Storage.getViceDeanStaff());
     setAcademicNotices(Storage.getAcademicNotices());
   }, [cloudSyncTick]);
 
@@ -2007,38 +2014,94 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onUpdateSettings(updated);
     setAboutFeedback({
       type: 'success',
-      message: 'محتوای بخش «درباره ما» به نسخه استاندارد ۱۲ نقشه پیش‌فرض بازگردانی شد.',
+      message: 'محتوای بخش «درباره ما» به نسخه استاندارد ۱۳ نقشه پیش‌فرض بازگردانی شد.',
     });
     setTimeout(() => setAboutFeedback(null), 3500);
   };
+
+  const [isFullBackupExporting, setIsFullBackupExporting] = useState(false);
+  const [isBackupRestoring, setIsBackupRestoring] = useState(false);
+  const [backupProgressMessage, setBackupProgressMessage] = useState<string | null>(null);
 
   const handleBackupExport = () => {
     Storage.exportBackupJson();
   };
 
+  const handleFullBackupExport = async () => {
+    if (isFullBackupExporting || isBackupRestoring) return;
+    setIsFullBackupExporting(true);
+    setBackupProgressMessage('در حال آماده‌سازی فایل پشتیبان کامل سامانه...');
+    try {
+      const result = await Storage.exportFullSnapshotBackupJson((msg) => {
+        setBackupProgressMessage(msg);
+      });
+      if (result.success) {
+        setAdminNoticeDialog({
+          title: 'نسخه پشتیبان کامل با موفقیت آماده و دانلود شد',
+          message:
+            `فایل پشتیبان کامل (حجم تقریبی ${result.sizeKb.toLocaleString('fa-IR')} کیلوبایت) شامل ${result.totalStudents.toLocaleString('fa-IR')} پرونده دانشجو، ${result.totalStaff.toLocaleString('fa-IR')} کاربری پرسنل، ${result.embeddedPhotosCount.toLocaleString('fa-IR')} تصویر پروفایل، ${result.fontsCount.toLocaleString('fa-IR')} فونت سفارشی و ${result.attachmentsCount.toLocaleString('fa-IR')} فایل ضمیمه دریافت شد. حتی در صورت ریست یا پاک‌شدن کامل سرور، با بارگذاری مجدد همین فایل تمام سامانه به همین وضعیت بازگردانده می‌شود.`,
+          tone: 'success',
+        });
+      } else {
+        setAdminNoticeDialog({
+          title: 'خطا در تهیه پشتیبان کامل',
+          message: result.errorMessage || 'تهیه فایل پشتیبان کامل با خطا مواجه شد.',
+          tone: 'error',
+        });
+      }
+    } finally {
+      setIsFullBackupExporting(false);
+      setBackupProgressMessage(null);
+    }
+  };
+
   const handleBackupImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (isFullBackupExporting || isBackupRestoring) {
+        e.target.value = '';
+        return;
+      }
+      setIsBackupRestoring(true);
+      setBackupProgressMessage('در حال خواندن فایل پشتیبان...');
       const reader = new FileReader();
+      reader.onerror = () => {
+        setIsBackupRestoring(false);
+        setBackupProgressMessage(null);
+        setAdminNoticeDialog({
+          title: 'خطا در خواندن فایل',
+          message: 'امکان خواندن فایل پشتیبان انتخاب‌شده وجود ندارد.',
+          tone: 'error',
+        });
+      };
       reader.onload = async (event) => {
-        const text = event.target?.result as string;
-        const ok = Storage.importBackupJson(text);
-        if (ok) {
-          const syncRes = await Storage.waitForPendingCloudSync();
-          onRefreshData();
-          setAdminNoticeDialog({
-            title: 'بازیابی نسخه پشتیبان',
-            message: syncRes.success
-              ? 'اطلاعات نسخه پشتیبان با موفقیت بازیابی و در دیتابیس ابری ذخیره شد.'
-              : 'اطلاعات نسخه پشتیبان در مرورگر بازیابی شد، اما همگام‌سازی برخی بخش‌ها با دیتابیس ابری با خطا مواجه شد.',
-            tone: syncRes.success ? 'success' : 'error',
+        try {
+          const text = String(event.target?.result || '');
+          const res = await Storage.importFullBackupJsonAsync(text, (msg) => {
+            setBackupProgressMessage(msg);
           });
-        } else {
-          setAdminNoticeDialog({
-            title: 'خطا در فایل پشتیبان',
-            message: 'فایل پشتیبان انتخاب‌شده نامعتبر است.',
-            tone: 'error',
-          });
+          if (res.ok) {
+            onRefreshData();
+            const fullySynced = res.cloudSynced && res.studentsSynced;
+            setAdminNoticeDialog({
+              title: res.isFullArchive
+                ? 'بازیابی کامل سامانه با موفقیت انجام شد'
+                : 'بازیابی نسخه پشتیبان JSON',
+              message: fullySynced
+                ? `تمام اطلاعات، تنظیمات${res.restoredPhotosCount > 0 ? `، ${res.restoredPhotosCount.toLocaleString('fa-IR')} تصویر پروفایل (${res.uploadedPhotosToCloudCount.toLocaleString('fa-IR')} تصویر روی سرور ابری)` : ''}${res.restoredFilesCount > 0 ? ` و ${res.restoredFilesCount.toLocaleString('fa-IR')} فایل/فونت و رسانه` : ''} با موفقیت بازیابی و در سرور و دیتابیس ابری بازسازی شد.`
+                : `اطلاعات${res.restoredPhotosCount > 0 ? ` و ${res.restoredPhotosCount.toLocaleString('fa-IR')} تصویر` : ''} در مرورگر بازیابی شد، اما همگام‌سازی کامل با سرور ابری (${!res.cloudSynced ? 'داده‌های سامانه' : 'فهرست دانشجویان'}) با خطا مواجه شد. لطفاً پس از اطمینان از اتصال اینترنت دوباره بررسی فرمایید.`,
+              tone: fullySynced ? 'success' : 'error',
+            });
+          } else {
+            setAdminNoticeDialog({
+              title: 'خطا در فایل پشتیبان',
+              message: res.errorMessage || 'فایل پشتیبان انتخاب‌شده نامعتبر است.',
+              tone: 'error',
+            });
+          }
+        } finally {
+          setIsBackupRestoring(false);
+          setBackupProgressMessage(null);
         }
       };
       reader.readAsText(file);
@@ -2310,7 +2373,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <Users className="w-4 h-4 text-teal-600" />
           <span>مدیریت کاربران سامانه</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
-            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length + educationStaffList.length + culturalStaffList.length + studentAffairsStaffList.length + securityStaffList.length}
+            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length + educationStaffList.length + culturalStaffList.length + studentAffairsStaffList.length + securityStaffList.length + viceDeanStaffList.length}
           </span>
         </button>
 
@@ -2485,6 +2548,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           culturalStaff={culturalStaffList}
           studentAffairsStaff={studentAffairsStaffList}
           securityStaff={securityStaffList}
+          viceDeanStaff={viceDeanStaffList}
           onRefreshData={handleUsersRefresh}
           onOpenExcelModal={onOpenExcelModal}
           onOpenReports={onOpenReports}
@@ -6087,6 +6151,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {mainTab === 'activity_log' && (() => {
         const roleLabelMap: Record<string, string> = {
           admin: 'مدیر کل',
+          vice_dean: 'معاونت دانشجویی',
           supervisor: 'سرپرست سرا',
           student: 'دانشجو',
           maintenance: 'تأسیسات',
@@ -6097,6 +6162,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           education: 'کارشناس آموزش',
           cultural: 'امور فرهنگی',
           student_affairs: 'امور دانشجویی و تربیت بدنی',
+          security: 'حراست و انتظامات',
           system: 'سیستم / مهمان',
         };
         const categoryLabelMap: Record<string, string> = {
@@ -6118,6 +6184,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           sports: 'امور ورزشی و تربیت بدنی',
           election: 'انتخابات شورای صنفی',
           disciplinary: 'شورای انضباطی',
+          security: 'حراست و انتظامات',
           settings: 'تنظیمات و اطلاعیه‌ها',
           backup: 'پشتیبان و بازنشانی',
           excel: 'ورود اطلاعات اکسل',
@@ -7339,7 +7406,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 className="px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>بازگردانی پیش‌فرض (۱۲ نقشه)</span>
+                <span>بازگردانی پیش‌فرض (۱۳ نقشه)</span>
               </button>
             </div>
 
@@ -7516,7 +7583,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex-1 min-w-[220px]">
                   <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    عنوان بخش فهرست امکانات و ۱۲ نقش سامانه:
+                    عنوان بخش فهرست امکانات و ۱۳ نقش سامانه:
                   </label>
                   <input
                     type="text"
@@ -7708,32 +7775,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           {/* بخش پشتیبان‌گیری و بازنشانی */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-            <h3 className="font-extrabold text-base text-slate-900 dark:text-white mb-2">
-              پشتیبان‌گیری و بازگردانی داده‌های سامانه (Backup & Restore)
-            </h3>
-            <p className="text-xs text-slate-400 mb-4">
-              جهت نگهداری دائمی اطلاعات، می‌توانید نسخه پشتیبان JSON دانلود کنید یا در مرورگر دیگر بازگردانی فرمایید.
-            </p>
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+            <div>
+              <h3 className="font-extrabold text-base text-slate-900 dark:text-white mb-1.5 flex items-center gap-2">
+                <Database className="w-5 h-5 text-emerald-600" />
+                <span>پشتیبان‌گیری و بازگردانی کامل سامانه (Backup & Restore)</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                با استفاده از گزینه «فایل پشتیبان کامل»، علاوه بر تمامی اطلاعات ۴۵ بخش پایگاه داده، همه فایل‌های ضمیمه، فونت‌ها، تصاویر اطلاعیه‌ها/تنظیمات و تمام عکس‌های ابری دانشجویان و کارکنان در یک فایل یکپارچه ذخیره می‌شوند؛ به‌طوری که حتی اگر سرور و دیتابیس کاملاً ریست یا پاک شده باشد، با بارگذاری مجدد این فایل تمام سایت دقیقاً به همین وضعیت برمی‌گردد.
+              </p>
+            </div>
 
-            <div className="flex flex-wrap gap-3">
+            {backupProgressMessage && (
+              <div className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-emerald-800 dark:text-emerald-200">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                <span>{backupProgressMessage}</span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
               <button
-                onClick={handleBackupExport}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                type="button"
+                onClick={handleFullBackupExport}
+                disabled={isFullBackupExporting || isBackupRestoring}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-xs font-extrabold shadow-md shadow-emerald-600/20 transition flex items-center gap-2 cursor-pointer"
               >
-                <Download className="w-4 h-4" />
-                <span>دانلود فایل پشتیبان کامل سامانه</span>
+                {isFullBackupExporting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Database className="w-4 h-4" />
+                )}
+                <span>دانلود فایل پشتیبان کامل (تمام فایل‌ها، عکس‌ها و اطلاعات)</span>
               </button>
 
-              <label className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer">
-                <Upload className="w-4 h-4" />
-                <span>بازیابی نسخه پشتیبان JSON</span>
-                <input type="file" accept=".json" onChange={handleBackupImport} className="hidden" />
+              <button
+                type="button"
+                onClick={handleBackupExport}
+                disabled={isFullBackupExporting || isBackupRestoring}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>دانلود پشتیبان سریع داده‌ها (JSON)</span>
+              </button>
+
+              <label
+                className={`px-4 py-2.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                  isFullBackupExporting || isBackupRestoring ? 'opacity-60 pointer-events-none' : 'cursor-pointer'
+                }`}
+              >
+                {isBackupRestoring ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Upload className="w-4 h-4" />
+                )}
+                <span>بازیابی نسخه پشتیبان (کامل / JSON)</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleBackupImport}
+                  disabled={isFullBackupExporting || isBackupRestoring}
+                  className="hidden"
+                />
               </label>
 
               <button
+                type="button"
                 onClick={handleResetDefaults}
-                className="px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer mr-auto"
+                disabled={isFullBackupExporting || isBackupRestoring}
+                className="px-4 py-2.5 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer mr-auto"
               >
                 <RotateCcw className="w-4 h-4" />
                 <span>بازنشانی به تنظیمات پیش‌فرض دانشگاه</span>

@@ -46,6 +46,7 @@ interface CulturalDashboardProps {
   onOpenMessages: () => void;
   onOpenChangePassword: () => void;
   onOpenUserGuide?: (role: 'cultural') => void;
+  embeddedMode?: boolean;
 }
 
 const DAYS_OF_WEEK: Array<{ key: DayOfWeek; label: string }> = [
@@ -76,6 +77,7 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
   onOpenMessages,
   onOpenChangePassword,
   onOpenUserGuide,
+  embeddedMode = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'timetable' | 'associations' | 'reports' | 'messages'>('timetable');
   const [programs, setPrograms] = useState<CulturalProgram[]>(() => Storage.getCulturalPrograms());
@@ -447,6 +449,7 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
   return (
     <div className="space-y-6">
       {/* سربرگ کارتابل امور فرهنگی */}
+      {!embeddedMode ? (
       <div className="bg-gradient-to-r from-fuchsia-800 via-purple-800 to-indigo-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
         <div className="absolute -top-12 -left-12 w-48 h-48 bg-white/10 rounded-full blur-3xl pointer-events-none" />
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
@@ -504,6 +507,20 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
           </div>
         </div>
       </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+          <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
+            مدیریت جدول زمانی هفتگی برنامه‌های فرهنگی، تشکل‌ها و انجمن‌ها
+          </div>
+          <button
+            onClick={() => openAddProgramModal('saturday')}
+            className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ ثبت برنامه در جدول زمانی هفتگی</span>
+          </button>
+        </div>
+      )}
 
       {/* کارت‌های شاخص کلیدی + اعلام حریم خصوصی */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">

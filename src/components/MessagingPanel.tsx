@@ -41,7 +41,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const [activeTab, setActiveTab] = useState<'inbox' | 'compose'>('inbox');
 
   // فرم پیام جدید
-  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor' | 'maintenance' | 'finance' | 'warehouse' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'student' | 'all'>('supervisor');
+  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor' | 'maintenance' | 'finance' | 'warehouse' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'student' | 'all'>('supervisor');
   const [category, setCategory] = useState<Message['category']>('accommodation');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
@@ -54,10 +54,11 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const [eduSelectedField, setEduSelectedField] = useState('');
   const [eduSelectedEntryTerm, setEduSelectedEntryTerm] = useState('');
   const [secComposeMode, setSecComposeMode] = useState<'student' | 'staff'>('student');
-  const [secStaffTarget, setSecStaffTarget] = useState<'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'education' | 'cultural' | 'counselor' | 'finance' | 'warehouse' | 'procurement' | 'all'>('supervisor');
+  const [secStaffTarget, setSecStaffTarget] = useState<'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'education' | 'cultural' | 'counselor' | 'finance' | 'warehouse' | 'procurement' | 'vice_dean' | 'all'>('supervisor');
 
-  // فیلتر دسته‌بندی صندوق پیام‌ها
+  // فیلتر دسته‌بندی و نقش صندوق پیام‌ها
   const [inboxCategoryFilter, setInboxCategoryFilter] = useState<string>('all');
+  const [inboxRoleFilter, setInboxRoleFilter] = useState<string>('all');
 
   // پاسخ‌دهی به تیکت
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
@@ -117,12 +118,16 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
 
   // فیلتر کردن پیام‌های مرتبط با کاربر با رعایت حریم خصوصی گزارش‌های محرمانه
   const userMessages = messages.filter((m) => {
+    // مدیر و معاونت دانشجویی بر تمام پیام‌های ثبت‌شده در همه حوزه‌ها نظارت دارند
+    if (currentUser.role === 'admin' || currentUser.role === 'vice_dean') {
+      return true;
+    }
+
     // گزارش محرمانه برای دانشجو، سرپرست، مشاور و مدیر (و پیام‌های مستقیم حراست) قابل رویت است
     if (
       m.isConfidential &&
       currentUser.role !== 'student' &&
       currentUser.role !== 'supervisor' &&
-      currentUser.role !== 'admin' &&
       currentUser.role !== 'counselor' &&
       !(currentUser.role === 'security' && (m.receiverType === 'security' || m.senderRole === 'security'))
     ) {
@@ -168,7 +173,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
         (!m.isConfidential && m.category === 'discipline')
       );
     }
-    return true; // admin sees all
+    return true;
   });
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -275,6 +280,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
           finance: 'امور مالی و حسابداری',
           warehouse: 'مسئول انبار و تجهیزات',
           procurement: 'کارپردازی و خرید',
+          vice_dean: 'معاونت دانشجویی',
           all: 'همه واحدها و سرپرستان',
         };
         Storage.addMessage({
@@ -298,9 +304,17 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       return;
     }
 
+    // محدودیت امنیتی پیام‌رسان معاونت دانشجویی: امکان ارسال پیام مستقیم به دانشجو یا دریافت مستقیم از دانشجو وجود ندارد
+    if (
+      (currentUser.role === 'vice_dean' && receiverType === 'student') ||
+      (currentUser.role === 'student' && receiverType === 'vice_dean')
+    ) {
+      return;
+    }
+
     let senderName = '';
     let senderId = '';
-    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' | 'cultural' | 'student_affairs' | 'security' = 'student';
+    let senderRole: Message['senderRole'] = 'student';
 
     if (currentUser.role === 'student') {
       senderName = currentUser.student.fullName;
@@ -338,6 +352,10 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       senderName = `${currentUser.staff.fullName} (امور دانشجویی و تربیت بدنی)`;
       senderId = currentUser.staff.id;
       senderRole = 'student_affairs';
+    } else if (currentUser.role === 'vice_dean') {
+      senderName = `${currentUser.staff.fullName} (معاونت دانشجویی)`;
+      senderId = currentUser.staff.id;
+      senderRole = 'vice_dean';
     } else {
       senderName = currentUser.name;
       senderId = currentUser.username;
@@ -366,8 +384,17 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const handleSendReply = (messageId: string) => {
     if (!replyText.trim()) return;
 
+    const targetMsg = messages.find((m) => m.id === messageId);
+    if (
+      currentUser.role === 'vice_dean' &&
+      targetMsg &&
+      (targetMsg.senderRole === 'student' || targetMsg.receiverType === 'student')
+    ) {
+      return;
+    }
+
     let senderName = '';
-    let senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'procurement' | 'counselor' | 'finance' | 'education' | 'cultural' | 'student_affairs' | 'security' = 'supervisor';
+    let senderRole: Message['senderRole'] = 'supervisor';
 
     if (currentUser.role === 'student') {
       senderName = currentUser.student.fullName;
@@ -402,6 +429,9 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     } else if (currentUser.role === 'security') {
       senderName = `${currentUser.staff.fullName} (حراست و انتظامات)`;
       senderRole = 'security';
+    } else if (currentUser.role === 'vice_dean') {
+      senderName = `${currentUser.staff.fullName} (معاونت دانشجویی)`;
+      senderRole = 'vice_dean';
     } else {
       senderName = 'مدیریت کل سراها';
       senderRole = 'admin';
@@ -465,12 +495,16 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
         ? currentUser.supervisor.id
         : currentUser.role === 'admin'
         ? currentUser.username
+        : currentUser.role === 'vice_dean'
+        ? currentUser.staff.id
         : 'admin';
     const createdByName =
       currentUser.role === 'supervisor'
         ? currentUser.supervisor.fullName
         : currentUser.role === 'admin'
         ? currentUser.name
+        : currentUser.role === 'vice_dean'
+        ? `${currentUser.staff.fullName} (معاونت دانشجویی)`
         : 'مدیر سرا';
     const createdByRole: 'supervisor' | 'admin' = currentUser.role === 'supervisor' ? 'supervisor' : 'admin';
 
@@ -763,6 +797,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                         { id: 'finance', label: 'امور مالی' },
                         { id: 'warehouse', label: 'مسئول انبار' },
                         { id: 'procurement', label: 'کارپرداز و خرید' },
+                        { id: 'vice_dean', label: 'معاونت دانشجویی' },
                         { id: 'all', label: 'همه واحدها و سرپرستان' },
                       ].map((item) => (
                         <button
@@ -936,7 +971,25 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                       >
                         مدیریت کل سراهای دانشگاه
                       </button>
+                      {currentUser.role !== 'student' && (
+                        <button
+                          type="button"
+                          onClick={() => setReceiverType('vice_dean')}
+                          className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                            receiverType === 'vice_dean'
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                          }`}
+                        >
+                          معاونت دانشجویی
+                        </button>
+                      )}
                     </div>
+                    {currentUser.role === 'vice_dean' && (
+                      <div className="mt-2 p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold text-indigo-900 dark:text-indigo-200">
+                        ارسال و دریافت پیام مستقیم برای معاونت دانشجویی با تمامی کارکنان و واحدهای سامانه (بجز دانشجو) فعال است. تمامی پیام‌های دانشجویان در تب پایش پیام‌ها قابل مشاهده است.
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -1030,8 +1083,8 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
 
               {/* ستون لیست گفتگوها همراه با فیلتر دسته‌بندی */}
               <div className="md:col-span-1 border-l border-slate-100 dark:border-slate-800 pl-2 space-y-2 overflow-y-auto max-h-[55vh]">
-                {/* فیلتر دسته‌بندی پیام‌ها */}
-                <div className="mb-2">
+                {/* فیلتر دسته‌بندی و نقش پیام‌ها */}
+                <div className="mb-2 space-y-1.5">
                   <select
                     value={inboxCategoryFilter}
                     onChange={(e) => setInboxCategoryFilter(e.target.value)}
@@ -1052,15 +1105,45 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                     <option value="discipline">انضباطی</option>
                     <option value="request">مرخصی و تردد</option>
                   </select>
+                  {(currentUser.role === 'vice_dean' || currentUser.role === 'admin') && (
+                    <select
+                      value={inboxRoleFilter}
+                      onChange={(e) => setInboxRoleFilter(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/30 text-[11px] font-bold"
+                    >
+                      <option value="all">پایش همه حوزه‌ها (از دانشجو تا مدیر)</option>
+                      <option value="student">پیام‌های دانشجویان</option>
+                      <option value="supervisor">سرپرستان سراها</option>
+                      <option value="maintenance">واحد تأسیسات</option>
+                      <option value="security">حراست و انتظامات</option>
+                      <option value="student_affairs">امور دانشجویی و ورزش</option>
+                      <option value="cultural">امور فرهنگی</option>
+                      <option value="education">کارشناس آموزش</option>
+                      <option value="counselor">مرکز مشاوره</option>
+                      <option value="finance">امور مالی</option>
+                      <option value="warehouse">انبار و تجهیزات</option>
+                      <option value="procurement">کارپردازی</option>
+                      <option value="vice_dean">معاونت دانشجویی</option>
+                      <option value="admin">مدیریت کل</option>
+                    </select>
+                  )}
                 </div>
 
-                {userMessages.filter((m) => inboxCategoryFilter === 'all' || m.category === inboxCategoryFilter).length === 0 ? (
+                {userMessages.filter(
+                  (m) =>
+                    (inboxCategoryFilter === 'all' || m.category === inboxCategoryFilter) &&
+                    (inboxRoleFilter === 'all' || m.senderRole === inboxRoleFilter || m.receiverType === inboxRoleFilter)
+                ).length === 0 ? (
                   <div className="p-4 text-center text-xs text-slate-400">
                     هیچ پیامی در این دسته ثبت نشده است.
                   </div>
                 ) : (
                   userMessages
-                    .filter((m) => inboxCategoryFilter === 'all' || m.category === inboxCategoryFilter)
+                    .filter(
+                      (m) =>
+                        (inboxCategoryFilter === 'all' || m.category === inboxCategoryFilter) &&
+                        (inboxRoleFilter === 'all' || m.senderRole === inboxRoleFilter || m.receiverType === inboxRoleFilter)
+                    )
                     .map((msg) => (
                       <button
                         key={msg.id}
@@ -1161,6 +1244,8 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                               ? 'امور دانشجویی'
                               : selectedMsg.senderRole === 'security'
                               ? 'حراست و انتظامات'
+                              : selectedMsg.senderRole === 'vice_dean'
+                              ? 'معاونت دانشجویی'
                               : 'مدیر'}
                           </span>
                           {selectedMsg.receiverName && (
@@ -1197,7 +1282,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-slate-400">{selectedMsg.date}</span>
-                          {(currentUser.role === 'supervisor' || currentUser.role === 'admin') && (
+                          {(currentUser.role === 'supervisor' || currentUser.role === 'admin' || currentUser.role === 'vice_dean') && (
                             <button
                               onClick={() => handleOpenReferModal(selectedMsg)}
                               className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
@@ -1246,23 +1331,32 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                     </div>
 
                     {/* کادر ارسال پاسخ */}
-                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="پاسخ خود را بنویسید..."
-                        value={replyText}
-                        onChange={(e) => setReplyText(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSendReply(selectedMsg.id)}
-                        className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-1 focus:ring-teal-500"
-                      />
-                      <button
-                        onClick={() => handleSendReply(selectedMsg.id)}
-                        className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-                      >
-                        <CornerDownLeft className="w-3.5 h-3.5" />
-                        <span>ارسال پاسخ</span>
-                      </button>
-                    </div>
+                    {currentUser.role === 'vice_dean' &&
+                    (selectedMsg.senderRole === 'student' || selectedMsg.receiverType === 'student') ? (
+                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+                        <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold text-indigo-800 dark:text-indigo-200">
+                          حالت پایش فقط-خواندنی: پیام‌های دارای طرف دانشجو برای معاونت دانشجویی صرفاً جهت نظارت نمایش داده می‌شوند و پاسخ‌دهی مستقیم به دانشجو غیرفعال است.
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="پاسخ خود را بنویسید..."
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSendReply(selectedMsg.id)}
+                          className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-1 focus:ring-teal-500"
+                        />
+                        <button
+                          onClick={() => handleSendReply(selectedMsg.id)}
+                          className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <CornerDownLeft className="w-3.5 h-3.5" />
+                          <span>ارسال پاسخ</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="h-full flex items-center justify-center text-xs text-slate-400 p-8">

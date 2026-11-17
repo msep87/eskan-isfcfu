@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useDeferredValue } from 'react';
-import * as XLSX from 'xlsx';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -100,6 +99,7 @@ const REPORTER_ROLE_LABELS: Record<SecurityReport['reportedByRole'], string> = {
   admin: 'مدیر کل سامانه',
   maintenance: 'واحد تأسیسات و فنی',
   student_affairs: 'امور دانشجویی',
+  vice_dean: 'معاونت دانشجویی',
 };
 
 const EVAL_TYPE_LABELS: Record<StudentEvaluation['type'], { label: string; cls: string }> = {
@@ -384,7 +384,8 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
     }
   };
 
-  const handleExportSecurityReportsExcel = () => {
+  const handleExportSecurityReportsExcel = async () => {
+    const XLSX = await import('xlsx');
     const rows = filteredReports.map((r, i) => ({
       'ردیف': i + 1,
       'کد گزارش': r.reportCode,
@@ -392,7 +393,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
       'دسته‌بندی': r.categoryLabel,
       'فوریت': REPORT_SEVERITY_META[r.severity]?.label || r.severity,
       'وضعیت حراست': REPORT_STATUS_META[r.status]?.label || r.status,
-      'ارسال‌کننده': `${r.reportedByName} (${REPORTER_ROLE_LABELS[r.reportedByRole]})`,
+      'ارسال‌کننده': `${r.reportedByName} (${REPORTER_ROLE_LABELS[r.reportedByRole] || r.reportedByRole})`,
       'تاریخ ثبت': r.reportedAt,
       'تاریخ وقوع': r.incidentDate,
       'سرا و محل': `${r.dormName || '-'} ${r.roomNumber ? `اتاق ${r.roomNumber}` : ''} ${r.locationDetails || ''}`.trim(),
@@ -408,7 +409,8 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
     XLSX.writeFile(wb, `گزارش_واحد_حراست_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  const handleExportEvaluationsExcel = () => {
+  const handleExportEvaluationsExcel = async () => {
+    const XLSX = await import('xlsx');
     const rows = filteredEvaluations.map((ev, i) => ({
       'ردیف': i + 1,
       'نام دانشجو': ev.studentName,

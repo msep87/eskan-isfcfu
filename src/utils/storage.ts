@@ -60,6 +60,7 @@ import {
   SecurityReportSeverity,
   SecurityReportStatus,
   SecurityReportStudentSnapshot,
+  ViceDeanStaff,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -104,10 +105,41 @@ import {
   INITIAL_SPORTS_REGISTRATIONS,
   INITIAL_SECURITY_STAFF,
   INITIAL_SECURITY_REPORTS,
+  INITIAL_VICE_DEAN_STAFF,
   generateInitialRoomsAndBeds,
 } from './sampleData';
 
-const API_BASE_URL = 'https://khabgah-api.vercel.app/api';
+const ENV_API_URL =
+  typeof import.meta !== 'undefined' && (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL;
+const ENV_SYNC_TOKEN =
+  typeof import.meta !== 'undefined' && (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_CLOUD_SYNC_TOKEN;
+
+const API_BASE_URL = (ENV_API_URL && ENV_API_URL.trim().replace(/\/+$/, '')) || 'https://khabgah-api.vercel.app/api';
+
+function buildApiHeaders(includeJson = true, extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (ENV_SYNC_TOKEN && ENV_SYNC_TOKEN.trim()) {
+    headers['Authorization'] = `Bearer ${ENV_SYNC_TOKEN.trim()}`;
+  }
+  if (extra) Object.assign(headers, extra);
+  return headers;
+}
+
+const DISALLOWED_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function sanitizePlainValue<T>(value: T, depth = 0): T {
+  if (depth > 30 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizePlainValue(item, depth + 1)) as unknown as T;
+  }
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (DISALLOWED_PROTO_KEYS.has(k) || k.startsWith('$')) continue;
+    clean[k] = sanitizePlainValue(v, depth + 1);
+  }
+  return clean as T;
+}
 
 const STORAGE_KEYS = {
   SETTINGS: 'farhangian_dorm_settings_prod',
@@ -155,6 +187,7 @@ const STORAGE_KEYS = {
   SPORTS_REGISTRATIONS: 'farhangian_dorm_sports_registrations_prod',
   SECURITY_STAFF: 'farhangian_dorm_security_staff_prod',
   SECURITY_REPORTS: 'farhangian_dorm_security_reports_prod',
+  VICE_DEAN_STAFF: 'farhangian_dorm_vice_dean_staff_prod',
 };
 
 export const SECURITY_REPORT_PRESETS: Array<{
@@ -373,6 +406,7 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.SPORTS_REGISTRATIONS, INITIAL_SPORTS_REGISTRATIONS);
   setIfMissing(STORAGE_KEYS.SECURITY_STAFF, INITIAL_SECURITY_STAFF);
   setIfMissing(STORAGE_KEYS.SECURITY_REPORTS, INITIAL_SECURITY_REPORTS);
+  setIfMissing(STORAGE_KEYS.VICE_DEAN_STAFF, INITIAL_VICE_DEAN_STAFF);
 
   try {
     if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
@@ -399,74 +433,183 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.STUDENTS, INITIAL_STUDENTS);
 }
 
-// مدیریت زمان و وضعیت همگام‌سازی ابری با تجمیع نوشتن‌های پیاپی برای سرعت بیشتر و جلوگیری از تداخل
+// مدیریت زمان و وضعیت همگام‌سازی ابری با تجمیع دسته‌ای (Batch)، بازپخش خطا و کنترل ETag/Version
 const keyWriteTimestamps: Record<string, number> = {};
 const pendingCloudRequests: Record<string, Promise<boolean> | undefined> = {};
-const pendingCloudTimers: Record<string, ReturnType<typeof setTimeout> | undefined> = {};
 const pendingCloudValues: Record<string, unknown> = {};
+const failedCloudRetryQueue: Record<string, unknown> = {};
+let coalescedFlushTimer: ReturnType<typeof setTimeout> | undefined;
 let activeSyncPromise: Promise<boolean> | null = null;
+let batchEndpointSupported: boolean | null = null;
+let versionEndpointSupported: boolean | null = null;
+let lastSyncRevision: string | number | null = null;
+let lastSyncEtag: string | null = null;
+let lastStudentsEtag: string | null = null;
 const SYNCABLE_KEYS = Object.values(STORAGE_KEYS).filter((k) => k !== STORAGE_KEYS.CURRENT_USER);
-const CLOUD_SYNC_DEBOUNCE_MS = 120;
+const CLOUD_SYNC_DEBOUNCE_MS = 140;
+const MAX_RETRY_QUEUE_KEYS = 25;
 
-function flushKeyToCloud(key: string, keepalive = false): void {
-  const timer = pendingCloudTimers[key];
-  if (timer !== undefined) {
-    clearTimeout(timer);
-    delete pendingCloudTimers[key];
+function enqueueFailedWrite(key: string, value: unknown): void {
+  if (Object.keys(failedCloudRetryQueue).length >= MAX_RETRY_QUEUE_KEYS && !(key in failedCloudRetryQueue)) {
+    const oldestKey = Object.keys(failedCloudRetryQueue)[0];
+    if (oldestKey) delete failedCloudRetryQueue[oldestKey];
   }
-  if (!(key in pendingCloudValues)) return;
+  failedCloudRetryQueue[key] = value;
+}
 
-  const value = pendingCloudValues[key];
-  delete pendingCloudValues[key];
-  keyWriteTimestamps[key] = Date.now();
-
-  if (typeof fetch !== 'function') return;
-
+function sendSingleKeyPost(key: string, value: unknown, keepalive = false): Promise<boolean> {
   let bodyStr: string;
   try {
     bodyStr = JSON.stringify({ key, value });
   } catch {
-    return;
+    return Promise.resolve(false);
   }
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : undefined;
+  const useKeepalive = keepalive && bodyStr.length < 60000;
 
   const reqOptions: RequestInit = {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildApiHeaders(true),
     body: bodyStr,
+    ...(useKeepalive ? { keepalive: true } : { signal: controller?.signal }),
   };
-  if (keepalive && bodyStr.length < 60000) {
-    reqOptions.keepalive = true;
-  }
 
   const reqPromise = fetch(`${API_BASE_URL}/sync`, reqOptions)
-    .then((res) => {
+    .then(async (res) => {
       if (!res.ok) {
         console.warn(`Cloud sync POST non-OK (${res.status}) for key ${key}`);
+        enqueueFailedWrite(key, value);
         return false;
       }
+      const data = (await res.json().catch(() => null)) as { revision?: string | number } | null;
+      if (data && data.revision !== undefined) {
+        lastSyncRevision = data.revision;
+      }
+      delete failedCloudRetryQueue[key];
       return true;
     })
     .catch((err) => {
       console.warn(`Cloud sync POST failed for key ${key}:`, err);
+      enqueueFailedWrite(key, value);
       return false;
     })
     .finally(() => {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
       if (pendingCloudRequests[key] === reqPromise) {
         delete pendingCloudRequests[key];
       }
     });
 
   pendingCloudRequests[key] = reqPromise;
+  return reqPromise;
 }
 
 function flushAllPendingCloudTimers(keepalive = false): void {
-  const keys = Object.keys(pendingCloudValues);
-  keys.forEach((k) => flushKeyToCloud(k, keepalive));
+  if (coalescedFlushTimer !== undefined) {
+    clearTimeout(coalescedFlushTimer);
+    coalescedFlushTimer = undefined;
+  }
+  if (typeof fetch !== 'function') {
+    for (const k of Object.keys(pendingCloudValues)) delete pendingCloudValues[k];
+    return;
+  }
+
+  const entriesToSend: Array<{ key: string; value: unknown }> = [];
+  for (const k of Object.keys(pendingCloudValues)) {
+    entriesToSend.push({ key: k, value: pendingCloudValues[k] });
+    delete pendingCloudValues[k];
+    keyWriteTimestamps[k] = Date.now();
+  }
+
+  if (entriesToSend.length === 0) return;
+
+  // اگر بیش از ۱ کلید هم‌زمان منتظر ارسال باشد و مسیر /sync/batch فعال باشد، همه را در یک درخواست تجمیع می‌کنیم
+  if (entriesToSend.length > 1 && batchEndpointSupported !== false) {
+    let batchBody: string;
+    try {
+      batchBody = JSON.stringify({ entries: entriesToSend });
+    } catch {
+      entriesToSend.forEach((e) => {
+        void sendSingleKeyPost(e.key, e.value, keepalive);
+      });
+      return;
+    }
+
+    const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 18000) : undefined;
+    const useKeepalive = keepalive && batchBody.length < 60000;
+
+    const batchPromise = fetch(`${API_BASE_URL}/sync/batch`, {
+      method: 'POST',
+      headers: buildApiHeaders(true),
+      body: batchBody,
+      ...(useKeepalive ? { keepalive: true } : { signal: controller?.signal }),
+    })
+      .then(async (res) => {
+        if (res.status === 404 || res.status === 405) {
+          batchEndpointSupported = false;
+          const fallbacks = await Promise.all(entriesToSend.map((e) => sendSingleKeyPost(e.key, e.value, keepalive)));
+          return fallbacks.every(Boolean);
+        }
+        if (!res.ok) {
+          entriesToSend.forEach((e) => enqueueFailedWrite(e.key, e.value));
+          return false;
+        }
+        batchEndpointSupported = true;
+        const data = (await res.json().catch(() => null)) as { revision?: string | number } | null;
+        if (data && data.revision !== undefined) {
+          lastSyncRevision = data.revision;
+        }
+        entriesToSend.forEach((e) => {
+          delete failedCloudRetryQueue[e.key];
+        });
+        return true;
+      })
+      .catch(() => {
+        entriesToSend.forEach((e) => enqueueFailedWrite(e.key, e.value));
+        return false;
+      })
+      .finally(() => {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        entriesToSend.forEach((e) => {
+          if (pendingCloudRequests[e.key] === batchPromise) {
+            delete pendingCloudRequests[e.key];
+          }
+        });
+      });
+
+    entriesToSend.forEach((e) => {
+      pendingCloudRequests[e.key] = batchPromise;
+    });
+    return;
+  }
+
+  entriesToSend.forEach((e) => {
+    void sendSingleKeyPost(e.key, e.value, keepalive);
+  });
+}
+
+function flushFailedRetryQueue(): void {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  const retryKeys = Object.keys(failedCloudRetryQueue);
+  if (retryKeys.length === 0) return;
+  for (const k of retryKeys) {
+    if (!(k in pendingCloudValues)) {
+      pendingCloudValues[k] = failedCloudRetryQueue[k];
+    }
+    delete failedCloudRetryQueue[k];
+  }
+  flushAllPendingCloudTimers(false);
 }
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   window.addEventListener('beforeunload', () => {
     flushAllPendingCloudTimers(true);
+  });
+  window.addEventListener('online', () => {
+    flushFailedRetryQueue();
   });
 }
 
@@ -480,12 +623,11 @@ function pushKeyToCloud<T>(key: string, value: T): void {
     return;
   }
 
-  const prevTimer = pendingCloudTimers[key];
-  if (prevTimer !== undefined) {
-    clearTimeout(prevTimer);
+  if (coalescedFlushTimer !== undefined) {
+    clearTimeout(coalescedFlushTimer);
   }
-  pendingCloudTimers[key] = setTimeout(() => {
-    flushKeyToCloud(key);
+  coalescedFlushTimer = setTimeout(() => {
+    flushAllPendingCloudTimers(false);
   }, CLOUD_SYNC_DEBOUNCE_MS);
 }
 
@@ -543,6 +685,14 @@ export function compressAvatarImageFile(
   quality = 0.78
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    if (!file || !file.type || !file.type.startsWith('image/') || file.type.toLowerCase().includes('svg')) {
+      reject(new Error('فرمت فایل باید تصویر استاندارد (JPG / PNG / WebP) باشد.'));
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      reject(new Error('حجم فایل تصویر بیش از حد مجاز است (حداکثر ۱۲ مگابایت).'));
+      return;
+    }
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('خطا در خواندن فایل تصویر.'));
     reader.onload = (ev) => {
@@ -627,7 +777,7 @@ function get<T>(key: string, defaultValue: T): T {
     }
     const item = localStorage.getItem(key);
     if (!item) return defaultValue;
-    const parsed = JSON.parse(item) as T;
+    const parsed = sanitizePlainValue(JSON.parse(item) as T);
     parsedCache.set(key, cloneValue(parsed));
     return parsed;
   } catch (e) {
@@ -1705,7 +1855,7 @@ export const Storage = {
 
   // تطبیق و اتصال دسته‌جمعی عکس‌های پرسنل و کادر بر اساس نام/کد کاربری
   batchAssignStaffPhotos: (
-    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security',
+    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean',
     photoMap: Record<string, string>
   ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     let matchedCount = 0;
@@ -1913,6 +2063,25 @@ export const Storage = {
           if (ref) Storage.setCurrentUser({ role: 'security', staff: ref });
         }
       }
+    } else if (role === 'vice_dean') {
+      const list = Storage.getViceDeanStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setViceDeanStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'vice_dean') {
+          const ref = list.find((vd) => vd.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'vice_dean', staff: ref });
+        }
+      }
     }
 
     if (matchedCount > 0 && saved) {
@@ -1927,6 +2096,7 @@ export const Storage = {
         cultural: 'کارشناسان امور فرهنگی',
         student_affairs: 'کارشناسان امور دانشجویی و تربیت بدنی',
         security: 'کارشناسان حراست و انتظامات',
+        vice_dean: 'کاربران معاونت دانشجویی',
       };
       Storage.addActivityLog({
         category: 'staff',
@@ -2008,7 +2178,7 @@ export const Storage = {
     messageId: string,
     reply: {
       senderName: string;
-      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security';
+      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean';
       content: string;
       date: string;
     }
@@ -2046,7 +2216,10 @@ export const Storage = {
     const students = Storage.getStudents().filter((s) => s.studentId !== studentId);
     Storage.setStudents(students);
     if (typeof fetch === 'function') {
-      fetch(`${API_BASE_URL}/students/${encodeURIComponent(studentId)}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`${API_BASE_URL}/students/${encodeURIComponent(studentId)}`, {
+        method: 'DELETE',
+        headers: buildApiHeaders(false),
+      }).catch(() => {});
     }
     Storage.addActivityLog({
       category: 'student',
@@ -2292,72 +2465,512 @@ export const Storage = {
     return { success: true, message: 'اطلاعات پرونده با موفقیت ثبت و ذخیره شد.' };
   },
 
-  // پشتیبان‌گیری کامل از داده‌ها به صورت فایل JSON
-  exportBackupJson: () => {
-    const fullBackup = {
-      settings: Storage.getSettings(),
-      dormitories: Storage.getDormitories(),
-      rooms: Storage.getRooms(),
-      beds: Storage.getBeds(),
-      students: Storage.getStudents(),
-      supervisors: Storage.getSupervisors(),
-      warnings: Storage.getWarnings(),
-      announcements: Storage.getAnnouncements(),
-      messages: Storage.getMessages(),
-      maintenanceStaff: Storage.getMaintenanceStaff(),
-      maintenanceTasks: Storage.getMaintenanceTasks(),
-      warehouseStaff: Storage.getWarehouseStaff(),
-      inventoryItems: Storage.getInventoryItems(),
-      inventoryTransactions: Storage.getInventoryTransactions(),
-      warehouseRequests: Storage.getWarehouseRequests(),
-      procurementStaff: Storage.getProcurementStaff(),
-      procurementRequests: Storage.getProcurementRequests(),
-      shiftSchedules: Storage.getShiftSchedules(),
-      shiftReports: Storage.getShiftReports(),
-      counselors: Storage.getCounselors(),
-      counselorShifts: Storage.getCounselorShifts(),
-      counselorReports: Storage.getCounselorReports(),
-      activityLogs: Storage.getActivityLogs(),
-      studentEvaluations: Storage.getStudentEvaluations(),
-      financeStaff: Storage.getFinanceStaff(),
-      studentFinances: Storage.getStudentFinances(),
-      educationStaff: Storage.getEducationStaff(),
-      academicNotices: Storage.getAcademicNotices(),
-      guestRequests: Storage.getGuestRequests(),
-      visitReports: Storage.getVisitReports(),
-      surveys: Storage.getSurveys(),
-      surveyResponses: Storage.getSurveyResponses(),
-      culturalStaff: Storage.getCulturalStaff(),
-      culturalPrograms: Storage.getCulturalPrograms(),
-      culturalAssociations: Storage.getCulturalAssociations(),
-      associationMemberships: Storage.getAssociationMemberships(),
-      studentAffairsStaff: Storage.getStudentAffairsStaff(),
-      guildElections: Storage.getGuildElections(),
-      guildElectionVotes: Storage.getGuildElectionVotes(),
-      disciplinaryReferrals: Storage.getDisciplinaryReferrals(),
-      sportsPrograms: Storage.getSportsPrograms(),
-      sportsRegistrations: Storage.getSportsRegistrations(),
-      securityStaff: Storage.getSecurityStaff(),
-      securityReports: Storage.getSecurityReports(),
-      exportedAt: new Date().toISOString(),
-      appName: 'سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
-    };
+  // جمع‌آوری کامل کلیه ۴۵ مجموعه داده‌ای سامانه جهت پشتیبان‌گیری استاندارد و کامل
+  _collectAllBackupDataSnapshot: () => ({
+    settings: Storage.getSettings(),
+    dormitories: Storage.getDormitories(),
+    rooms: Storage.getRooms(),
+    beds: Storage.getBeds(),
+    students: Storage.getStudents(),
+    supervisors: Storage.getSupervisors(),
+    warnings: Storage.getWarnings(),
+    announcements: Storage.getAnnouncements(),
+    messages: Storage.getMessages(),
+    maintenanceStaff: Storage.getMaintenanceStaff(),
+    maintenanceTasks: Storage.getMaintenanceTasks(),
+    warehouseStaff: Storage.getWarehouseStaff(),
+    inventoryItems: Storage.getInventoryItems(),
+    inventoryTransactions: Storage.getInventoryTransactions(),
+    warehouseRequests: Storage.getWarehouseRequests(),
+    procurementStaff: Storage.getProcurementStaff(),
+    procurementRequests: Storage.getProcurementRequests(),
+    shiftSchedules: Storage.getShiftSchedules(),
+    shiftReports: Storage.getShiftReports(),
+    counselors: Storage.getCounselors(),
+    counselorShifts: Storage.getCounselorShifts(),
+    counselorReports: Storage.getCounselorReports(),
+    activityLogs: Storage.getActivityLogs(),
+    studentEvaluations: Storage.getStudentEvaluations(),
+    financeStaff: Storage.getFinanceStaff(),
+    studentFinances: Storage.getStudentFinances(),
+    educationStaff: Storage.getEducationStaff(),
+    academicNotices: Storage.getAcademicNotices(),
+    guestRequests: Storage.getGuestRequests(),
+    visitReports: Storage.getVisitReports(),
+    surveys: Storage.getSurveys(),
+    surveyResponses: Storage.getSurveyResponses(),
+    culturalStaff: Storage.getCulturalStaff(),
+    culturalPrograms: Storage.getCulturalPrograms(),
+    culturalAssociations: Storage.getCulturalAssociations(),
+    associationMemberships: Storage.getAssociationMemberships(),
+    studentAffairsStaff: Storage.getStudentAffairsStaff(),
+    guildElections: Storage.getGuildElections(),
+    guildElectionVotes: Storage.getGuildElectionVotes(),
+    disciplinaryReferrals: Storage.getDisciplinaryReferrals(),
+    sportsPrograms: Storage.getSportsPrograms(),
+    sportsRegistrations: Storage.getSportsRegistrations(),
+    securityStaff: Storage.getSecurityStaff(),
+    securityReports: Storage.getSecurityReports(),
+    viceDeanStaff: Storage.getViceDeanStaff(),
+    exportedAt: new Date().toISOString(),
+    appName: 'سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
+  }),
 
+  // پشتیبان‌گیری سریع از داده‌ها به صورت فایل JSON
+  exportBackupJson: () => {
+    const fullBackup = Storage._collectAllBackupDataSnapshot();
     const blob = new Blob([JSON.stringify(fullBackup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `پشتیبان_سامانه_خوابگاه_فرهنگیان_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `پشتیبان_داده‌های_خوابگاه_فرهنگیان_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2500);
   },
 
-  // بازیابی نسخه پشتیبان از فایل JSON (همراه با اعتبارسنجی ساختار و حذف کلیدهای مخرب)
+  // پشتیبان‌گیری کامل و مستقل (شامل تمامی داده‌ها، فایل‌های ضمیمه، فونت‌ها، تصاویر اطلاعیه‌ها/تنظیمات و تمام عکس‌های ابری کاربران)
+  exportFullSnapshotBackupJson: async (
+    onProgress?: (message: string) => void
+  ): Promise<{
+    success: boolean;
+    totalStudents: number;
+    totalStaff: number;
+    embeddedPhotosCount: number;
+    embeddedFilesCount: number;
+    fontsCount: number;
+    attachmentsCount: number;
+    sizeKb: number;
+    errorMessage?: string;
+  }> => {
+    type PhotoRole =
+      | 'student'
+      | 'supervisor'
+      | 'maintenance'
+      | 'warehouse'
+      | 'counselor'
+      | 'finance'
+      | 'procurement'
+      | 'education'
+      | 'cultural'
+      | 'student_affairs'
+      | 'security'
+      | 'vice_dean';
+
+    interface ArchivedPhotoRecord {
+      role: PhotoRole;
+      userId: string;
+      originalUrl?: string;
+      dataUrl: string;
+    }
+
+    const apiOrigin = API_BASE_URL.replace(/\/api\/?$/, '');
+    const resolveAssetUrl = (raw: string): string => {
+      const trimmed = String(raw || '').trim();
+      if (!trimmed) return '';
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('blob:')) {
+        return trimmed;
+      }
+      if (trimmed.startsWith('/api/')) return `${apiOrigin}${trimmed}`;
+      if (trimmed.startsWith('api/')) return `${apiOrigin}/${trimmed}`;
+      if (trimmed.startsWith('/') && typeof window !== 'undefined' && window.location?.origin) {
+        return `${window.location.origin}${trimmed}`;
+      }
+      return trimmed;
+    };
+
+    const isFetchableUrl = (raw?: string): boolean => {
+      if (!raw || typeof raw !== 'string') return false;
+      const t = raw.trim();
+      if (!t || t.startsWith('data:')) return false;
+      return (
+        t.startsWith('http://') ||
+        t.startsWith('https://') ||
+        t.startsWith('/api/') ||
+        t.startsWith('api/') ||
+        t.startsWith('blob:') ||
+        t.startsWith('/')
+      );
+    };
+
+    const fetchUrlAsDataUrl = async (rawUrl: string): Promise<string | null> => {
+      const resolved = resolveAssetUrl(rawUrl);
+      if (!resolved) return null;
+      const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+      const timer = controller ? setTimeout(() => controller.abort(), 10000) : undefined;
+      try {
+        const res = await fetch(resolved, {
+          method: 'GET',
+          signal: controller?.signal,
+        });
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        if (!blob || blob.size === 0) return null;
+        return await new Promise<string | null>((resolve) => {
+          const reader = new FileReader();
+          reader.onerror = () => resolve(null);
+          reader.onload = () => {
+            const result = typeof reader.result === 'string' ? reader.result : null;
+            resolve(result);
+          };
+          reader.readAsDataURL(blob);
+        });
+      } catch {
+        return null;
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    };
+
+    const runWithConcurrency = async <T,>(
+      items: T[],
+      limit: number,
+      worker: (item: T, index: number) => Promise<void>
+    ): Promise<void> => {
+      if (items.length === 0) return;
+      let cursor = 0;
+      const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (cursor < items.length) {
+          const idx = cursor++;
+          await worker(items[idx], idx);
+        }
+      });
+      await Promise.all(workers);
+    };
+
+    try {
+      onProgress?.('در حال گردآوری اطلاعات پایگاه داده و تنظیمات سامانه...');
+      const baseData = Storage._collectAllBackupDataSnapshot();
+
+      const photoMap = new Map<string, ArchivedPhotoRecord>();
+      const allowedRolesSet = new Set<PhotoRole>([
+        'student',
+        'supervisor',
+        'maintenance',
+        'warehouse',
+        'counselor',
+        'finance',
+        'procurement',
+        'education',
+        'cultural',
+        'student_affairs',
+        'security',
+        'vice_dean',
+      ]);
+
+      // گام ۱: دریافت مستقیم عکس‌های ذخیره‌شده در دیتابیس ابری از مسیر صفحه‌بندی‌شده /api/photos/export
+      let skip = 0;
+      let hasMore = true;
+      let batchPage = 0;
+      while (hasMore && batchPage < 150) {
+        batchPage += 1;
+        onProgress?.(`در حال دریافت تصاویر پروفایل از سرور ابری (بخش ${batchPage})...`);
+        const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+        const timer = controller ? setTimeout(() => controller.abort(), 15000) : undefined;
+        try {
+          const res = await fetch(`${API_BASE_URL}/photos/export?skip=${skip}&limit=30`, {
+            method: 'GET',
+            headers: buildApiHeaders(false),
+            cache: 'no-store',
+            signal: controller?.signal,
+          });
+          if (timer !== undefined) clearTimeout(timer);
+          if (!res.ok) {
+            hasMore = false;
+            break;
+          }
+          const payload = (await res.json().catch(() => null)) as {
+            ok?: boolean;
+            hasMore?: boolean;
+            nextSkip?: number;
+            photos?: Array<{ role?: string; userId?: string; dataUrl?: string }>;
+          } | null;
+          if (!payload || !Array.isArray(payload.photos) || payload.photos.length === 0) {
+            hasMore = false;
+            break;
+          }
+          for (const item of payload.photos) {
+            const role = String(item?.role || '').trim() as PhotoRole;
+            const userId = String(item?.userId || '').trim();
+            const dataUrl = String(item?.dataUrl || '').trim();
+            if (allowedRolesSet.has(role) && userId && dataUrl.startsWith('data:image/')) {
+              photoMap.set(`${role}:${userId}`, { role, userId, dataUrl });
+            }
+          }
+          hasMore = Boolean(payload.hasMore);
+          skip = typeof payload.nextSkip === 'number' ? payload.nextSkip : skip + payload.photos.length;
+        } catch {
+          if (timer !== undefined) clearTimeout(timer);
+          hasMore = false;
+        }
+      }
+
+      // گام ۲: تکمیل عکس‌های باقی‌مانده (درون‌خطی یا لینک‌های مستقیم HTTP) برای همه ۱۲ نقش کاربری
+      const missingPhotoFetchQueue: Array<{ role: PhotoRole; userId: string; rawUrl: string }> = [];
+      const registerUserPhotos = (
+        role: PhotoRole,
+        records: Array<{ id?: string; studentId?: string; photoUrl?: string }>
+      ) => {
+        for (const rec of records) {
+          const userId = String(role === 'student' ? rec.studentId || '' : rec.id || '').trim();
+          const photoUrl = String(rec.photoUrl || '').trim();
+          if (!userId || !photoUrl) continue;
+          const key = `${role}:${userId}`;
+          const existing = photoMap.get(key);
+          if (existing) {
+            if (!existing.originalUrl) existing.originalUrl = photoUrl;
+            continue;
+          }
+          if (photoUrl.startsWith('data:image/')) {
+            photoMap.set(key, { role, userId, originalUrl: photoUrl, dataUrl: photoUrl });
+          } else if (isFetchableUrl(photoUrl)) {
+            missingPhotoFetchQueue.push({ role, userId, rawUrl: photoUrl });
+          }
+        }
+      };
+
+      registerUserPhotos('student', baseData.students);
+      registerUserPhotos('supervisor', baseData.supervisors);
+      registerUserPhotos('maintenance', baseData.maintenanceStaff);
+      registerUserPhotos('warehouse', baseData.warehouseStaff);
+      registerUserPhotos('counselor', baseData.counselors);
+      registerUserPhotos('finance', baseData.financeStaff);
+      registerUserPhotos('procurement', baseData.procurementStaff);
+      registerUserPhotos('education', baseData.educationStaff);
+      registerUserPhotos('cultural', baseData.culturalStaff);
+      registerUserPhotos('student_affairs', baseData.studentAffairsStaff);
+      registerUserPhotos('security', baseData.securityStaff);
+      registerUserPhotos('vice_dean', baseData.viceDeanStaff);
+
+      if (missingPhotoFetchQueue.length > 0) {
+        onProgress?.(`در حال تبدیل و ضمیمه‌کردن ${missingPhotoFetchQueue.length} تصویر کاربری...`);
+        await runWithConcurrency(missingPhotoFetchQueue, 6, async (task) => {
+          const dataUrl = await fetchUrlAsDataUrl(task.rawUrl);
+          if (dataUrl && dataUrl.startsWith('data:image/')) {
+            photoMap.set(`${task.role}:${task.userId}`, {
+              role: task.role,
+              userId: task.userId,
+              originalUrl: task.rawUrl,
+              dataUrl,
+            });
+          }
+        });
+      }
+
+      // گام ۳: جمع‌آوری تمامی فایل‌های خارجی داخل تنظیمات، فونت‌ها، پیوست‌های درباره ما و اطلاعیه‌ها
+      const urlSet = new Set<string>();
+      const collectUrl = (candidate?: string) => {
+        if (candidate && isFetchableUrl(candidate)) {
+          urlSet.add(candidate.trim());
+        }
+      };
+      const collectHtmlUrls = (html?: string) => {
+        if (!html || typeof html !== 'string') return;
+        const regex = /(?:src|href)\s*=\s*["']([^"']+)["']/gi;
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(html)) !== null) {
+          if (match[1] && isFetchableUrl(match[1]) && /\.(png|jpe?g|webp|gif|svg|pdf|woff2?|ttf|otf)(\?|$)/i.test(match[1]) || (match[1] && match[1].includes('/api/photo/'))) {
+            collectUrl(match[1]);
+          }
+        }
+      };
+
+      const st = baseData.settings;
+      collectUrl(st.customLogoUrl);
+      collectUrl(st.customWallpaperUrl);
+      collectUrl(st.heroBgImageUrl);
+      if (st.wallpaper && isFetchableUrl(st.wallpaper)) collectUrl(st.wallpaper);
+      if (Array.isArray(st.customFonts)) {
+        st.customFonts.forEach((f) => collectUrl(f?.dataUrl));
+      }
+      if (Array.isArray(st.homeNotes)) {
+        st.homeNotes.forEach((n) => collectHtmlUrls(n?.bodyHtml));
+      }
+      if (st.aboutContent) {
+        collectHtmlUrls(st.aboutContent.designerBioHtml);
+        collectHtmlUrls(st.aboutContent.boardingSectionHtml);
+        collectHtmlUrls(st.aboutContent.extraSectionHtml);
+        if (Array.isArray(st.aboutContent.attachments)) {
+          st.aboutContent.attachments.forEach((att) => collectUrl(att?.dataUrl));
+        }
+      }
+      if (Array.isArray(baseData.announcements)) {
+        baseData.announcements.forEach((ann) => {
+          collectUrl(ann?.imageUrl);
+          collectHtmlUrls(ann?.contentHtml);
+        });
+      }
+
+      const embeddedFiles: Record<string, string> = {};
+      const externalAssets = Array.from(urlSet);
+      if (externalAssets.length > 0) {
+        onProgress?.(`در حال دریافت و ضمیمه‌سازی ${externalAssets.length} فایل و تصویر رسانه‌ای...`);
+        await runWithConcurrency(externalAssets, 5, async (origUrl) => {
+          const dataUrl = await fetchUrlAsDataUrl(origUrl);
+          if (dataUrl) {
+            embeddedFiles[origUrl] = dataUrl;
+          }
+        });
+      }
+
+      const totalStaff =
+        baseData.supervisors.length +
+        baseData.maintenanceStaff.length +
+        baseData.warehouseStaff.length +
+        baseData.counselors.length +
+        baseData.financeStaff.length +
+        baseData.procurementStaff.length +
+        baseData.educationStaff.length +
+        baseData.culturalStaff.length +
+        baseData.studentAffairsStaff.length +
+        baseData.securityStaff.length +
+        baseData.viceDeanStaff.length;
+
+      const fontsCount = Array.isArray(st.customFonts) ? st.customFonts.length : 0;
+      const attachmentsCount = Array.isArray(st.aboutContent?.attachments)
+        ? st.aboutContent.attachments.length
+        : 0;
+      const cloudPhotos = Array.from(photoMap.values());
+
+      const fullArchive = {
+        ...baseData,
+        backupFormat: 'full_archive_v2' as const,
+        version: '2.0',
+        cloudPhotos,
+        embeddedFiles,
+        archiveSummary: {
+          totalStudents: baseData.students.length,
+          totalStaff,
+          embeddedPhotosCount: cloudPhotos.length,
+          embeddedFilesCount: Object.keys(embeddedFiles).length,
+          fontsCount,
+          attachmentsCount,
+        },
+      };
+
+      onProgress?.('در حال بسته‌بندی نهایی و آماده‌سازی دانلود فایل پشتیبان کامل...');
+      const serialized = JSON.stringify(fullArchive);
+      const blob = new Blob([serialized], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `پشتیبان_کامل_سامانه_خوابگاه_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+
+      Storage.addActivityLog({
+        category: 'backup',
+        action: 'تهیه نسخه پشتیبان کامل سامانه (تمام داده‌ها، عکس‌ها و فایل‌ها)',
+        details: `${baseData.students.length} دانشجو، ${cloudPhotos.length} تصویر پروفایل، ${fontsCount} فونت و ${attachmentsCount} فایل ضمیمه بسته‌بندی شد.`,
+        severity: 'info',
+      });
+
+      return {
+        success: true,
+        totalStudents: baseData.students.length,
+        totalStaff,
+        embeddedPhotosCount: cloudPhotos.length,
+        embeddedFilesCount: Object.keys(embeddedFiles).length,
+        fontsCount,
+        attachmentsCount,
+        sizeKb: Math.max(1, Math.round(serialized.length / 1024)),
+      };
+    } catch (err) {
+      console.error('exportFullSnapshotBackupJson failed:', err);
+      return {
+        success: false,
+        totalStudents: 0,
+        totalStaff: 0,
+        embeddedPhotosCount: 0,
+        embeddedFilesCount: 0,
+        fontsCount: 0,
+        attachmentsCount: 0,
+        sizeKb: 0,
+        errorMessage: 'خطا در تهیه نسخه پشتیبان کامل سامانه. لطفاً دوباره تلاش نمایید.',
+      };
+    }
+  },
+
+  // اعمال کلیه مجموعه‌های پشتیبان در حافظه محلی بدون ارسال تایمرهای تکراری (برای استفاده هم‌زمان در sync/async)
+  _applyParsedBackupCollections: (
+    data: Record<string, unknown>,
+    options: { queueCloudSync: boolean }
+  ): void => {
+    const writeCollection = (key: string, value: unknown) => {
+      if (options.queueCloudSync) {
+        set(key, value);
+      } else {
+        keyWriteTimestamps[key] = Date.now();
+        safeLocalStorageSet(key, JSON.stringify(value), value);
+      }
+    };
+
+    if (data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings)) {
+      writeCollection(STORAGE_KEYS.SETTINGS, data.settings as AppSettings);
+    }
+    if (Array.isArray(data.dormitories)) writeCollection(STORAGE_KEYS.DORMITORIES, data.dormitories);
+    if (Array.isArray(data.rooms)) writeCollection(STORAGE_KEYS.ROOMS, data.rooms);
+    if (Array.isArray(data.beds)) writeCollection(STORAGE_KEYS.BEDS, data.beds);
+    if (Array.isArray(data.students)) {
+      writeCollection(
+        STORAGE_KEYS.STUDENTS,
+        data.students
+          .filter((s: unknown): s is Record<string, unknown> => Boolean(s && typeof s === 'object'))
+          .map((s: Record<string, unknown>) => normalizeStudentRecord(s))
+      );
+    }
+    if (Array.isArray(data.supervisors)) writeCollection(STORAGE_KEYS.SUPERVISORS, data.supervisors);
+    if (Array.isArray(data.warnings)) writeCollection(STORAGE_KEYS.WARNINGS, data.warnings);
+    if (Array.isArray(data.announcements)) writeCollection(STORAGE_KEYS.ANNOUNCEMENTS, data.announcements);
+    if (Array.isArray(data.messages)) writeCollection(STORAGE_KEYS.MESSAGES, data.messages);
+    if (Array.isArray(data.maintenanceStaff)) writeCollection(STORAGE_KEYS.MAINTENANCE_STAFF, data.maintenanceStaff);
+    if (Array.isArray(data.maintenanceTasks)) writeCollection(STORAGE_KEYS.MAINTENANCE_TASKS, data.maintenanceTasks);
+    if (Array.isArray(data.warehouseStaff)) writeCollection(STORAGE_KEYS.WAREHOUSE_STAFF, data.warehouseStaff);
+    if (Array.isArray(data.inventoryItems)) writeCollection(STORAGE_KEYS.INVENTORY_ITEMS, data.inventoryItems);
+    if (Array.isArray(data.inventoryTransactions)) writeCollection(STORAGE_KEYS.INVENTORY_TRANSACTIONS, data.inventoryTransactions);
+    if (Array.isArray(data.warehouseRequests)) writeCollection(STORAGE_KEYS.WAREHOUSE_REQUESTS, data.warehouseRequests);
+    if (Array.isArray(data.procurementStaff)) writeCollection(STORAGE_KEYS.PROCUREMENT_STAFF, data.procurementStaff);
+    if (Array.isArray(data.procurementRequests)) writeCollection(STORAGE_KEYS.PROCUREMENT_REQUESTS, data.procurementRequests);
+    if (Array.isArray(data.shiftSchedules)) writeCollection(STORAGE_KEYS.SHIFT_SCHEDULES, data.shiftSchedules);
+    if (Array.isArray(data.shiftReports)) writeCollection(STORAGE_KEYS.SHIFT_REPORTS, data.shiftReports);
+    if (Array.isArray(data.counselors)) writeCollection(STORAGE_KEYS.COUNSELORS, data.counselors);
+    if (Array.isArray(data.counselorShifts)) writeCollection(STORAGE_KEYS.COUNSELOR_SHIFTS, data.counselorShifts);
+    if (Array.isArray(data.counselorReports)) writeCollection(STORAGE_KEYS.COUNSELOR_REPORTS, data.counselorReports);
+    if (Array.isArray(data.activityLogs)) writeCollection(STORAGE_KEYS.ACTIVITY_LOGS, data.activityLogs);
+    if (Array.isArray(data.studentEvaluations)) writeCollection(STORAGE_KEYS.STUDENT_EVALUATIONS, data.studentEvaluations);
+    if (Array.isArray(data.financeStaff)) writeCollection(STORAGE_KEYS.FINANCE_STAFF, data.financeStaff);
+    if (Array.isArray(data.studentFinances)) writeCollection(STORAGE_KEYS.STUDENT_FINANCES, data.studentFinances);
+    if (Array.isArray(data.educationStaff)) writeCollection(STORAGE_KEYS.EDUCATION_STAFF, data.educationStaff);
+    if (Array.isArray(data.academicNotices)) writeCollection(STORAGE_KEYS.ACADEMIC_NOTICES, data.academicNotices);
+    if (Array.isArray(data.guestRequests)) writeCollection(STORAGE_KEYS.GUEST_REQUESTS, data.guestRequests);
+    if (Array.isArray(data.visitReports)) writeCollection(STORAGE_KEYS.VISIT_REPORTS, data.visitReports);
+    if (Array.isArray(data.surveys)) writeCollection(STORAGE_KEYS.SURVEYS, data.surveys);
+    if (Array.isArray(data.surveyResponses)) writeCollection(STORAGE_KEYS.SURVEY_RESPONSES, data.surveyResponses);
+    if (Array.isArray(data.culturalStaff)) writeCollection(STORAGE_KEYS.CULTURAL_STAFF, data.culturalStaff);
+    if (Array.isArray(data.culturalPrograms)) writeCollection(STORAGE_KEYS.CULTURAL_PROGRAMS, data.culturalPrograms);
+    if (Array.isArray(data.culturalAssociations)) writeCollection(STORAGE_KEYS.CULTURAL_ASSOCIATIONS, data.culturalAssociations);
+    if (Array.isArray(data.associationMemberships)) writeCollection(STORAGE_KEYS.ASSOCIATION_MEMBERSHIPS, data.associationMemberships);
+    if (Array.isArray(data.studentAffairsStaff)) writeCollection(STORAGE_KEYS.STUDENT_AFFAIRS_STAFF, data.studentAffairsStaff);
+    if (Array.isArray(data.guildElections)) writeCollection(STORAGE_KEYS.GUILD_ELECTIONS, data.guildElections);
+    if (Array.isArray(data.guildElectionVotes)) writeCollection(STORAGE_KEYS.GUILD_ELECTION_VOTES, data.guildElectionVotes);
+    if (Array.isArray(data.disciplinaryReferrals)) writeCollection(STORAGE_KEYS.DISCIPLINARY_REFERRALS, data.disciplinaryReferrals);
+    if (Array.isArray(data.sportsPrograms)) writeCollection(STORAGE_KEYS.SPORTS_PROGRAMS, data.sportsPrograms);
+    if (Array.isArray(data.sportsRegistrations)) writeCollection(STORAGE_KEYS.SPORTS_REGISTRATIONS, data.sportsRegistrations);
+    if (Array.isArray(data.securityStaff)) writeCollection(STORAGE_KEYS.SECURITY_STAFF, data.securityStaff);
+    if (Array.isArray(data.securityReports)) writeCollection(STORAGE_KEYS.SECURITY_REPORTS, data.securityReports);
+    if (Array.isArray(data.viceDeanStaff)) writeCollection(STORAGE_KEYS.VICE_DEAN_STAFF, data.viceDeanStaff);
+  },
+
+  // بازیابی نسخه پشتیبان همگام (سازگاری با فراخوانی‌های قدیمی)
   importBackupJson: (jsonString: string): boolean => {
     try {
-      const data = JSON.parse(jsonString, (key, value) =>
+      const parsed = JSON.parse(jsonString, (key, value) =>
         key === '__proto__' || key === 'constructor' || key === 'prototype' ? undefined : value
       );
+      const data = sanitizePlainValue(parsed) as Record<string, unknown>;
       if (
         !data ||
         typeof data !== 'object' ||
@@ -2369,57 +2982,7 @@ export const Storage = {
         return false;
       }
 
-      if (data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings)) {
-        Storage.setSettings(data.settings);
-      }
-      if (Array.isArray(data.dormitories)) Storage.setDormitories(data.dormitories);
-      Storage.setRooms(data.rooms);
-      Storage.setBeds(data.beds);
-      Storage.setStudents(
-        data.students
-          .filter((s: unknown): s is Record<string, unknown> => Boolean(s && typeof s === 'object'))
-          .map((s: Record<string, unknown>) => normalizeStudentRecord(s))
-      );
-      if (Array.isArray(data.supervisors)) Storage.setSupervisors(data.supervisors);
-      if (Array.isArray(data.warnings)) Storage.setWarnings(data.warnings);
-      if (Array.isArray(data.announcements)) Storage.setAnnouncements(data.announcements);
-      if (Array.isArray(data.messages)) Storage.setMessages(data.messages);
-      if (Array.isArray(data.maintenanceStaff)) Storage.setMaintenanceStaff(data.maintenanceStaff);
-      if (Array.isArray(data.maintenanceTasks)) Storage.setMaintenanceTasks(data.maintenanceTasks);
-      if (Array.isArray(data.warehouseStaff)) Storage.setWarehouseStaff(data.warehouseStaff);
-      if (Array.isArray(data.inventoryItems)) set(STORAGE_KEYS.INVENTORY_ITEMS, data.inventoryItems);
-      if (Array.isArray(data.inventoryTransactions)) Storage.setInventoryTransactions(data.inventoryTransactions);
-      if (Array.isArray(data.warehouseRequests)) Storage.setWarehouseRequests(data.warehouseRequests);
-      if (Array.isArray(data.procurementStaff)) Storage.setProcurementStaff(data.procurementStaff);
-      if (Array.isArray(data.procurementRequests)) Storage.setProcurementRequests(data.procurementRequests);
-      if (Array.isArray(data.shiftSchedules)) Storage.setShiftSchedules(data.shiftSchedules);
-      if (Array.isArray(data.shiftReports)) Storage.setShiftReports(data.shiftReports);
-      if (Array.isArray(data.counselors)) Storage.setCounselors(data.counselors);
-      if (Array.isArray(data.counselorShifts)) Storage.setCounselorShifts(data.counselorShifts);
-      if (Array.isArray(data.counselorReports)) Storage.setCounselorReports(data.counselorReports);
-      if (Array.isArray(data.activityLogs)) Storage.setActivityLogs(data.activityLogs);
-      if (Array.isArray(data.studentEvaluations)) Storage.setStudentEvaluations(data.studentEvaluations);
-      if (Array.isArray(data.financeStaff)) Storage.setFinanceStaff(data.financeStaff);
-      if (Array.isArray(data.studentFinances)) Storage.setStudentFinances(data.studentFinances);
-      if (Array.isArray(data.educationStaff)) Storage.setEducationStaff(data.educationStaff);
-      if (Array.isArray(data.academicNotices)) Storage.setAcademicNotices(data.academicNotices);
-      if (Array.isArray(data.guestRequests)) Storage.setGuestRequests(data.guestRequests);
-      if (Array.isArray(data.visitReports)) Storage.setVisitReports(data.visitReports);
-      if (Array.isArray(data.surveys)) Storage.setSurveys(data.surveys);
-      if (Array.isArray(data.surveyResponses)) Storage.setSurveyResponses(data.surveyResponses);
-      if (Array.isArray(data.culturalStaff)) Storage.setCulturalStaff(data.culturalStaff);
-      if (Array.isArray(data.culturalPrograms)) Storage.setCulturalPrograms(data.culturalPrograms);
-      if (Array.isArray(data.culturalAssociations)) Storage.setCulturalAssociations(data.culturalAssociations);
-      if (Array.isArray(data.associationMemberships)) Storage.setAssociationMemberships(data.associationMemberships);
-      if (Array.isArray(data.studentAffairsStaff)) Storage.setStudentAffairsStaff(data.studentAffairsStaff);
-      if (Array.isArray(data.guildElections)) Storage.setGuildElections(data.guildElections);
-      if (Array.isArray(data.guildElectionVotes)) Storage.setGuildElectionVotes(data.guildElectionVotes);
-      if (Array.isArray(data.disciplinaryReferrals)) Storage.setDisciplinaryReferrals(data.disciplinaryReferrals);
-      if (Array.isArray(data.sportsPrograms)) Storage.setSportsPrograms(data.sportsPrograms);
-      if (Array.isArray(data.sportsRegistrations)) Storage.setSportsRegistrations(data.sportsRegistrations);
-      if (Array.isArray(data.securityStaff)) Storage.setSecurityStaff(data.securityStaff);
-      if (Array.isArray(data.securityReports)) Storage.setSecurityReports(data.securityReports);
-
+      Storage._applyParsedBackupCollections(data, { queueCloudSync: true });
       Storage.addActivityLog({
         category: 'backup',
         action: 'بازیابی نسخه پشتیبان JSON',
@@ -2430,6 +2993,348 @@ export const Storage = {
     } catch (e) {
       console.error('Failed to restore backup', e);
       return false;
+    }
+  },
+
+  // بازیابی کامل و خودکفا از فایل پشتیبان (پشتیبانی از بازیابی کامل حتی پس از ریست یا پاک‌شدن کامل سرور و دیتابیس)
+  importFullBackupJsonAsync: async (
+    jsonString: string,
+    onProgress?: (message: string) => void
+  ): Promise<{
+    ok: boolean;
+    isFullArchive: boolean;
+    cloudSynced: boolean;
+    studentsSynced: boolean;
+    restoredPhotosCount: number;
+    uploadedPhotosToCloudCount: number;
+    restoredFilesCount: number;
+    errorMessage?: string;
+  }> => {
+    type PhotoRole =
+      | 'student'
+      | 'supervisor'
+      | 'maintenance'
+      | 'warehouse'
+      | 'counselor'
+      | 'finance'
+      | 'procurement'
+      | 'education'
+      | 'cultural'
+      | 'student_affairs'
+      | 'security'
+      | 'vice_dean';
+
+    try {
+      onProgress?.('در حال خواندن و اعتبارسنجی ساختار فایل پشتیبان...');
+      const rawParsed = JSON.parse(jsonString, (key, value) =>
+        key === '__proto__' || key === 'constructor' || key === 'prototype' ? undefined : value
+      );
+      const data = sanitizePlainValue(rawParsed) as Record<string, unknown>;
+
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        Array.isArray(data) ||
+        !Array.isArray(data.students) ||
+        !Array.isArray(data.rooms) ||
+        !Array.isArray(data.beds)
+      ) {
+        return {
+          ok: false,
+          isFullArchive: false,
+          cloudSynced: false,
+          studentsSynced: false,
+          restoredPhotosCount: 0,
+          uploadedPhotosToCloudCount: 0,
+          restoredFilesCount: 0,
+          errorMessage: 'ساختار فایل پشتیبان انتخاب‌شده معتبر نیست یا فاقد داده‌های پایه است.',
+        };
+      }
+
+      // لغو تایمرهای معلق قبلی تا داده‌های قدیمی روی بازیابی جدید بازنویسی نشوند
+      if (coalescedFlushTimer !== undefined) {
+        clearTimeout(coalescedFlushTimer);
+        coalescedFlushTimer = undefined;
+      }
+      for (const k of Object.keys(pendingCloudValues)) delete pendingCloudValues[k];
+      for (const k of Object.keys(failedCloudRetryQueue)) delete failedCloudRetryQueue[k];
+      lastSyncRevision = null;
+      lastSyncEtag = null;
+      lastStudentsEtag = null;
+
+      const isFullArchive =
+        data.backupFormat === 'full_archive_v2' ||
+        Array.isArray(data.cloudPhotos) ||
+        Boolean(data.embeddedFiles && typeof data.embeddedFiles === 'object');
+
+      // گام ۱: بازیابی فایل‌های رسانه‌ای، فونت‌ها، تصاویر اطلاعیه‌ها و لوگو/پس‌زمینه
+      const embeddedFilesMap: Record<string, string> = {};
+      if (data.embeddedFiles && typeof data.embeddedFiles === 'object' && !Array.isArray(data.embeddedFiles)) {
+        for (const [origUrl, dUrl] of Object.entries(data.embeddedFiles as Record<string, unknown>)) {
+          if (typeof dUrl === 'string' && dUrl.startsWith('data:')) {
+            embeddedFilesMap[origUrl] = dUrl;
+          }
+        }
+      }
+
+      let restoredFilesCount = Object.keys(embeddedFilesMap).length;
+      const resolveEmbeddedUrl = (val?: unknown): string | undefined => {
+        if (typeof val !== 'string') return undefined;
+        return embeddedFilesMap[val] || val;
+      };
+      const replaceHtmlUrls = (html?: unknown): string | undefined => {
+        if (typeof html !== 'string') return undefined;
+        let out = html;
+        for (const [origUrl, dUrl] of Object.entries(embeddedFilesMap)) {
+          if (out.includes(origUrl)) {
+            out = out.split(origUrl).join(dUrl);
+          }
+        }
+        return out;
+      };
+
+      if (data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings)) {
+        const st = { ...(data.settings as Record<string, unknown>) };
+        if (typeof st.customLogoUrl === 'string') st.customLogoUrl = resolveEmbeddedUrl(st.customLogoUrl);
+        if (typeof st.customWallpaperUrl === 'string') {
+          st.customWallpaperUrl = resolveEmbeddedUrl(st.customWallpaperUrl);
+        }
+        if (typeof st.heroBgImageUrl === 'string') st.heroBgImageUrl = resolveEmbeddedUrl(st.heroBgImageUrl);
+        if (typeof st.wallpaper === 'string') st.wallpaper = resolveEmbeddedUrl(st.wallpaper);
+        if (Array.isArray(st.customFonts)) {
+          const mappedFonts = st.customFonts.map((f) => {
+            if (!f || typeof f !== 'object') return f;
+            const fontObj = f as Record<string, unknown>;
+            return { ...fontObj, dataUrl: resolveEmbeddedUrl(fontObj.dataUrl) ?? fontObj.dataUrl };
+          });
+          st.customFonts = mappedFonts;
+          restoredFilesCount += mappedFonts.length;
+        }
+        if (Array.isArray(st.homeNotes)) {
+          st.homeNotes = st.homeNotes.map((n) => {
+            if (!n || typeof n !== 'object') return n;
+            const noteObj = n as Record<string, unknown>;
+            return typeof noteObj.bodyHtml === 'string'
+              ? { ...noteObj, bodyHtml: replaceHtmlUrls(noteObj.bodyHtml) }
+              : noteObj;
+          });
+        }
+        if (st.aboutContent && typeof st.aboutContent === 'object' && !Array.isArray(st.aboutContent)) {
+          const ac = { ...(st.aboutContent as Record<string, unknown>) };
+          if (typeof ac.designerBioHtml === 'string') ac.designerBioHtml = replaceHtmlUrls(ac.designerBioHtml);
+          if (typeof ac.boardingSectionHtml === 'string') {
+            ac.boardingSectionHtml = replaceHtmlUrls(ac.boardingSectionHtml);
+          }
+          if (typeof ac.extraSectionHtml === 'string') ac.extraSectionHtml = replaceHtmlUrls(ac.extraSectionHtml);
+          if (Array.isArray(ac.attachments)) {
+            const mappedAttachments = ac.attachments.map((att) => {
+              if (!att || typeof att !== 'object') return att;
+              const attObj = att as Record<string, unknown>;
+              return { ...attObj, dataUrl: resolveEmbeddedUrl(attObj.dataUrl) ?? attObj.dataUrl };
+            });
+            ac.attachments = mappedAttachments;
+            restoredFilesCount += mappedAttachments.length;
+          }
+          st.aboutContent = ac;
+        }
+        data.settings = st;
+      }
+
+      if (Array.isArray(data.announcements)) {
+        data.announcements = data.announcements.map((ann) => {
+          if (!ann || typeof ann !== 'object') return ann;
+          const aObj = { ...(ann as Record<string, unknown>) };
+          if (typeof aObj.imageUrl === 'string') aObj.imageUrl = resolveEmbeddedUrl(aObj.imageUrl);
+          if (typeof aObj.contentHtml === 'string') aObj.contentHtml = replaceHtmlUrls(aObj.contentHtml);
+          return aObj;
+        });
+      }
+
+      // گام ۲: جمع‌آوری، بارگذاری مجدد به سرور ابری و بازنشانی لینک عکس‌های تمامی ۱۲ نقش کاربری
+      const photoByKey = new Map<string, { role: PhotoRole; userId: string; dataUrl: string }>();
+      const allowedRolesSet = new Set<PhotoRole>([
+        'student',
+        'supervisor',
+        'maintenance',
+        'warehouse',
+        'counselor',
+        'finance',
+        'procurement',
+        'education',
+        'cultural',
+        'student_affairs',
+        'security',
+        'vice_dean',
+      ]);
+
+      if (Array.isArray(data.cloudPhotos)) {
+        for (const item of data.cloudPhotos) {
+          if (!item || typeof item !== 'object') continue;
+          const obj = item as { role?: unknown; userId?: unknown; dataUrl?: unknown };
+          const role = String(obj.role || '').trim() as PhotoRole;
+          const userId = String(obj.userId || '').trim();
+          const dataUrl = String(obj.dataUrl || '').trim();
+          if (allowedRolesSet.has(role) && userId && dataUrl.startsWith('data:image/')) {
+            photoByKey.set(`${role}:${userId}`, { role, userId, dataUrl });
+          }
+        }
+      }
+
+      const roleArrayPairs: Array<{ role: PhotoRole; prop: string }> = [
+        { role: 'student', prop: 'students' },
+        { role: 'supervisor', prop: 'supervisors' },
+        { role: 'maintenance', prop: 'maintenanceStaff' },
+        { role: 'warehouse', prop: 'warehouseStaff' },
+        { role: 'counselor', prop: 'counselors' },
+        { role: 'finance', prop: 'financeStaff' },
+        { role: 'procurement', prop: 'procurementStaff' },
+        { role: 'education', prop: 'educationStaff' },
+        { role: 'cultural', prop: 'culturalStaff' },
+        { role: 'student_affairs', prop: 'studentAffairsStaff' },
+        { role: 'security', prop: 'securityStaff' },
+        { role: 'vice_dean', prop: 'viceDeanStaff' },
+      ];
+
+      for (const { role, prop } of roleArrayPairs) {
+        const list = data[prop];
+        if (!Array.isArray(list)) continue;
+        for (const rawRec of list) {
+          if (!rawRec || typeof rawRec !== 'object') continue;
+          const rec = rawRec as Record<string, unknown>;
+          const userId = String(role === 'student' ? rec.studentId || '' : rec.id || '').trim();
+          const photoUrl = String(rec.photoUrl || '').trim();
+          if (!userId) continue;
+          if (!photoByKey.has(`${role}:${userId}`) && photoUrl.startsWith('data:image/')) {
+            photoByKey.set(`${role}:${userId}`, { role, userId, dataUrl: photoUrl });
+          }
+        }
+      }
+
+      const restoredPhotosCount = photoByKey.size;
+      let uploadedPhotosToCloudCount = 0;
+      const resolvedUrlByKey = new Map<string, string>();
+
+      if (restoredPhotosCount > 0) {
+        const byRole = new Map<PhotoRole, Array<{ userId: string; dataUrl: string }>>();
+        for (const item of photoByKey.values()) {
+          const arr = byRole.get(item.role) || [];
+          arr.push({ userId: item.userId, dataUrl: item.dataUrl });
+          byRole.set(item.role, arr);
+        }
+
+        let uploadedRolesDone = 0;
+        for (const [role, items] of byRole.entries()) {
+          uploadedRolesDone += 1;
+          onProgress?.(
+            `در حال بازگردانی و بارگذاری عکس‌های کاربران روی سرور ابری (دسته ${uploadedRolesDone} از ${byRole.size})...`
+          );
+          const uploadRes = await Storage.uploadPhotosToCloud(role, items);
+          for (const it of items) {
+            const key = `${role}:${it.userId}`;
+            const newUrl = uploadRes.urls?.[it.userId];
+            if (uploadRes.ok && newUrl) {
+              resolvedUrlByKey.set(key, newUrl);
+              uploadedPhotosToCloudCount += 1;
+            } else {
+              // در صورت آفلاین بودن یا عدم پاسخ سرور، عکس به‌صورت مستقیم درون رکورد حفظ می‌شود
+              resolvedUrlByKey.set(key, it.dataUrl);
+            }
+          }
+        }
+
+        for (const { role, prop } of roleArrayPairs) {
+          const list = data[prop];
+          if (!Array.isArray(list)) continue;
+          data[prop] = list.map((rawRec) => {
+            if (!rawRec || typeof rawRec !== 'object') return rawRec;
+            const rec = { ...(rawRec as Record<string, unknown>) };
+            const userId = String(role === 'student' ? rec.studentId || '' : rec.id || '').trim();
+            if (!userId) return rec;
+            const resolved = resolvedUrlByKey.get(`${role}:${userId}`);
+            if (resolved) {
+              rec.photoUrl = resolved;
+            } else if (typeof rec.photoUrl === 'string' && embeddedFilesMap[rec.photoUrl]) {
+              rec.photoUrl = embeddedFilesMap[rec.photoUrl];
+            }
+            return rec;
+          });
+        }
+      }
+
+      // گام ۳: ثبت تمامی ۴۵ مجموعه داده در حافظه مرورگر بدون فعال‌سازی تایمرهای موازی
+      onProgress?.('در حال ثبت کامل جداول و اطلاعات سامانه در حافظه داخلی...');
+      Storage._applyParsedBackupCollections(data, { queueCloudSync: false });
+      Storage.addActivityLog({
+        category: 'backup',
+        action: isFullArchive
+          ? 'بازیابی نسخه پشتیبان کامل سامانه (داده، فایل و عکس)'
+          : 'بازیابی نسخه پشتیبان JSON',
+        details: `${data.students.length} دانشجو، ${restoredPhotosCount} تصویر پروفایل و ${restoredFilesCount} فایل ضمیمه بازیابی شد.`,
+        severity: 'warning',
+      });
+
+      // گام ۴: همگام‌سازی کامل با دیتابیس ابری (MongoDB sync_kv + students collection)
+      onProgress?.('در حال بازسازی و همگام‌سازی کامل پایگاه داده ابری سرور...');
+      const cloudSynced = await Storage.syncAllToCloud();
+
+      let studentsSynced = false;
+      const restoredStudents = Storage.getStudents();
+      if (restoredStudents.length === 0) {
+        studentsSynced = true;
+      } else {
+        try {
+          const fullPayloadStr = JSON.stringify({ students: restoredStudents, replaceAll: true });
+          if (fullPayloadStr.length <= 3_500_000) {
+            const stRes = await fetch(`${API_BASE_URL}/students`, {
+              method: 'POST',
+              headers: buildApiHeaders(true),
+              body: fullPayloadStr,
+            });
+            studentsSynced = stRes.ok;
+          } else {
+            let allChunksOk = true;
+            for (let i = 0; i < restoredStudents.length; i += 250) {
+              const chunk = restoredStudents.slice(i, i + 250);
+              const stRes = await fetch(`${API_BASE_URL}/students`, {
+                method: 'POST',
+                headers: buildApiHeaders(true),
+                body: JSON.stringify({ students: chunk }),
+              });
+              if (!stRes.ok) {
+                allChunksOk = false;
+                break;
+              }
+            }
+            studentsSynced = allChunksOk;
+          }
+        } catch {
+          studentsSynced = false;
+        }
+      }
+
+      await Storage.waitForPendingCloudSync();
+
+      return {
+        ok: true,
+        isFullArchive,
+        cloudSynced,
+        studentsSynced,
+        restoredPhotosCount,
+        uploadedPhotosToCloudCount,
+        restoredFilesCount,
+      };
+    } catch (e) {
+      console.error('importFullBackupJsonAsync failed:', e);
+      return {
+        ok: false,
+        isFullArchive: false,
+        cloudSynced: false,
+        studentsSynced: false,
+        restoredPhotosCount: 0,
+        uploadedPhotosToCloudCount: 0,
+        restoredFilesCount: 0,
+        errorMessage: 'خطا در خواندن یا پردازش فایل پشتیبان انتخاب‌شده.',
+      };
     }
   },
 
@@ -2653,12 +3558,19 @@ export const Storage = {
 
   // بازنشانی به داده‌های اولیه و همگام‌سازی با دیتابیس ابری
   resetToDefaults: () => {
-    Object.keys(pendingCloudTimers).forEach((k) => {
-      const t = pendingCloudTimers[k];
-      if (t !== undefined) clearTimeout(t);
-      delete pendingCloudTimers[k];
+    if (coalescedFlushTimer !== undefined) {
+      clearTimeout(coalescedFlushTimer);
+      coalescedFlushTimer = undefined;
+    }
+    Object.keys(pendingCloudValues).forEach((k) => {
       delete pendingCloudValues[k];
     });
+    Object.keys(failedCloudRetryQueue).forEach((k) => {
+      delete failedCloudRetryQueue[k];
+    });
+    lastSyncRevision = null;
+    lastSyncEtag = null;
+    lastStudentsEtag = null;
     parsedCache.clear();
     localStorage.clear();
     initializeStorageIfNeeded();
@@ -2673,7 +3585,7 @@ export const Storage = {
 
   // تغییر کلمه عبور برای تمام نقش‌ها
   changePassword: (
-    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security',
+    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean',
     userId: string,
     currentPasswordInput: string,
     newPasswordInput: string
@@ -2907,6 +3819,26 @@ export const Storage = {
         targetName: staff.fullName,
       });
       return { success: true, message: 'کلمه عبور حراست با موفقیت تغییر یافت.' };
+    }
+
+    if (role === 'vice_dean') {
+      const staffList = Storage.getViceDeanStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) {
+        return { success: false, message: 'کاربر معاونت دانشجویی یافت نشد.' };
+      }
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی معاونت دانشجویی اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setViceDeanStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور معاونت دانشجویی',
+        details: `کلمه عبور معاونت دانشجویی ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور معاونت دانشجویی با موفقیت تغییر یافت.' };
     }
 
     if (role === 'student') {
@@ -3213,7 +4145,7 @@ export const Storage = {
 
   // تغییر یا ریست مستقیم رمز عبور کاربران توسط مدیر کل (بدون نیاز به رمز قبلی)
   adminResetUserPassword: (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean',
     idOrStudentId: string,
     newPasswordInput: string
   ): { success: boolean; message: string } => {
@@ -3445,6 +4377,25 @@ export const Storage = {
       return {
         success: true,
         message: `رمز عبور حراست «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'vice_dean') {
+      const list = Storage.getViceDeanStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر معاونت دانشجویی یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setViceDeanStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز معاونت دانشجویی توسط مدیر',
+        details: `کلمه عبور معاونت دانشجویی ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور معاونت دانشجویی «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
       };
     }
 
@@ -5170,6 +6121,10 @@ export const Storage = {
       } else if (currentUser.role === 'security') {
         actorName = currentUser.staff.fullName;
         actorRole = 'security';
+        actorUsername = currentUser.staff.username;
+      } else if (currentUser.role === 'vice_dean') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'vice_dean';
         actorUsername = currentUser.staff.username;
       }
     }
@@ -7006,7 +7961,7 @@ export const Storage = {
     referralText: string;
     referredById: string;
     referredByName: string;
-    referredByRole: 'supervisor' | 'admin';
+    referredByRole: 'supervisor' | 'admin' | 'vice_dean';
     notifyStudentInbox?: boolean;
   }): { success: boolean; message: string; referrals?: DisciplinaryReferral[] } => {
     if (!payload.students || payload.students.length === 0) {
@@ -7449,6 +8404,7 @@ export const Storage = {
       const res = await fetch(`${API_BASE_URL}/students`, {
         method: 'GET',
         cache: 'no-store',
+        ...(ENV_SYNC_TOKEN ? { headers: buildApiHeaders(false) } : {}),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -7458,7 +8414,7 @@ export const Storage = {
       if (!Array.isArray(rawData)) return null;
 
       const cleanStudents: Student[] = rawData.map((item: Record<string, unknown>) =>
-        normalizeStudentRecord(item)
+        normalizeStudentRecord(sanitizePlainValue(item))
       );
 
       const lastLocalWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
@@ -7488,7 +8444,7 @@ export const Storage = {
       const timeoutId = setTimeout(() => controller.abort(), 10000);
       const res = await fetch(`${API_BASE_URL}/students`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildApiHeaders(true),
         body: JSON.stringify(newStudent),
         signal: controller.signal,
       });
@@ -7536,7 +8492,7 @@ export const Storage = {
   },
 
   uploadPhotosToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean',
     items: Array<{ userId: string; dataUrl: string }>
   ): Promise<{
     supported: boolean;
@@ -7564,7 +8520,7 @@ export const Storage = {
       try {
         const res = await fetch(`${API_BASE_URL}/photos/batch`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: buildApiHeaders(true),
           body: JSON.stringify({ items: chunk }),
           signal: controller.signal,
         });
@@ -7621,12 +8577,20 @@ export const Storage = {
   },
 
   uploadSinglePhotoToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean',
     userId: string,
     dataUrl: string
   ): Promise<{ supported: boolean; ok: boolean; url: string; errorMessage?: string }> => {
     if (!dataUrl || !dataUrl.startsWith('data:image/')) {
       return { supported: true, ok: true, url: dataUrl };
+    }
+    if (dataUrl.slice(0, 40).toLowerCase().includes('image/svg+xml')) {
+      return {
+        supported: true,
+        ok: false,
+        url: '',
+        errorMessage: 'فرمت SVG مجاز نیست. لطفاً تصویر JPG یا PNG بارگذاری کنید.',
+      };
     }
     const res = await Storage.uploadPhotosToCloud(role, [{ userId, dataUrl }]);
     return {
@@ -7638,12 +8602,14 @@ export const Storage = {
   },
 
   waitForPendingCloudSync: async (): Promise<{ success: boolean; failedKeys: string[] }> => {
+    flushFailedRetryQueue();
     flushAllPendingCloudTimers(false);
     const entries = Object.entries(pendingCloudRequests).filter(
       (entry): entry is [string, Promise<boolean>] => Boolean(entry[1])
     );
     if (entries.length === 0) {
-      return { success: true, failedKeys: [] };
+      const queuedFails = Object.keys(failedCloudRetryQueue);
+      return { success: queuedFails.length === 0, failedKeys: queuedFails };
     }
     const results = await Promise.all(
       entries.map(async ([key, promise]) => ({ key, ok: await promise }))
@@ -7655,20 +8621,81 @@ export const Storage = {
   syncAllToCloud: async (): Promise<boolean> => {
     try {
       flushAllPendingCloudTimers(false);
-      const posts = SYNCABLE_KEYS.map(async (key) => {
-        const raw = localStorage.getItem(key);
-        if (!raw) return true;
-        const value = JSON.parse(raw);
-        keyWriteTimestamps[key] = Date.now();
+      const allEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
+      for (const key of SYNCABLE_KEYS) {
+        let parsedVal: unknown = undefined;
+        let serializedLen = 0;
+        if (parsedCache.has(key)) {
+          parsedVal = cloneValue(parsedCache.get(key));
+          try {
+            serializedLen = JSON.stringify(parsedVal).length;
+          } catch {
+            serializedLen = 0;
+          }
+        } else {
+          const raw = localStorage.getItem(key);
+          if (!raw) continue;
+          try {
+            parsedVal = JSON.parse(raw);
+            serializedLen = raw.length;
+          } catch {
+            continue;
+          }
+        }
+        if (parsedVal !== undefined) {
+          allEntries.push({ key, value: parsedVal, byteEstimate: serializedLen });
+          keyWriteTimestamps[key] = Date.now();
+        }
+      }
+      if (allEntries.length === 0) return true;
+
+      if (batchEndpointSupported !== false) {
+        let allBatchOk = true;
+        const batches: Array<Array<{ key: string; value: unknown }>> = [];
+        let currentBatch: Array<{ key: string; value: unknown }> = [];
+        let currentBytes = 0;
+        const MAX_BATCH_BYTES = 2_400_000;
+
+        for (const item of allEntries) {
+          if (
+            currentBatch.length > 0 &&
+            (currentBatch.length >= 15 || currentBytes + item.byteEstimate > MAX_BATCH_BYTES)
+          ) {
+            batches.push(currentBatch);
+            currentBatch = [];
+            currentBytes = 0;
+          }
+          currentBatch.push({ key: item.key, value: item.value });
+          currentBytes += item.byteEstimate;
+        }
+        if (currentBatch.length > 0) batches.push(currentBatch);
+
+        for (const chunk of batches) {
+          const res = await fetch(`${API_BASE_URL}/sync/batch`, {
+            method: 'POST',
+            headers: buildApiHeaders(true),
+            body: JSON.stringify({ entries: chunk }),
+          });
+          if (res.status === 404 || res.status === 405) {
+            batchEndpointSupported = false;
+            allBatchOk = false;
+            break;
+          }
+          if (!res.ok) return false;
+          batchEndpointSupported = true;
+        }
+        if (batchEndpointSupported && allBatchOk) return true;
+      }
+
+      for (const { key, value } of allEntries) {
         const res = await fetch(`${API_BASE_URL}/sync`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: buildApiHeaders(true),
           body: JSON.stringify({ key, value }),
         });
-        return res.ok;
-      });
-      const results = await Promise.all(posts);
-      return results.every(Boolean);
+        if (!res.ok) return false;
+      }
+      return true;
     } catch (err) {
       console.warn('syncAllToCloud error:', err);
       return false;
@@ -7676,62 +8703,154 @@ export const Storage = {
   },
 
   syncFromCloud: async (): Promise<boolean> => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return false;
+    }
     if (activeSyncPromise) {
       return activeSyncPromise;
     }
 
+    // اگر نوشتن‌های ناموفق قبلی در صف هستند، ابتدا تلاش مجدد برای ارسال انجام شود
+    flushFailedRetryQueue();
+
     activeSyncPromise = (async () => {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      const timeoutId = setTimeout(() => controller.abort(), 11000);
 
       try {
+        // گام ۱: بررسی فوق‌سبک نسخه سرور (اگر مسیر /sync/version در بک‌اند فعال باشد از دانلود بی‌مورد کل دیتابیس جلوگیری می‌کند)
+        if (versionEndpointSupported !== false) {
+          try {
+            const verController = new AbortController();
+            const verTimer = setTimeout(() => verController.abort(), 4000);
+            const verRes = await fetch(`${API_BASE_URL}/sync/version`, {
+              method: 'GET',
+              cache: 'no-store',
+              signal: verController.signal,
+            });
+            clearTimeout(verTimer);
+
+            if (verRes.status === 404 || verRes.status === 405) {
+              versionEndpointSupported = false;
+            } else if (verRes.ok) {
+              versionEndpointSupported = true;
+              const verData = (await verRes.json().catch(() => null)) as {
+                revision?: string | number;
+              } | null;
+              if (
+                verData?.revision !== undefined &&
+                lastSyncRevision !== null &&
+                String(verData.revision) === String(lastSyncRevision)
+              ) {
+                return false;
+              }
+              if (verData?.revision !== undefined) {
+                lastSyncRevision = verData.revision;
+              }
+            }
+          } catch {
+            // ادامه به همگام‌سازی عادی
+          }
+        }
+
+        const syncHeaders: Record<string, string> | undefined = lastSyncEtag
+          ? { 'If-None-Match': lastSyncEtag }
+          : undefined;
+        const studentsHeaders: Record<string, string> | undefined = lastStudentsEtag
+          ? { 'If-None-Match': lastStudentsEtag }
+          : undefined;
+
         const [syncResult, studentsResult] = await Promise.allSettled([
-          fetch(`${API_BASE_URL}/sync`, { method: 'GET', cache: 'no-store', signal: controller.signal }),
-          fetch(`${API_BASE_URL}/students`, { method: 'GET', cache: 'no-store', signal: controller.signal }),
+          fetch(`${API_BASE_URL}/sync`, {
+            method: 'GET',
+            cache: 'no-store',
+            ...(syncHeaders ? { headers: syncHeaders } : {}),
+            signal: controller.signal,
+          }),
+          fetch(`${API_BASE_URL}/students`, {
+            method: 'GET',
+            cache: 'no-store',
+            ...(studentsHeaders ? { headers: studentsHeaders } : {}),
+            signal: controller.signal,
+          }),
         ]);
 
         let hasRemoteChanges = false;
         let cloudMap: Record<string, unknown> | null = null;
 
-        if (syncResult.status === 'fulfilled' && syncResult.value.ok) {
-          const parsed = await syncResult.value.json();
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            cloudMap = parsed as Record<string, unknown>;
+        if (syncResult.status === 'fulfilled') {
+          const res = syncResult.value;
+          const etag = res.headers?.get?.('etag');
+          if (etag) lastSyncEtag = etag;
 
-            for (const [key, val] of Object.entries(cloudMap)) {
-              if (!SYNCABLE_KEYS.includes(key)) continue;
-              if (val === undefined || val === null) continue;
-              if (pendingCloudRequests[key] || pendingCloudTimers[key] !== undefined) continue;
-              const lastLocalWrite = keyWriteTimestamps[key] || 0;
-              if (Date.now() - lastLocalWrite < 5000) continue;
-              const serialized = JSON.stringify(val);
-              if (localStorage.getItem(key) !== serialized) {
-                safeLocalStorageSet(key, serialized, val);
-                hasRemoteChanges = true;
+          if (res.status === 304) {
+            // بدون تغییر از آخرین دریافت
+          } else if (res.ok) {
+            const rawParsed = await res.json();
+            // پشتیبانی از هر دو فرمت پاسخ مستقیم و ساختار { data, revision }
+            const unwrapped =
+              rawParsed &&
+              typeof rawParsed === 'object' &&
+              !Array.isArray(rawParsed) &&
+              'data' in rawParsed &&
+              typeof (rawParsed as Record<string, unknown>).data === 'object' &&
+              !(STORAGE_KEYS.STUDENTS in (rawParsed as Record<string, unknown>))
+                ? ((rawParsed as { data: Record<string, unknown>; revision?: string | number }).data)
+                : rawParsed;
+
+            if (
+              rawParsed &&
+              typeof rawParsed === 'object' &&
+              'revision' in rawParsed &&
+              (rawParsed as { revision?: string | number }).revision !== undefined
+            ) {
+              lastSyncRevision = (rawParsed as { revision?: string | number }).revision ?? lastSyncRevision;
+            }
+
+            if (unwrapped && typeof unwrapped === 'object' && !Array.isArray(unwrapped)) {
+              cloudMap = sanitizePlainValue(unwrapped as Record<string, unknown>);
+
+              for (const [key, val] of Object.entries(cloudMap)) {
+                if (!SYNCABLE_KEYS.includes(key)) continue;
+                if (val === undefined || val === null) continue;
+                if (pendingCloudRequests[key] || key in pendingCloudValues) continue;
+                const lastLocalWrite = keyWriteTimestamps[key] || 0;
+                if (Date.now() - lastLocalWrite < 5000) continue;
+                const serialized = JSON.stringify(val);
+                if (localStorage.getItem(key) !== serialized) {
+                  safeLocalStorageSet(key, serialized, val);
+                  hasRemoteChanges = true;
+                }
               }
             }
           }
         }
 
-        if (studentsResult.status === 'fulfilled' && studentsResult.value.ok) {
-          const rawStudents = await studentsResult.value.json();
-          if (Array.isArray(rawStudents)) {
-            const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
-            if (
-              !pendingCloudRequests[STORAGE_KEYS.STUDENTS] &&
-              pendingCloudTimers[STORAGE_KEYS.STUDENTS] === undefined &&
-              Date.now() - lastStudentWrite >= 5000
-            ) {
-              const cleanStudents: Student[] = rawStudents.map((item: Record<string, unknown>) =>
-                normalizeStudentRecord(item)
-              );
+        if (studentsResult.status === 'fulfilled') {
+          const res = studentsResult.value;
+          const etag = res.headers?.get?.('etag');
+          if (etag) lastStudentsEtag = etag;
 
-              const cloudSyncStudents = cloudMap?.[STORAGE_KEYS.STUDENTS];
-              if (!Array.isArray(cloudSyncStudents) && cleanStudents.length > 0) {
-                const serializedStudents = JSON.stringify(cleanStudents);
-                if (localStorage.getItem(STORAGE_KEYS.STUDENTS) !== serializedStudents) {
-                  safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, cleanStudents);
-                  hasRemoteChanges = true;
+          if (res.status !== 304 && res.ok) {
+            const rawStudents = await res.json();
+            if (Array.isArray(rawStudents)) {
+              const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
+              if (
+                !pendingCloudRequests[STORAGE_KEYS.STUDENTS] &&
+                !(STORAGE_KEYS.STUDENTS in pendingCloudValues) &&
+                Date.now() - lastStudentWrite >= 5000
+              ) {
+                const cleanStudents: Student[] = rawStudents.map((item: Record<string, unknown>) =>
+                  normalizeStudentRecord(sanitizePlainValue(item))
+                );
+
+                const cloudSyncStudents = cloudMap?.[STORAGE_KEYS.STUDENTS];
+                if (!Array.isArray(cloudSyncStudents) && cleanStudents.length > 0) {
+                  const serializedStudents = JSON.stringify(cleanStudents);
+                  if (localStorage.getItem(STORAGE_KEYS.STUDENTS) !== serializedStudents) {
+                    safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, cleanStudents);
+                    hasRemoteChanges = true;
+                  }
                 }
               }
             }
@@ -7787,7 +8906,8 @@ export const Storage = {
         | 'education'
         | 'cultural'
         | 'student_affairs'
-        | 'security';
+        | 'security'
+        | 'vice_dean';
       roleLabel: string;
       fullName: string;
       username: string;
@@ -7886,6 +9006,15 @@ export const Storage = {
         password: sec.password,
         isInactive: sec.status === 'inactive' || sec.isActive === false,
         user: { role: 'security' as const, staff: sec },
+      })),
+      ...Storage.getViceDeanStaff().map((vd) => ({
+        role: 'vice_dean' as const,
+        roleLabel: 'معاونت دانشجویی',
+        fullName: vd.fullName,
+        username: vd.username,
+        password: vd.password,
+        isInactive: vd.status === 'inactive' || vd.isActive === false,
+        user: { role: 'vice_dean' as const, staff: vd },
       })),
     ];
 
@@ -8060,7 +9189,7 @@ export const Storage = {
     description: string;
     reportedById: string;
     reportedByName: string;
-    reportedByRole: 'supervisor' | 'admin' | 'maintenance' | 'student_affairs';
+    reportedByRole: 'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'vice_dean';
   }): { success: boolean; message: string; report?: SecurityReport } => {
     if (!payload.students || payload.students.length === 0) {
       return { success: false, message: 'لطفاً حداقل یک دانشجو برای ارسال گزارش به حراست انتخاب نمایید.' };
@@ -8124,11 +9253,12 @@ export const Storage = {
     list.unshift(newReport);
     Storage.setSecurityReports(list);
 
-    const roleFa: Record<'supervisor' | 'admin' | 'maintenance' | 'student_affairs', string> = {
+    const roleFa: Record<'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'vice_dean', string> = {
       supervisor: 'سرپرست سرا',
       admin: 'مدیر کل سامانه',
       maintenance: 'واحد تأسیسات',
       student_affairs: 'امور دانشجویی',
+      vice_dean: 'معاونت دانشجویی',
     };
 
     Storage.addActivityLog({
@@ -8198,6 +9328,92 @@ export const Storage = {
       });
     }
     return { success: true, message: 'گزارش حراست با موفقیت حذف شد.' };
+  },
+
+  // -------------------------------------------------------------
+  // متدهای مدیریت کاربران معاونت دانشجویی
+  // -------------------------------------------------------------
+  getViceDeanStaff: (): ViceDeanStaff[] =>
+    get<ViceDeanStaff[]>(STORAGE_KEYS.VICE_DEAN_STAFF, INITIAL_VICE_DEAN_STAFF),
+
+  setViceDeanStaff: (staff: ViceDeanStaff[]): boolean =>
+    set(STORAGE_KEYS.VICE_DEAN_STAFF, staff),
+
+  addViceDeanStaff: (
+    staffData: Omit<ViceDeanStaff, 'id'>
+  ): { success: boolean; message: string; staff?: ViceDeanStaff } => {
+    const list = Storage.getViceDeanStaff();
+    const cleanUsername = normalizeAsciiDigits(staffData.username).toLowerCase();
+    if (!cleanUsername) {
+      return { success: false, message: 'نام کاربری معاونت دانشجویی نمی‌تواند خالی باشد.' };
+    }
+    if (list.some((s) => normalizeAsciiDigits(s.username).toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کاربر معاونت دانشجویی دیگری ثبت شده است.' };
+    }
+    const newStaff: ViceDeanStaff = {
+      ...staffData,
+      id: makeUniqueId('vd'),
+      username: cleanUsername,
+      role: 'vice_dean',
+      department: staffData.department?.trim() || 'معاونت دانشجویی دانشگاه فرهنگیان',
+      title: staffData.title?.trim() || 'معاون دانشجویی',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setViceDeanStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کاربر معاونت دانشجویی',
+      details: `کاربر معاونت دانشجویی «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کاربر معاونت دانشجویی «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateViceDeanStaff: (
+    id: string,
+    updates: Partial<ViceDeanStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getViceDeanStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر معاونت دانشجویی یافت نشد.' };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizeAsciiDigits(normalizedUpdates.username).toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((s) => s.id !== id && normalizeAsciiDigits(s.username).toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر معاونت دانشجویی دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
+    Storage.setViceDeanStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'vice_dean' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'vice_dean', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کاربر معاونت دانشجویی با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteViceDeanStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getViceDeanStaff();
+    const target = list.find((s) => s.id === id);
+    Storage.setViceDeanStaff(list.filter((s) => s.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کاربر معاونت دانشجویی',
+        details: `حساب کاربری معاونت دانشجویی «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کاربر معاونت دانشجویی با موفقیت حذف گردید.' };
   },
 };
 

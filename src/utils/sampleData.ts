@@ -43,6 +43,7 @@ import {
   SportsRegistration,
   SecurityStaff,
   SecurityReport,
+  ViceDeanStaff,
 } from '../types';
 
 export const INITIAL_SETTINGS: AppSettings = {
@@ -190,3 +191,6 @@ export const INITIAL_SECURITY_STAFF: SecurityStaff[] = [];
 
 // گزارش‌های ارسالی به واحد حراست و انتظامات (کاملاً خالی)
 export const INITIAL_SECURITY_REPORTS: SecurityReport[] = [];
+
+// معاونت دانشجویی (کاملاً خالی)
+export const INITIAL_VICE_DEAN_STAFF: ViceDeanStaff[] = [];

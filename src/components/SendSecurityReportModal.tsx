@@ -27,7 +27,7 @@ import { toEnglishDigits } from '../utils/excelUtils';
 interface SendSecurityReportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  reporterRole: 'supervisor' | 'admin' | 'maintenance' | 'student_affairs';
+  reporterRole: 'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'vice_dean';
   reporterId: string;
   reporterName: string;
   students?: Student[];
@@ -44,6 +44,7 @@ const ROLE_TITLES: Record<SendSecurityReportModalProps['reporterRole'], string> 
   admin: 'مدیریت کل سامانه',
   maintenance: 'واحد تأسیسات و فنی',
   student_affairs: 'اداره امور دانشجویی',
+  vice_dean: 'معاونت دانشجویی',
 };
 
 export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = ({

@@ -84,6 +84,7 @@ interface SupervisorDashboardProps {
   onOpenMessages: () => void;
   onOpenExcelModal: () => void;
   onOpenUserGuide?: (role: 'supervisor') => void;
+  embeddedMode?: boolean;
 }
 
 export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
@@ -102,6 +103,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   onOpenMessages,
   onOpenExcelModal,
   onOpenUserGuide,
+  embeddedMode = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'announcements' | 'students' | 'guest_requests' | 'maintenance' | 'warehouse' | 'shifts'>('manager');
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
@@ -584,6 +586,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
       />
 
       {/* بنر سرپرستی و آمار */}
+      {!embeddedMode ? (
       <div className="bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-teal-800/40">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
           <div>
@@ -723,6 +726,75 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           </button>
         </div>
       </div>
+      ) : (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 space-y-3 shadow-xs">
+          {myDorms.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-300">انتخاب سرا جهت مدیریت:</span>
+              <button
+                onClick={() => setSelectedDormId('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  selectedDormId === 'all'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                }`}
+              >
+                همه سراها ({myDorms.length} سرا)
+              </button>
+              {myDorms.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => setSelectedDormId(d.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    selectedDormId === d.id
+                      ? 'bg-teal-600 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {d.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setIsWarningModalOpen(true)}
+              className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>اعلام اخطار به اتاق</span>
+            </button>
+            <button
+              onClick={() => {
+                setEvalTargetStudent(null);
+                setIsStudentEvalModalOpen(true);
+              }}
+              className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Award className="w-3.5 h-3.5" />
+              <span>تذکر / نمره ارزیابی دانشجو</span>
+            </button>
+            <button
+              onClick={() => {
+                setMaintDormId(selectedDormId === 'all' ? (myDorms[0]?.id || '') : selectedDormId);
+                setMaintStaffId(allStaff[0]?.id || '');
+                setIsAddMaintenanceModalOpen(true);
+              }}
+              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              <span>ثبت خرابی تأسیسات</span>
+            </button>
+            <button
+              onClick={() => setIsSendSecurityModalOpen(true)}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Shield className="w-3.5 h-3.5" />
+              <span>گزارش به حراست</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* پیام بازخورد تأیید یا رد */}
       {actionFeedback && (

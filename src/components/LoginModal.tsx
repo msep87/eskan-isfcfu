@@ -34,6 +34,7 @@ interface LoginModalProps {
       | 'cultural'
       | 'student_affairs'
       | 'security'
+      | 'vice_dean'
       | 'student'
   ) => void;
 }
@@ -559,7 +560,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <div className="p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-900/50 flex items-start gap-2 text-[11px] text-indigo-900 dark:text-indigo-200 leading-relaxed">
                 <Info className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400 mt-0.5" />
                 <span>
-                  همکاران گرامی (سرپرست سرا، حراست و انتظامات، تأسیسات، مشاور، انبار، کارپردازی، امور مالی، کارشناس آموزش، امور فرهنگی و امور دانشجویی) با وارد کردن نام کاربری و کلمه عبور خود، به‌صورت خودکار به پنل کاربری اختصاصی خود هدایت می‌شوند.
+                  همکاران گرامی (معاونت دانشجویی، سرپرست سرا، حراست و انتظامات، تأسیسات، مشاور، انبار، کارپردازی، امور مالی، کارشناس آموزش، امور فرهنگی و امور دانشجویی) با وارد کردن نام کاربری و کلمه عبور خود، به‌صورت خودکار به پنل کاربری اختصاصی خود هدایت می‌شوند.
                 </span>
               </div>
             )}

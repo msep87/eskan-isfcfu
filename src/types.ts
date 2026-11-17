@@ -118,7 +118,7 @@ export type MessageCategory =
 export interface MessageReply {
   id: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean';
   content: string;
   date: string;
 }
@@ -127,8 +127,8 @@ export interface Message {
   id: string;
   senderId: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security';
-  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'all';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean';
+  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'all';
   receiverId?: string;
   receiverName?: string;
   targetScope?: 'single' | 'field' | 'entry_term';
@@ -279,6 +279,22 @@ export interface SecurityStaff {
   notes?: string;
 }
 
+export interface ViceDeanStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل معاونت دانشجویی
+  department?: string; // معاونت دانشجویی دانشگاه فرهنگیان
+  title?: string; // عنوان سازمانی (معاون دانشجویی / سرپرست معاونت دانشجویی)
+  role: 'vice_dean';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
 export type SecurityReportCategory =
   | 'disciplinary_incident'
   | 'curfew_entry_exit'
@@ -320,7 +336,7 @@ export interface SecurityReport {
   studentsSnapshot: SecurityReportStudentSnapshot[];
   reportedById: string;
   reportedByName: string;
-  reportedByRole: 'supervisor' | 'admin' | 'maintenance' | 'student_affairs';
+  reportedByRole: 'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'vice_dean';
   reportedAt: string;
   status: SecurityReportStatus;
   securityNotes?: string;
@@ -649,6 +665,7 @@ export type CurrentUser =
   | { role: 'cultural'; staff: CulturalStaff }
   | { role: 'student_affairs'; staff: StudentAffairsStaff }
   | { role: 'security'; staff: SecurityStaff }
+  | { role: 'vice_dean'; staff: ViceDeanStaff }
   | null;
 
 export type DayOfWeek = 'saturday' | 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
@@ -821,7 +838,7 @@ export interface ActivityLog {
   timestamp: string; // ISO string برای مرتب‌سازی دقیق
   date: string; // تاریخ و ساعت شمسی خوانا
   actorName: string;
-  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'system';
+  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'system';
   actorUsername?: string;
   category: ActivityLogCategory;
   action: string;
@@ -1103,7 +1120,7 @@ export interface DisciplinaryReferral {
   referralText: string;
   referredById: string;
   referredByName: string;
-  referredByRole: 'supervisor' | 'admin';
+  referredByRole: 'supervisor' | 'admin' | 'vice_dean';
   referredAt: string;
   status: DisciplinaryReferralStatus;
   sessionDate?: string;

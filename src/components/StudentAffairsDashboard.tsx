@@ -67,6 +67,7 @@ interface StudentAffairsDashboardProps {
   onOpenMessages: () => void;
   onOpenChangePassword: () => void;
   onOpenUserGuide?: (role: 'student_affairs') => void;
+  embeddedMode?: boolean;
 }
 
 const SPORT_TYPE_LABELS: Record<SportsProgramType, string> = {
@@ -173,6 +174,7 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
   onOpenMessages,
   onOpenChangePassword,
   onOpenUserGuide,
+  embeddedMode = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'students' | 'sports' | 'elections' | 'disciplinary'>('students');
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -785,9 +787,11 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
     printHtmlViaIframe(html);
   };
 
+  const StudentAffairsHeaderVars = !embeddedMode;
   return (
     <div className="space-y-6">
       {/* سربرگ امور دانشجویی و تربیت بدنی */}
+      {StudentAffairsHeaderVars && (
       <div className="bg-gradient-to-r from-cyan-800 via-teal-800 to-slate-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
         <div className="absolute -top-14 -left-14 w-52 h-52 bg-cyan-400/15 rounded-full blur-3xl pointer-events-none" />
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
@@ -854,6 +858,7 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
           </div>
         </div>
       </div>
+      )}
 
       {/* کارت‌های آماری */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
@@ -1367,7 +1372,11 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
                     <div className="text-xs text-slate-500 flex flex-wrap gap-4">
                       <span>
                         معرفی‌کننده: <strong>{ref.referredByName}</strong> (
-                        {ref.referredByRole === 'admin' ? 'مدیر کل' : 'سرپرست سرا'})
+                        {ref.referredByRole === 'admin'
+                          ? 'مدیر کل'
+                          : ref.referredByRole === 'vice_dean'
+                          ? 'معاونت دانشجویی'
+                          : 'سرپرست سرا'})
                       </span>
                       <span>تاریخ معرفی: {ref.referredAt}</span>
                       <span>

@@ -128,6 +128,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         m.status !== 'answered'
       );
     }
+    if (currentUser?.role === 'vice_dean') {
+      return (
+        m.senderRole !== 'student' &&
+        m.receiverType !== 'student' &&
+        (m.receiverType === 'vice_dean' || m.receiverType === 'all' || m.senderRole === 'vice_dean') &&
+        m.status !== 'answered'
+      );
+    }
     return m.status === 'pending';
   }).length;
 
@@ -257,6 +265,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ? currentUser.staff.photoUrl
                       : currentUser.role === 'security'
                       ? currentUser.staff.photoUrl
+                      : currentUser.role === 'vice_dean'
+                      ? currentUser.staff.photoUrl
                       : currentUser.role === 'counselor'
                       ? currentUser.counselor.photoUrl
                       : undefined;
@@ -282,6 +292,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       {currentUser.role === 'cultural' && currentUser.staff.fullName}
                       {currentUser.role === 'student_affairs' && currentUser.staff.fullName}
                       {currentUser.role === 'security' && currentUser.staff.fullName}
+                      {currentUser.role === 'vice_dean' && currentUser.staff.fullName}
                       {currentUser.role === 'admin' && 'مدیر امور خوابگاه‌ها'}
                     </span>
                     {currentUser.role === 'counselor' && (
@@ -329,6 +340,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                         حراست و انتظامات
                       </span>
                     )}
+                    {currentUser.role === 'vice_dean' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 font-bold">
+                        معاونت دانشجویی
+                      </span>
+                    )}
                     {currentUser.role === 'student' && (
                       currentUser.student.isProfileCompleted ? (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
@@ -353,6 +369,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentUser.role === 'cultural' && (currentUser.staff.department || 'واحد امور فرهنگی و اجتماعی سراها')}
                     {currentUser.role === 'student_affairs' && (currentUser.staff.department || 'اداره امور دانشجویی، تربیت بدنی و رفاهی')}
                     {currentUser.role === 'security' && (currentUser.staff.department || 'واحد حراست و انتظامات')}
+                    {currentUser.role === 'vice_dean' && (currentUser.staff.title || currentUser.staff.department || 'معاونت دانشجویی دانشگاه فرهنگیان')}
                     {currentUser.role === 'admin' && 'مدیر کل سامانه'}
                   </div>
                 </div>
