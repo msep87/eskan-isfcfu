@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Student, Dormitory, Room, Bed, AppSettings } from '../types';
 import { Storage } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
+import { getStudentResidenceType } from '../utils/financeUtils';
 import {
   X,
   Printer,
@@ -596,11 +597,13 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
                       <span className="font-bold text-slate-800">{student.fieldOfStudy || '-'}</span>
                     </div>
                     <div className="text-[10px] truncate">
-                      <span className="text-slate-500 font-semibold">سرا و اتاق: </span>
+                      <span className="text-slate-500 font-semibold">سرا و وضعیت سکونت: </span>
                       <span className="font-bold text-teal-800">
                         {dorm && room
-                          ? `${dorm.name} • اتاق ${room.roomNumber}${bed ? ` (${bed.label})` : ''}`
-                          : 'فاقد اتاق / ترددی'}
+                          ? `${getStudentResidenceType(student) === 'dormitory' ? 'خوابگاهی' : 'ترددی'} • ${dorm.name} • اتاق ${room.roomNumber}${bed ? ` (${bed.label})` : ''}`
+                          : getStudentResidenceType(student) === 'dormitory'
+                          ? 'خوابگاهی (فاقد اتاق)'
+                          : 'ترددی (غیرخوابگاهی)'}
                       </span>
                     </div>
 

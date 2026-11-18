@@ -15,12 +15,14 @@ import {
   Users,
   Shield,
   Info,
+  Loader2,
 } from 'lucide-react';
 
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (user: NonNullable<CurrentUser>) => void;
+  onRefreshData?: () => void;
   onOpenUserGuide?: (
     role?:
       | 'admin'
@@ -43,6 +45,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   isOpen,
   onClose,
   onLoginSuccess,
+  onRefreshData,
   onOpenUserGuide,
 }) => {
   const [tab, setTab] = useState<'student' | 'staff' | 'admin'>('student');
@@ -57,6 +60,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   const [errorMsg, setErrorMsg] = useState('');
   const [recoverySuccessMsg, setRecoverySuccessMsg] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // وضعیت بازیابی رمز عبور دانشجو (دو سوال سه‌گزینه‌ای)
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
@@ -97,7 +101,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
-  const handleOpenRecovery = () => {
+  const handleOpenRecovery = async () => {
     setErrorMsg('');
     setRecoverySuccessMsg('');
     setSelectedFatherName('');
@@ -106,7 +110,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setRecoveryStudentId(prefillId);
 
     if (prefillId) {
-      const res = Storage.getStudentRecoveryQuestions(prefillId);
+      let res = Storage.getStudentRecoveryQuestions(prefillId);
+      if (!res.success) {
+        setIsAuthenticating(true);
+        const synced = await Storage.ensureCloudDataForAuth('student');
+        setIsAuthenticating(false);
+        if (synced) {
+          onRefreshData?.();
+          res = Storage.getStudentRecoveryQuestions(prefillId);
+        }
+      }
       if (res.success && res.studentId && res.fatherOptions && res.birthDateOptions) {
         setRecoveryData({
           studentId: res.studentId,
@@ -127,12 +140,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setIsRecoveryMode(true);
   };
 
-  const handleFetchRecoveryQuestions = (e: React.FormEvent) => {
+  const handleFetchRecoveryQuestions = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAuthenticating) return;
     setErrorMsg('');
     setRecoverySuccessMsg('');
 
-    const res = Storage.getStudentRecoveryQuestions(recoveryStudentId);
+    let res = Storage.getStudentRecoveryQuestions(recoveryStudentId);
+    if (!res.success && recoveryStudentId.trim()) {
+      setIsAuthenticating(true);
+      const synced = await Storage.ensureCloudDataForAuth('student');
+      setIsAuthenticating(false);
+      if (synced) {
+        onRefreshData?.();
+        res = Storage.getStudentRecoveryQuestions(recoveryStudentId);
+      }
+    }
     if (!res.success || !res.studentId || !res.fatherOptions || !res.birthDateOptions) {
       setErrorMsg(res.message);
       return;
@@ -184,8 +207,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
-  const handleStudentLogin = (e: React.FormEvent) => {
+  const handleStudentLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAuthenticating) return;
     setErrorMsg('');
     setRecoverySuccessMsg('');
 
@@ -194,17 +218,30 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    const students = Storage.getStudents();
     const cleanId = toEnglishDigits(studentId.trim());
     const cleanNat = toEnglishDigits(nationalId.trim());
 
-    const student = students.find((s) => {
-      if (!s.studentId || toEnglishDigits(String(s.studentId).trim()) !== cleanId) {
-        return false;
+    const findMatchingStudent = () =>
+      Storage.getStudents().find((s) => {
+        if (!s.studentId || toEnglishDigits(String(s.studentId).trim()) !== cleanId) {
+          return false;
+        }
+        const effectivePass = toEnglishDigits(String(s.password || s.nationalId || '').trim());
+        return Boolean(effectivePass) && effectivePass === cleanNat;
+      });
+
+    let student = findMatchingStudent();
+
+    // در دستگاه یا گوشی تازه که هنوز لیست دانشجویان از سرور ابری دانلود نشده، همگام‌سازی فوری انجام می‌شود
+    if (!student) {
+      setIsAuthenticating(true);
+      const synced = await Storage.ensureCloudDataForAuth('student');
+      setIsAuthenticating(false);
+      if (synced) {
+        onRefreshData?.();
+        student = findMatchingStudent();
       }
-      const effectivePass = toEnglishDigits(String(s.password || s.nationalId || '').trim());
-      return Boolean(effectivePass) && effectivePass === cleanNat;
-    });
+    }
 
     if (student) {
       Storage.addActivityLog({
@@ -233,12 +270,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
-  const handleStaffOrAdminLogin = (e: React.FormEvent) => {
+  const handleStaffOrAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAuthenticating) return;
     setErrorMsg('');
 
     if (tab === 'staff') {
-      const result = Storage.authenticateStaffByCredentials(username, password);
+      let result = Storage.authenticateStaffByCredentials(username, password);
+      if (!result.success && username.trim() && password.trim()) {
+        setIsAuthenticating(true);
+        const synced = await Storage.ensureCloudDataForAuth('staff');
+        setIsAuthenticating(false);
+        if (synced) {
+          onRefreshData?.();
+          result = Storage.authenticateStaffByCredentials(username, password);
+        }
+      }
       if (result.success && result.user) {
         onLoginSuccess(result.user);
         handleCloseModal();
@@ -257,9 +304,20 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         return;
       }
 
-      const currentAdminPass = toEnglishDigits(
+      let currentAdminPass = toEnglishDigits(
         String(Storage.getSettings().adminPassword || '261').trim()
       );
+      if (cleanAdminUser === 'admin' && cleanAdminPass !== currentAdminPass) {
+        setIsAuthenticating(true);
+        const synced = await Storage.ensureCloudDataForAuth('admin');
+        setIsAuthenticating(false);
+        if (synced) {
+          onRefreshData?.();
+          currentAdminPass = toEnglishDigits(
+            String(Storage.getSettings().adminPassword || '261').trim()
+          );
+        }
+      }
       if (cleanAdminUser === 'admin' && cleanAdminPass === currentAdminPass) {
         Storage.addActivityLog({
           category: 'auth',
@@ -407,9 +465,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
             <button
               type="submit"
-              className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-bold text-sm shadow-lg shadow-teal-600/25 transition cursor-pointer mt-2"
+              disabled={isAuthenticating}
+              className="w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:opacity-70 text-white rounded-2xl font-bold text-sm shadow-lg shadow-teal-600/25 transition cursor-pointer mt-2 flex items-center justify-center gap-2"
             >
-              ورود به سامانه دانشجو
+              {isAuthenticating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>در حال دریافت و بررسی اطلاعات دانشجو...</span>
+                </>
+              ) : (
+                <span>ورود به سامانه دانشجو</span>
+              )}
             </button>
           </form>
         )}
@@ -448,9 +514,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <div className="flex items-center gap-2 pt-1">
                   <button
                     type="submit"
-                    className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs shadow-md transition cursor-pointer"
+                    disabled={isAuthenticating}
+                    className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-70 text-white rounded-xl font-bold text-xs shadow-md transition cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    نمایش سوالات امنیتی
+                    {isAuthenticating ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>در حال بررسی...</span>
+                      </>
+                    ) : (
+                      <span>نمایش سوالات امنیتی</span>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -595,13 +669,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
             <button
               type="submit"
-              className={`w-full py-3 text-white rounded-2xl font-bold text-sm shadow-lg transition cursor-pointer mt-2 ${
+              disabled={isAuthenticating}
+              className={`w-full py-3 text-white rounded-2xl font-bold text-sm shadow-lg transition cursor-pointer mt-2 disabled:opacity-70 flex items-center justify-center gap-2 ${
                 tab === 'admin'
                   ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/25'
                   : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/25'
               }`}
             >
-              {tab === 'admin' ? 'ورود مدیر کل سامانه' : 'ورود به کارتابل تخصصی کارکنان'}
+              {isAuthenticating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>در حال بررسی اطلاعات کاربران...</span>
+                </>
+              ) : (
+                <span>{tab === 'admin' ? 'ورود مدیر کل سامانه' : 'ورود به کارتابل تخصصی کارکنان'}</span>
+              )}
             </button>
           </form>
         )}

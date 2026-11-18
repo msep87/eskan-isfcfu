@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { Storage, DISCIPLINARY_VIOLATION_PRESETS } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
+import { getStudentResidenceType } from '../utils/financeUtils';
 import {
   X,
   User,
@@ -451,6 +452,15 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                     🌟 {isDefaultRepresentative ? 'نماینده اتاق (پیش‌فرض نفر اول)' : 'نماینده اتاق'}
                   </span>
                 )}
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${
+                    getStudentResidenceType(student) === 'dormitory'
+                      ? 'bg-teal-400/25 text-teal-50 border border-teal-200/50'
+                      : 'bg-amber-400/30 text-amber-50 border border-amber-200/50'
+                  }`}
+                >
+                  {getStudentResidenceType(student) === 'dormitory' ? 'خوابگاهی' : 'ترددی'}
+                </span>
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${
                     student.isProfileCompleted

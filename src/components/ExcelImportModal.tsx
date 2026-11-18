@@ -23,6 +23,7 @@ import {
 import { Storage } from '../utils/storage';
 import {
   Student,
+  StudentResidenceType,
   Dormitory,
   Room,
   Bed,
@@ -90,6 +91,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
   const [previewStudents, setPreviewStudents] = useState<Student[] | null>(null);
   const [detectedCustomCols, setDetectedCustomCols] = useState<string[]>([]);
   const [replaceMode, setReplaceMode] = useState(false);
+  const [defaultUnassignedResidence, setDefaultUnassignedResidence] =
+    useState<StudentResidenceType>('commuter');
 
   // پیش‌نمایش سراها
   const [previewDormsData, setPreviewDormsData] = useState<{
@@ -467,11 +470,14 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
           st.assignedRoomId = room.id;
           st.assignedBedId = targetBed.id;
           st.assignmentStatus = 'confirmed';
+          // دانشجوی دارای اتاق به‌صورت پیش‌فرض خوابگاهی است
+          st.residenceType = st.residenceType || 'dormitory';
         } else {
           st.assignedDormId = undefined;
           st.assignedRoomId = undefined;
           st.assignedBedId = undefined;
           st.assignmentStatus = 'none';
+          st.residenceType = st.residenceType || defaultUnassignedResidence;
 
           beds.forEach((b) => {
             if (b.studentId === st.studentId) {
@@ -488,17 +494,23 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
       Storage.setRooms(rooms);
       Storage.setBeds(beds);
 
+      let finalStudents: Student[];
       if (replaceMode) {
-        Storage.setStudents(previewStudents);
+        finalStudents = previewStudents;
+        Storage.setStudents(finalStudents);
       } else {
         const existing = Storage.getStudents();
         const mergedMap = new Map<string, Student>();
         existing.forEach((s) => mergedMap.set(s.studentId, s));
         previewStudents.forEach((s) => mergedMap.set(s.studentId, s));
-        Storage.setStudents(Array.from(mergedMap.values()));
+        finalStudents = Array.from(mergedMap.values());
+        Storage.setStudents(finalStudents);
       }
 
-      const syncRes = await Storage.waitForPendingCloudSync();
+      const [syncRes, collectionRes] = await Promise.all([
+        Storage.waitForPendingCloudSync(),
+        Storage.syncStudentsCollectionToCloud(finalStudents, replaceMode),
+      ]);
 
       const allocatedCount = previewStudents.filter((s) => s.assignedBedId).length;
       const unassignedCount = previewStudents.length - allocatedCount;
@@ -510,13 +522,13 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
         targetName: `${previewStudents.length} دانشجو`,
       });
 
-      if (syncRes.success) {
+      if (syncRes.success && collectionRes.ok) {
         setSuccessMsg(
-          `تعداد ${previewStudents.length} دانشجو با موفقیت در دیتابیس ابری ذخیره و همگام‌سازی گردید (${allocatedCount} نفر با اسکان قطعی از اکسل، و ${unassignedCount} نفر فاقد اتاق جهت انتخاب توسط خود دانشجو).`
+          `تعداد ${previewStudents.length} دانشجو با موفقیت در دیتابیس ابری و کالکشن دانشجویان ذخیره و همگام‌سازی گردید (${allocatedCount} نفر با اسکان قطعی از اکسل، و ${unassignedCount} نفر فاقد اتاق جهت انتخاب توسط خود دانشجو).`
         );
       } else {
         setSuccessMsg(
-          `تعداد ${previewStudents.length} دانشجو در مرورگر ثبت شد، اما همگام‌سازی برخی بخش‌ها با دیتابیس ابری با تأخیر یا خطا مواجه شد.`
+          `تعداد ${previewStudents.length} دانشجو در مرورگر ثبت شد، اما همگام‌سازی برخی بخش‌ها با دیتابیس ابری با تأخیر یا خطا مواجه شد (تلاش مجدد خودکار فعال است).`
         );
       }
       setPreviewStudents(null);
@@ -1088,13 +1100,13 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                 <span>نحوه ساماندهی اتاق‌ها و تخت‌ها از طریق اکسل:</span>
               </div>
               <p className="text-[11px] text-indigo-800 dark:text-indigo-300">
-                • <strong>ستون‌های اختیاری اسکان:</strong> «نام سرا»، «شماره اتاق» و «شماره تخت»
+                • <strong>ستون‌های اختیاری اسکان و نوع سکونت:</strong> «نوع سکونت» (خوابگاهی / ترددی)، «نام سرا»، «شماره اتاق» و «شماره تخت»
               </p>
               <p className="text-[11px] text-indigo-800 dark:text-indigo-300">
-                • <strong>اگر این ستون‌ها پر باشند:</strong> دانشجو به صورت قطعی در همان اتاق و تخت اسکان می‌یابد و پس از ورود، در صورت تمایل می‌تواند <em>درخواست تغییر یا جابجایی اتاق و تخت</em> ثبت کند.
+                • <strong>برچسب خوابگاهی یا ترددی:</strong> دانشجویانی که دارای اتاق هستند به‌صورت پیش‌فرض <em>خوابگاهی</em> ثبت می‌شوند. برای دانشجویان فاقد اتاق می‌توانید در ستون «نوع سکونت» مقدار «خوابگاهی» یا «ترددی» را درج کنید یا در پیش‌نمایش زیر تغییر دهید.
               </p>
               <p className="text-[11px] text-indigo-800 dark:text-indigo-300">
-                • <strong>اگر این ستون‌ها خالی باشند:</strong> دانشجو فاقد اسکان ثبت شده و خودش موظف است به صورت آنلاین وارد نقشه بصری شده و اتاق و تخت را انتخاب کند.
+                • <strong>اگر ستون‌های اتاق پر باشند:</strong> دانشجو به صورت قطعی در همان اتاق و تخت اسکان می‌یابد و پس از ورود، در صورت تمایل می‌تواند <em>درخواست تغییر یا جابجایی اتاق و تخت</em> ثبت کند.
               </p>
               <p className="text-[11px] font-bold text-indigo-900 dark:text-indigo-200">
                 • <strong>قاعده شماره‌گذاری تخت‌ها:</strong> شماره‌های فرد (۱، ۳، ۵، ۷، ...) طبقه پایین و شماره‌های زوج (۲، ۴، ۶، ۸، ...) طبقه بالا هستند.
@@ -1137,6 +1149,37 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                   )}
                 </div>
 
+                {/* تنظیم پیش‌فرض نوع سکونت برای ردیف‌های فاقد اتاق و بدون مقدار در ستون نوع سکونت */}
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-bold text-slate-700 dark:text-slate-200">
+                    برچسب پیش‌فرض دانشجویان بدون اتاق (در صورت خالی بودن ستون «نوع سکونت» در اکسل):
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setDefaultUnassignedResidence('commuter')}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                        defaultUnassignedResidence === 'commuter'
+                          ? 'bg-amber-600 text-white border-amber-600'
+                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'
+                      }`}
+                    >
+                      ترددی (غیرخوابگاهی)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDefaultUnassignedResidence('dormitory')}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                        defaultUnassignedResidence === 'dormitory'
+                          ? 'bg-teal-600 text-white border-teal-600'
+                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'
+                      }`}
+                    >
+                      خوابگاهی (در انتظار اتاق)
+                    </button>
+                  </div>
+                </div>
+
                 <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-56">
                   <table className="w-full text-right text-xs">
                     <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold sticky top-0">
@@ -1147,6 +1190,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                         <th className="p-2.5">ورودی</th>
                         <th className="p-2.5">شهر</th>
                         <th className="p-2.5">همراه</th>
+                        <th className="p-2.5 text-teal-700 dark:text-teal-300 font-black">نوع سکونت (کلیک برای تغییر)</th>
                         <th className="p-2.5 text-indigo-700 dark:text-indigo-400 font-black">تخصیص اسکان در اکسل</th>
                         {detectedCustomCols.map((c) => (
                           <th key={c} className="p-2.5 text-teal-600 font-bold">{c} (سفارشی)</th>
@@ -1154,36 +1198,67 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {previewStudents.slice(0, 12).map((st, i) => (
-                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-2.5 font-bold">{st.studentId}</td>
-                          <td className="p-2.5">{st.fullName}</td>
-                          <td className="p-2.5">{st.fieldOfStudy}</td>
-                          <td className="p-2.5">{st.entryTerm}</td>
-                          <td className="p-2.5">{st.city}</td>
-                          <td className="p-2.5" dir="ltr">{st.mobile}</td>
-                          <td className="p-2.5">
-                            {st.assignedRoomNumber && st.assignedBedNumber ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold text-[11px] border border-emerald-200 dark:border-emerald-800">
-                                <span>{st.assignedDormName ? `${st.assignedDormName} • ` : ''}اتاق {st.assignedRoomNumber}</span>
-                                <span>•</span>
-                                <span>
-                                  تخت {st.assignedBedNumber} (
-                                  {parseInt(String(st.assignedBedNumber), 10) % 2 === 1 ? 'پایین' : 'بالا'}
-                                  )
+                      {previewStudents.slice(0, 12).map((st, i) => {
+                        const effectiveRes: StudentResidenceType =
+                          st.residenceType ||
+                          (st.assignedRoomNumber && st.assignedBedNumber
+                            ? 'dormitory'
+                            : defaultUnassignedResidence);
+                        return (
+                          <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <td className="p-2.5 font-bold">{st.studentId}</td>
+                            <td className="p-2.5">{st.fullName}</td>
+                            <td className="p-2.5">{st.fieldOfStudy}</td>
+                            <td className="p-2.5">{st.entryTerm}</td>
+                            <td className="p-2.5">{st.city}</td>
+                            <td className="p-2.5" dir="ltr">{st.mobile}</td>
+                            <td className="p-2.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextVal: StudentResidenceType =
+                                    effectiveRes === 'dormitory' ? 'commuter' : 'dormitory';
+                                  setPreviewStudents((prev) =>
+                                    prev
+                                      ? prev.map((rowItem, idx) =>
+                                          idx === i ? { ...rowItem, residenceType: nextVal } : rowItem
+                                        )
+                                      : prev
+                                  );
+                                }}
+                                title="کلیک برای تغییر بین خوابگاهی و ترددی"
+                                className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border transition cursor-pointer ${
+                                  effectiveRes === 'dormitory'
+                                    ? 'bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-700'
+                                    : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700'
+                                }`}
+                              >
+                                {effectiveRes === 'dormitory' ? 'خوابگاهی' : 'ترددی'}
+                              </button>
+                            </td>
+                            <td className="p-2.5">
+                              {st.assignedRoomNumber && st.assignedBedNumber ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold text-[11px] border border-emerald-200 dark:border-emerald-800">
+                                  <span>{st.assignedDormName ? `${st.assignedDormName} • ` : ''}اتاق {st.assignedRoomNumber}</span>
+                                  <span>•</span>
+                                  <span>
+                                    تخت {st.assignedBedNumber} (
+                                    {parseInt(String(st.assignedBedNumber), 10) % 2 === 1 ? 'پایین' : 'بالا'}
+                                    )
+                                  </span>
                                 </span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-bold text-[10px] border border-amber-200 dark:border-amber-800">
-                                <span>فاقد اتاق (انتخاب توسط خود دانشجو)</span>
-                              </span>
-                            )}
-                          </td>
-                          {detectedCustomCols.map((c) => (
-                            <td key={c} className="p-2.5 text-slate-600">{st.customFields?.[c] || '-'}</td>
-                          ))}
-                        </tr>
-                      ))}
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-bold text-[10px] border border-amber-200 dark:border-amber-800">
+                                  <span>فاقد اتاق</span>
+                                </span>
+                              )}
+                            </td>
+                            {detectedCustomCols.map((c) => (
+                              <td key={c} className="p-2.5 text-slate-600">{st.customFields?.[c] || '-'}</td>
+                            ))}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

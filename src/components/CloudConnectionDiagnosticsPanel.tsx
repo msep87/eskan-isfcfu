@@ -52,10 +52,11 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
   const [diagStepText, setDiagStepText] = useState<string | null>(null);
   const [isLiveMonitoring, setIsLiveMonitoring] = useState(false);
   const [latencyHistory, setLatencyHistory] = useState<Array<{ time: string; ms: number; ok: boolean }>>([]);
-  const [actionBusy, setActionBusy] = useState<'push' | 'pull' | null>(null);
+  const [actionBusy, setActionBusy] = useState<'push' | 'pull' | 'retry' | null>(null);
   const [actionMessage, setActionMessage] = useState<{
     ok: boolean;
     text: string;
+    details?: string[];
   } | null>(null);
   const isMountedRef = useRef(true);
 
@@ -137,16 +138,32 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
     if (actionBusy || isDiagnosing) return;
     setActionBusy('push');
     setActionMessage(null);
-    setDiagStepText('در حال ارسال امن تمام ۴۵ جدول سامانه به سرور ابری...');
+    setDiagStepText('در حال آماده‌سازی انتقال کامل تمام داده‌ها، کاربران و تنظیمات به سرور ابری و دیتابیس...');
     try {
       const res = await Storage.syncAllToCloudDetailed((msg) => {
         if (isMountedRef.current) setDiagStepText(msg);
       });
       if (!isMountedRef.current) return;
+      setLocalAudit(Storage.getLocalCloudPayloadSummary());
+
+      const summaryDetails: string[] = [
+        `جداول همگام‌سازی‌شده: ${res.syncedCount.toLocaleString('fa-IR')} از ${res.totalCount.toLocaleString('fa-IR')} جدول سامانه`,
+        `تنظیمات عمومی، لوگو، فونت‌ها و ظاهر سایت: ${res.settingsSynced ? 'منتقل و ثبت شد' : 'نیاز به بررسی'}`,
+        `هم‌ترازی کالکشن دانشجویان در MongoDB: ${
+          res.studentsMirroredCount > 0
+            ? `${res.studentsMirroredCount.toLocaleString('fa-IR')} پرونده (${res.studentsMirrorOk ? 'کامل و موفق' : 'دارای خطا در بخشی از دسته‌ها'})`
+            : 'بدون رکورد دانشجو'
+        }`,
+        `حجم کل منتقل‌شده: ${formatBytesFa(res.totalBytesSent)}${
+          res.latestRevision !== null ? ` | نسخه جدید سرور: #${String(res.latestRevision)}` : ''
+        }`,
+      ];
+
       if (res.ok) {
         setActionMessage({
           ok: true,
-          text: `تمام ${res.syncedCount.toLocaleString('fa-IR')} جدول فعال با موفقیت به سرور ابری ارسال و همگام‌سازی شد.`,
+          text: `وضعیت فعلی تمام داده‌ها و تنظیمات سامانه با موفقیت به سرور ابری و پایگاه داده منتقل و ثبت شد؛ از این لحظه در تمام سیستم‌ها قابل مشاهده است.`,
+          details: summaryDetails,
         });
       } else {
         const errParts: string[] = [];
@@ -159,9 +176,18 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
         if (otherErrs > 0) {
           errParts.push(`${otherErrs.toLocaleString('fa-IR')} جدول دچار خطای شبکه/سرور`);
         }
+        if (!res.studentsMirrorOk) {
+          errParts.push('بخش کالکشن دانشجویان دچار خطای ارسال شد');
+        }
+        if (res.failedKeys.length > 0) {
+          summaryDetails.push(
+            `جداول ناموفق: ${res.failedKeys.map((k) => Storage.getFriendlySyncKeyLabel(k)).join('، ')}`
+          );
+        }
         setActionMessage({
           ok: false,
-          text: `${res.syncedCount.toLocaleString('fa-IR')} از ${res.totalCount.toLocaleString('fa-IR')} جدول ارسال شد، اما ${errParts.join(' و ')} ناموفق ماند.`,
+          text: `${res.syncedCount.toLocaleString('fa-IR')} از ${res.totalCount.toLocaleString('fa-IR')} جدول منتقل شد، اما ${errParts.join(' و ')}.`,
+          details: summaryDetails,
         });
       }
       if (report) {
@@ -175,24 +201,53 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
     }
   };
 
+  const handleRetryFailedQueue = async () => {
+    if (actionBusy || isDiagnosing) return;
+    setActionBusy('retry');
+    setActionMessage(null);
+    setDiagStepText('در حال ارسال مجدد جداول معوق در صف خطا به سرور ابری...');
+    try {
+      const res = await Storage.retryFailedCloudQueueNow();
+      if (!isMountedRef.current) return;
+      if (res.success) {
+        setActionMessage({
+          ok: true,
+          text: 'تمام تغییرات معوق با موفقیت به سرور ابری و دیتابیس ارسال و ثبت شدند.',
+        });
+      } else {
+        setActionMessage({
+          ok: false,
+          text: `تلاش مجدد انجام شد اما ${res.failedKeys.length.toLocaleString('fa-IR')} جدول هنوز ارسال نشده است: ${res.failedKeys
+            .map((k) => Storage.getFriendlySyncKeyLabel(k))
+            .join('، ')}`,
+        });
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setActionBusy(null);
+        setDiagStepText(null);
+      }
+    }
+  };
+
   const handlePullFromCloud = async () => {
     if (actionBusy || isDiagnosing) return;
     setActionBusy('pull');
     setActionMessage(null);
-    setDiagStepText('در حال دریافت آخرین تغییرات از سرور ابری...');
+    setDiagStepText('در حال دریافت اجباری آخرین داده‌ها و تنظیمات از سرور ابری...');
     try {
-      const changed = await Storage.syncFromCloud();
+      const changed = await Storage.syncFromCloud({ force: true });
       if (!isMountedRef.current) return;
+      onRefreshData?.();
       if (changed) {
-        onRefreshData?.();
         setActionMessage({
           ok: true,
-          text: 'داده‌های جدید از سرور ابری دریافت و در سامانه اعمال شدند.',
+          text: 'آخرین داده‌ها و تنظیمات از سرور ابری دریافت و در سامانه اعمال شدند.',
         });
       } else {
         setActionMessage({
           ok: true,
-          text: 'درخواست دریافت انجام شد؛ داده‌های مرورگر با آخرین نسخه سرور هم‌تراز است.',
+          text: 'بررسی اجباری کامل انجام شد؛ داده‌های مرورگر شما با آخرین نسخه سرور کاملاً یکسان است.',
         });
       }
     } finally {
@@ -264,20 +319,6 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
 
           <button
             type="button"
-            onClick={handlePushAllToCloud}
-            disabled={isDiagnosing || actionBusy !== null}
-            className="px-3.5 py-2.5 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800 disabled:opacity-60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-          >
-            {actionBusy === 'push' ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <UploadCloud className="w-4 h-4" />
-            )}
-            <span>همگام‌سازی فوری به ابر</span>
-          </button>
-
-          <button
-            type="button"
             onClick={handlePullFromCloud}
             disabled={isDiagnosing || actionBusy !== null}
             className="px-3.5 py-2.5 bg-teal-50 dark:bg-teal-950/40 hover:bg-teal-100 dark:hover:bg-teal-900/50 text-teal-700 dark:text-teal-200 border border-teal-200 dark:border-teal-800 disabled:opacity-60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
@@ -292,6 +333,69 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
         </div>
       </div>
 
+      {/* بخش اختصاصی انتقال وضعیت فعلی داده‌ها و تنظیمات به سرور ابری و دیتابیس */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/25 border border-indigo-200/80 dark:border-indigo-800/70 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="p-2.5 rounded-xl bg-indigo-600 text-white shrink-0 shadow-sm">
+            <UploadCloud className="w-5 h-5" />
+          </div>
+          <div className="space-y-1">
+            <h4 className="font-extrabold text-sm text-indigo-950 dark:text-indigo-100">
+              انتقال وضعیت فعلی داده‌ها و تنظیمات به سرور ابری و دیتابیس
+            </h4>
+            <p className="text-xs text-indigo-800/85 dark:text-indigo-200/80 leading-relaxed">
+              با کلیک روی این دکمه، تمام داده‌ها و تنظیمات فعلی این سیستم (تنظیمات عمومی، لوگو و ظاهر سایت، تمامی کاربران کارکنان و سرپرستان، پرونده دانشجویان، سراها، اتاق‌ها، تخت‌ها و اطلاعیه‌ها) به‌صورت کامل به سرور ابری و پایگاه داده MongoDB منتقل و هم‌تراز می‌شوند تا در سایر سیستم‌ها نیز دقیقاً همین وضعیت نمایش داده شود.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handlePushAllToCloud}
+          disabled={isDiagnosing || actionBusy !== null}
+          className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-xs font-extrabold shadow-md shadow-indigo-600/25 transition flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+        >
+          {actionBusy === 'push' ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <UploadCloud className="w-4 h-4" />
+          )}
+          <span>انتقال داده‌ها و تنظیمات فعلی به سرور ابری و دیتابیس</span>
+        </button>
+      </div>
+
+      {/* هشدار صف تغییرات ارسال‌نشده (در صورت وجود خطای شبکه قبلی) */}
+      {liveMetrics.failedRetryQueueKeys.length > 0 && (
+        <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 text-xs text-rose-900 dark:text-rose-100">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <div className="font-extrabold">
+                {liveMetrics.failedRetryQueueKeys.length.toLocaleString('fa-IR')} جدول تغییریافته هنوز در صف ارسال به سرور ابری است:
+              </div>
+              <div className="text-[11px] text-rose-700 dark:text-rose-300 font-semibold">
+                {liveMetrics.failedRetryQueueKeys
+                  .map((k) => Storage.getFriendlySyncKeyLabel(k))
+                  .join('، ')}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleRetryFailedQueue}
+            disabled={isDiagnosing || actionBusy !== null}
+            className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+          >
+            {actionBusy === 'retry' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5" />
+            )}
+            <span>ارسال مجدد صف معوق</span>
+          </button>
+        </div>
+      )}
+
       {/* پیشرفت لحظه‌ای تست یا همگام‌سازی */}
       {diagStepText && (
         <div className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-xs font-bold text-sky-800 dark:text-sky-200">
@@ -302,18 +406,27 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
 
       {actionMessage && (
         <div
-          className={`flex items-center gap-2.5 px-4 py-3 rounded-2xl border text-xs font-bold ${
+          className={`p-4 rounded-2xl border text-xs space-y-2 ${
             actionMessage.ok
-              ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
-              : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200'
+              ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100'
+              : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-100'
           }`}
         >
-          {actionMessage.ok ? (
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-          ) : (
-            <AlertTriangle className="w-4 h-4 shrink-0" />
+          <div className="flex items-center gap-2.5 font-extrabold">
+            {actionMessage.ok ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            )}
+            <span>{actionMessage.text}</span>
+          </div>
+          {actionMessage.details && actionMessage.details.length > 0 && (
+            <ul className="space-y-1 text-[11px] font-semibold opacity-90 pr-6">
+              {actionMessage.details.map((line, idx) => (
+                <li key={idx}>• {line}</li>
+              ))}
+            </ul>
           )}
-          <span>{actionMessage.text}</span>
         </div>
       )}
 

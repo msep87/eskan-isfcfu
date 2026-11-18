@@ -185,11 +185,18 @@ export default function App() {
     }
   }, []);
 
-  // مقداردهی اولیه فوری داده‌های محلی (نمایش آنی صفحه) + همگام‌سازی پس‌زمینه با دیتابیس ابری
+  // مقداردهی اولیه فوری داده‌های محلی (نمایش آنی صفحه) + همگام‌سازی پس‌زمینه تدریجی با دیتابیس ابری
   useEffect(() => {
     let isMounted = true;
     initializeStorageIfNeeded();
     refreshAllData();
+
+    // بروزرسانی تدریجی و فوری رابط کاربری بلافاصله پس از دریافت هر موج داده (تنظیمات، کاربران، دانشجویان، اطلاعیه‌ها)
+    const unsubscribeCloudUpdates = Storage.subscribeCloudDataChanged(() => {
+      if (isMounted) {
+        refreshAllData();
+      }
+    });
 
     const performInitialSync = async () => {
       lastSyncCheckRef.current = Date.now();
@@ -218,6 +225,7 @@ export default function App() {
 
     return () => {
       isMounted = false;
+      unsubscribeCloudUpdates();
       window.removeEventListener('focus', handleBackgroundSync);
       window.clearInterval(intervalId);
     };
@@ -908,6 +916,7 @@ export default function App() {
             isOpen={isLoginModalOpen}
             onClose={() => setIsLoginModalOpen(false)}
             onLoginSuccess={handleLoginSuccess}
+            onRefreshData={refreshAllData}
             onOpenUserGuide={(r) => handleOpenUserGuide(r)}
           />
         )}

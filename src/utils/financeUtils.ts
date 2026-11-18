@@ -1,4 +1,4 @@
-import { Student, StudentFinancialRecord, StudentFinancialStatus } from '../types';
+import { Student, StudentFinancialRecord, StudentFinancialStatus, StudentResidenceType } from '../types';
 import { toEnglishDigits } from './excelUtils';
 
 export type ProvinceOrigin = 'in_province' | 'out_of_province' | 'unknown';
@@ -35,8 +35,67 @@ export function detectProvinceOrigin(province?: string | null): ProvinceOrigin {
   return 'out_of_province';
 }
 
+export function parseResidenceTypeValue(
+  raw?: string | number | boolean | null
+): StudentResidenceType | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw === 'boolean') return raw ? 'dormitory' : 'commuter';
+  const norm = normalizePersianText(String(raw));
+  if (!norm || norm === '-' || norm === 'نامشخص') return undefined;
+
+  if (
+    norm.includes('تردد') ||
+    norm.includes('غیرخوابگاه') ||
+    norm.includes('غیر خوابگاه') ||
+    norm.includes('روزانه') ||
+    norm.includes('commut') ||
+    norm === 'day' ||
+    norm === 'false' ||
+    norm === '0' ||
+    norm === 'خیر' ||
+    norm === 'نه'
+  ) {
+    return 'commuter';
+  }
+
+  if (
+    norm.includes('خوابگاه') ||
+    norm.includes('سرا') ||
+    norm.includes('ساکن') ||
+    norm.includes('اسکان') ||
+    norm.includes('شبان') ||
+    norm.includes('dorm') ||
+    norm.includes('resident') ||
+    norm === 'true' ||
+    norm === '1' ||
+    norm === 'بله' ||
+    norm === 'آری'
+  ) {
+    return 'dormitory';
+  }
+
+  return undefined;
+}
+
+export function getStudentResidenceType(
+  student: Pick<Student, 'residenceType' | 'assignedBedId' | 'assignmentStatus'>
+): StudentResidenceType {
+  if (student.residenceType === 'dormitory' || student.residenceType === 'commuter') {
+    return student.residenceType;
+  }
+  return student.assignedBedId && student.assignmentStatus !== 'none'
+    ? 'dormitory'
+    : 'commuter';
+}
+
+export function getStudentResidenceLabel(
+  student: Pick<Student, 'residenceType' | 'assignedBedId' | 'assignmentStatus'>
+): string {
+  return getStudentResidenceType(student) === 'dormitory' ? 'خوابگاهی' : 'ترددی';
+}
+
 export function isStudentDormResident(student: Student): boolean {
-  return Boolean(student.assignedBedId && student.assignmentStatus !== 'none');
+  return getStudentResidenceType(student) === 'dormitory';
 }
 
 export function computeStudentFinancialInfo(

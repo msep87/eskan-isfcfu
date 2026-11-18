@@ -311,6 +311,11 @@ function makeUniqueId(prefix: string): string {
 
 // کش درون‌حافظه برای حذف JSON.parse تکراری در حجم بالای داده (با کپی ایمن برای جلوگیری از تداخل ارجاع)
 const parsedCache = new Map<string, unknown>();
+const lastAppliedSerializedByKey = new Map<string, string>();
+const NON_CRITICAL_EVICTABLE_KEYS = [
+  STORAGE_KEYS.ANNOUNCEMENTS,
+  STORAGE_KEYS.ACTIVITY_LOGS,
+];
 
 function cloneValue<T>(val: T): T {
   if (val === null || typeof val !== 'object') return val;
@@ -325,19 +330,34 @@ function cloneValue<T>(val: T): T {
 }
 
 function safeLocalStorageSet(key: string, serialized: string, parsedValue?: unknown): boolean {
+  lastAppliedSerializedByKey.set(key, serialized);
+  if (parsedValue !== undefined) {
+    parsedCache.set(key, cloneValue(parsedValue));
+  } else {
+    parsedCache.delete(key);
+  }
   try {
     localStorage.setItem(key, serialized);
-    if (parsedValue !== undefined) {
-      parsedCache.set(key, cloneValue(parsedValue));
-    } else {
-      parsedCache.delete(key);
-    }
     return true;
   } catch (e) {
-    console.warn(`Failed to write ${key} to localStorage (quota or access):`, e);
-    if (parsedValue !== undefined) {
-      parsedCache.set(key, cloneValue(parsedValue));
+    // در موبایل/سافاری (سقف ۵MB): اگر کلید حیاتی مثل تنظیمات، کاربران یا دانشجویان جا نشد،
+    // کلیدهای حجیم غیرحیاتی (مثل عکس اطلاعیه‌ها) فقط از localStorage آزاد می‌شوند اما در RAM باقی می‌مانند.
+    if (!NON_CRITICAL_EVICTABLE_KEYS.includes(key)) {
+      for (const evictKey of NON_CRITICAL_EVICTABLE_KEYS) {
+        if (evictKey === key) continue;
+        try {
+          if (localStorage.getItem(evictKey) !== null) {
+            localStorage.removeItem(evictKey);
+            removePersistedCloudKeyTimestamp(evictKey);
+          }
+          localStorage.setItem(key, serialized);
+          return true;
+        } catch {
+          // ادامه به کلید قابل تخلیه بعدی
+        }
+      }
     }
+    console.warn(`Failed to write ${key} to localStorage (quota or access):`, e);
     return false;
   }
 }
@@ -433,12 +453,17 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.STUDENTS, INITIAL_STUDENTS);
 }
 
-// مدیریت زمان و وضعیت همگام‌سازی ابری با تجمیع دسته‌ای (Batch)، بازپخش خطا و کنترل ETag/Version
+// مدیریت زمان و وضعیت همگام‌سازی ابری با تجمیع هوشمند، بازپخش خودکار خطا، صف پایدار و کنترل ETag/Version
 const keyWriteTimestamps: Record<string, number> = {};
 const pendingCloudRequests: Record<string, Promise<boolean> | undefined> = {};
 const pendingCloudValues: Record<string, unknown> = {};
 const failedCloudRetryQueue: Record<string, unknown> = {};
+const activeStudentMirrorPromises = new Set<Promise<boolean>>();
 let coalescedFlushTimer: ReturnType<typeof setTimeout> | undefined;
+let coalescedFlushDueAt = 0;
+let failedRetryTimer: ReturnType<typeof setTimeout> | undefined;
+let failedRetryAttempts = 0;
+let initialSyncRetryTimer: ReturnType<typeof setTimeout> | undefined;
 let activeSyncPromise: Promise<boolean> | null = null;
 let batchEndpointSupported: boolean | null = null;
 let versionEndpointSupported: boolean | null = null;
@@ -447,8 +472,218 @@ let lastSyncRevision: string | number | null = null;
 let lastSyncEtag: string | null = null;
 let lastStudentsEtag: string | null = null;
 const SYNCABLE_KEYS = Object.values(STORAGE_KEYS).filter((k) => k !== STORAGE_KEYS.CURRENT_USER);
-const CLOUD_SYNC_DEBOUNCE_MS = 140;
-const MAX_RETRY_QUEUE_KEYS = 25;
+const CLOUD_SYNC_DEBOUNCE_MS = 120;
+const CLOUD_SYNC_IMMEDIATE_MS = 15;
+const MAX_RETRY_QUEUE_KEYS = 45;
+const MAX_AUTO_RETRY_CYCLES = 5;
+
+// متادیتای زمان بروزرسانی هر جدول همگام‌سازی‌شده برای جلوگیری از دانلود مجدد کلیدهای حجیمِ بدون تغییر
+const CLOUD_SYNC_META_STORAGE_KEY = 'farhangian_dorm_cloud_sync_meta_v2';
+const DIRTY_CLOUD_KEYS_STORAGE_KEY = 'farhangian_dorm_dirty_keys_v1';
+const persistedDirtyKeys = new Set<string>();
+const memoryKeyUpdatedAt: Record<string, string> = {};
+const cloudDataChangedSubscribers = new Set<() => void>();
+let cloudDataNotifyScheduled = false;
+
+interface PersistedCloudSyncMeta {
+  revision?: string | number | null;
+  hydrated?: boolean;
+  keyUpdatedAt?: Record<string, string>;
+}
+
+function readPersistedCloudSyncMeta(): PersistedCloudSyncMeta {
+  try {
+    const raw = localStorage.getItem(CLOUD_SYNC_META_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as PersistedCloudSyncMeta;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePersistedCloudSyncMeta(meta: PersistedCloudSyncMeta): void {
+  try {
+    localStorage.setItem(CLOUD_SYNC_META_STORAGE_KEY, JSON.stringify(meta));
+  } catch {
+    // نادیده گرفتن در صورت پر بودن حافظه
+  }
+}
+
+function savePersistedDirtyKeys(): void {
+  try {
+    if (persistedDirtyKeys.size === 0) {
+      localStorage.removeItem(DIRTY_CLOUD_KEYS_STORAGE_KEY);
+    } else {
+      localStorage.setItem(
+        DIRTY_CLOUD_KEYS_STORAGE_KEY,
+        JSON.stringify(Array.from(persistedDirtyKeys))
+      );
+    }
+  } catch {
+    // نادیده گرفتن در صورت پر بودن حافظه
+  }
+}
+
+function markKeyDirtyForCloud(key: string): void {
+  if (!SYNCABLE_KEYS.includes(key)) return;
+  if (!persistedDirtyKeys.has(key)) {
+    persistedDirtyKeys.add(key);
+    savePersistedDirtyKeys();
+  }
+}
+
+function clearKeyDirtyForCloud(key: string): void {
+  if (persistedDirtyKeys.has(key)) {
+    persistedDirtyKeys.delete(key);
+    savePersistedDirtyKeys();
+  }
+}
+
+function updateLocalCloudKeyTimestamp(key: string, updatedAtIso?: string | null): void {
+  if (!updatedAtIso || typeof updatedAtIso !== 'string') return;
+  memoryKeyUpdatedAt[key] = updatedAtIso;
+  try {
+    if (localStorage.getItem(key) !== null) {
+      const meta = readPersistedCloudSyncMeta();
+      const nextMap = { ...(meta.keyUpdatedAt || {}), [key]: updatedAtIso };
+      writePersistedCloudSyncMeta({
+        revision: lastSyncRevision !== null ? lastSyncRevision : meta.revision ?? null,
+        hydrated: Boolean(meta.hydrated),
+        keyUpdatedAt: nextMap,
+      });
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function removePersistedCloudKeyTimestamp(key: string): void {
+  try {
+    const meta = readPersistedCloudSyncMeta();
+    if (meta.keyUpdatedAt && key in meta.keyUpdatedAt) {
+      delete meta.keyUpdatedAt[key];
+      writePersistedCloudSyncMeta(meta);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+// بارگذاری متادیتای کلیدهای ذخیره‌شده و تغییرات ارسال‌نشده قبلی هنگام شروع جلسه مرورگر
+(function hydrateInitialCloudMeta() {
+  if (typeof localStorage === 'undefined') return;
+  const meta = readPersistedCloudSyncMeta();
+  if (meta.keyUpdatedAt && typeof meta.keyUpdatedAt === 'object') {
+    for (const [k, ts] of Object.entries(meta.keyUpdatedAt)) {
+      try {
+        if (typeof ts === 'string' && ts && localStorage.getItem(k) !== null) {
+          memoryKeyUpdatedAt[k] = ts;
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+  // تنها زمانی revision ذخیره شده را معتبر می‌دانیم که کلیدهای کلیدی واقعاً در localStorage موجود باشند
+  if (
+    meta.hydrated &&
+    meta.revision !== undefined &&
+    meta.revision !== null &&
+    memoryKeyUpdatedAt[STORAGE_KEYS.SETTINGS] &&
+    memoryKeyUpdatedAt[STORAGE_KEYS.STUDENTS] &&
+    memoryKeyUpdatedAt[STORAGE_KEYS.SUPERVISORS] &&
+    memoryKeyUpdatedAt[STORAGE_KEYS.ANNOUNCEMENTS]
+  ) {
+    lastSyncRevision = meta.revision;
+  }
+
+  // بازیابی تغییرات محلی که در نشست قبلی به دلیل قطع اینترنت یا بسته شدن صفحه هنوز به سرور ابری نرسیده بودند
+  try {
+    const rawDirty = localStorage.getItem(DIRTY_CLOUD_KEYS_STORAGE_KEY);
+    if (rawDirty) {
+      const list = JSON.parse(rawDirty);
+      if (Array.isArray(list)) {
+        for (const k of list) {
+          if (typeof k === 'string' && SYNCABLE_KEYS.includes(k)) {
+            const rawVal = localStorage.getItem(k);
+            if (rawVal) {
+              try {
+                const parsedVal = sanitizePlainValue(JSON.parse(rawVal));
+                persistedDirtyKeys.add(k);
+                failedCloudRetryQueue[k] = parsedVal;
+              } catch {
+                // ignore malformed entry
+              }
+            }
+          }
+        }
+        savePersistedDirtyKeys();
+      }
+    }
+  } catch {
+    // ignore
+  }
+})();
+
+function notifyCloudDataChanged(): void {
+  if (cloudDataChangedSubscribers.size === 0 || cloudDataNotifyScheduled) return;
+  cloudDataNotifyScheduled = true;
+  const run = () => {
+    cloudDataNotifyScheduled = false;
+    cloudDataChangedSubscribers.forEach((cb) => {
+      try {
+        cb();
+      } catch {
+        // ignore callback error
+      }
+    });
+  };
+  if (typeof queueMicrotask === 'function') {
+    queueMicrotask(run);
+  } else {
+    setTimeout(run, 0);
+  }
+}
+
+// کلیدهای حجیم که همیشه باید به‌صورت مجزا و اختصاصی (Solo) دریافت و ارسال شوند تا هرگز باعث Timeout کلیدهای دیگر نشوند
+const SOLO_HEAVY_KEYS = new Set<string>([
+  STORAGE_KEYS.SETTINGS,
+  STORAGE_KEYS.BEDS,
+  STORAGE_KEYS.STUDENTS,
+  STORAGE_KEYS.ANNOUNCEMENTS,
+]);
+
+// کلیدهای احراز هویت کلیه کارکنان و سرپرستان (بسیار کم‌حجم؛ زیر ۵۰KB و دریافت در ~۱ ثانیه)
+const STAFF_AUTH_KEYS: string[] = [
+  STORAGE_KEYS.SUPERVISORS,
+  STORAGE_KEYS.MAINTENANCE_STAFF,
+  STORAGE_KEYS.WAREHOUSE_STAFF,
+  STORAGE_KEYS.FINANCE_STAFF,
+  STORAGE_KEYS.PROCUREMENT_STAFF,
+  STORAGE_KEYS.EDUCATION_STAFF,
+  STORAGE_KEYS.COUNSELORS,
+  STORAGE_KEYS.CULTURAL_STAFF,
+  STORAGE_KEYS.STUDENT_AFFAIRS_STAFF,
+  STORAGE_KEYS.SECURITY_STAFF,
+  STORAGE_KEYS.VICE_DEAN_STAFF,
+];
+
+// کلیدهای بحرانی (ایجاد/ویرایش هر نوع کاربر و تنظیمات) که بلافاصله و بدون معطلی به سرور ابری ارسال می‌شوند
+const IMMEDIATE_CLOUD_KEYS = new Set<string>([
+  ...STAFF_AUTH_KEYS,
+  STORAGE_KEYS.STUDENTS,
+  STORAGE_KEYS.SETTINGS,
+]);
+
+// موج اول سریع (کارکنان + سراها + اتاق‌ها + اخطارها و پیام‌ها)
+const FAST_BOOTSTRAP_KEYS: string[] = [
+  ...STAFF_AUTH_KEYS,
+  STORAGE_KEYS.DORMITORIES,
+  STORAGE_KEYS.ROOMS,
+  STORAGE_KEYS.WARNINGS,
+  STORAGE_KEYS.MESSAGES,
+];
 
 const utf8Encoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
 function getUtf8ByteLength(str: string): number {
@@ -561,7 +796,17 @@ const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.DORMITORIES]: 'سراهای دانشجویی',
   [STORAGE_KEYS.ROOMS]: 'اتاق‌ها',
   [STORAGE_KEYS.BEDS]: 'تخت‌ها',
-  [STORAGE_KEYS.SUPERVISORS]: 'سرپرستان سرا',
+  [STORAGE_KEYS.SUPERVISORS]: 'کاربران سرپرستان سرا',
+  [STORAGE_KEYS.MAINTENANCE_STAFF]: 'کاربران تأسیسات و فنی',
+  [STORAGE_KEYS.WAREHOUSE_STAFF]: 'کاربران انبار و تجهیزات',
+  [STORAGE_KEYS.FINANCE_STAFF]: 'کاربران امور مالی',
+  [STORAGE_KEYS.PROCUREMENT_STAFF]: 'کاربران کارپردازی و خرید',
+  [STORAGE_KEYS.EDUCATION_STAFF]: 'کاربران کارشناسان آموزش',
+  [STORAGE_KEYS.COUNSELORS]: 'کاربران مشاوران و روانشناسان',
+  [STORAGE_KEYS.CULTURAL_STAFF]: 'کاربران امور فرهنگی',
+  [STORAGE_KEYS.STUDENT_AFFAIRS_STAFF]: 'کاربران امور دانشجویی و تربیت بدنی',
+  [STORAGE_KEYS.SECURITY_STAFF]: 'کاربران حراست و انتظامات',
+  [STORAGE_KEYS.VICE_DEAN_STAFF]: 'کاربران معاونت دانشجویی',
   [STORAGE_KEYS.ANNOUNCEMENTS]: 'اطلاعیه‌ها و اخبار',
   [STORAGE_KEYS.MESSAGES]: 'پیام‌ها و مکاتبات',
   [STORAGE_KEYS.WARNINGS]: 'اخطارهای انضباطی و اتاق',
@@ -573,8 +818,24 @@ const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.SPORTS_PROGRAMS]: 'برنامه‌های ورزشی',
   [STORAGE_KEYS.SPORTS_REGISTRATIONS]: 'ثبت‌نام‌های ورزشی',
   [STORAGE_KEYS.CULTURAL_PROGRAMS]: 'برنامه‌های فرهنگی',
+  [STORAGE_KEYS.CULTURAL_ASSOCIATIONS]: 'انجمن‌ها و کانون‌های فرهنگی',
+  [STORAGE_KEYS.ASSOCIATION_MEMBERSHIPS]: 'عضویت‌های کانون‌های فرهنگی',
   [STORAGE_KEYS.STUDENT_FINANCES]: 'سوابق مالی دانشجویان',
   [STORAGE_KEYS.INVENTORY_ITEMS]: 'اقلام انبار و تجهیزات',
+  [STORAGE_KEYS.INVENTORY_TRANSACTIONS]: 'تراکنش‌های انبار',
+  [STORAGE_KEYS.WAREHOUSE_REQUESTS]: 'درخواست‌های انبار',
+  [STORAGE_KEYS.PROCUREMENT_REQUESTS]: 'درخواست‌های کارپردازی',
+  [STORAGE_KEYS.ACADEMIC_NOTICES]: 'اعلامیه‌های وضعیت تحصیلی',
+  [STORAGE_KEYS.SHIFT_SCHEDULES]: 'برنامه شیفت سرپرستان',
+  [STORAGE_KEYS.SHIFT_REPORTS]: 'گزارش‌های شیفت سرپرستان',
+  [STORAGE_KEYS.COUNSELOR_SHIFTS]: 'برنامه شیفت مشاوران',
+  [STORAGE_KEYS.COUNSELOR_REPORTS]: 'گزارش‌های مشاوره',
+  [STORAGE_KEYS.GUEST_REQUESTS]: 'درخواست‌های مهمان',
+  [STORAGE_KEYS.VISIT_REPORTS]: 'گزارش‌های بازدید اتاق‌ها',
+  [STORAGE_KEYS.SURVEYS]: 'نظرسنجی‌های دوره‌ای',
+  [STORAGE_KEYS.SURVEY_RESPONSES]: 'پاسخ‌های نظرسنجی',
+  [STORAGE_KEYS.GUILD_ELECTIONS]: 'انتخابات شورای صنفی',
+  [STORAGE_KEYS.GUILD_ELECTION_VOTES]: 'آرای انتخابات شورای صنفی',
 };
 
 const cloudTelemetryState = {
@@ -596,6 +857,12 @@ const cloudMetricsSubscribers = new Set<(metrics: CloudLiveMetrics) => void>();
 let metricsNotifyScheduled = false;
 
 function buildCloudLiveMetricsSnapshot(): CloudLiveMetrics {
+  const failedUnion = new Set<string>(Object.keys(failedCloudRetryQueue));
+  persistedDirtyKeys.forEach((k) => {
+    if (!pendingCloudRequests[k] && !(k in pendingCloudValues)) {
+      failedUnion.add(k);
+    }
+  });
   return {
     apiBaseUrl: API_BASE_URL,
     hasSyncToken: Boolean(ENV_SYNC_TOKEN && ENV_SYNC_TOKEN.trim()),
@@ -615,7 +882,7 @@ function buildCloudLiveMetricsSnapshot(): CloudLiveMetrics {
     bytesReceivedUtf8: cloudTelemetryState.bytesReceivedUtf8,
     pendingKeysCount: Object.keys(pendingCloudValues).length,
     inFlightKeysCount: Object.keys(pendingCloudRequests).length,
-    failedRetryQueueKeys: Object.keys(failedCloudRetryQueue),
+    failedRetryQueueKeys: Array.from(failedUnion),
     endpointCapabilities: {
       version: versionEndpointSupported,
       manifest: manifestEndpointSupported,
@@ -707,16 +974,255 @@ function recordCloudTrafficEvent(ev: {
   notifyCloudMetricsSubscribers();
 }
 
+function computeUploadTimeoutMs(utf8Bytes: number): number {
+  if (utf8Bytes > 1_200_000) return 75000;
+  if (utf8Bytes > 400_000) return 48000;
+  return 25000;
+}
+
+function scheduleFailedRetryTimer(): void {
+  if (failedRetryTimer !== undefined) return;
+  if (Object.keys(failedCloudRetryQueue).length === 0) return;
+  if (failedRetryAttempts >= MAX_AUTO_RETRY_CYCLES) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  if (typeof setTimeout !== 'function') return;
+
+  const delays = [3000, 7000, 15000, 30000, 45000];
+  const waitMs = delays[Math.min(failedRetryAttempts, delays.length - 1)];
+  failedRetryTimer = setTimeout(() => {
+    failedRetryTimer = undefined;
+    failedRetryAttempts += 1;
+    flushFailedRetryQueue();
+  }, waitMs);
+}
+
 function enqueueFailedWrite(key: string, value: unknown): void {
   if (Object.keys(failedCloudRetryQueue).length >= MAX_RETRY_QUEUE_KEYS && !(key in failedCloudRetryQueue)) {
     const oldestKey = Object.keys(failedCloudRetryQueue)[0];
     if (oldestKey) delete failedCloudRetryQueue[oldestKey];
   }
   failedCloudRetryQueue[key] = value;
+  markKeyDirtyForCloud(key);
   notifyCloudMetricsSubscribers();
+  scheduleFailedRetryTimer();
 }
 
-function sendSingleKeyPost(key: string, value: unknown, keepalive = false): Promise<boolean> {
+function mirrorSingleStudentToCloud(student: Student): Promise<boolean> {
+  if (typeof fetch !== 'function' || !student?.studentId) {
+    return Promise.resolve(false);
+  }
+  let bodyStr: string;
+  try {
+    bodyStr = JSON.stringify({ student });
+  } catch {
+    return Promise.resolve(false);
+  }
+
+  const payloadBytes = getUtf8ByteLength(bodyStr);
+  const runPromise = (async (): Promise<boolean> => {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+      const timeoutId = controller ? setTimeout(() => controller.abort(), 18000) : undefined;
+      try {
+        const res = await fetch(`${API_BASE_URL}/students`, {
+          method: 'POST',
+          headers: buildApiHeaders(true),
+          body: bodyStr,
+          signal: controller?.signal,
+        });
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+        if (res.ok) {
+          const data = (await res.json().catch(() => null)) as { revision?: string | number } | null;
+          if (data && data.revision !== undefined && lastSyncRevision !== null) {
+            lastSyncRevision = data.revision;
+          }
+          recordCloudTrafficEvent({
+            direction: 'up',
+            endpoint: '/students',
+            method: 'POST',
+            status: res.status,
+            ok: true,
+            durationMs: dur,
+            bytes: payloadBytes,
+            detail: `همگام‌سازی فوری پرونده دانشجو (${student.studentId})`,
+          });
+          return true;
+        }
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/students',
+          method: 'POST',
+          status: res.status,
+          ok: false,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: `خطا در ثبت کالکشن دانشجو (${student.studentId})`,
+          errorMessage: `HTTP ${res.status}`,
+        });
+        if (attempt < 2 && (res.status === 429 || res.status >= 500 || res.status === 408)) {
+          await new Promise((r) => setTimeout(r, 700));
+          continue;
+        }
+        return false;
+      } catch (err) {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/students',
+          method: 'POST',
+          status: null,
+          ok: false,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: `عدم پاسخ در ثبت کالکشن دانشجو (${student.studentId})`,
+          errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
+        });
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 700));
+          continue;
+        }
+        return false;
+      }
+    }
+    return false;
+  })().finally(() => {
+    activeStudentMirrorPromises.delete(runPromise);
+    notifyCloudMetricsSubscribers();
+  });
+
+  activeStudentMirrorPromises.add(runPromise);
+  return runPromise;
+}
+
+async function mirrorStudentsCollectionToCloud(
+  studentsList: Student[],
+  options?: { replaceAll?: boolean; onProgress?: (message: string) => void }
+): Promise<{ ok: boolean; count: number; revision: string | number | null }> {
+  if (typeof fetch !== 'function' || !Array.isArray(studentsList) || studentsList.length === 0) {
+    return { ok: true, count: 0, revision: null };
+  }
+
+  const chunkSize = 250;
+  const totalChunks = Math.ceil(studentsList.length / chunkSize);
+  let syncedCount = 0;
+  let allChunksOk = true;
+  let latestRevision: string | number | null = null;
+  const allValidIds = studentsList
+    .map((s) => String(s?.studentId || '').trim())
+    .filter(Boolean);
+
+  for (let idx = 0; idx < totalChunks; idx += 1) {
+    const chunk = studentsList.slice(idx * chunkSize, (idx + 1) * chunkSize);
+    const isLastChunk = idx === totalChunks - 1;
+    options?.onProgress?.(
+      `در حال همگام‌سازی کالکشن دانشجویان در دیتابیس (دسته ${(idx + 1).toLocaleString('fa-IR')} از ${totalChunks.toLocaleString('fa-IR')})...`
+    );
+
+    const payload: Record<string, unknown> = { students: chunk };
+    if (options?.replaceAll && isLastChunk && allChunksOk && allValidIds.length > 0) {
+      payload.keepStudentIds = allValidIds;
+    }
+
+    let bodyStr = '';
+    try {
+      bodyStr = JSON.stringify(payload);
+    } catch {
+      allChunksOk = false;
+      continue;
+    }
+    const payloadBytes = getUtf8ByteLength(bodyStr);
+
+    let chunkOk = false;
+    for (let attempt = 1; attempt <= 2 && !chunkOk; attempt += 1) {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+      const timeoutId = controller ? setTimeout(() => controller.abort(), 38000) : undefined;
+      try {
+        const res = await fetch(`${API_BASE_URL}/students`, {
+          method: 'POST',
+          headers: buildApiHeaders(true),
+          body: bodyStr,
+          signal: controller?.signal,
+        });
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+        if (res.ok) {
+          const data = (await res.json().catch(() => null)) as { revision?: string | number } | null;
+          if (data && data.revision !== undefined) {
+            latestRevision = data.revision;
+            if (lastSyncRevision !== null) {
+              lastSyncRevision = data.revision;
+            }
+          }
+          chunkOk = true;
+          syncedCount += chunk.length;
+          recordCloudTrafficEvent({
+            direction: 'up',
+            endpoint: '/students',
+            method: 'POST',
+            status: res.status,
+            ok: true,
+            durationMs: dur,
+            bytes: payloadBytes,
+            detail: `همگام‌سازی دسته ${idx + 1}/${totalChunks} کالکشن دانشجویان (${chunk.length.toLocaleString('fa-IR')} نفر)`,
+          });
+        } else {
+          recordCloudTrafficEvent({
+            direction: 'up',
+            endpoint: '/students',
+            method: 'POST',
+            status: res.status,
+            ok: false,
+            durationMs: dur,
+            bytes: payloadBytes,
+            detail: `خطا در دسته ${idx + 1}/${totalChunks} کالکشن دانشجویان`,
+            errorMessage: `HTTP ${res.status}`,
+          });
+          if (attempt < 2 && (res.status === 429 || res.status >= 500 || res.status === 408)) {
+            await new Promise((r) => setTimeout(r, 900));
+            continue;
+          }
+          break;
+        }
+      } catch (err) {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/students',
+          method: 'POST',
+          status: null,
+          ok: false,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: `عدم پاسخ در دسته ${idx + 1}/${totalChunks} کالکشن دانشجویان`,
+          errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
+        });
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 900));
+          continue;
+        }
+        break;
+      }
+    }
+
+    if (!chunkOk) {
+      allChunksOk = false;
+    }
+  }
+
+  return { ok: allChunksOk, count: syncedCount, revision: latestRevision };
+}
+
+function sendSingleKeyPost(
+  key: string,
+  value: unknown,
+  keepalive = false,
+  maxAttempts = 3
+): Promise<boolean> {
   let bodyStr: string;
   try {
     bodyStr = JSON.stringify({ key, value });
@@ -724,25 +1230,76 @@ function sendSingleKeyPost(key: string, value: unknown, keepalive = false): Prom
     return Promise.resolve(false);
   }
 
-  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const payloadBytes = getUtf8ByteLength(bodyStr);
-  const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
-  const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : undefined;
+  if (payloadBytes > 4_350_000) {
+    enqueueFailedWrite(key, value);
+    recordCloudTrafficEvent({
+      direction: 'up',
+      endpoint: '/sync',
+      method: 'POST',
+      status: 413,
+      ok: false,
+      durationMs: 0,
+      bytes: payloadBytes,
+      detail: `حجم ${FRIENDLY_SYNC_KEY_LABELS[key] || key} بیش از سقف ۴.۵MB سرور است`,
+      errorMessage: 'HTTP 413 Payload Too Large',
+    });
+    return Promise.resolve(false);
+  }
+
   const useKeepalive = keepalive && bodyStr.length < 60000;
+  const attemptsToRun = useKeepalive ? 1 : Math.max(1, maxAttempts);
+  const timeoutMs = computeUploadTimeoutMs(payloadBytes);
 
-  const reqOptions: RequestInit = {
-    method: 'POST',
-    headers: buildApiHeaders(true),
-    body: bodyStr,
-    ...(useKeepalive ? { keepalive: true } : { signal: controller?.signal }),
-  };
+  const reqPromise = (async (): Promise<boolean> => {
+    for (let attempt = 1; attempt <= attemptsToRun; attempt += 1) {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+      const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
 
-  const reqPromise = fetch(`${API_BASE_URL}/sync`, reqOptions)
-    .then(async (res) => {
-      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-      if (!res.ok) {
-        console.warn(`Cloud sync POST non-OK (${res.status}) for key ${key}`);
-        enqueueFailedWrite(key, value);
+      const reqOptions: RequestInit = {
+        method: 'POST',
+        headers: buildApiHeaders(true),
+        body: bodyStr,
+        ...(useKeepalive ? { keepalive: true } : { signal: controller?.signal }),
+      };
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/sync`, reqOptions);
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+
+        if (res.ok) {
+          const data = (await res.json().catch(() => null)) as {
+            revision?: string | number;
+            updatedAt?: string;
+          } | null;
+          if (data && data.revision !== undefined && lastSyncRevision !== null) {
+            lastSyncRevision = data.revision;
+          }
+          if (data && typeof data.updatedAt === 'string') {
+            updateLocalCloudKeyTimestamp(key, data.updatedAt);
+          }
+          delete failedCloudRetryQueue[key];
+          clearKeyDirtyForCloud(key);
+          failedRetryAttempts = 0;
+          recordCloudTrafficEvent({
+            direction: 'up',
+            endpoint: '/sync',
+            method: 'POST',
+            status: res.status,
+            ok: true,
+            durationMs: dur,
+            bytes: payloadBytes,
+            detail: `ذخیره فوری ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+          });
+          return true;
+        }
+
+        const retryable =
+          !useKeepalive &&
+          attempt < attemptsToRun &&
+          (res.status === 429 || res.status === 408 || res.status >= 500);
         recordCloudTrafficEvent({
           direction: 'up',
           endpoint: '/sync',
@@ -751,183 +1308,290 @@ function sendSingleKeyPost(key: string, value: unknown, keepalive = false): Prom
           ok: false,
           durationMs: dur,
           bytes: payloadBytes,
-          detail: `خطا در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+          detail: retryable
+            ? `خطای ${res.status} در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key} (تلاش مجدد ${attempt + 1}/${attemptsToRun})`
+            : `خطا در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
           errorMessage: `HTTP ${res.status}`,
         });
+
+        if (retryable) {
+          await new Promise((r) => setTimeout(r, attempt === 1 ? 700 : 1800));
+          continue;
+        }
+
+        console.warn(`Cloud sync POST non-OK (${res.status}) for key ${key}`);
+        enqueueFailedWrite(key, value);
+        return false;
+      } catch (err) {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+        const retryable = !useKeepalive && attempt < attemptsToRun;
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/sync',
+          method: 'POST',
+          status: null,
+          ok: false,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: retryable
+            ? `وقفه شبکه در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key} (تلاش مجدد ${attempt + 1}/${attemptsToRun})`
+            : `عدم پاسخ در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+          errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
+        });
+
+        if (retryable) {
+          await new Promise((r) => setTimeout(r, attempt === 1 ? 700 : 1800));
+          continue;
+        }
+
+        console.warn(`Cloud sync POST failed for key ${key}:`, err);
+        enqueueFailedWrite(key, value);
         return false;
       }
-      const data = (await res.json().catch(() => null)) as { revision?: string | number } | null;
-      if (data && data.revision !== undefined) {
-        lastSyncRevision = data.revision;
-      }
-      delete failedCloudRetryQueue[key];
-      recordCloudTrafficEvent({
-        direction: 'up',
-        endpoint: '/sync',
-        method: 'POST',
-        status: res.status,
-        ok: true,
-        durationMs: dur,
-        bytes: payloadBytes,
-        detail: `ذخیره ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
-      });
-      return true;
-    })
-    .catch((err) => {
-      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-      console.warn(`Cloud sync POST failed for key ${key}:`, err);
-      enqueueFailedWrite(key, value);
-      recordCloudTrafficEvent({
-        direction: 'up',
-        endpoint: '/sync',
-        method: 'POST',
-        status: null,
-        ok: false,
-        durationMs: dur,
-        bytes: payloadBytes,
-        detail: `عدم پاسخ در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
-        errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
-      });
-      return false;
-    })
-    .finally(() => {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-      if (pendingCloudRequests[key] === reqPromise) {
-        delete pendingCloudRequests[key];
-      }
-      notifyCloudMetricsSubscribers();
-    });
+    }
+    enqueueFailedWrite(key, value);
+    return false;
+  })().finally(() => {
+    if (pendingCloudRequests[key] === reqPromise) {
+      delete pendingCloudRequests[key];
+    }
+    notifyCloudMetricsSubscribers();
+    // اگر در حین ارسال، تغییر جدیدتری روی همین کلید ثبت شده باشد، بلافاصله نسخه جدیدتر را ارسال می‌کنیم
+    if (key in pendingCloudValues && !keepalive) {
+      setTimeout(() => {
+        flushAllPendingCloudTimers(false);
+      }, 10);
+    }
+  });
 
   pendingCloudRequests[key] = reqPromise;
   notifyCloudMetricsSubscribers();
   return reqPromise;
 }
 
+function sendCompactBatchWithFallback(
+  batchEntries: Array<{ key: string; value: unknown; byteEstimate: number }>,
+  keepalive = false
+): void {
+  if (batchEntries.length === 0) return;
+  if (batchEntries.length === 1 || batchEndpointSupported === false) {
+    batchEntries.forEach((e) => {
+      void sendSingleKeyPost(e.key, e.value, keepalive, 3);
+    });
+    return;
+  }
+
+  let batchBody: string;
+  try {
+    batchBody = JSON.stringify({
+      entries: batchEntries.map((e) => ({ key: e.key, value: e.value })),
+    });
+  } catch {
+    batchEntries.forEach((e) => {
+      void sendSingleKeyPost(e.key, e.value, keepalive, 3);
+    });
+    return;
+  }
+
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const payloadBytes = getUtf8ByteLength(batchBody);
+  const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 28000) : undefined;
+  const useKeepalive = keepalive && batchBody.length < 60000;
+
+  const batchPromise = fetch(`${API_BASE_URL}/sync/batch`, {
+    method: 'POST',
+    headers: buildApiHeaders(true),
+    body: batchBody,
+    ...(useKeepalive ? { keepalive: true } : { signal: controller?.signal }),
+  })
+    .then(async (res) => {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+      if (res.status === 404 || res.status === 405) {
+        batchEndpointSupported = false;
+        const fallbacks = await Promise.all(
+          batchEntries.map((e) => sendSingleKeyPost(e.key, e.value, keepalive, 2))
+        );
+        return fallbacks.every(Boolean);
+      }
+      if (!res.ok) {
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/sync/batch',
+          method: 'POST',
+          status: res.status,
+          ok: false,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: `خطا در ارسال دسته‌ای (${batchEntries.length} جدول) — ارسال تفکیکی خودکار`,
+          errorMessage: `HTTP ${res.status}`,
+        });
+        if (!useKeepalive) {
+          const fallbacks = await Promise.all(
+            batchEntries.map((e) => sendSingleKeyPost(e.key, e.value, false, 2))
+          );
+          return fallbacks.every(Boolean);
+        }
+        batchEntries.forEach((e) => enqueueFailedWrite(e.key, e.value));
+        return false;
+      }
+
+      batchEndpointSupported = true;
+      const data = (await res.json().catch(() => null)) as {
+        revision?: string | number;
+        updatedAt?: string;
+      } | null;
+      if (data && data.revision !== undefined && lastSyncRevision !== null) {
+        lastSyncRevision = data.revision;
+      }
+      batchEntries.forEach((e) => {
+        if (data && typeof data.updatedAt === 'string') {
+          updateLocalCloudKeyTimestamp(e.key, data.updatedAt);
+        }
+        delete failedCloudRetryQueue[e.key];
+        clearKeyDirtyForCloud(e.key);
+      });
+      failedRetryAttempts = 0;
+      recordCloudTrafficEvent({
+        direction: 'up',
+        endpoint: '/sync/batch',
+        method: 'POST',
+        status: res.status,
+        ok: true,
+        durationMs: dur,
+        bytes: payloadBytes,
+        detail: `ذخیره دسته‌ای ${batchEntries.length} جدول در ابر`,
+      });
+      return true;
+    })
+    .catch(async (err) => {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+      recordCloudTrafficEvent({
+        direction: 'up',
+        endpoint: '/sync/batch',
+        method: 'POST',
+        status: null,
+        ok: false,
+        durationMs: dur,
+        bytes: payloadBytes,
+        detail: `وقفه در ارسال دسته‌ای (${batchEntries.length} جدول) — ارسال تفکیکی خودکار`,
+        errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
+      });
+      if (!useKeepalive) {
+        const fallbacks = await Promise.all(
+          batchEntries.map((e) => sendSingleKeyPost(e.key, e.value, false, 2))
+        );
+        return fallbacks.every(Boolean);
+      }
+      batchEntries.forEach((e) => enqueueFailedWrite(e.key, e.value));
+      return false;
+    })
+    .finally(() => {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      let hasChainedWrite = false;
+      batchEntries.forEach((e) => {
+        if (pendingCloudRequests[e.key] === batchPromise) {
+          delete pendingCloudRequests[e.key];
+        }
+        if (e.key in pendingCloudValues) {
+          hasChainedWrite = true;
+        }
+      });
+      notifyCloudMetricsSubscribers();
+      if (hasChainedWrite && !keepalive) {
+        setTimeout(() => {
+          flushAllPendingCloudTimers(false);
+        }, 10);
+      }
+    });
+
+  batchEntries.forEach((e) => {
+    pendingCloudRequests[e.key] = batchPromise;
+  });
+  notifyCloudMetricsSubscribers();
+}
+
 function flushAllPendingCloudTimers(keepalive = false): void {
   if (coalescedFlushTimer !== undefined) {
     clearTimeout(coalescedFlushTimer);
     coalescedFlushTimer = undefined;
+    coalescedFlushDueAt = 0;
   }
   if (typeof fetch !== 'function') {
     for (const k of Object.keys(pendingCloudValues)) delete pendingCloudValues[k];
     return;
   }
 
-  const entriesToSend: Array<{ key: string; value: unknown }> = [];
+  const readyEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
   for (const k of Object.keys(pendingCloudValues)) {
-    entriesToSend.push({ key: k, value: pendingCloudValues[k] });
+    // حفظ ترتیب نوشتن برای هر کلید: اگر درخواستی روی همین کلید در حال اجراست، منتظر اتمام آن می‌مانیم تا نسخه جدیدتر بعد از آن ارسال شود
+    if (!keepalive && pendingCloudRequests[k]) {
+      continue;
+    }
+    const val = pendingCloudValues[k];
     delete pendingCloudValues[k];
     keyWriteTimestamps[k] = Date.now();
-  }
-
-  if (entriesToSend.length === 0) return;
-
-  // اگر بیش از ۱ کلید هم‌زمان منتظر ارسال باشد و مسیر /sync/batch فعال باشد، همه را در یک درخواست تجمیع می‌کنیم
-  if (entriesToSend.length > 1 && batchEndpointSupported !== false) {
-    let batchBody: string;
+    let byteEstimate = 0;
     try {
-      batchBody = JSON.stringify({ entries: entriesToSend });
+      byteEstimate = getUtf8ByteLength(JSON.stringify(val));
     } catch {
-      entriesToSend.forEach((e) => {
-        void sendSingleKeyPost(e.key, e.value, keepalive);
-      });
-      return;
+      byteEstimate = 0;
     }
-
-    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    const payloadBytes = getUtf8ByteLength(batchBody);
-    const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
-    const timeoutId = controller ? setTimeout(() => controller.abort(), 18000) : undefined;
-    const useKeepalive = keepalive && batchBody.length < 60000;
-
-    const batchPromise = fetch(`${API_BASE_URL}/sync/batch`, {
-      method: 'POST',
-      headers: buildApiHeaders(true),
-      body: batchBody,
-      ...(useKeepalive ? { keepalive: true } : { signal: controller?.signal }),
-    })
-      .then(async (res) => {
-        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-        if (res.status === 404 || res.status === 405) {
-          batchEndpointSupported = false;
-          const fallbacks = await Promise.all(entriesToSend.map((e) => sendSingleKeyPost(e.key, e.value, keepalive)));
-          return fallbacks.every(Boolean);
-        }
-        if (!res.ok) {
-          entriesToSend.forEach((e) => enqueueFailedWrite(e.key, e.value));
-          recordCloudTrafficEvent({
-            direction: 'up',
-            endpoint: '/sync/batch',
-            method: 'POST',
-            status: res.status,
-            ok: false,
-            durationMs: dur,
-            bytes: payloadBytes,
-            detail: `خطا در ارسال دسته‌ای (${entriesToSend.length} جدول)`,
-            errorMessage: `HTTP ${res.status}`,
-          });
-          return false;
-        }
-        batchEndpointSupported = true;
-        const data = (await res.json().catch(() => null)) as { revision?: string | number } | null;
-        if (data && data.revision !== undefined) {
-          lastSyncRevision = data.revision;
-        }
-        entriesToSend.forEach((e) => {
-          delete failedCloudRetryQueue[e.key];
-        });
-        recordCloudTrafficEvent({
-          direction: 'up',
-          endpoint: '/sync/batch',
-          method: 'POST',
-          status: res.status,
-          ok: true,
-          durationMs: dur,
-          bytes: payloadBytes,
-          detail: `ذخیره دسته‌ای ${entriesToSend.length} جدول در ابر`,
-        });
-        return true;
-      })
-      .catch((err) => {
-        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-        entriesToSend.forEach((e) => enqueueFailedWrite(e.key, e.value));
-        recordCloudTrafficEvent({
-          direction: 'up',
-          endpoint: '/sync/batch',
-          method: 'POST',
-          status: null,
-          ok: false,
-          durationMs: dur,
-          bytes: payloadBytes,
-          detail: `قطع ارتباط در ارسال دسته‌ای (${entriesToSend.length} جدول)`,
-          errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
-        });
-        return false;
-      })
-      .finally(() => {
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
-        entriesToSend.forEach((e) => {
-          if (pendingCloudRequests[e.key] === batchPromise) {
-            delete pendingCloudRequests[e.key];
-          }
-        });
-        notifyCloudMetricsSubscribers();
-      });
-
-    entriesToSend.forEach((e) => {
-      pendingCloudRequests[e.key] = batchPromise;
-    });
-    notifyCloudMetricsSubscribers();
-    return;
+    readyEntries.push({ key: k, value: val, byteEstimate });
   }
 
-  entriesToSend.forEach((e) => {
-    void sendSingleKeyPost(e.key, e.value, keepalive);
-  });
+  if (readyEntries.length === 0) return;
+
+  // تفکیک کامل کلیدهای حجیم (دانشجویان، اطلاعیه‌ها، تنظیمات، تخت‌ها یا >300KB) از کلیدهای سبک تا هرگز یک جدول حجیم مانع ثبت کاربران یا تنظیمات نشود
+  const soloEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
+  const compactEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
+
+  for (const entry of readyEntries) {
+    if (SOLO_HEAVY_KEYS.has(entry.key) || entry.byteEstimate > 300_000 || batchEndpointSupported === false) {
+      soloEntries.push(entry);
+    } else {
+      compactEntries.push(entry);
+    }
+  }
+
+  // کلیدهای حجیم و حساس به‌صورت مجزا با Timeout سخاوتمندانه و تلاش مجدد ارسال می‌شوند
+  for (const solo of soloEntries) {
+    void sendSingleKeyPost(solo.key, solo.value, keepalive, 3);
+  }
+
+  // کلیدهای سبک در دسته‌های ایمن (حداکثر ۸ کلید و ۵۵۰ کیلوبایت) ارسال می‌شوند و در صورت خطا خودکار تک‌تک می‌شوند
+  if (compactEntries.length > 0) {
+    const MAX_COMPACT_BATCH_BYTES = 550_000;
+    let currentBatch: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
+    let currentBytes = 0;
+
+    for (const item of compactEntries) {
+      if (
+        currentBatch.length > 0 &&
+        (currentBatch.length >= 8 || currentBytes + item.byteEstimate > MAX_COMPACT_BATCH_BYTES)
+      ) {
+        sendCompactBatchWithFallback(currentBatch, keepalive);
+        currentBatch = [];
+        currentBytes = 0;
+      }
+      currentBatch.push(item);
+      currentBytes += item.byteEstimate;
+    }
+    if (currentBatch.length > 0) {
+      sendCompactBatchWithFallback(currentBatch, keepalive);
+    }
+  }
 }
 
 function flushFailedRetryQueue(): void {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  if (failedRetryTimer !== undefined) {
+    clearTimeout(failedRetryTimer);
+    failedRetryTimer = undefined;
+  }
   const retryKeys = Object.keys(failedCloudRetryQueue);
   if (retryKeys.length === 0) return;
   for (const k of retryKeys) {
@@ -943,31 +1607,66 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
   window.addEventListener('beforeunload', () => {
     flushAllPendingCloudTimers(true);
   });
+  window.addEventListener('pagehide', () => {
+    flushAllPendingCloudTimers(true);
+  });
   window.addEventListener('online', () => {
+    failedRetryAttempts = 0;
     notifyCloudMetricsSubscribers();
     flushFailedRetryQueue();
   });
   window.addEventListener('offline', () => {
     notifyCloudMetricsSubscribers();
   });
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        flushAllPendingCloudTimers(true);
+      } else if (document.visibilityState === 'visible') {
+        failedRetryAttempts = 0;
+        flushFailedRetryQueue();
+      }
+    });
+  }
+  // اگر تغییرات ارسال‌نشده از نشست قبلی در حافظه مانده بود، بلافاصله پس از بارگذاری به سرور ابری ارسال شوند
+  if (Object.keys(failedCloudRetryQueue).length > 0) {
+    setTimeout(() => {
+      flushFailedRetryQueue();
+    }, 1200);
+  }
 }
 
 function pushKeyToCloud<T>(key: string, value: T): void {
   if (key === STORAGE_KEYS.CURRENT_USER) return;
   keyWriteTimestamps[key] = Date.now();
   pendingCloudValues[key] = value;
+  markKeyDirtyForCloud(key);
+  failedRetryAttempts = 0;
 
   if (typeof fetch !== 'function') {
     delete pendingCloudValues[key];
     return;
   }
 
+  // ثبت/ویرایش هر نوع کاربر و تنظیمات با اولویت فوری (15ms) به سرور ابری ارسال می‌شود
+  const desiredDelay = IMMEDIATE_CLOUD_KEYS.has(key) ? CLOUD_SYNC_IMMEDIATE_MS : CLOUD_SYNC_DEBOUNCE_MS;
+  const now = Date.now();
+  const targetDueAt = now + desiredDelay;
+
   if (coalescedFlushTimer !== undefined) {
+    // اگر تایمر فعلی زودتر از زمان جدید منقضی می‌شود، آن را به تعویق نمی‌اندازیم تا نوشتن فوری کاربر معطل نشود
+    if (coalescedFlushDueAt > 0 && coalescedFlushDueAt <= targetDueAt) {
+      notifyCloudMetricsSubscribers();
+      return;
+    }
     clearTimeout(coalescedFlushTimer);
   }
+
+  coalescedFlushDueAt = targetDueAt;
   coalescedFlushTimer = setTimeout(() => {
     flushAllPendingCloudTimers(false);
-  }, CLOUD_SYNC_DEBOUNCE_MS);
+  }, desiredDelay);
+  notifyCloudMetricsSubscribers();
 }
 
 function normalizeLookupKey(raw: string | number | null | undefined): string {
@@ -1083,6 +1782,14 @@ function normalizeStudentRecord(raw: Record<string, unknown>): Student {
   void createdAt;
   void updatedAt;
   const r = rest as Partial<Student>;
+  const assignmentStatus = r.assignmentStatus || 'none';
+  const resolvedResidenceType: Student['residenceType'] =
+    r.residenceType === 'dormitory' || r.residenceType === 'commuter'
+      ? r.residenceType
+      : r.assignedBedId && assignmentStatus !== 'none'
+      ? 'dormitory'
+      : undefined;
+
   return {
     ...r,
     studentId: String(r.studentId ?? ''),
@@ -1104,7 +1811,8 @@ function normalizeStudentRecord(raw: Record<string, unknown>): Student {
     previousScore: typeof r.previousScore === 'number' ? r.previousScore : 100,
     password: r.password ? String(r.password) : undefined,
     isProfileCompleted: Boolean(r.isProfileCompleted),
-    assignmentStatus: r.assignmentStatus || 'none',
+    assignmentStatus,
+    residenceType: resolvedResidenceType,
   };
 }
 
@@ -1860,9 +2568,11 @@ export const Storage = {
     student.assignedRoomNumber = room?.roomNumber;
     student.assignedBedId = targetBed.id;
     student.assignmentStatus = finalStatus;
+    student.residenceType = 'dormitory';
 
     Storage.setBeds(beds);
     Storage.setStudents(students);
+    void mirrorSingleStudentToCloud(student);
 
     Storage.addActivityLog({
       category: 'accommodation',
@@ -1906,6 +2616,7 @@ export const Storage = {
 
     Storage.setStudents(students);
     Storage.setBeds(beds);
+    void mirrorSingleStudentToCloud(student);
     Storage.addActivityLog({
       category: 'accommodation',
       action: 'تأیید قطعی اسکان دانشجو',
@@ -2050,6 +2761,7 @@ export const Storage = {
     Storage.setStudents(students);
     Storage.setBeds(beds);
     Storage.setMessages(messages);
+    void mirrorSingleStudentToCloud(student);
     Storage.addActivityLog({
       category: 'accommodation',
       action: 'رد درخواست اسکان موقت',
@@ -2090,6 +2802,9 @@ export const Storage = {
 
     Storage.setBeds(beds);
     Storage.setStudents(students);
+    if (student) {
+      void mirrorSingleStudentToCloud(student);
+    }
 
     if (student) {
       Storage.addActivityLog({
@@ -2545,6 +3260,7 @@ export const Storage = {
     }
     students.unshift(newStudent);
     Storage.setStudents(students);
+    void mirrorSingleStudentToCloud(newStudent);
     return { success: true, message: 'دانشجو با موفقیت ثبت و به سامانه اضافه گردید.' };
   },
 
@@ -2599,6 +3315,13 @@ export const Storage = {
     };
     students[index] = updatedStudent;
     Storage.setStudents(students);
+    void mirrorSingleStudentToCloud(updatedStudent);
+    if (isStudentIdChanged && typeof fetch === 'function') {
+      fetch(`${API_BASE_URL}/students/${encodeURIComponent(studentId)}`, {
+        method: 'DELETE',
+        headers: buildApiHeaders(false),
+      }).catch(() => {});
+    }
 
     // همگام‌سازی وضعیت تخت یا شماره دانشجویی در ارجاعات مرتبط
     if (isStudentIdChanged || updatedData.assignmentStatus !== undefined) {
@@ -2789,6 +3512,7 @@ export const Storage = {
 
     students[index] = { ...students[index], ...updatedData, isProfileCompleted: true };
     Storage.setStudents(students);
+    void mirrorSingleStudentToCloud(students[index]);
     Storage.addActivityLog({
       category: 'student',
       action: 'تکمیل/ویرایش پروفایل دانشجو',
@@ -3944,6 +4668,10 @@ export const Storage = {
     lastSyncRevision = null;
     lastSyncEtag = null;
     lastStudentsEtag = null;
+    Object.keys(memoryKeyUpdatedAt).forEach((k) => {
+      delete memoryKeyUpdatedAt[k];
+    });
+    lastAppliedSerializedByKey.clear();
     parsedCache.clear();
     localStorage.clear();
     initializeStorageIfNeeded();
@@ -4234,6 +4962,7 @@ export const Storage = {
       }
       students[idx] = updatedStudent;
       Storage.setStudents(students);
+      void mirrorSingleStudentToCloud(updatedStudent);
       const currentUser = Storage.getCurrentUser();
       if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === updatedStudent.studentId) {
         Storage.setCurrentUser({ role: 'student', student: updatedStudent });
@@ -4493,6 +5222,7 @@ export const Storage = {
     delete updatedStudent.password;
     students[idx] = updatedStudent;
     Storage.setStudents(students);
+    void mirrorSingleStudentToCloud(updatedStudent);
 
     const currentUser = Storage.getCurrentUser();
     if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === updatedStudent.studentId) {
@@ -4546,6 +5276,7 @@ export const Storage = {
       }
       students[idx] = updatedStudent;
       Storage.setStudents(students);
+      void mirrorSingleStudentToCloud(updatedStudent);
       const currentUser = Storage.getCurrentUser();
       if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === updatedStudent.studentId) {
         Storage.setCurrentUser({ role: 'student', student: updatedStudent });
@@ -6523,7 +7254,11 @@ export const Storage = {
 
     const logs = Storage.getActivityLogs();
     const updated = [newLog, ...logs].slice(0, 500);
-    Storage.setActivityLogs(updated);
+    if (memoryKeyUpdatedAt[STORAGE_KEYS.ACTIVITY_LOGS]) {
+      Storage.setActivityLogs(updated);
+    } else {
+      safeLocalStorageSet(STORAGE_KEYS.ACTIVITY_LOGS, JSON.stringify(updated), updated);
+    }
     return newLog;
   },
 
@@ -8262,7 +8997,10 @@ export const Storage = {
           'بازه زمانی رأی‌گیری این انتخابات در حال حاضر توسط واحد امور دانشجویی فعال نیست و ثبت رأی امکان‌پذیر نمی‌باشد.',
       };
     }
-    const isDormResident = Boolean(student.assignedBedId && student.assignmentStatus !== 'none');
+    const isDormResident =
+      student.residenceType === 'dormitory' || student.residenceType === 'commuter'
+        ? student.residenceType === 'dormitory'
+        : Boolean(student.assignedBedId && student.assignmentStatus !== 'none');
     if (election.targetEligibility === 'dorm_only' && !isDormResident) {
       return {
         success: false,
@@ -8359,7 +9097,10 @@ export const Storage = {
     payload.students.forEach((st, idx) => {
       const stDorm = payload.dorm || dorms.find((d) => d.id === st.assignedDormId);
       const stRoom = payload.room || rooms.find((r) => r.id === st.assignedRoomId);
-      const isDormResident = Boolean(st.assignedBedId && st.assignmentStatus !== 'none');
+      const isDormResident =
+        st.residenceType === 'dormitory' || st.residenceType === 'commuter'
+          ? st.residenceType === 'dormitory'
+          : Boolean(st.assignedBedId && st.assignmentStatus !== 'none');
 
       const ref: DisciplinaryReferral = {
         id: makeUniqueId('dref'),
@@ -8690,7 +9431,10 @@ export const Storage = {
       return { success: false, message: 'ظرفیت این برنامه ورزشی تکمیل شده است.' };
     }
 
-    const isDormResident = Boolean(student.assignedBedId && student.assignmentStatus !== 'none');
+    const isDormResident =
+      student.residenceType === 'dormitory' || student.residenceType === 'commuter'
+        ? student.residenceType === 'dormitory'
+        : Boolean(student.assignedBedId && student.assignmentStatus !== 'none');
     const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
       hour: '2-digit',
       minute: '2-digit',
@@ -8772,78 +9516,149 @@ export const Storage = {
   // -------------------------------------------------------------
   fetchStudentsFromDB: async (): Promise<Student[] | null> => {
     try {
-      const collected: Student[] = [];
-      let skip = 0;
       const limit = 400;
-      let keepFetching = true;
 
-      while (keepFetching) {
+      const fetchPage = async (skip: number) => {
         const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000);
-        const res = await fetch(`${API_BASE_URL}/students?skip=${skip}&limit=${limit}`, {
-          method: 'GET',
-          cache: 'no-store',
-          ...(ENV_SYNC_TOKEN ? { headers: buildApiHeaders(false) } : {}),
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        try {
+          const res = await fetch(`${API_BASE_URL}/students?skip=${skip}&limit=${limit}`, {
+            method: 'GET',
+            cache: 'no-store',
+            ...(ENV_SYNC_TOKEN ? { headers: buildApiHeaders(false) } : {}),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
 
-        if (!res.ok) {
+          if (!res.ok) {
+            recordCloudTrafficEvent({
+              direction: 'down',
+              endpoint: `/students?skip=${skip}`,
+              method: 'GET',
+              status: res.status,
+              ok: false,
+              durationMs: dur,
+              bytes: 0,
+              detail: 'خطا در دریافت صفحه دانشجویان از سرور',
+              errorMessage: `HTTP ${res.status}`,
+            });
+            return null;
+          }
+          const rawText = await res.text();
+          const rxBytes = getUtf8ByteLength(rawText);
+          const rawData = JSON.parse(rawText) as
+            | Array<Record<string, unknown>>
+            | {
+                students?: Array<Record<string, unknown>>;
+                total?: number;
+                hasMore?: boolean;
+                nextSkip?: number;
+              };
+          return { rawData, status: res.status, dur, rxBytes };
+        } catch (err) {
+          clearTimeout(timeoutId);
+          const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
           recordCloudTrafficEvent({
             direction: 'down',
             endpoint: `/students?skip=${skip}`,
             method: 'GET',
-            status: res.status,
+            status: null,
             ok: false,
             durationMs: dur,
             bytes: 0,
-            detail: 'خطا در دریافت صفحه دانشجویان از سرور',
-            errorMessage: `HTTP ${res.status}`,
+            detail: 'قطع ارتباط در دریافت صفحه دانشجویان',
+            errorMessage: err instanceof Error ? err.message : 'Network error',
           });
           return null;
         }
-        const rawText = await res.text();
-        const rxBytes = getUtf8ByteLength(rawText);
-        const rawData = JSON.parse(rawText) as
-          | Array<Record<string, unknown>>
-          | { students?: Array<Record<string, unknown>>; hasMore?: boolean; nextSkip?: number };
+      };
 
-        if (Array.isArray(rawData)) {
-          for (const item of rawData) {
-            collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
-          }
-          keepFetching = false;
-          recordCloudTrafficEvent({
-            direction: 'down',
-            endpoint: '/students',
-            method: 'GET',
-            status: res.status,
-            ok: true,
-            durationMs: dur,
-            bytes: rxBytes,
-            detail: `دریافت ${rawData.length.toLocaleString('fa-IR')} پرونده دانشجو`,
-          });
-        } else if (rawData && Array.isArray(rawData.students)) {
-          for (const item of rawData.students) {
-            collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
-          }
-          keepFetching = Boolean(rawData.hasMore) && rawData.students.length > 0;
-          skip = typeof rawData.nextSkip === 'number' ? rawData.nextSkip : skip + rawData.students.length;
-          recordCloudTrafficEvent({
-            direction: 'down',
-            endpoint: `/students?skip=${skip}`,
-            method: 'GET',
-            status: res.status,
-            ok: true,
-            durationMs: dur,
-            bytes: rxBytes,
-            detail: `دریافت صفحه ${rawData.students.length.toLocaleString('fa-IR')} دانشجو (مجموع ${collected.length.toLocaleString('fa-IR')})`,
-          });
-        } else {
-          return null;
+      const first = await fetchPage(0);
+      if (!first) return null;
+
+      const collected: Student[] = [];
+      if (Array.isArray(first.rawData)) {
+        for (const item of first.rawData) {
+          collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
         }
+        recordCloudTrafficEvent({
+          direction: 'down',
+          endpoint: '/students',
+          method: 'GET',
+          status: first.status,
+          ok: true,
+          durationMs: first.dur,
+          bytes: first.rxBytes,
+          detail: `دریافت ${first.rawData.length.toLocaleString('fa-IR')} پرونده دانشجو`,
+        });
+      } else if (first.rawData && Array.isArray(first.rawData.students)) {
+        for (const item of first.rawData.students) {
+          collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
+        }
+        recordCloudTrafficEvent({
+          direction: 'down',
+          endpoint: '/students?skip=0',
+          method: 'GET',
+          status: first.status,
+          ok: true,
+          durationMs: first.dur,
+          bytes: first.rxBytes,
+          detail: `دریافت صفحه اول (${first.rawData.students.length.toLocaleString('fa-IR')} دانشجو)`,
+        });
+
+        const total = typeof first.rawData.total === 'number' ? first.rawData.total : 0;
+        const hasMore = Boolean(first.rawData.hasMore) && first.rawData.students.length > 0;
+
+        if (hasMore && total > collected.length) {
+          const remainingSkips: number[] = [];
+          for (let s = collected.length; s < total; s += limit) {
+            remainingSkips.push(s);
+          }
+          const results = await Promise.all(remainingSkips.map((s) => fetchPage(s)));
+          for (let i = 0; i < results.length; i++) {
+            const pageRes = results[i];
+            if (!pageRes || Array.isArray(pageRes.rawData) || !Array.isArray(pageRes.rawData?.students)) {
+              return null;
+            }
+            for (const item of pageRes.rawData.students) {
+              collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
+            }
+            recordCloudTrafficEvent({
+              direction: 'down',
+              endpoint: `/students?skip=${remainingSkips[i]}`,
+              method: 'GET',
+              status: pageRes.status,
+              ok: true,
+              durationMs: pageRes.dur,
+              bytes: pageRes.rxBytes,
+              detail: `دریافت صفحه ${pageRes.rawData.students.length.toLocaleString('fa-IR')} دانشجو (مجموع ${collected.length.toLocaleString('fa-IR')})`,
+            });
+          }
+        } else if (hasMore) {
+          let skip =
+            typeof first.rawData.nextSkip === 'number'
+              ? first.rawData.nextSkip
+              : first.rawData.students.length;
+          let keepFetching = true;
+          while (keepFetching) {
+            const pageRes = await fetchPage(skip);
+            if (!pageRes || Array.isArray(pageRes.rawData) || !Array.isArray(pageRes.rawData?.students)) {
+              return null;
+            }
+            for (const item of pageRes.rawData.students) {
+              collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
+            }
+            keepFetching = Boolean(pageRes.rawData.hasMore) && pageRes.rawData.students.length > 0;
+            skip =
+              typeof pageRes.rawData.nextSkip === 'number'
+                ? pageRes.rawData.nextSkip
+                : skip + pageRes.rawData.students.length;
+          }
+        }
+      } else {
+        return null;
       }
 
       const lastLocalWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
@@ -8868,56 +9683,119 @@ export const Storage = {
       };
     }
 
-    try {
+    const bodyStr = JSON.stringify(newStudent);
+    const payloadBytes = getUtf8ByteLength(bodyStr);
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      const res = await fetch(`${API_BASE_URL}/students`, {
-        method: 'POST',
-        headers: buildApiHeaders(true),
-        body: JSON.stringify(newStudent),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      try {
+        const res = await fetch(`${API_BASE_URL}/students`, {
+          method: 'POST',
+          headers: buildApiHeaders(true),
+          body: bodyStr,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
 
-      const data = await res.json().catch(() => ({} as Record<string, unknown>));
-      if (!res.ok) {
-        return {
-          success: false,
-          message:
-            (data as { message?: string })?.message || 'خطا در ثبت دانشجو در دیتابیس ابری',
+        const data = await res.json().catch(() => ({} as Record<string, unknown>));
+        if (!res.ok) {
+          recordCloudTrafficEvent({
+            direction: 'up',
+            endpoint: '/students',
+            method: 'POST',
+            status: res.status,
+            ok: false,
+            durationMs: dur,
+            bytes: payloadBytes,
+            detail: `خطا در ثبت دانشجوی جدید (${newStudent.studentId})`,
+            errorMessage: `HTTP ${res.status}`,
+          });
+          if (attempt < 2 && (res.status === 429 || res.status === 408 || res.status >= 500)) {
+            await new Promise((r) => setTimeout(r, 800));
+            continue;
+          }
+          return {
+            success: false,
+            message:
+              (data as { message?: string })?.message || 'خطا در ثبت دانشجو در دیتابیس ابری',
+          };
+        }
+
+        if ((data as { revision?: string | number })?.revision !== undefined && lastSyncRevision !== null) {
+          lastSyncRevision = (data as { revision?: string | number }).revision ?? lastSyncRevision;
+        }
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/students',
+          method: 'POST',
+          status: res.status,
+          ok: true,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: `ثبت فوری دانشجوی جدید ${newStudent.fullName} (${newStudent.studentId})`,
+        });
+
+        const rawReturned = ((data as { student?: Record<string, unknown> })?.student ||
+          newStudent) as Record<string, unknown>;
+        const normalized = normalizeStudentRecord(rawReturned);
+        const savedStudent: Student = {
+          ...normalized,
+          residenceType: normalized.residenceType || newStudent.residenceType,
         };
+
+        const updatedStudents = [savedStudent, ...currentStudents];
+        set(STORAGE_KEYS.STUDENTS, updatedStudents);
+        Storage.addActivityLog({
+          category: 'student',
+          action: 'ثبت دانشجوی جدید در دیتابیس ابری',
+          details: `دانشجو ${savedStudent.fullName} (${savedStudent.studentId}) ثبت شد.`,
+          targetName: `${savedStudent.fullName} (${savedStudent.studentId})`,
+        });
+
+        return {
+          success: true,
+          student: savedStudent,
+          message:
+            (data as { message?: string })?.message ||
+            'دانشجو با موفقیت در دیتابیس ابری ثبت شد.',
+        };
+      } catch (err: unknown) {
+        clearTimeout(timeoutId);
+        lastError = err;
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/students',
+          method: 'POST',
+          status: null,
+          ok: false,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail:
+            attempt < 2
+              ? `تلاش مجدد ثبت دانشجوی جدید (${newStudent.studentId})...`
+              : `عدم پاسخ در ثبت دانشجوی جدید (${newStudent.studentId})`,
+          errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
+        });
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 800));
+          continue;
+        }
       }
-
-      const rawReturned = ((data as { student?: Record<string, unknown> })?.student ||
-        newStudent) as Record<string, unknown>;
-      const savedStudent = normalizeStudentRecord(rawReturned);
-
-      const updatedStudents = [savedStudent, ...currentStudents];
-      set(STORAGE_KEYS.STUDENTS, updatedStudents);
-      Storage.addActivityLog({
-        category: 'student',
-        action: 'ثبت دانشجوی جدید در دیتابیس ابری',
-        details: `دانشجو ${savedStudent.fullName} (${savedStudent.studentId}) ثبت شد.`,
-        targetName: `${savedStudent.fullName} (${savedStudent.studentId})`,
-      });
-
-      return {
-        success: true,
-        student: savedStudent,
-        message:
-          (data as { message?: string })?.message ||
-          'دانشجو با موفقیت در دیتابیس ابری ثبت شد.',
-      };
-    } catch (err: unknown) {
-      console.warn('addStudentToDB error:', err);
-      const isTimeout = err instanceof Error && err.name === 'AbortError';
-      return {
-        success: false,
-        message: isTimeout
-          ? 'زمان انتظار پاسخ از سرور ابری به پایان رسید. لطفاً چند لحظه بعد دوباره تلاش نمایید.'
-          : 'عدم امکان برقراری ارتباط با سرور ابری (khabgah-api). لطفاً وضعیت سرور بک‌اند در Vercel و اتصال اینترنت را بررسی نمایید.',
-      };
     }
+
+    console.warn('addStudentToDB error:', lastError);
+    const isTimeout = lastError instanceof Error && lastError.name === 'AbortError';
+    return {
+      success: false,
+      message: isTimeout
+        ? 'زمان انتظار پاسخ از سرور ابری به پایان رسید. لطفاً چند لحظه بعد دوباره تلاش نمایید.'
+        : 'عدم امکان برقراری ارتباط با سرور ابری (khabgah-api). لطفاً وضعیت سرور بک‌اند در Vercel و اتصال اینترنت را بررسی نمایید.',
+    };
   },
 
   uploadPhotosToCloud: async (
@@ -9047,20 +9925,57 @@ export const Storage = {
     };
   },
 
-  waitForPendingCloudSync: async (): Promise<{ success: boolean; failedKeys: string[] }> => {
+  getFriendlySyncKeyLabel: (key: string): string => FRIENDLY_SYNC_KEY_LABELS[key] || key,
+
+  syncStudentsCollectionToCloud: async (
+    studentsList: Student[],
+    replaceAll = false,
+    onProgress?: (message: string) => void
+  ): Promise<{ ok: boolean; count: number; revision: string | number | null }> => {
+    return mirrorStudentsCollectionToCloud(studentsList, { replaceAll, onProgress });
+  },
+
+  retryFailedCloudQueueNow: async (): Promise<{ success: boolean; failedKeys: string[] }> => {
+    failedRetryAttempts = 0;
     flushFailedRetryQueue();
-    flushAllPendingCloudTimers(false);
-    const entries = Object.entries(pendingCloudRequests).filter(
-      (entry): entry is [string, Promise<boolean>] => Boolean(entry[1])
-    );
-    if (entries.length === 0) {
-      const queuedFails = Object.keys(failedCloudRetryQueue);
-      return { success: queuedFails.length === 0, failedKeys: queuedFails };
+    return Storage.waitForPendingCloudSync();
+  },
+
+  waitForPendingCloudSync: async (): Promise<{ success: boolean; failedKeys: string[] }> => {
+    const failedSet = new Set<string>();
+    for (let pass = 0; pass < 3; pass += 1) {
+      flushFailedRetryQueue();
+      flushAllPendingCloudTimers(false);
+
+      const entries = Object.entries(pendingCloudRequests).filter(
+        (entry): entry is [string, Promise<boolean>] => Boolean(entry[1])
+      );
+      const mirrorList = Array.from(activeStudentMirrorPromises);
+
+      if (entries.length === 0 && mirrorList.length === 0) {
+        break;
+      }
+
+      const [kvResults] = await Promise.all([
+        Promise.all(entries.map(async ([key, promise]) => ({ key, ok: await promise }))),
+        Promise.all(mirrorList),
+      ]);
+
+      for (const r of kvResults) {
+        if (!r.ok) failedSet.add(r.key);
+        else failedSet.delete(r.key);
+      }
+
+      // اگر حین انتظار نوشتن جدیدتری در صف قرار گرفته باشد، یک دور دیگر منتظر می‌مانیم
+      if (Object.keys(pendingCloudValues).length === 0 && Object.keys(pendingCloudRequests).length === 0) {
+        break;
+      }
     }
-    const results = await Promise.all(
-      entries.map(async ([key, promise]) => ({ key, ok: await promise }))
-    );
-    const failedKeys = results.filter((r) => !r.ok).map((r) => r.key);
+
+    for (const k of Object.keys(failedCloudRetryQueue)) {
+      failedSet.add(k);
+    }
+    const failedKeys = Array.from(failedSet);
     return { success: failedKeys.length === 0, failedKeys };
   },
 
@@ -9070,16 +9985,35 @@ export const Storage = {
     ok: boolean;
     syncedCount: number;
     totalCount: number;
+    settingsSynced: boolean;
+    studentsMirroredCount: number;
+    studentsMirrorOk: boolean;
+    latestRevision: string | number | null;
+    totalBytesSent: number;
     failedKeys: string[];
     oversizedKeys: string[];
   }> => {
     const failedKeys: string[] = [];
     const oversizedKeys: string[] = [];
     let syncedCount = 0;
+    let settingsSynced = false;
+    let studentsMirroredCount = 0;
+    let studentsMirrorOk = true;
+    let latestRevision: string | number | null = null;
+    let totalBytesSent = 0;
 
     try {
+      onProgress?.('در حال آماده‌سازی و جمع‌آوری تمام جداول و تنظیمات فعلی مرورگر...');
       flushAllPendingCloudTimers(false);
-      const allEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
+      // اگر درخواست در حال اجرایی هست، ابتدا کوتاه صبر می‌کنیم تا تداخل رخ ندهد
+      const inflightInitial = Object.values(pendingCloudRequests).filter(
+        (p): p is Promise<boolean> => Boolean(p)
+      );
+      if (inflightInitial.length > 0) {
+        await Promise.all(inflightInitial);
+      }
+
+      const entryByKey = new Map<string, { key: string; value: unknown; byteEstimate: number }>();
       for (const key of SYNCABLE_KEYS) {
         let parsedVal: unknown = undefined;
         let serializedUtf8Bytes = 0;
@@ -9101,18 +10035,34 @@ export const Storage = {
           }
         }
         if (parsedVal !== undefined) {
-          allEntries.push({ key, value: parsedVal, byteEstimate: serializedUtf8Bytes });
+          entryByKey.set(key, { key, value: parsedVal, byteEstimate: serializedUtf8Bytes });
           keyWriteTimestamps[key] = Date.now();
         }
       }
 
+      const allEntries = Array.from(entryByKey.values());
       const totalCount = allEntries.length;
       if (totalCount === 0) {
-        return { ok: true, syncedCount: 0, totalCount: 0, failedKeys, oversizedKeys };
+        return {
+          ok: true,
+          syncedCount: 0,
+          totalCount: 0,
+          settingsSynced: true,
+          studentsMirroredCount: 0,
+          studentsMirrorOk: true,
+          latestRevision,
+          totalBytesSent: 0,
+          failedKeys,
+          oversizedKeys,
+        };
       }
 
-      const postSingleWithRetry = async (key: string, value: unknown, utf8Bytes: number): Promise<boolean> => {
-        if (utf8Bytes > 4_300_000) {
+      const postSingleWithRetry = async (
+        key: string,
+        value: unknown,
+        utf8Bytes: number
+      ): Promise<boolean> => {
+        if (utf8Bytes > 4_350_000) {
           oversizedKeys.push(key);
           failedKeys.push(key);
           recordCloudTrafficEvent({
@@ -9124,14 +10074,15 @@ export const Storage = {
             durationMs: 0,
             bytes: utf8Bytes,
             detail: `حجم ${FRIENDLY_SYNC_KEY_LABELS[key] || key} بیش از سقف ۴.۵MB سرور است`,
-            errorMessage: 'Payload exceeds 4.3MB limit',
+            errorMessage: 'Payload exceeds 4.35MB limit',
           });
           return false;
         }
-        for (let attempt = 0; attempt < 2; attempt += 1) {
+        const timeoutMs = computeUploadTimeoutMs(utf8Bytes);
+        for (let attempt = 0; attempt < 3; attempt += 1) {
           const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 30000);
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
           try {
             const bodyStr = JSON.stringify({ key, value });
             const reqBytes = getUtf8ByteLength(bodyStr);
@@ -9144,7 +10095,20 @@ export const Storage = {
             clearTimeout(timer);
             const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
             if (res.ok) {
+              const data = (await res.json().catch(() => null)) as {
+                revision?: string | number;
+                updatedAt?: string;
+              } | null;
+              if (data?.revision !== undefined) {
+                latestRevision = data.revision;
+              }
+              if (typeof data?.updatedAt === 'string') {
+                updateLocalCloudKeyTimestamp(key, data.updatedAt);
+              }
+              totalBytesSent += reqBytes;
               delete failedCloudRetryQueue[key];
+              clearKeyDirtyForCloud(key);
+              if (key === STORAGE_KEYS.SETTINGS) settingsSynced = true;
               recordCloudTrafficEvent({
                 direction: 'up',
                 endpoint: '/sync',
@@ -9153,7 +10117,7 @@ export const Storage = {
                 ok: true,
                 durationMs: dur,
                 bytes: reqBytes,
-                detail: `ارسال جدول ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+                detail: `انتقال کامل ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
               });
               return true;
             }
@@ -9184,8 +10148,8 @@ export const Storage = {
               detail: `خطای ${res.status} در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
               errorMessage: `HTTP ${res.status}`,
             });
-            if (attempt === 0 && (res.status === 429 || res.status >= 500)) {
-              await new Promise((r) => setTimeout(r, 650));
+            if (attempt < 2 && (res.status === 429 || res.status === 408 || res.status >= 500)) {
+              await new Promise((r) => setTimeout(r, attempt === 0 ? 750 : 1800));
               continue;
             }
             failedKeys.push(key);
@@ -9204,8 +10168,8 @@ export const Storage = {
               detail: `خطای شبکه در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
               errorMessage: err instanceof Error ? err.message : 'Network error',
             });
-            if (attempt === 0) {
-              await new Promise((r) => setTimeout(r, 650));
+            if (attempt < 2) {
+              await new Promise((r) => setTimeout(r, attempt === 0 ? 750 : 1800));
               continue;
             }
             failedKeys.push(key);
@@ -9216,22 +10180,37 @@ export const Storage = {
         return false;
       };
 
-      // دسته‌های سبک (حداکثر ۹۰۰ کیلوبایت UTF-8 و ۸ کلید) تا هیچ درخواستی به سقف ۴.۵ مگابایت Vercel نرسد
-      const batches: Array<Array<{ key: string; value: unknown; byteEstimate: number }>> = [];
-      let currentBatch: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
-      let currentBytes = 0;
-      const MAX_BATCH_UTF8_BYTES = 900_000;
+      // اولویت‌بندی انتقال: ۱) تنظیمات و ظاهر سایت، ۲) کلیدهای سبک و کاربران کارکنان، ۳) کلیدهای حجیم به‌صورت اختصاصی
+      const settingsEntry = entryByKey.get(STORAGE_KEYS.SETTINGS);
+      const compactEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
+      const heavySoloEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
 
       for (const item of allEntries) {
-        if (item.byteEstimate > MAX_BATCH_UTF8_BYTES) {
-          if (currentBatch.length > 0) {
-            batches.push(currentBatch);
-            currentBatch = [];
-            currentBytes = 0;
-          }
-          batches.push([item]);
-          continue;
+        if (item.key === STORAGE_KEYS.SETTINGS) continue;
+        if (SOLO_HEAVY_KEYS.has(item.key) || item.byteEstimate > 300_000) {
+          heavySoloEntries.push(item);
+        } else {
+          compactEntries.push(item);
         }
+      }
+
+      // مرتب‌سازی کلیدهای حجیم: اول تخت‌ها، بعد دانشجویان، آخر اطلاعیه‌ها
+      const heavyOrder: Record<string, number> = {
+        [STORAGE_KEYS.BEDS]: 1,
+        [STORAGE_KEYS.STUDENTS]: 2,
+        [STORAGE_KEYS.ANNOUNCEMENTS]: 3,
+      };
+      heavySoloEntries.sort((a, b) => (heavyOrder[a.key] || 99) - (heavyOrder[b.key] || 99));
+
+      // ساخت دسته‌های ایمن (فقط برای کلیدهای سبک، حداکثر ۸ کلید و ۵۵۰ کیلوبایت)
+      const batches: Array<Array<{ key: string; value: unknown; byteEstimate: number }>> = [];
+      if (settingsEntry) batches.push([settingsEntry]);
+
+      let currentBatch: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
+      let currentBytes = 0;
+      const MAX_BATCH_UTF8_BYTES = 550_000;
+
+      for (const item of compactEntries) {
         if (
           currentBatch.length > 0 &&
           (currentBatch.length >= 8 || currentBytes + item.byteEstimate > MAX_BATCH_UTF8_BYTES)
@@ -9245,17 +10224,23 @@ export const Storage = {
       }
       if (currentBatch.length > 0) batches.push(currentBatch);
 
+      for (const heavy of heavySoloEntries) {
+        batches.push([heavy]);
+      }
+
       for (let bIdx = 0; bIdx < batches.length; bIdx += 1) {
         const chunk = batches[bIdx];
-        onProgress?.(
-          `در حال ارسال بخش‌های پایگاه داده به سرور ابری (دسته ${bIdx + 1} از ${batches.length})...`
-        );
+        const stepLabel =
+          chunk.length === 1
+            ? `در حال انتقال «${FRIENDLY_SYNC_KEY_LABELS[chunk[0].key] || chunk[0].key}» (مرحله ${(bIdx + 1).toLocaleString('fa-IR')} از ${batches.length.toLocaleString('fa-IR')})...`
+            : `در حال انتقال جداول سامانه به سرور ابری (دسته ${(bIdx + 1).toLocaleString('fa-IR')} از ${batches.length.toLocaleString('fa-IR')})...`;
+        onProgress?.(stepLabel);
 
         let batchOk = false;
         if (batchEndpointSupported !== false && chunk.length > 1) {
           const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 30000);
+          const timer = setTimeout(() => controller.abort(), 32000);
           const bodyStr = JSON.stringify({
             entries: chunk.map((c) => ({ key: c.key, value: c.value })),
           });
@@ -9272,10 +10257,24 @@ export const Storage = {
             if (res.status === 404 || res.status === 405) {
               batchEndpointSupported = false;
             } else if (res.ok) {
+              const data = (await res.json().catch(() => null)) as {
+                revision?: string | number;
+                updatedAt?: string;
+              } | null;
+              if (data?.revision !== undefined) {
+                latestRevision = data.revision;
+              }
               batchEndpointSupported = true;
               batchOk = true;
               syncedCount += chunk.length;
-              chunk.forEach((c) => delete failedCloudRetryQueue[c.key]);
+              totalBytesSent += reqBytes;
+              chunk.forEach((c) => {
+                if (typeof data?.updatedAt === 'string') {
+                  updateLocalCloudKeyTimestamp(c.key, data.updatedAt);
+                }
+                delete failedCloudRetryQueue[c.key];
+                clearKeyDirtyForCloud(c.key);
+              });
               recordCloudTrafficEvent({
                 direction: 'up',
                 endpoint: '/sync/batch',
@@ -9284,7 +10283,7 @@ export const Storage = {
                 ok: true,
                 durationMs: dur,
                 bytes: reqBytes,
-                detail: `ارسال دسته ${bIdx + 1} از ${batches.length} (${chunk.length} جدول)`,
+                detail: `انتقال دسته ${bIdx + 1} از ${batches.length} (${chunk.length} جدول)`,
               });
             } else {
               recordCloudTrafficEvent({
@@ -9324,16 +10323,53 @@ export const Storage = {
         }
       }
 
+      // هم‌ترازی کامل کالکشن اختصاصی students در MongoDB با فهرست فعلی دانشجویان مرورگر
+      const currentStudents = Storage.getStudents();
+      if (currentStudents.length > 0) {
+        const mirrorRes = await mirrorStudentsCollectionToCloud(currentStudents, {
+          replaceAll: true,
+          onProgress,
+        });
+        studentsMirroredCount = mirrorRes.count;
+        studentsMirrorOk = mirrorRes.ok;
+        if (mirrorRes.revision !== null) {
+          latestRevision = mirrorRes.revision;
+        }
+      }
+
+      if (failedKeys.length === 0 && latestRevision !== null) {
+        lastSyncRevision = latestRevision;
+        failedRetryAttempts = 0;
+      }
+
+      notifyCloudMetricsSubscribers();
+
       return {
-        ok: failedKeys.length === 0,
+        ok: failedKeys.length === 0 && studentsMirrorOk,
         syncedCount,
         totalCount,
+        settingsSynced,
+        studentsMirroredCount,
+        studentsMirrorOk,
+        latestRevision,
+        totalBytesSent,
         failedKeys,
         oversizedKeys,
       };
     } catch (err) {
       console.warn('syncAllToCloudDetailed error:', err);
-      return { ok: false, syncedCount, totalCount: 0, failedKeys, oversizedKeys };
+      return {
+        ok: false,
+        syncedCount,
+        totalCount: 0,
+        settingsSynced,
+        studentsMirroredCount,
+        studentsMirrorOk: false,
+        latestRevision,
+        totalBytesSent,
+        failedKeys,
+        oversizedKeys,
+      };
     }
   },
 
@@ -9342,12 +10378,113 @@ export const Storage = {
     return res.ok;
   },
 
-  syncFromCloud: async (): Promise<boolean> => {
+  subscribeCloudDataChanged: (listener: () => void): (() => void) => {
+    cloudDataChangedSubscribers.add(listener);
+    return () => {
+      cloudDataChangedSubscribers.delete(listener);
+    };
+  },
+
+  hasCloudHydrated: (): boolean => {
+    if (memoryKeyUpdatedAt[STORAGE_KEYS.SETTINGS] && memoryKeyUpdatedAt[STORAGE_KEYS.SUPERVISORS]) {
+      return true;
+    }
+    const meta = readPersistedCloudSyncMeta();
+    return Boolean(meta.hydrated && meta.keyUpdatedAt?.[STORAGE_KEYS.SETTINGS]);
+  },
+
+  // همگام‌سازی فوری و هدفمند پیش از ورود کاربر در دستگاه‌های تازه (رفع خطای «کاربر یافت نشد» در اولین بازشدن سایت)
+  ensureCloudDataForAuth: async (scope: 'student' | 'staff' | 'admin'): Promise<boolean> => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return false;
     }
-    if (activeSyncPromise) {
+
+    const fetchKeysNow = async (keys: string[], timeoutMs: number): Promise<boolean> => {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/sync?keys=${encodeURIComponent(keys.join(','))}`,
+          { method: 'GET', cache: 'no-store', signal: ctrl.signal }
+        );
+        clearTimeout(timer);
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+        if (!res.ok) return false;
+        const rawTxt = await res.text();
+        const rxBytes = getUtf8ByteLength(rawTxt);
+        const parsed = JSON.parse(rawTxt) as Record<string, unknown>;
+        recordCloudTrafficEvent({
+          direction: 'down',
+          endpoint: `/sync?auth(${scope})`,
+          method: 'GET',
+          status: res.status,
+          ok: true,
+          durationMs: dur,
+          bytes: rxBytes,
+          detail: `همگام‌سازی فوری احراز هویت (${scope})`,
+        });
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          let updatedAny = false;
+          const cleanObj = sanitizePlainValue(parsed);
+          for (const [k, v] of Object.entries(cleanObj)) {
+            if (!SYNCABLE_KEYS.includes(k) || v === undefined || v === null) continue;
+            const ser = JSON.stringify(v);
+            if (lastAppliedSerializedByKey.get(k) !== ser) {
+              safeLocalStorageSet(k, ser, v);
+              updatedAny = true;
+            }
+          }
+          if (updatedAny) notifyCloudDataChanged();
+          return true;
+        }
+        return false;
+      } catch {
+        clearTimeout(timer);
+        return false;
+      }
+    };
+
+    if (scope === 'staff') {
+      return fetchKeysNow(STAFF_AUTH_KEYS, 15000);
+    }
+
+    if (scope === 'admin') {
+      return fetchKeysNow([STORAGE_KEYS.SETTINGS], 25000);
+    }
+
+    // برای ورود دانشجو: ابتدا از مسیر صفحه‌بندی موازی فوق‌سریع /api/students (~۴-۵ ثانیه) و در صورت نیاز از sync_kv
+    const fetchedStudents = await Storage.fetchStudentsFromDB();
+    if (Array.isArray(fetchedStudents) && fetchedStudents.length > 0) {
+      const serialized = JSON.stringify(fetchedStudents);
+      if (lastAppliedSerializedByKey.get(STORAGE_KEYS.STUDENTS) !== serialized) {
+        safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serialized, fetchedStudents);
+        notifyCloudDataChanged();
+      }
+      return true;
+    }
+    return fetchKeysNow([STORAGE_KEYS.STUDENTS], 45000);
+  },
+
+  syncFromCloud: async (options?: { force?: boolean }): Promise<boolean> => {
+    const force = Boolean(options?.force);
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return false;
+    }
+    if (activeSyncPromise && !force) {
       return activeSyncPromise;
+    }
+    if (activeSyncPromise && force) {
+      try {
+        await activeSyncPromise;
+      } catch {
+        // ادامه با همگام‌سازی اجباری جدید
+      }
+    }
+
+    if (initialSyncRetryTimer !== undefined) {
+      clearTimeout(initialSyncRetryTimer);
+      initialSyncRetryTimer = undefined;
     }
 
     // اگر نوشتن‌های ناموفق قبلی در صف هستند، ابتدا تلاش مجدد برای ارسال انجام شود
@@ -9355,11 +10492,13 @@ export const Storage = {
 
     activeSyncPromise = (async () => {
       try {
-        // گام ۱: بررسی فوق‌سبک نسخه سرور
-        if (versionEndpointSupported !== false) {
+        let candidateRevision: string | number | null = null;
+
+        // گام ۱: در بارگذاری‌های بعدی (وقتی نسخه قبلی با موفقیت کامل ثبت شده)، بررسی فوق‌سبک نسخه سرور
+        if (!force && lastSyncRevision !== null && versionEndpointSupported !== false) {
           try {
             const verController = new AbortController();
-            const verTimer = setTimeout(() => verController.abort(), 6000);
+            const verTimer = setTimeout(() => verController.abort(), 7000);
             const verRes = await fetch(`${API_BASE_URL}/sync/version`, {
               method: 'GET',
               cache: 'no-store',
@@ -9376,45 +10515,218 @@ export const Storage = {
               } | null;
               if (
                 verData?.revision !== undefined &&
-                lastSyncRevision !== null &&
                 String(verData.revision) === String(lastSyncRevision)
               ) {
                 return false;
               }
               if (verData?.revision !== undefined) {
-                lastSyncRevision = verData.revision;
+                candidateRevision = verData.revision;
               }
             }
           } catch {
-            // ادامه به همگام‌سازی عادی
+            // ادامه به همگام‌سازی مانیفست
           }
         }
 
         let hasRemoteChanges = false;
         const cloudMap: Record<string, unknown> = {};
+        const serverKeyUpdatedAtMap: Record<string, string> = {};
+        const failedKeys = new Set<string>();
+        const persistedMeta = readPersistedCloudSyncMeta();
+        const persistedKeyUpdatedAt: Record<string, string> = {
+          ...(persistedMeta.keyUpdatedAt || {}),
+        };
+        let persistedMetaDirty = false;
 
-        const applyCloudKvEntries = (entriesObj: Record<string, unknown>) => {
+        const persistCloudMetaIfDirty = (markHydrated = false, commitRevision: string | number | null = null) => {
+          if (!persistedMetaDirty && !markHydrated && commitRevision === null) return;
+          persistedMetaDirty = false;
+          writePersistedCloudSyncMeta({
+            revision: commitRevision !== null ? commitRevision : persistedMeta.revision ?? null,
+            hydrated: markHydrated || Boolean(persistedMeta.hydrated),
+            keyUpdatedAt: persistedKeyUpdatedAt,
+          });
+        };
+
+        const applyCloudKvEntries = (entriesObj: Record<string, unknown>): boolean => {
+          let batchChanged = false;
           for (const [key, val] of Object.entries(entriesObj)) {
             if (!SYNCABLE_KEYS.includes(key)) continue;
             if (val === undefined || val === null) continue;
             cloudMap[key] = val;
-            if (pendingCloudRequests[key] || key in pendingCloudValues) continue;
+            if (
+              pendingCloudRequests[key] ||
+              key in pendingCloudValues ||
+              key in failedCloudRetryQueue ||
+              persistedDirtyKeys.has(key)
+            ) {
+              continue;
+            }
             const lastLocalWrite = keyWriteTimestamps[key] || 0;
-            if (Date.now() - lastLocalWrite < 5000) continue;
+            if (!force && Date.now() - lastLocalWrite < 12000) continue;
+
             const serialized = JSON.stringify(val);
-            if (localStorage.getItem(key) !== serialized) {
-              safeLocalStorageSet(key, serialized, val);
+            let currentLs: string | null = null;
+            try {
+              currentLs = localStorage.getItem(key);
+            } catch {
+              currentLs = null;
+            }
+            const alreadyApplied =
+              lastAppliedSerializedByKey.get(key) === serialized || currentLs === serialized;
+
+            let persistedOk = currentLs === serialized;
+            if (!alreadyApplied) {
+              persistedOk = safeLocalStorageSet(key, serialized, val);
               hasRemoteChanges = true;
+              batchChanged = true;
+            } else {
+              lastAppliedSerializedByKey.set(key, serialized);
+              if (!parsedCache.has(key)) {
+                parsedCache.set(key, cloneValue(val));
+              }
+            }
+
+            const srvTs = serverKeyUpdatedAtMap[key];
+            if (srvTs) {
+              memoryKeyUpdatedAt[key] = srvTs;
+              if (persistedOk) {
+                if (persistedKeyUpdatedAt[key] !== srvTs) {
+                  persistedKeyUpdatedAt[key] = srvTs;
+                  persistedMetaDirty = true;
+                }
+              } else if (key in persistedKeyUpdatedAt) {
+                delete persistedKeyUpdatedAt[key];
+                persistedMetaDirty = true;
+              }
             }
           }
+
+          if (batchChanged) {
+            persistCloudMetaIfDirty(
+              Boolean(memoryKeyUpdatedAt[STORAGE_KEYS.SETTINGS] || memoryKeyUpdatedAt[STORAGE_KEYS.SUPERVISORS])
+            );
+            notifyCloudDataChanged();
+          }
+          return batchChanged;
         };
 
-        // گام ۲: همگام‌سازی تکه‌ای سریع با /api/sync/manifest تا هیچ کلید بزرگی باعث Timeout یا خطای ۴.۵MB نشود
+        // تابع کمکی دریافت یک تکه با Timeout هوشمند بر اساس نوع کلید + تلاش مجدد خودکار + تفکیک در صورت خطا
+        const fetchSyncChunk = async (
+          chunkKeys: string[],
+          timeoutMs: number,
+          attempt = 1
+        ): Promise<boolean> => {
+          const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          const kCtrl = new AbortController();
+          const kTimer = setTimeout(() => kCtrl.abort(), timeoutMs);
+          try {
+            const res = await fetch(
+              `${API_BASE_URL}/sync?keys=${encodeURIComponent(chunkKeys.join(','))}`,
+              {
+                method: 'GET',
+                cache: 'no-store',
+                signal: kCtrl.signal,
+              }
+            );
+            clearTimeout(kTimer);
+            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+
+            if (res.ok) {
+              const rawTxt = await res.text();
+              const rxBytes = getUtf8ByteLength(rawTxt);
+              const chunkJson = ((): unknown => {
+                try {
+                  return JSON.parse(rawTxt);
+                } catch {
+                  return null;
+                }
+              })();
+              recordCloudTrafficEvent({
+                direction: 'down',
+                endpoint:
+                  chunkKeys.length === 1
+                    ? `/sync?key=${FRIENDLY_SYNC_KEY_LABELS[chunkKeys[0]] || chunkKeys[0]}`
+                    : `/sync?keys(${chunkKeys.length})`,
+                method: 'GET',
+                status: res.status,
+                ok: true,
+                durationMs: dur,
+                bytes: rxBytes,
+                detail:
+                  chunkKeys.length === 1
+                    ? `دریافت ${FRIENDLY_SYNC_KEY_LABELS[chunkKeys[0]] || chunkKeys[0]}`
+                    : `دریافت تکه همگام‌سازی (${chunkKeys.length} جدول)`,
+              });
+              if (chunkJson && typeof chunkJson === 'object' && !Array.isArray(chunkJson)) {
+                applyCloudKvEntries(sanitizePlainValue(chunkJson as Record<string, unknown>));
+                return true;
+              }
+            } else {
+              recordCloudTrafficEvent({
+                direction: 'down',
+                endpoint: `/sync?keys(${chunkKeys.length})`,
+                method: 'GET',
+                status: res.status,
+                ok: false,
+                durationMs: dur,
+                bytes: 0,
+                detail: `خطا در دریافت تکه همگام‌سازی (${chunkKeys.length} جدول)`,
+                errorMessage: `HTTP ${res.status}`,
+              });
+            }
+          } catch (err) {
+            clearTimeout(kTimer);
+            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+            recordCloudTrafficEvent({
+              direction: 'down',
+              endpoint:
+                chunkKeys.length === 1
+                  ? `/sync?key=${FRIENDLY_SYNC_KEY_LABELS[chunkKeys[0]] || chunkKeys[0]}`
+                  : `/sync?keys(${chunkKeys.length})`,
+              method: 'GET',
+              status: null,
+              ok: false,
+              durationMs: dur,
+              bytes: 0,
+              detail:
+                chunkKeys.length === 1
+                  ? `خطا/زمان‌سنجی در دریافت ${FRIENDLY_SYNC_KEY_LABELS[chunkKeys[0]] || chunkKeys[0]}`
+                  : 'قطع ارتباط در دریافت تکه همگام‌سازی',
+              errorMessage: err instanceof Error ? err.message : 'Network error',
+            });
+          }
+
+          // اگر تکه چندکلیدی شکست خورد، کلیدها را تک‌تک دریافت می‌کنیم تا یک کلید حجیم مانع بارگذاری بقیه نشود
+          if (chunkKeys.length > 1) {
+            let allSubOk = true;
+            for (const singleKey of chunkKeys) {
+              const singleTimeout = singleKey === STORAGE_KEYS.ANNOUNCEMENTS ? 75000 : 40000;
+              const ok = await fetchSyncChunk([singleKey], singleTimeout, 1);
+              if (!ok) {
+                allSubOk = false;
+                failedKeys.add(singleKey);
+              }
+            }
+            return allSubOk;
+          }
+
+          // تلاش مجدد یک‌باره برای کلید تکی در صورت خطای موقت شبکه یا Cold Start
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 800));
+            return fetchSyncChunk(chunkKeys, Math.min(timeoutMs + 15000, 90000), attempt + 1);
+          }
+
+          chunkKeys.forEach((k) => failedKeys.add(k));
+          return false;
+        };
+
+        // گام ۲: همگام‌سازی تکه‌ای اولویت‌بندی‌شده با /api/sync/manifest
         let usedManifestSync = false;
         if (manifestEndpointSupported !== false) {
           try {
             const mController = new AbortController();
-            const mTimer = setTimeout(() => mController.abort(), 10000);
+            const mTimer = setTimeout(() => mController.abort(), 14000);
             const mRes = await fetch(`${API_BASE_URL}/sync/manifest`, {
               method: 'GET',
               cache: 'no-store',
@@ -9428,114 +10740,115 @@ export const Storage = {
               manifestEndpointSupported = true;
               const manifestData = (await mRes.json().catch(() => null)) as {
                 revision?: string | number;
-                keys?: Array<{ key: string; sizeBytes?: number | null }>;
+                keys?: Array<{ key: string; updatedAt?: string | null; sizeBytes?: number | null }>;
               } | null;
 
               if (manifestData?.revision !== undefined) {
-                lastSyncRevision = manifestData.revision;
+                candidateRevision = manifestData.revision;
               }
 
               const serverKeys = Array.isArray(manifestData?.keys)
                 ? manifestData.keys.filter((k) => k?.key && SYNCABLE_KEYS.includes(k.key))
                 : [];
 
-              if (serverKeys.length > 0) {
-                usedManifestSync = true;
-                const keyChunks: string[][] = [];
-                let curKeys: string[] = [];
-                let curSize = 0;
-
-                for (const kInfo of serverKeys) {
-                  const estSize = typeof kInfo.sizeBytes === 'number' ? kInfo.sizeBytes : 120_000;
-                  if (estSize > 700_000) {
-                    if (curKeys.length > 0) {
-                      keyChunks.push(curKeys);
-                      curKeys = [];
-                      curSize = 0;
-                    }
-                    keyChunks.push([kInfo.key]);
-                    continue;
-                  }
-                  if (curKeys.length > 0 && (curKeys.length >= 6 || curSize + estSize > 700_000)) {
-                    keyChunks.push(curKeys);
-                    curKeys = [];
-                    curSize = 0;
-                  }
-                  curKeys.push(kInfo.key);
-                  curSize += estSize;
+              for (const kInfo of serverKeys) {
+                if (typeof kInfo.updatedAt === 'string' && kInfo.updatedAt) {
+                  serverKeyUpdatedAtMap[kInfo.key] = kInfo.updatedAt;
                 }
-                if (curKeys.length > 0) keyChunks.push(curKeys);
+              }
+
+              // حذف کلیدهایی که دقیقاً با همین updatedAt هم‌اکنون در مرورگر بارگذاری شده‌اند (صرفه‌جویی میلیونی در ترافیک!)
+              const keysToDownload = serverKeys.filter((kInfo) => {
+                if (force) return true;
+                const srvTs = kInfo.updatedAt;
+                if (!srvTs) return true;
+                if (memoryKeyUpdatedAt[kInfo.key] !== srvTs) return true;
+                const hasLocalData =
+                  parsedCache.has(kInfo.key) ||
+                  (() => {
+                    try {
+                      return localStorage.getItem(kInfo.key) !== null;
+                    } catch {
+                      return false;
+                    }
+                  })();
+                return !hasLocalData;
+              });
+
+              if (keysToDownload.length > 0) {
+                usedManifestSync = true;
+                const infoByKey = new Map(keysToDownload.map((k) => [k.key, k]));
+                const scheduled = new Set<string>();
+                const taskQueue: Array<{ keys: string[]; timeoutMs: number }> = [];
+
+                // موج ۱-الف: کلیدهای سبک و حیاتی ورود و ساختار (تمام کارکنان + سراها + اتاق‌ها؛ ~۵۵KB در ~۱ ثانیه)
+                const fastBatch = FAST_BOOTSTRAP_KEYS.filter((k) => infoByKey.has(k));
+                if (fastBatch.length > 0) {
+                  fastBatch.forEach((k) => scheduled.add(k));
+                  taskQueue.push({ keys: fastBatch, timeoutMs: 22000 });
+                }
+
+                // موج ۱-ب: تنظیمات و ظاهر سایت به‌صورت کاملاً مجزا (لوگو، فونت، پس‌زمینه، بنر و نکات؛ ~۵۱۸KB)
+                if (infoByKey.has(STORAGE_KEYS.SETTINGS)) {
+                  scheduled.add(STORAGE_KEYS.SETTINGS);
+                  taskQueue.push({ keys: [STORAGE_KEYS.SETTINGS], timeoutMs: 45000 });
+                }
+
+                // موج ۱-ج: تخت‌ها به‌صورت مجزا (~۳۶۸KB)
+                if (infoByKey.has(STORAGE_KEYS.BEDS)) {
+                  scheduled.add(STORAGE_KEYS.BEDS);
+                  taskQueue.push({ keys: [STORAGE_KEYS.BEDS], timeoutMs: 45000 });
+                }
+
+                // موج ۱-د: سایر جداول سبک عملیاتی در دسته‌های کم‌حجم
+                const remainingCompact: Array<{ key: string; sizeBytes?: number | null }> = [];
+                for (const kInfo of keysToDownload) {
+                  if (scheduled.has(kInfo.key) || SOLO_HEAVY_KEYS.has(kInfo.key)) continue;
+                  const estSize = typeof kInfo.sizeBytes === 'number' ? kInfo.sizeBytes : 25_000;
+                  if (estSize > 260_000) {
+                    scheduled.add(kInfo.key);
+                    taskQueue.push({ keys: [kInfo.key], timeoutMs: 45000 });
+                  } else {
+                    remainingCompact.push(kInfo);
+                  }
+                }
+
+                let curBatch: string[] = [];
+                let curBytes = 0;
+                for (const item of remainingCompact) {
+                  const est = typeof item.sizeBytes === 'number' ? item.sizeBytes : 25_000;
+                  if (curBatch.length > 0 && (curBatch.length >= 10 || curBytes + est > 260_000)) {
+                    taskQueue.push({ keys: curBatch, timeoutMs: 25000 });
+                    curBatch = [];
+                    curBytes = 0;
+                  }
+                  curBatch.push(item.key);
+                  scheduled.add(item.key);
+                  curBytes += est;
+                }
+                if (curBatch.length > 0) {
+                  taskQueue.push({ keys: curBatch, timeoutMs: 25000 });
+                }
+
+                // موج ۲-الف: پرونده تمام دانشجویان به‌صورت اختصاصی با Timeout سخاوتمندانه
+                if (infoByKey.has(STORAGE_KEYS.STUDENTS)) {
+                  scheduled.add(STORAGE_KEYS.STUDENTS);
+                  taskQueue.push({ keys: [STORAGE_KEYS.STUDENTS], timeoutMs: 65000 });
+                }
+
+                // موج ۲-ب: اطلاعیه‌ها (شامل تصاویر پیوست؛ ~۲.۵MB) به‌صورت کاملاً اختصاصی با Timeout ۷۵ ثانیه
+                if (infoByKey.has(STORAGE_KEYS.ANNOUNCEMENTS)) {
+                  scheduled.add(STORAGE_KEYS.ANNOUNCEMENTS);
+                  taskQueue.push({ keys: [STORAGE_KEYS.ANNOUNCEMENTS], timeoutMs: 75000 });
+                }
 
                 let cursor = 0;
-                const workers = Array.from({ length: Math.min(3, keyChunks.length) }, async () => {
-                  while (cursor < keyChunks.length) {
+                const workerCount = Math.min(4, taskQueue.length);
+                const workers = Array.from({ length: workerCount }, async () => {
+                  while (cursor < taskQueue.length) {
                     const idx = cursor++;
-                    const chunkKeys = keyChunks[idx];
-                    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-                    const kCtrl = new AbortController();
-                    const kTimer = setTimeout(() => kCtrl.abort(), 25000);
-                    try {
-                      const res = await fetch(
-                        `${API_BASE_URL}/sync?keys=${encodeURIComponent(chunkKeys.join(','))}`,
-                        {
-                          method: 'GET',
-                          cache: 'no-store',
-                          signal: kCtrl.signal,
-                        }
-                      );
-                      clearTimeout(kTimer);
-                      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-                      if (res.ok) {
-                        const rawTxt = await res.text();
-                        const rxBytes = getUtf8ByteLength(rawTxt);
-                        const chunkJson = ((): unknown => {
-                          try {
-                            return JSON.parse(rawTxt);
-                          } catch {
-                            return null;
-                          }
-                        })();
-                        recordCloudTrafficEvent({
-                          direction: 'down',
-                          endpoint: `/sync?keys(${chunkKeys.length})`,
-                          method: 'GET',
-                          status: res.status,
-                          ok: true,
-                          durationMs: dur,
-                          bytes: rxBytes,
-                          detail: `دریافت تکه همگام‌سازی (${chunkKeys.length} جدول)`,
-                        });
-                        if (chunkJson && typeof chunkJson === 'object' && !Array.isArray(chunkJson)) {
-                          applyCloudKvEntries(sanitizePlainValue(chunkJson as Record<string, unknown>));
-                        }
-                      } else {
-                        recordCloudTrafficEvent({
-                          direction: 'down',
-                          endpoint: `/sync?keys(${chunkKeys.length})`,
-                          method: 'GET',
-                          status: res.status,
-                          ok: false,
-                          durationMs: dur,
-                          bytes: 0,
-                          detail: `خطا در دریافت تکه همگام‌سازی (${chunkKeys.length} جدول)`,
-                          errorMessage: `HTTP ${res.status}`,
-                        });
-                      }
-                    } catch (err) {
-                      clearTimeout(kTimer);
-                      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-                      recordCloudTrafficEvent({
-                        direction: 'down',
-                        endpoint: `/sync?keys(${chunkKeys.length})`,
-                        method: 'GET',
-                        status: null,
-                        ok: false,
-                        durationMs: dur,
-                        bytes: 0,
-                        detail: `قطع ارتباط در دریافت تکه همگام‌سازی`,
-                        errorMessage: err instanceof Error ? err.message : 'Network error',
-                      });
-                    }
+                    const job = taskQueue[idx];
+                    await fetchSyncChunk(job.keys, job.timeoutMs, 1);
                   }
                 });
                 await Promise.all(workers);
@@ -9544,17 +10857,16 @@ export const Storage = {
               }
             }
           } catch {
-            // ادامه به روش استاندارد در صورت خطای شبکه
+            // ادامه به روش جایگزین در صورت خطای شبکه
           }
         }
 
         if (!usedManifestSync) {
-          const syncHeaders: Record<string, string> | undefined = lastSyncEtag
-            ? { 'If-None-Match': lastSyncEtag }
-            : undefined;
+          const syncHeaders: Record<string, string> | undefined =
+            !force && lastSyncEtag ? { 'If-None-Match': lastSyncEtag } : undefined;
           const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
           const sController = new AbortController();
-          const sTimer = setTimeout(() => sController.abort(), 28000);
+          const sTimer = setTimeout(() => sController.abort(), 35000);
           try {
             const res = await fetch(`${API_BASE_URL}/sync`, {
               method: 'GET',
@@ -9608,14 +10920,15 @@ export const Storage = {
                 'revision' in rawParsed &&
                 (rawParsed as { revision?: string | number }).revision !== undefined
               ) {
-                lastSyncRevision =
-                  (rawParsed as { revision?: string | number }).revision ?? lastSyncRevision;
+                candidateRevision =
+                  (rawParsed as { revision?: string | number }).revision ?? candidateRevision;
               }
 
               if (unwrapped && typeof unwrapped === 'object' && !Array.isArray(unwrapped)) {
                 applyCloudKvEntries(sanitizePlainValue(unwrapped as Record<string, unknown>));
               }
             } else {
+              failedKeys.add('__full_sync__');
               recordCloudTrafficEvent({
                 direction: 'down',
                 endpoint: '/sync',
@@ -9630,6 +10943,7 @@ export const Storage = {
             }
           } catch (err) {
             clearTimeout(sTimer);
+            failedKeys.add('__full_sync__');
             const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
             recordCloudTrafficEvent({
               direction: 'down',
@@ -9645,22 +10959,57 @@ export const Storage = {
           }
         }
 
-        // گام ۳: اگر کلید دانشجویان از sync_kv دریافت نشده بود، به‌صورت صفحه‌بندی‌شده از /api/students دریافت شود
-        if (!Array.isArray(cloudMap[STORAGE_KEYS.STUDENTS])) {
+        // گام ۳: اگر کلید دانشجویان هنوز دریافت نشده یا دچار خطا شد، به‌صورت موازی از /api/students دریافت شود
+        const needStudentsFallback =
+          failedKeys.has(STORAGE_KEYS.STUDENTS) ||
+          (!Array.isArray(cloudMap[STORAGE_KEYS.STUDENTS]) &&
+            !memoryKeyUpdatedAt[STORAGE_KEYS.STUDENTS]);
+
+        if (needStudentsFallback) {
           const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
           if (
             !pendingCloudRequests[STORAGE_KEYS.STUDENTS] &&
             !(STORAGE_KEYS.STUDENTS in pendingCloudValues) &&
-            Date.now() - lastStudentWrite >= 5000
+            !(STORAGE_KEYS.STUDENTS in failedCloudRetryQueue) &&
+            !persistedDirtyKeys.has(STORAGE_KEYS.STUDENTS) &&
+            (force || Date.now() - lastStudentWrite >= 12000)
           ) {
             const fetchedStudents = await Storage.fetchStudentsFromDB();
             if (Array.isArray(fetchedStudents) && fetchedStudents.length > 0) {
               const serializedStudents = JSON.stringify(fetchedStudents);
-              if (localStorage.getItem(STORAGE_KEYS.STUDENTS) !== serializedStudents) {
-                safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, fetchedStudents);
-                hasRemoteChanges = true;
+              const persistedOk =
+                lastAppliedSerializedByKey.get(STORAGE_KEYS.STUDENTS) === serializedStudents
+                  ? true
+                  : safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, fetchedStudents);
+              hasRemoteChanges = true;
+              failedKeys.delete(STORAGE_KEYS.STUDENTS);
+              const srvTs = serverKeyUpdatedAtMap[STORAGE_KEYS.STUDENTS];
+              if (srvTs) {
+                memoryKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = srvTs;
+                if (persistedOk) {
+                  persistedKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = srvTs;
+                  persistedMetaDirty = true;
+                }
               }
+              notifyCloudDataChanged();
             }
+          }
+        }
+
+        // تنها زمانی revision را تثبیت می‌کنیم که هیچ کلیدی شکست نخورده باشد (رفع باگ توقف همیشگی پس از خطای اول)
+        if (failedKeys.size === 0 && candidateRevision !== null) {
+          lastSyncRevision = candidateRevision;
+          persistCloudMetaIfDirty(true, candidateRevision);
+        } else {
+          persistCloudMetaIfDirty(
+            Boolean(memoryKeyUpdatedAt[STORAGE_KEYS.SETTINGS] || memoryKeyUpdatedAt[STORAGE_KEYS.SUPERVISORS]),
+            null
+          );
+          if (failedKeys.size > 0 && typeof setTimeout === 'function') {
+            initialSyncRetryTimer = setTimeout(() => {
+              initialSyncRetryTimer = undefined;
+              void Storage.syncFromCloud();
+            }, 6000);
           }
         }
 
@@ -10329,7 +11678,6 @@ export const Storage = {
         } | null;
         if (vJson?.revision !== undefined) {
           revision = vJson.revision;
-          lastSyncRevision = vJson.revision;
         }
         updatedAt = vJson?.updatedAt || null;
       }

@@ -10,6 +10,27 @@ export default defineConfig(() => {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),
       },
+      dedupe: [
+        'react',
+        'react-dom',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'react-is',
+      ],
+    },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'react-is',
+        'lucide-react',
+        'recharts',
+        'xlsx',
+        'canvas-confetti',
+      ],
     },
     build: {
       chunkSizeWarningLimit: 900,
@@ -25,7 +46,12 @@ export default defineConfig(() => {
             if (id.includes('node_modules/lucide-react')) {
               return 'vendor-icons';
             }
-            if (id.includes('node_modules/react')) {
+            if (
+              id.includes('node_modules/react/') ||
+              id.includes('node_modules/react-dom/') ||
+              id.includes('node_modules/react-is/') ||
+              id.includes('node_modules/scheduler/')
+            ) {
               return 'vendor-react';
             }
           },

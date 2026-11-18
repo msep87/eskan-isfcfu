@@ -5,6 +5,7 @@ import {
   Room,
   Bed,
   Student,
+  StudentResidenceType,
   Supervisor,
   Announcement,
   RoomWarning,
@@ -67,6 +68,7 @@ import { AdminUsersPanel, UserCategoryKey } from './AdminUsersPanel';
 import { AdminSurveyManager } from './AdminSurveyManager';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { CloudConnectionDiagnosticsPanel } from './CloudConnectionDiagnosticsPanel';
+import { getStudentResidenceType } from '../utils/financeUtils';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
 import { STANDARD_FONTS, readMultipleFontFiles } from '../utils/fonts';
 import {
@@ -103,7 +105,6 @@ import {
   Image as ImageIcon,
   Percent,
   CheckCheck,
-  FolderUp,
   Camera,
   AlertTriangle,
   XCircle,
@@ -148,6 +149,10 @@ import {
   Paperclip,
   Database,
   Loader2,
+  ChevronDown,
+  Home,
+  Bus,
+  Server,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -459,13 +464,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     tone: 'success' | 'error';
   } | null>(null);
 
-  // وضعیت آپلود دسته‌جمعی پوشه عکس‌ها
-  const [batchPhotoStatus, setBatchPhotoStatus] = useState<{
-    type: 'success' | 'error' | 'loading';
-    text: string;
-    details?: string[];
-  } | null>(null);
-
   // فرم ثبت و انتشار اطلاعیه توسط مدیر
   const [newAnnTitle, setNewAnnTitle] = useState('');
   const [newAnnContent, setNewAnnContent] = useState('');
@@ -533,9 +531,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setAboutEditorResetKey((k) => k + 1);
   }, [settings.aboutContent]);
 
+  // بخش بازشده در تب تنظیمات مدیر (با کلیک روی هر دکمه، فقط همان بخش نمایش داده می‌شود)
+  type AdminSettingsSectionKey =
+    | 'general'
+    | 'appearance'
+    | 'cloud'
+    | 'backup'
+    | 'home_notes'
+    | 'about'
+    | 'quick_users';
+  const [openSettingsSection, setOpenSettingsSection] = useState<AdminSettingsSectionKey | null>(null);
+  const [appearanceSubTab, setAppearanceSubTab] = useState<'all' | 'logo' | 'fonts_bg' | 'hero'>('all');
+
   useEffect(() => {
     if (!focusAboutEditorTick) return;
     setMainTab('settings');
+    setOpenSettingsSection('about');
     window.setTimeout(() => {
       const el = document.getElementById('admin-about-editor');
       if (el) {
@@ -569,6 +580,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [stFormPreviousDorm, setStFormPreviousDorm] = useState('');
   const [stFormPreviousRoom, setStFormPreviousRoom] = useState('');
   const [stFormPreviousScore, setStFormPreviousScore] = useState('100');
+  const [stFormResidenceType, setStFormResidenceType] = useState<StudentResidenceType>('dormitory');
   const [stFormAssignmentStatus, setStFormAssignmentStatus] = useState<'none' | 'temporary' | 'confirmed'>('none');
   const [stFormBloodGroup, setStFormBloodGroup] = useState('O+');
   const [stFormSpecialCondition, setStFormSpecialCondition] = useState('ندارد');
@@ -599,6 +611,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormPreviousDorm('');
     setStFormPreviousRoom('');
     setStFormPreviousScore('100');
+    setStFormResidenceType('dormitory');
     setStFormAssignmentStatus('none');
     setStFormBloodGroup('O+');
     setStFormSpecialCondition('ندارد');
@@ -631,6 +644,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormPreviousDorm(st.previousDorm || '');
     setStFormPreviousRoom(st.previousRoom || '');
     setStFormPreviousScore(String(st.previousScore ?? 100));
+    setStFormResidenceType(getStudentResidenceType(st));
     setStFormAssignmentStatus(st.assignmentStatus || (st.assignedBedId ? 'temporary' : 'none'));
     const rawCustom = st.customFields || {};
     setStFormBloodGroup(String(rawCustom['گروه خونی'] || 'ثبت نشده'));
@@ -749,6 +763,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         previousDorm: stFormPreviousDorm.trim(),
         previousRoom: stFormPreviousRoom.trim(),
         previousScore: normalizedScore,
+        residenceType: stFormResidenceType,
         assignmentStatus: editingStudent.assignedBedId ? stFormAssignmentStatus : editingStudent.assignmentStatus,
         customFields: mergedCustomFields,
         photoUrl: resolvedPhotoUrl,
@@ -787,6 +802,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         previousDorm: stFormPreviousDorm.trim(),
         previousRoom: stFormPreviousRoom.trim(),
         previousScore: normalizedScore,
+        residenceType: stFormResidenceType,
         customFields: mergedCustomFields,
         photoUrl: resolvedPhotoUrl,
         isProfileCompleted: stFormProfileCompleted,
@@ -799,8 +815,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setStFormError(res.message);
         return;
       }
-      await Storage.waitForPendingCloudSync();
-      setApprovalFeedback({ type: 'success', message: `${res.message}${photoCloudWarning}` });
+      const syncRes = await Storage.waitForPendingCloudSync();
+      setApprovalFeedback({
+        type: syncRes.success ? 'success' : 'error',
+        message: syncRes.success
+          ? `${res.message} و با تمام جداول ابری همگام شد.${photoCloudWarning}`
+          : `${res.message} اما همگام‌سازی جدول کل دانشجویان با تأخیر مواجه شد و به‌صورت خودکار مجدداً ارسال خواهد شد.${photoCloudWarning}`,
+      });
     }
 
     setIsAddStudentModalOpen(false);
@@ -1224,138 +1245,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleToggleAnnouncementHome = (id: string) => {
     Storage.toggleAnnouncementHomePage(id);
     onRefreshData();
-  };
-
-  // پردازش پوشه عکس‌های دانشجویان بر اساس شماره دانشجویی و بارگذاری ابری
-  const handleBatchPhotosUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const imageFiles = Array.from(files).filter(
-      (f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp)$/i.test(f.name)
-    );
-    e.target.value = '';
-
-    if (imageFiles.length === 0) {
-      setBatchPhotoStatus({ type: 'error', text: 'هیچ فایل تصویری در پوشه انتخاب شده یافت نشد.' });
-      return;
-    }
-
-    setBatchPhotoStatus({
-      type: 'loading',
-      text: `در حال بررسی تطبیق ${imageFiles.length} فایل عکس با فهرست دانشجویان...`,
-    });
-
-    const normalizeCode = (raw: string) =>
-      raw
-        .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
-        .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-        .trim()
-        .toLowerCase();
-
-    const currentStudents = Storage.getStudents();
-    const unmatchedKeys: string[] = [];
-    const matchedEntries: Array<{ studentId: string; file: File }> = [];
-
-    for (const file of imageFiles) {
-      const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
-      const cleanBase = normalizeCode(baseName);
-      const digitMatch = cleanBase.match(/\d+/)?.[0] || cleanBase;
-
-      const found =
-        currentStudents.find((s) => normalizeCode(s.studentId) === cleanBase) ||
-        currentStudents.find((s) => normalizeCode(s.studentId) === digitMatch);
-
-      if (found) {
-        matchedEntries.push({ studentId: found.studentId.trim(), file });
-      } else {
-        unmatchedKeys.push(baseName.trim());
-      }
-    }
-
-    if (matchedEntries.length === 0) {
-      setBatchPhotoStatus({
-        type: 'error',
-        text: 'هیچ عکسی با شماره دانشجویی تطابق پیدا نکرد. لطفاً نام فایل‌ها را بررسی فرمایید (مثال: 4021001.jpg).',
-        details: unmatchedKeys.slice(0, 8),
-      });
-      return;
-    }
-
-    setBatchPhotoStatus({
-      type: 'loading',
-      text: `در حال بهینه‌سازی و بارگذاری ابری ${matchedEntries.length} تصویر منطبق‌شده... لطفاً شکیبا باشید.`,
-    });
-
-    const compressedMap: Record<string, string> = {};
-    const cloudItems: Array<{ userId: string; dataUrl: string }> = [];
-
-    for (const entry of matchedEntries) {
-      try {
-        const dataUrl = await compressAvatarImageFile(entry.file);
-        compressedMap[entry.studentId] = dataUrl;
-        cloudItems.push({ userId: entry.studentId, dataUrl });
-      } catch {
-        // فایل تصویر خراب نادیده گرفته می‌شود
-      }
-    }
-
-    const cloudRes = await Storage.uploadPhotosToCloud('student', cloudItems);
-
-    if (cloudRes.supported && cloudRes.ok) {
-      const urlPhotoMap: Record<string, string> = {};
-      matchedEntries.forEach((entry) => {
-        const u = cloudRes.urls[entry.studentId];
-        if (u) urlPhotoMap[entry.studentId] = u;
-      });
-
-      const result = Storage.batchAssignStudentPhotos(urlPhotoMap);
-      const syncRes = await Storage.waitForPendingCloudSync();
-      onRefreshData();
-
-      setBatchPhotoStatus({
-        type: result.saved && syncRes.success ? 'success' : 'error',
-        text: !result.saved
-          ? 'ذخیره‌سازی آدرس تصاویر در حافظه مرورگر با خطا مواجه شد.'
-          : syncRes.success
-          ? `تعداد ${result.matchedCount} عکس با موفقیت در دیتابیس ابری (MongoDB) ذخیره شد و در همه سیستم‌ها قابل مشاهده است.`
-          : 'عکس‌ها در سرور ذخیره شدند اما همگام‌سازی لیست دانشجویان با خطا مواجه شد.',
-        details:
-          unmatchedKeys.length > 0
-            ? unmatchedKeys.map((k) => `فایل با شناسه «${k}» در فهرست دانشجویان موجود یافت نشد.`)
-            : undefined,
-      });
-      return;
-    }
-
-    if (!cloudRes.supported) {
-      const result = Storage.batchAssignStudentPhotos(compressedMap);
-      await Storage.waitForPendingCloudSync();
-      onRefreshData();
-
-      setBatchPhotoStatus({
-        type: 'error',
-        text: !result.saved
-          ? 'مسیر ذخیره ابری عکس‌ها (/api/photos/batch) در سرور khabgah-api فعال نیست و حافظه مرورگر نیز ظرفیت ذخیره مستقیم تصاویر را ندارد. لطفاً فایل server.js بک‌اند را بروزرسانی کنید.'
-          : `هشدار: ${result.matchedCount} عکس فقط در مرورگر فعلی ثبت شد و برای مشاهده در سیستم‌های دیگر باید فایل جدید server.js (شامل /api/photos/batch) را در بک‌اند khabgah-api جایگزین کنید.`,
-        details:
-          unmatchedKeys.length > 0
-            ? unmatchedKeys.map((k) => `فایل با شناسه «${k}» در فهرست دانشجویان موجود یافت نشد.`)
-            : undefined,
-      });
-      return;
-    }
-
-    setBatchPhotoStatus({
-      type: 'error',
-      text:
-        cloudRes.errorMessage ||
-        'بارگذاری تصاویر در فضای ابری با خطا مواجه شد. لطفاً اتصال اینترنت و وضعیت سرور khabgah-api را بررسی کنید.',
-      details:
-        unmatchedKeys.length > 0
-          ? unmatchedKeys.map((k) => `فایل با شناسه «${k}» در فهرست دانشجویان موجود یافت نشد.`)
-          : undefined,
-    });
   };
 
   const handleSaveSettings = (e: React.FormEvent) => {
@@ -5524,7 +5413,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
 
                 <form
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault();
                     if (!newCnsFullName.trim() || !newCnsUsername.trim() || !newCnsPassword.trim()) return;
 
@@ -5540,9 +5429,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     });
 
                     if (res.success) {
+                      const syncRes = await Storage.waitForPendingCloudSync();
                       setCounselorsList(Storage.getCounselors());
                       setIsAddCounselorModalOpen(false);
-                      setCounselorFeedback(`مشاور «${res.counselor.fullName}» با موفقیت افزوده شد.`);
+                      setCounselorFeedback(
+                        syncRes.success
+                          ? `مشاور «${res.counselor.fullName}» با موفقیت افزوده و بلافاصله در سرور ابری و دیتابیس ثبت شد.`
+                          : `مشاور «${res.counselor.fullName}» در مرورگر ثبت شد اما ارسال به سرور ابری در صف تلاش مجدد قرار گرفت.`
+                      );
                       setNewCnsFullName('');
                       setNewCnsUsername('');
                       setNewCnsPassword('');
@@ -6473,13 +6367,144 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       })()}
 
       {/* ========================================================= */}
-      {/* ۹. تب پیکربندی سیستم، ظاهر و صفحه اول */}
+      {/* ۹. تب پیکربندی سیستم، ظاهر و صفحه اول (دسته‌بندی‌شده با دکمه‌های بازشونده) */}
       {/* ========================================================= */}
       {mainTab === 'settings' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
+        <div className="space-y-5 animate-in fade-in duration-200">
+          {/* فهرست دکمه‌های بازشونده دسته‌بندی تنظیمات (نمایش فقط بخش انتخاب‌شده) */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400">
+                  <Settings className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-black text-sm sm:text-base text-slate-900 dark:text-white">
+                    مرکز تنظیمات و پیکربندی سامانه
+                  </h2>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    روی هر دکمه کلیک کنید تا فقط همان بخش تنظیمات باز شود و بدون نیاز به اسکرول طولانی آن را مدیریت نمایید.
+                  </p>
+                </div>
+              </div>
 
-          {/* کارت دسترسی سریع به بخش مجزای مدیریت کاربران */}
-          <div className="bg-gradient-to-r from-indigo-50 via-teal-50 to-slate-50 dark:from-indigo-950/30 dark:via-teal-950/30 dark:to-slate-900 rounded-3xl p-5 border border-indigo-200/70 dark:border-indigo-900/50 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              {openSettingsSection && (
+                <button
+                  type="button"
+                  onClick={() => setOpenSettingsSection(null)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>بستن بخش بازشده</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
+              {(
+                [
+                  {
+                    key: 'general' as const,
+                    title: 'سال تحصیلی و انتخاب اتاق',
+                    desc: 'سال، نیمسال، بازه رزرو، دسترسی‌ها و مقیاس متن',
+                    icon: Calendar,
+                  },
+                  {
+                    key: 'appearance' as const,
+                    title: 'تنظیمات ظاهری سایت',
+                    desc: 'آرم و لوگو، فونت‌ها، تصاویر پس‌زمینه و بنر صفحه اول',
+                    icon: Palette,
+                  },
+                  {
+                    key: 'cloud' as const,
+                    title: 'اتصال سرور ابری و دیتابیس',
+                    desc: 'بررسی اتصال، ترافیک آنلاین و همگام‌سازی',
+                    icon: Server,
+                  },
+                  {
+                    key: 'backup' as const,
+                    title: 'پشتیبان‌گیری و بازیابی کامل',
+                    desc: 'فایل پشتیبان کامل با عکس‌ها، بازیابی و بازنشانی',
+                    icon: Database,
+                  },
+                  {
+                    key: 'home_notes' as const,
+                    title: 'نکات مهم صفحه اول',
+                    desc: 'ویرایش کارت‌های راهنما و نکات انتخاب اتاق',
+                    icon: Info,
+                  },
+                  {
+                    key: 'about' as const,
+                    title: 'محتوا و فایل‌های «درباره ما»',
+                    desc: 'متن‌ها، طراح، ۱۳ نقش و فایل‌های پیوست',
+                    icon: Edit3,
+                  },
+                  {
+                    key: 'quick_users' as const,
+                    title: 'دسترسی سریع کاربران',
+                    desc: 'ورود مستقیم به بخش‌های مختلف مدیریت کاربران',
+                    icon: Users,
+                  },
+                ] as const
+              ).map((item) => {
+                const IconComp = item.icon;
+                const isOpen = openSettingsSection === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() =>
+                      setOpenSettingsSection((prev) => (prev === item.key ? null : item.key))
+                    }
+                    className={`group text-right p-3 rounded-2xl border transition cursor-pointer flex items-start justify-between gap-2 ${
+                      isOpen
+                        ? 'bg-teal-600 text-white border-teal-600 shadow-md shadow-teal-600/20'
+                        : 'bg-slate-50/90 dark:bg-slate-800/60 text-slate-800 dark:text-slate-100 border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:bg-teal-50/50 dark:hover:bg-teal-950/30'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <div
+                        className={`p-2 rounded-xl shrink-0 transition ${
+                          isOpen
+                            ? 'bg-white/20 text-white'
+                            : 'bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 border border-slate-200/80 dark:border-slate-700'
+                        }`}
+                      >
+                        <IconComp className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-extrabold text-xs leading-snug truncate">
+                          {item.title}
+                        </div>
+                        <div
+                          className={`text-[10px] mt-0.5 line-clamp-2 leading-relaxed ${
+                            isOpen ? 'text-teal-50/90' : 'text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
+                          {item.desc}
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronDown
+                      className={`w-4 h-4 shrink-0 mt-0.5 transition-transform duration-200 ${
+                        isOpen ? 'rotate-180 text-white' : 'text-slate-400 group-hover:text-teal-600'
+                      }`}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+
+            {!openSettingsSection && (
+              <div className="px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-500 dark:text-slate-400">
+                برای مشاهده و ویرایش هر گروه از تنظیمات، روی یکی از دکمه‌های بالا کلیک کنید.
+              </div>
+            )}
+          </div>
+
+          {/* ۱. دسترسی سریع به مدیریت کاربران */}
+          {openSettingsSection === 'quick_users' && (
+          <div className="bg-gradient-to-r from-indigo-50 via-teal-50 to-slate-50 dark:from-indigo-950/30 dark:via-teal-950/30 dark:to-slate-900 rounded-3xl p-5 border border-indigo-200/70 dark:border-indigo-900/50 flex flex-col lg:flex-row lg:items-center justify-between gap-4 animate-in fade-in duration-150">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-2xl bg-teal-600 text-white shadow-sm shrink-0">
                 <Users className="w-5 h-5" />
@@ -6506,6 +6531,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { key: 'education' as const, label: `کارشناس آموزش (${educationStaffList.length})` },
                 { key: 'cultural' as const, label: `امور فرهنگی (${culturalStaffList.length})` },
                 { key: 'student_affairs' as const, label: `امور دانشجویی (${studentAffairsStaffList.length})` },
+                { key: 'security' as const, label: `حراست (${securityStaffList.length})` },
+                { key: 'vice_dean' as const, label: `معاونت دانشجویی (${viceDeanStaffList.length})` },
               ].map((item) => (
                 <button
                   key={item.key}
@@ -6521,12 +6548,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               ))}
             </div>
           </div>
+          )}
 
-          {/* پنل بررسی اتصال به سرور ابری، دیتابیس و گزارش آنلاین ترافیک */}
-          <CloudConnectionDiagnosticsPanel onRefreshData={onRefreshData} />
+          {/* ۲. پنل بررسی اتصال به سرور ابری، دیتابیس و گزارش آنلاین ترافیک */}
+          {openSettingsSection === 'cloud' && (
+            <div className="animate-in fade-in duration-150">
+              <CloudConnectionDiagnosticsPanel onRefreshData={onRefreshData} />
+            </div>
+          )}
 
-          {/* بخش تنظیمات سال تحصیلی، نیمسال و بازه زمانی مجاز انتخاب اتاق */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
+          {/* ۳. بخش تنظیمات سال تحصیلی، نیمسال و بازه زمانی مجاز انتخاب اتاق */}
+          {openSettingsSection === 'general' && (
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs animate-in fade-in duration-150">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
               <div className="flex items-center gap-2">
                 <Settings className="w-5 h-5 text-teal-600" />
@@ -6764,71 +6797,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             </form>
           </div>
+          )}
 
-          {/* بخش تطبیق و اتصال دسته‌جمعی عکس‌های دانشجویان از روی پوشه */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center gap-2 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
-              <FolderUp className="w-5 h-5 text-indigo-600" />
-              <div>
-                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                  بارگذاری دسته‌جمعی پوشه عکس‌های دانشجویان
-                </h3>
-                <p className="text-xs text-slate-400">
-                  انتخاب مستقیم کل پوشه عکس‌ها؛ سامانه بر اساس شماره دانشجویی نام فایل، عکس‌ها را به پرونده متصل می‌کند.
-                </p>
-              </div>
-            </div>
-
-            {batchPhotoStatus && (
-              <div
-                className={`mb-4 p-4 rounded-2xl text-xs ${
-                  batchPhotoStatus.type === 'loading'
-                    ? 'bg-indigo-50 text-indigo-800 border border-indigo-200'
-                    : batchPhotoStatus.type === 'success'
-                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                    : 'bg-rose-50 text-rose-800 border border-rose-200'
-                }`}
-              >
-                <div className="flex items-center gap-2 font-bold mb-1">
-                  {batchPhotoStatus.type === 'loading' ? (
-                    <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin shrink-0" />
-                  ) : batchPhotoStatus.type === 'success' ? (
-                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  )}
-                  <span>{batchPhotoStatus.text}</span>
-                </div>
-              </div>
-            )}
-
-            <div className="p-5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-dashed border-indigo-300 dark:border-indigo-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1">
-                <div className="font-bold text-indigo-900 dark:text-indigo-200">
-                  راهنمای بارگذاری پوشه عکس‌ها:
+          {/* ۴. دسته یکپارچه تنظیمات ظاهری سایت (آرم و لوگو، فونت‌ها، تصاویر پس‌زمینه و بنر صفحه اول) */}
+          {openSettingsSection === 'appearance' && (
+          <div className="space-y-5 animate-in fade-in duration-150">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400">
+                  <Palette className="w-5 h-5" />
                 </div>
                 <div>
-                  نام هر فایل عکس دقیقاً شماره دانشجویی دانشجو باشد (مثلاً: <span className="font-mono font-bold text-indigo-700 dark:text-indigo-300">4021001.jpg</span>).
+                  <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
+                    تنظیمات ظاهری سایت (آرم، فونت‌ها و تصاویر پس‌زمینه)
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    تمامی بخش‌های ظاهری سامانه شامل آرم دانشگاه، فونت‌ها، والپیپر صفحات و پس‌زمینه بنر اصلی به‌صورت یکجا در این دسته قرار دارند.
+                  </p>
                 </div>
               </div>
-
-              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
-                <label className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 cursor-pointer hover:scale-105">
-                  <FolderUp className="w-4 h-4" />
-                  <span>انتخاب و بارگذاری کل پوشه عکس‌ها</span>
-                  <input
-                    type="file"
-                    multiple
-                    {...({ webkitdirectory: '', directory: '' } as any)}
-                    onChange={handleBatchPhotosUpload}
-                    className="hidden"
-                  />
-                </label>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(
+                  [
+                    { id: 'all' as const, label: 'همه بخش‌های ظاهری' },
+                    { id: 'logo' as const, label: 'آرم و لوگو' },
+                    { id: 'fonts_bg' as const, label: 'فونت‌ها و پس‌زمینه سایت' },
+                    { id: 'hero' as const, label: 'پس‌زمینه بنر صفحه اول' },
+                  ] as const
+                ).map((tab) => {
+                  const active = appearanceSubTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setAppearanceSubTab(tab.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
+                        active
+                          ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
+                          : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
-          </div>
 
-          {/* بخش مدیریت و بارگذاری آرم دانشگاه */}
+          {/* ۴-۱. بخش مدیریت و بارگذاری آرم دانشگاه */}
+          {(appearanceSubTab === 'all' || appearanceSubTab === 'logo') && (
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
             <div className="flex items-center gap-2 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
               <ImageIcon className="w-5 h-5 text-teal-600" />
@@ -6881,8 +6898,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
           </div>
+          )}
 
-          {/* بخش مدیریت فونت‌های متعدد، انتخاب فونت نمایش و والپیپر اختصاصی */}
+          {/* ۴-۲. بخش مدیریت فونت‌های متعدد، انتخاب فونت نمایش و والپیپر اختصاصی */}
+          {(appearanceSubTab === 'all' || appearanceSubTab === 'fonts_bg') && (
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
@@ -7099,8 +7118,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
           </div>
+          )}
 
-          {/* بخش شخصی‌سازی پس‌زمینه باکس اصلی (بنر معرفی سامانه) صفحه اول */}
+          {/* ۴-۳. بخش شخصی‌سازی پس‌زمینه باکس اصلی (بنر معرفی سامانه) صفحه اول */}
+          {(appearanceSubTab === 'all' || appearanceSubTab === 'hero') && (
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
@@ -7303,9 +7324,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               })()}
             </div>
           </div>
+          )}
+          </div>
+          )}
 
-          {/* بخش ویرایش نکات مهم انتخاب اتاق و اسکان در صفحه اول سایت */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
+          {/* ۸. بخش ویرایش نکات مهم انتخاب اتاق و اسکان در صفحه اول سایت */}
+          {openSettingsSection === 'home_notes' && (
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5 animate-in fade-in duration-150">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <Info className="w-5 h-5 text-teal-600" />
@@ -7430,11 +7455,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             </div>
           </div>
+          )}
 
-          {/* بخش ویرایش کامل محتوا، کارت‌ها و فایل‌های پیوست بخش «درباره ما» */}
+          {/* ۹. بخش ویرایش کامل محتوا، کارت‌ها و فایل‌های پیوست بخش «درباره ما» */}
+          {openSettingsSection === 'about' && (
           <div
             id="admin-about-editor"
-            className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5"
+            className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5 animate-in fade-in duration-150"
           >
             <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
@@ -7821,9 +7848,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             </div>
           </div>
+          )}
 
-          {/* بخش پشتیبان‌گیری و بازنشانی */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+          {/* ۱۰. بخش پشتیبان‌گیری و بازنشانی */}
+          {openSettingsSection === 'backup' && (
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4 animate-in fade-in duration-150">
             <div>
               <h3 className="font-extrabold text-base text-slate-900 dark:text-white mb-1.5 flex items-center gap-2">
                 <Database className="w-5 h-5 text-emerald-600" />
@@ -7897,6 +7926,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             </div>
           </div>
+          )}
 
         </div>
       )}
@@ -8174,6 +8204,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <span>تخصیص / تغییر اتاق و تخت</span>
                     </button>
                   )}
+                </div>
+
+                {/* برچسب نوع سکونت دانشجو: خوابگاهی یا ترددی */}
+                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-1">
+                    <label className="font-extrabold text-slate-800 dark:text-slate-100 text-xs">
+                      برچسب نوع سکونت دانشجو (خوابگاهی / ترددی) *
+                    </label>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                      دانشجوی دارای اتاق به‌صورت پیش‌فرض «خوابگاهی» است
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStFormResidenceType('dormitory')}
+                      className={`p-2.5 rounded-xl border text-right transition cursor-pointer flex items-center gap-2.5 ${
+                        stFormResidenceType === 'dormitory'
+                          ? 'bg-teal-50 dark:bg-teal-950/60 border-teal-500 text-teal-900 dark:text-teal-100 ring-1 ring-teal-500/40'
+                          : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-teal-300'
+                      }`}
+                    >
+                      <div
+                        className={`p-1.5 rounded-lg shrink-0 ${
+                          stFormResidenceType === 'dormitory'
+                            ? 'bg-teal-600 text-white'
+                            : 'bg-white dark:bg-slate-900 text-slate-400 border border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        <Home className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-extrabold text-xs">دانشجوی خوابگاهی</div>
+                        <div className="text-[10px] opacity-75">ساکن سرا یا متقاضی اسکان خوابگاهی</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setStFormResidenceType('commuter')}
+                      className={`p-2.5 rounded-xl border text-right transition cursor-pointer flex items-center gap-2.5 ${
+                        stFormResidenceType === 'commuter'
+                          ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-500 text-amber-900 dark:text-amber-100 ring-1 ring-amber-500/40'
+                          : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-amber-300'
+                      }`}
+                    >
+                      <div
+                        className={`p-1.5 rounded-lg shrink-0 ${
+                          stFormResidenceType === 'commuter'
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-white dark:bg-slate-900 text-slate-400 border border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        <Bus className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-extrabold text-xs">دانشجوی ترددی</div>
+                        <div className="text-[10px] opacity-75">غیرخوابگاهی / تردد روزانه</div>
+                      </div>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

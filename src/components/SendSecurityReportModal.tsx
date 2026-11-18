@@ -23,6 +23,7 @@ import {
 } from '../types';
 import { SECURITY_REPORT_PRESETS, Storage } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
+import { isStudentDormResident } from '../utils/financeUtils';
 
 interface SendSecurityReportModalProps {
   isOpen: boolean;
@@ -135,7 +136,7 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
     const q = toEnglishDigits(deferredSearch.trim().toLowerCase());
     return allStudents.filter((s) => {
       if (dormFilter === 'commuter') {
-        if (s.assignedBedId && s.assignmentStatus !== 'none') return false;
+        if (isStudentDormResident(s)) return false;
       } else if (dormFilter !== 'all') {
         if (s.assignedDormId !== dormFilter) return false;
       }
@@ -411,7 +412,11 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
                         </div>
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-slate-400 shrink-0 text-left">
-                        {dName ? `${dName}${rNum ? ` · اتاق ${rNum}` : ''}` : 'ترددی / بدون اتاق'}
+                        {dName
+                          ? `${dName}${rNum ? ` · اتاق ${rNum}` : ''}`
+                          : isStudentDormResident(st)
+                          ? 'خوابگاهی (بدون اتاق)'
+                          : 'ترددی / بدون اتاق'}
                       </div>
                     </button>
                   );

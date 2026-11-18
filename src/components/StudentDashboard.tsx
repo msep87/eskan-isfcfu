@@ -23,6 +23,7 @@ import {
   computeStudentFinancialInfo,
   FINANCIAL_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
+  getStudentResidenceType,
 } from '../utils/financeUtils';
 import { RoommatesCard } from './RoommatesCard';
 import { VisualBedPicker } from './VisualBedPicker';
@@ -192,7 +193,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   // انتخابات شورای صنفی (رأی‌گیری منحصراً در بازه فعال isActiveWindow مجاز است)
   const allGuildElections: GuildElection[] = Storage.getGuildElections();
   const activeGuildElectionsCount = allGuildElections.filter((e) => e.isActiveWindow).length;
-  const isStudentDormResident = Boolean(student.assignedBedId && student.assignmentStatus !== 'none');
+  const isStudentDormResident = getStudentResidenceType(student) === 'dormitory';
 
   // برنامه‌های ورزشی و تربیت بدنی منتشرشده و متناسب با سرا و جنسیت دانشجو
   const allSportsRegistrations: SportsRegistration[] = Storage.getSportsRegistrations();

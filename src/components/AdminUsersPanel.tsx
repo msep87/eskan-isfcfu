@@ -18,6 +18,7 @@ import {
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
+import { getStudentResidenceType } from '../utils/financeUtils';
 import { compareStudents } from '../utils/studentSearchSort';
 import { ExcelImportTab } from './ExcelImportModal';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
@@ -70,6 +71,8 @@ import {
   Landmark,
   UtensilsCrossed,
   ArrowLeftRight,
+  Home,
+  Bus,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -185,6 +188,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const [stDormFilter, setStDormFilter] = useState('all');
   const [stRoomFilter, setStRoomFilter] = useState('');
   const [stAssignFilter, setStAssignFilter] = useState<'all' | 'confirmed' | 'temporary' | 'none'>('all');
+  const [stResidenceFilter, setStResidenceFilter] = useState<'all' | 'dormitory' | 'commuter'>('all');
   const [stProfileFilter, setStProfileFilter] = useState<'all' | 'completed' | 'incomplete'>('all');
   const [stLocationFilter, setStLocationFilter] = useState('');
 
@@ -649,6 +653,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         if (status !== stAssignFilter) return false;
       }
 
+      if (stResidenceFilter !== 'all') {
+        if (getStudentResidenceType(st) !== stResidenceFilter) return false;
+      }
+
       if (stProfileFilter === 'completed' && !st.isProfileCompleted) return false;
       if (stProfileFilter === 'incomplete' && st.isProfileCompleted) return false;
 
@@ -669,9 +677,36 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     stDormFilter,
     deferredStRoomFilter,
     stAssignFilter,
+    stResidenceFilter,
     stProfileFilter,
     deferredStLocationFilter,
   ]);
+
+  const residenceStats = useMemo(() => {
+    let dormitory = 0;
+    let commuter = 0;
+    students.forEach((st) => {
+      if (getStudentResidenceType(st) === 'dormitory') dormitory += 1;
+      else commuter += 1;
+    });
+    return { dormitory, commuter };
+  }, [students]);
+
+  const handleQuickToggleResidenceType = (st: Student) => {
+    const current = getStudentResidenceType(st);
+    const next = current === 'dormitory' ? 'commuter' : 'dormitory';
+    const res = Storage.updateStudentAdmin(st.studentId, { residenceType: next });
+    if (res.success) {
+      setFeedback({
+        type: 'success',
+        message: `برچسب دانشجو «${st.fullName}» به «${next === 'dormitory' ? 'خوابگاهی' : 'ترددی'}» تغییر یافت.`,
+      });
+      onRefreshData();
+      setTimeout(() => setFeedback(null), 3000);
+    } else {
+      setFeedback({ type: 'error', message: res.message });
+    }
+  };
 
   const sortedStudents = useMemo(() => {
     if (stSortBy === 'default') return filteredStudents;
@@ -690,6 +725,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     stDormFilter,
     deferredStRoomFilter,
     stAssignFilter,
+    stResidenceFilter,
     stProfileFilter,
     deferredStLocationFilter,
     stSortBy,
@@ -759,6 +795,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     stDormFilter !== 'all' ||
     Boolean(stRoomFilter.trim()) ||
     stAssignFilter !== 'all' ||
+    stResidenceFilter !== 'all' ||
     stProfileFilter !== 'all' ||
     Boolean(stLocationFilter.trim()) ||
     stSortBy !== 'default';
@@ -770,6 +807,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     setStDormFilter('all');
     setStRoomFilter('');
     setStAssignFilter('all');
+    setStResidenceFilter('all');
     setStProfileFilter('all');
     setStLocationFilter('');
     setStSortBy('default');
@@ -1611,12 +1649,25 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       }
     }
 
-    await Storage.waitForPendingCloudSync();
+    const syncRes = await Storage.waitForPendingCloudSync();
     setStaffModalOpen(false);
     onRefreshData();
+    if (syncRes.success) {
+      showToast(
+        'success',
+        editingStaffId
+          ? `مشخصات «${cleanName}» با موفقیت بروزرسانی و بلافاصله در سرور ابری و دیتابیس ثبت شد.`
+          : `کاربر جدید «${cleanName}» با موفقیت ایجاد و بلافاصله در سرور ابری و دیتابیس ثبت شد.`
+      );
+    } else {
+      showToast(
+        'error',
+        `تغییرات «${cleanName}» در مرورگر ذخیره شد اما ارسال فوری به سرور ابری با اختلال مواجه شد؛ تلاش مجدد خودکار در پس‌زمینه فعال است.`
+      );
+    }
   };
 
-  const handlePasswordSubmit = (e: React.FormEvent) => {
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passwordModalTarget) return;
     setPasswordError('');
@@ -1629,13 +1680,18 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setPasswordError(res.message);
       return;
     }
+    const syncRes = await Storage.waitForPendingCloudSync();
     setPasswordModalTarget(null);
     setNewPasswordInput('');
     onRefreshData();
-    showToast('success', res.message);
+    if (syncRes.success) {
+      showToast('success', `${res.message} (در سرور ابری ثبت شد)`);
+    } else {
+      showToast('error', `${res.message} — هشدار: همگام‌سازی ابری در صف تلاش مجدد قرار گرفت.`);
+    }
   };
 
-  const handleQuickResetPassword = () => {
+  const handleQuickResetPassword = async () => {
     if (!passwordModalTarget) return;
     const res = Storage.adminResetUserPassword(
       passwordModalTarget.role,
@@ -1646,51 +1702,54 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setPasswordError(res.message);
       return;
     }
+    const syncRes = await Storage.waitForPendingCloudSync();
     setPasswordModalTarget(null);
     setNewPasswordInput('');
     onRefreshData();
-    showToast('success', res.message);
+    if (syncRes.success) {
+      showToast('success', `${res.message} (در سرور ابری ثبت شد)`);
+    } else {
+      showToast('error', `${res.message} — هشدار: همگام‌سازی ابری در صف تلاش مجدد قرار گرفت.`);
+    }
   };
 
-  const handleConfirmDeleteStaff = () => {
+  const handleConfirmDeleteStaff = async () => {
     if (!deleteTarget) return;
+    let baseMessage = `کاربر «${deleteTarget.fullName}» حذف گردید.`;
     if (deleteTarget.role === 'supervisor') {
       const updated = Storage.getSupervisors().filter((s) => s.id !== deleteTarget.id);
       Storage.setSupervisors(updated);
-      showToast('success', `سرپرست «${deleteTarget.fullName}» حذف گردید.`);
+      baseMessage = `سرپرست «${deleteTarget.fullName}» حذف گردید.`;
     } else if (deleteTarget.role === 'maintenance') {
-      const res = Storage.deleteMaintenanceStaff(deleteTarget.id);
-      showToast('success', res.message);
+      baseMessage = Storage.deleteMaintenanceStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'warehouse') {
-      const res = Storage.deleteWarehouseStaff(deleteTarget.id);
-      showToast('success', res.message);
+      baseMessage = Storage.deleteWarehouseStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'counselor') {
       Storage.deleteCounselor(deleteTarget.id);
-      showToast('success', `مشاور «${deleteTarget.fullName}» حذف گردید.`);
+      baseMessage = `مشاور «${deleteTarget.fullName}» حذف گردید.`;
     } else if (deleteTarget.role === 'finance') {
-      const res = Storage.deleteFinanceStaff(deleteTarget.id);
-      showToast('success', res.message);
+      baseMessage = Storage.deleteFinanceStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'procurement') {
-      const res = Storage.deleteProcurementStaff(deleteTarget.id);
-      showToast('success', res.message);
+      baseMessage = Storage.deleteProcurementStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'education') {
-      const res = Storage.deleteEducationStaff(deleteTarget.id);
-      showToast('success', res.message);
+      baseMessage = Storage.deleteEducationStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'cultural') {
-      const res = Storage.deleteCulturalStaff(deleteTarget.id);
-      showToast('success', res.message);
+      baseMessage = Storage.deleteCulturalStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'student_affairs') {
-      const res = Storage.deleteStudentAffairsStaff(deleteTarget.id);
-      showToast('success', res.message);
+      baseMessage = Storage.deleteStudentAffairsStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'security') {
-      const res = Storage.deleteSecurityStaff(deleteTarget.id);
-      showToast('success', res.message);
+      baseMessage = Storage.deleteSecurityStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'vice_dean') {
-      const res = Storage.deleteViceDeanStaff(deleteTarget.id);
-      showToast('success', res.message);
+      baseMessage = Storage.deleteViceDeanStaff(deleteTarget.id).message;
     }
+    const syncRes = await Storage.waitForPendingCloudSync();
     setDeleteTarget(null);
     onRefreshData();
+    if (syncRes.success) {
+      showToast('success', `${baseMessage} (در سرور ابری اعمال شد)`);
+    } else {
+      showToast('error', `${baseMessage} — هشدار: همگام‌سازی ابری در صف تلاش مجدد قرار گرفت.`);
+    }
   };
 
   const roleCategories = [
@@ -1984,11 +2043,43 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 <GraduationCap className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                  مدیریت دانشجویان ({filteredStudents.length} از {students.length} دانشجو)
-                </h3>
-                <p className="text-xs text-slate-400">
-                  جستجوی پیشرفته بر اساس نام، کد دانشجویی، کد ملی، رشته، ورودی، سرا، اتاق، وضعیت اسکان و محل سکونت
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    مدیریت دانشجویان ({filteredStudents.length} از {students.length} دانشجو)
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStResidenceFilter((prev) => (prev === 'dormitory' ? 'all' : 'dormitory'))
+                    }
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${
+                      stResidenceFilter === 'dormitory'
+                        ? 'bg-teal-600 text-white border-teal-600'
+                        : 'bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800 hover:bg-teal-100'
+                    }`}
+                    title="فیلتر سریع دانشجویان خوابگاهی"
+                  >
+                    <Home className="w-3 h-3" />
+                    <span>خوابگاهی: {residenceStats.dormitory.toLocaleString('fa-IR')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStResidenceFilter((prev) => (prev === 'commuter' ? 'all' : 'commuter'))
+                    }
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${
+                      stResidenceFilter === 'commuter'
+                        ? 'bg-amber-600 text-white border-amber-600'
+                        : 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800 hover:bg-amber-100'
+                    }`}
+                    title="فیلتر سریع دانشجویان ترددی"
+                  >
+                    <Bus className="w-3 h-3" />
+                    <span>ترددی: {residenceStats.commuter.toLocaleString('fa-IR')}</span>
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  جستجوی پیشرفته بر اساس نام، کد دانشجویی، کد ملی، رشته، ورودی، سرا، اتاق، نوع سکونت (خوابگاهی/ترددی) و محل سکونت
                 </p>
               </div>
             </div>
@@ -2213,6 +2304,21 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    نوع سکونت (خوابگاهی / ترددی):
+                  </label>
+                  <select
+                    value={stResidenceFilter}
+                    onChange={(e) => setStResidenceFilter(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-bold"
+                  >
+                    <option value="all">همه دانشجویان (خوابگاهی و ترددی)</option>
+                    <option value="dormitory">فقط دانشجویان خوابگاهی ({residenceStats.dormitory})</option>
+                    <option value="commuter">فقط دانشجویان ترددی ({residenceStats.commuter})</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
                     وضعیت تکمیل پرونده:
                   </label>
                   <select
@@ -2226,7 +2332,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   </select>
                 </div>
 
-                <div className="sm:col-span-2">
+                <div>
                   <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
                     استان، شهر یا نشانی محل سکونت:
                   </label>
@@ -2592,25 +2698,47 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           )}
                         </td>
                         <td className="p-3">
-                          {d && r && b ? (
-                            <div>
-                              <span className="font-bold text-teal-600">اتاق {r.roomNumber}</span>
-                              <span className="text-[11px] text-slate-400 block">
-                                {d.name} - {b.label}
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col items-start gap-1">
-                              <span className="text-slate-400 text-[11px]">فاقد اسکان</span>
-                              <button
-                                type="button"
-                                onClick={() => onAssignStudentRoom(st)}
-                                className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 text-[10px] font-bold transition cursor-pointer"
-                              >
-                                + تعیین اتاق
-                              </button>
-                            </div>
-                          )}
+                          {(() => {
+                            const resType = getStudentResidenceType(st);
+                            const isDorm = resType === 'dormitory';
+                            return (
+                              <div className="space-y-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickToggleResidenceType(st)}
+                                  title="کلیک برای تغییر برچسب بین خوابگاهی و ترددی"
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border transition cursor-pointer ${
+                                    isDorm
+                                      ? 'bg-teal-50 dark:bg-teal-950/70 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-700 hover:bg-teal-100'
+                                      : 'bg-amber-50 dark:bg-amber-950/70 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700 hover:bg-amber-100'
+                                  }`}
+                                >
+                                  {isDorm ? <Home className="w-3 h-3" /> : <Bus className="w-3 h-3" />}
+                                  <span>{isDorm ? 'خوابگاهی' : 'ترددی'}</span>
+                                </button>
+
+                                {d && r && b ? (
+                                  <div>
+                                    <span className="font-bold text-teal-600">اتاق {r.roomNumber}</span>
+                                    <span className="text-[11px] text-slate-400 block">
+                                      {d.name} - {b.label}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-start gap-1">
+                                    <span className="text-slate-400 text-[11px]">فاقد اتاق</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => onAssignStudentRoom(st)}
+                                      className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 text-[10px] font-bold transition cursor-pointer"
+                                    >
+                                      + تعیین اتاق
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="p-3">
                           <div className="font-mono text-[11px]" dir="ltr">

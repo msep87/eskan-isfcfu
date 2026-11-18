@@ -1,3 +1,5 @@
+export type StudentResidenceType = 'dormitory' | 'commuter';
+
 export interface Student {
   studentId: string; // شماره دانشجویی
   nationalId: string; // کد ملی
@@ -21,6 +23,7 @@ export interface Student {
   photoUrl?: string; // تصویر دانشجو
   avatarColor?: string;
   isProfileCompleted: boolean;
+  residenceType?: StudentResidenceType; // برچسب وضعیت سکونت: خوابگاهی یا ترددی (دانشجوی دارای اتاق پیش‌فرض خوابگاهی است)
   assignedDormId?: string;
   assignedRoomId?: string;
   assignedBedId?: string;

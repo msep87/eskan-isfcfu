@@ -36,6 +36,8 @@ import {
   PAYMENT_METHOD_LABELS,
   isStudentDormResident,
   normalizePersianText,
+  parseResidenceTypeValue,
+  getStudentResidenceType,
 } from './financeUtils';
 
 // تبدیل اعداد فارسی و عربی به انگلیسی جهت پردازش دقیق
@@ -166,6 +168,20 @@ const KNOWN_STUDENT_FIELD_MAP: Record<string, keyof Student> = {
   'تخت': 'assignedBedNumber',
   'bed': 'assignedBedNumber',
   'bed_number': 'assignedBedNumber',
+
+  // ستون نوع سکونت (خوابگاهی / ترددی):
+  'نوع سکونت': 'residenceType',
+  'وضعیت سکونت': 'residenceType',
+  'نوع دانشجو': 'residenceType',
+  'نوع اسکان': 'residenceType',
+  'خوابگاهی/ترددی': 'residenceType',
+  'خوابگاهی / ترددی': 'residenceType',
+  'خوابگاهی یا ترددی': 'residenceType',
+  'ترددی/خوابگاهی': 'residenceType',
+  'نوع سکونت (خوابگاهی/ترددی)': 'residenceType',
+  'residence_type': 'residenceType',
+  'residencetype': 'residenceType',
+  'residence': 'residenceType',
 };
 
 // خواندن اکسل دانشجویان
@@ -266,24 +282,27 @@ export async function parseStudentExcel(file: File): Promise<{
           const colors = ['#0d9488', '#0284c7', '#6366f1', '#8b5cf6', '#ec4899', '#f59e0b'];
           studentObj.avatarColor = colors[index % colors.length];
 
-          // بررسی و تعیین وضعیت اسکان بر اساس پر یا خالی بودن ستون‌های اکسل
+          // بررسی و تعیین وضعیت اسکان و برچسب خوابگاهی / ترددی بر اساس ستون‌های اکسل
           const cleanDorm = String(studentObj.assignedDormName || '').trim();
           const cleanRoom = toEnglishDigits(String(studentObj.assignedRoomNumber || '')).trim();
           const cleanBedRaw = toEnglishDigits(String(studentObj.assignedBedNumber || '')).trim();
+          const parsedResidence = parseResidenceTypeValue(studentObj.residenceType);
 
           if (cleanRoom && cleanBedRaw) {
-            // اگر ستون‌های اسکان پر بود یعنی قبلاً توسط مدیر ساماندهی شده است (و دانشجو می‌تواند بعداً درخواست تغییر اتاق/تخت بدهد)
+            // اگر ستون‌های اسکان پر بود یعنی قبلاً توسط مدیر ساماندهی شده است (دانشجوی دارای اتاق پیش‌فرض خوابگاهی است)
             const bedNum = parseInt(cleanBedRaw, 10);
             studentObj.assignmentStatus = 'confirmed';
             studentObj.assignedDormName = cleanDorm;
             studentObj.assignedRoomNumber = cleanRoom;
             studentObj.assignedBedNumber = isNaN(bedNum) ? cleanBedRaw : bedNum;
+            studentObj.residenceType = parsedResidence || 'dormitory';
           } else {
-            // اگر ستون‌ها خالی بود یعنی خود دانشجو باید وارد سامانه شده و اتاق را انتخاب کند
+            // اگر ستون‌های اتاق خالی بود
             studentObj.assignmentStatus = 'none';
             studentObj.assignedDormName = undefined;
             studentObj.assignedRoomNumber = undefined;
             studentObj.assignedBedNumber = undefined;
+            studentObj.residenceType = parsedResidence;
           }
 
           students.push(studentObj as Student);
@@ -450,7 +469,8 @@ export async function downloadStudentTemplate() {
       'سرای سال قبل': 'سرای شهید باهنر',
       'اتاق سال قبل': '۱۰۴',
       'امتیاز سال قبل': '95',
-      // ستون‌های تخصیص اتاق (پر شده: تخصیص قطعی توسط مدیر | فرد=پایین، زوج=بالا)
+      // ستون نوع سکونت (خوابگاهی / ترددی) و ستون‌های تخصیص اتاق (پر شده: تخصیص قطعی توسط مدیر | فرد=پایین، زوج=بالا)
+      'نوع سکونت': 'خوابگاهی',
       'نام سرا': 'سرای شهید باهنر - بلوک سینا',
       'شماره اتاق': '۱۰۱',
       'شماره تخت': 1, // فرد: طبقه پایین
@@ -478,7 +498,8 @@ export async function downloadStudentTemplate() {
       'سرای سال قبل': 'عدم سکونت (ورودی جدید)',
       'اتاق سال قبل': '-',
       'امتیاز سال قبل': '100',
-      // ستون‌های تخصیص اتاق خالی: خود دانشجو در سامانه اتاق انتخاب می‌کند
+      // دانشجوی خوابگاهی فاقد اتاق: خود دانشجو در سامانه اتاق انتخاب می‌کند
+      'نوع سکونت': 'خوابگاهی',
       'نام سرا': '',
       'شماره اتاق': '',
       'شماره تخت': '',
@@ -506,6 +527,7 @@ export async function downloadStudentTemplate() {
       'اتاق سال قبل': '۲۰۲',
       'امتیاز سال قبل': '90',
       // ستون‌های تخصیص اتاق: تخت زوج = طبقه بالا
+      'نوع سکونت': 'خوابگاهی',
       'نام سرا': 'سرای شهید باهنر - بلوک سینا',
       'شماره اتاق': '۱۰۱',
       'شماره تخت': 2, // زوج: طبقه بالا
@@ -533,6 +555,7 @@ export async function downloadStudentTemplate() {
       'اتاق سال قبل': '۱۰۱',
       'امتیاز سال قبل': '94',
       // ستون‌های تخصیص اتاق: تخت فرد = طبقه پایین
+      'نوع سکونت': 'خوابگاهی',
       'نام سرا': 'سرای شهید باهنر - بلوک سینا',
       'شماره اتاق': '۱۰۱',
       'شماره تخت': 3, // فرد: طبقه پایین
@@ -549,9 +572,9 @@ export async function downloadStudentTemplate() {
       'ترم ورود': '۴۰۲۱',
       'نام پدر': 'رضا',
       'تاریخ تولد': '1383/02/10',
-      'استان محل سکونت': 'کرمان',
-      'شهر محل سکونت': 'رفسنجان',
-      'شماره تلفن': '03434221100',
+      'استان محل سکونت': 'اصفهان',
+      'شهر محل سکونت': 'اصفهان',
+      'شماره تلفن': '03134221100',
       'شماره همراه': '09138889900',
       'شماره ضروری': '09139990011',
       'شماره والدین': '09137770022',
@@ -559,7 +582,8 @@ export async function downloadStudentTemplate() {
       'سرای سال قبل': 'عدم سکونت',
       'اتاق سال قبل': '-',
       'امتیاز سال قبل': '100',
-      // ستون‌های تخصیص اتاق: خالی (دانشجو خود در سامانه اتاق و تخت انتخاب می‌کند)
+      // دانشجوی ترددی (غیرخوابگاهی)
+      'نوع سکونت': 'ترددی',
       'نام سرا': '',
       'شماره اتاق': '',
       'شماره تخت': '',
@@ -673,6 +697,7 @@ export async function exportStudentsToExcel(students: Student[], dormsMap: Map<s
       'شماره ضروری': s.emergencyPhone,
       'شماره والدین': s.parentPhone,
       'نشانی دقیق': s.postalAddress || '',
+      'نوع سکونت': getStudentResidenceType(s) === 'dormitory' ? 'خوابگاهی' : 'ترددی',
       'سرای تخصیص یافته': s.assignedDormId ? dormsMap.get(s.assignedDormId) || s.assignedDormId : 'تخصیص نیافته',
       'اتاق تخصیص یافته': s.assignedRoomId ? roomsMap.get(s.assignedRoomId) || s.assignedRoomId : 'تخصیص نیافته',
       'وضعیت پروفایل': s.isProfileCompleted ? 'تکمیل شده' : 'ناقص',

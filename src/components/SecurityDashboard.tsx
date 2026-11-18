@@ -41,6 +41,7 @@ import {
 import { Storage } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
+import { isStudentDormResident } from '../utils/financeUtils';
 
 interface SecurityDashboardProps {
   securityStaff: SecurityStaff;
@@ -333,7 +334,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
     const q = toEnglishDigits(deferredStudentSearch.trim().toLowerCase());
     return students.filter((s) => {
       if (studentDormFilter === 'commuter') {
-        if (s.assignedBedId && s.assignmentStatus !== 'none') return false;
+        if (isStudentDormResident(s)) return false;
       } else if (studentDormFilter !== 'all') {
         if (s.assignedDormId !== studentDormFilter) return false;
       }
@@ -1242,6 +1243,10 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                               <span className="font-bold text-teal-700 dark:text-teal-300">{dName}</span>
                               {rNum && <div className="text-[11px] text-slate-500">اتاق {rNum}</div>}
                             </div>
+                          ) : isStudentDormResident(st) ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 font-bold text-[11px]">
+                              خوابگاهی (بدون اتاق)
+                            </span>
                           ) : (
                             <span className="text-slate-400">ترددی / بدون اتاق</span>
                           )}
