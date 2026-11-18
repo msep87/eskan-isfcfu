@@ -22,6 +22,7 @@ import { getStudentResidenceType } from '../utils/financeUtils';
 import { compareStudents } from '../utils/studentSearchSort';
 import { ExcelImportTab } from './ExcelImportModal';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
+import { StudentReferralModal } from './StudentReferralModal';
 import {
   Users,
   GraduationCap,
@@ -73,6 +74,7 @@ import {
   ArrowLeftRight,
   Home,
   Bus,
+  Send,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -120,6 +122,9 @@ interface AdminUsersPanelProps {
   onEvictStudent: (student: Student) => void;
   studentSecondaryEditEnabled?: boolean;
   onToggleStudentSecondaryEdit?: () => void;
+  actorId?: string;
+  actorName?: string;
+  actorRole?: 'admin' | 'supervisor' | 'vice_dean';
 }
 
 type StaffRole =
@@ -174,6 +179,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   onEvictStudent,
   studentSecondaryEditEnabled = false,
   onToggleStudentSecondaryEdit,
+  actorId = 'admin',
+  actorName = 'مدیریت کل امور سراها',
+  actorRole = 'admin',
 }) => {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null
@@ -204,6 +212,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
 
   // مدال پرونده کامل دانشجو با کلیک روی نام (عکس، اخطار، تذکر، پیام، ارزیابی فردی و اتاق)
   const [profileModalStudentId, setProfileModalStudentId] = useState<string | null>(null);
+  const [referralTargetStudent, setReferralTargetStudent] = useState<Student | null>(null);
 
   // جستجوی پیشرفته کارکنان (سرپرست، تأسیسات، انبار، مشاور)
   const [staffQuery, setStaffQuery] = useState('');
@@ -2835,6 +2844,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                               <Award className="w-3.5 h-3.5" />
                             </button>
 
+                            <button
+                              type="button"
+                              onClick={() => setReferralTargetStudent(st)}
+                              className="px-2 py-1 rounded-lg bg-fuchsia-50 dark:bg-fuchsia-950/70 text-fuchsia-800 dark:text-fuchsia-300 hover:bg-fuchsia-100 border border-fuchsia-200 dark:border-fuchsia-800 transition cursor-pointer inline-flex items-center gap-1 text-[10px] font-extrabold"
+                              title="ارجاع دانشجو به مشاور، امور دانشجویی یا حراست با ثبت گزارش"
+                            >
+                              <Send className="w-3 h-3 shrink-0" />
+                              <span>ارجاع / گزارش</span>
+                            </button>
+
                             {st.assignedBedId && st.assignmentStatus !== 'none' ? (
                               <>
                                 <button
@@ -5367,6 +5386,21 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           />
         );
       })()}
+
+      <StudentReferralModal
+        isOpen={Boolean(referralTargetStudent)}
+        onClose={() => setReferralTargetStudent(null)}
+        student={referralTargetStudent}
+        dorms={dorms}
+        rooms={rooms}
+        actorId={actorId}
+        actorName={actorName}
+        actorRole={actorRole}
+        onSuccess={(msg) => {
+          showToast('success', msg);
+          onRefreshData();
+        }}
+      />
     </div>
   );
 };

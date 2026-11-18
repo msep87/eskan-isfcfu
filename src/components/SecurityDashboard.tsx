@@ -20,10 +20,9 @@ import {
   X,
   UserCheck,
   Gavel,
-  ChevronRight,
-  ChevronLeft,
   Info,
   BookOpen,
+  Send,
 } from 'lucide-react';
 import {
   Bed,
@@ -42,6 +41,12 @@ import { Storage } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
 import { isStudentDormResident } from '../utils/financeUtils';
+import { StudentReferralModal } from './StudentReferralModal';
+import {
+  StudentListPaginationBar,
+  DEFAULT_STUDENT_PAGE_SIZE,
+  getPaginationMeta,
+} from './StudentListPaginationBar';
 
 interface SecurityDashboardProps {
   securityStaff: SecurityStaff;
@@ -101,6 +106,11 @@ const REPORTER_ROLE_LABELS: Record<SecurityReport['reportedByRole'], string> = {
   maintenance: 'واحد تأسیسات و فنی',
   student_affairs: 'امور دانشجویی',
   vice_dean: 'معاونت دانشجویی',
+  security: 'واحد حراست و انتظامات',
+  counselor: 'مرکز مشاوره',
+  finance: 'امور مالی و حسابداری',
+  education: 'امور آموزش',
+  cultural: 'امور فرهنگی',
 };
 
 const EVAL_TYPE_LABELS: Record<StudentEvaluation['type'], { label: string; cls: string }> = {
@@ -203,15 +213,16 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
   const deferredRecordSearch = useDeferredValue(recordSearch);
   const [recordDormFilter, setRecordDormFilter] = useState<string>('all');
 
-  // فیلترها و صفحه‌بندی بانک اطلاعات دانشجویان (۵۰ نفر در صفحه)
+  // فیلترها و صفحه‌بندی بانک اطلاعات دانشجویان (پیش‌فرض ۵۰ نفر در صفحه)
   const [studentSearch, setStudentSearch] = useState('');
   const deferredStudentSearch = useDeferredValue(studentSearch);
   const [studentDormFilter, setStudentDormFilter] = useState<string>('all');
   const [studentPage, setStudentPage] = useState(1);
-  const [studentPageSize, setStudentPageSize] = useState(50);
+  const [studentPageSize, setStudentPageSize] = useState<number | 'all'>(DEFAULT_STUDENT_PAGE_SIZE);
 
-  // مودال پرونده جامع دانشجو
+  // مودال پرونده جامع دانشجو و ارجاع
   const [dossierStudent, setDossierStudent] = useState<Student | null>(null);
+  const [referralTargetStudent, setReferralTargetStudent] = useState<Student | null>(null);
 
   const filteredReports = useMemo(() => {
     const q = toEnglishDigits(deferredReportSearch.trim().toLowerCase());
@@ -348,12 +359,12 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
     });
   }, [students, deferredStudentSearch, studentDormFilter, dormMap, roomMap]);
 
-  const totalStudentPages = Math.max(1, Math.ceil(filteredStudents.length / studentPageSize));
-  const safeStudentPage = Math.min(studentPage, totalStudentPages);
+  const { totalPages: totalStudentPages, safePage: safeStudentPage, startIndex: secStartIdx, endIndex: secEndIdx } =
+    getPaginationMeta(filteredStudents.length, studentPage, studentPageSize);
   const paginatedStudents = useMemo(() => {
-    const start = (safeStudentPage - 1) * studentPageSize;
-    return filteredStudents.slice(start, start + studentPageSize);
-  }, [filteredStudents, safeStudentPage, studentPageSize]);
+    if (studentPageSize === 'all') return filteredStudents;
+    return filteredStudents.slice(secStartIdx, secEndIdx);
+  }, [filteredStudents, studentPageSize, secStartIdx, secEndIdx]);
 
   const pendingSecurityReportsCount = securityReports.filter(
     (r) => r.status === 'pending' || r.status === 'reviewing'
@@ -1163,16 +1174,18 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
               <select
                 value={studentPageSize}
                 onChange={(e) => {
-                  setStudentPageSize(Number(e.target.value));
+                  const val = e.target.value;
+                  setStudentPageSize(val === 'all' ? 'all' : Number(val));
                   setStudentPage(1);
                 }}
-                className="px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
+                className="px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold"
               >
-                {[25, 50, 100, 200].map((n) => (
+                {[25, 50, 100, 200, 500].map((n) => (
                   <option key={n} value={n}>
-                    {n.toLocaleString('fa-IR')}
+                    {n.toLocaleString('fa-IR')} {n === 50 ? '(پیش‌فرض)' : ''}
                   </option>
                 ))}
+                <option value="all">همه ({filteredStudents.length.toLocaleString('fa-IR')})</option>
               </select>
             </div>
           </div>
@@ -1188,12 +1201,12 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                     <th className="px-3 py-3">تماس و محل سکونت</th>
                     <th className="px-3 py-3">وضعیت سرا / اتاق</th>
                     <th className="px-3 py-3">امتیازات و اخطارها</th>
-                    <th className="px-3 py-3 text-center">پرونده</th>
+                    <th className="px-3 py-3 text-center">عملیات</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {paginatedStudents.map((st, idx) => {
-                    const rowIndex = (safeStudentPage - 1) * studentPageSize + idx + 1;
+                    const rowIndex = secStartIdx + idx + 1;
                     const dName = st.assignedDormId ? dormMap.get(st.assignedDormId)?.name : st.assignedDormName;
                     const rNum = st.assignedRoomId ? roomMap.get(st.assignedRoomId)?.roomNumber : st.assignedRoomNumber;
                     const stats = studentStatsMap.get(st.studentId);
@@ -1263,14 +1276,25 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setDossierStudent(st)}
-                            className="px-3 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/50 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>پرونده</span>
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => setDossierStudent(st)}
+                              className="px-2.5 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/50 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>پرونده</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setReferralTargetStudent(st)}
+                              className="px-2.5 py-1.5 rounded-xl bg-fuchsia-50 hover:bg-fuchsia-100 dark:bg-fuchsia-950/50 text-fuchsia-800 dark:text-fuchsia-300 border border-fuchsia-200 dark:border-fuchsia-800 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer"
+                              title="ارجاع دانشجو به مشاور، امور دانشجویی یا حراست با ثبت گزارش"
+                            >
+                              <Send className="w-3 h-3" />
+                              <span>ارجاع</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1279,32 +1303,17 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
               </table>
             </div>
 
-            {/* صفحه‌بندی */}
-            {totalStudentPages > 1 && (
-              <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                <span className="text-slate-500 tabular-nums">
-                  صفحه {safeStudentPage.toLocaleString('fa-IR')} از {totalStudentPages.toLocaleString('fa-IR')} (مجموع {filteredStudents.length.toLocaleString('fa-IR')} دانشجو)
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    disabled={safeStudentPage <= 1}
-                    onClick={() => setStudentPage((p) => Math.max(1, p - 1))}
-                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-40 cursor-pointer"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={safeStudentPage >= totalStudentPages}
-                    onClick={() => setStudentPage((p) => Math.min(totalStudentPages, p + 1))}
-                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-40 cursor-pointer"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
+            <div className="p-3 border-t border-slate-100 dark:border-slate-800">
+              <StudentListPaginationBar
+                totalItems={filteredStudents.length}
+                currentPage={safeStudentPage}
+                pageSize={studentPageSize}
+                onPageChange={setStudentPage}
+                onPageSizeChange={setStudentPageSize}
+                showPageSizeSelector={false}
+                compact
+              />
+            </div>
           </div>
         </div>
       )}
@@ -1576,6 +1585,21 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
           </div>
         </div>
       )}
+      <StudentReferralModal
+        isOpen={Boolean(referralTargetStudent)}
+        onClose={() => setReferralTargetStudent(null)}
+        student={referralTargetStudent}
+        dorms={dorms}
+        rooms={rooms}
+        actorId={securityStaff.id}
+        actorName={securityStaff.fullName}
+        actorRole="security"
+        onSuccess={(msg) => {
+          setFeedbackMsg(msg);
+          setTimeout(() => setFeedbackMsg(null), 4000);
+          onRefreshData();
+        }}
+      />
     </div>
   );
 };

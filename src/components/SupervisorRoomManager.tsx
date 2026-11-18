@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { AppSettings, Dormitory, Room, Bed, Student } from '../types';
 import { Storage } from '../utils/storage';
+import { normSearchText } from '../utils/studentSearchSort';
 import {
   Users,
   Bed as BedIcon,
@@ -25,6 +26,7 @@ import {
   ShieldAlert,
   ClipboardCheck,
   Building2,
+  X,
 } from 'lucide-react';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 import { RoomRosterPrintModal } from './RoomRosterPrintModal';
@@ -178,11 +180,75 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
     );
   });
 
-  const filteredRooms = dormRooms.filter((r) => {
-    if (selectedFloor !== 'all' && r.floor !== selectedFloor) return false;
-    if (searchQuery.trim() && !r.roomNumber.includes(searchQuery.trim())) return false;
-    return true;
-  });
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const normalizedSearch = normSearchText(deferredSearchQuery);
+
+  const doesStudentMatchSearch = (st: Student, q: string) => {
+    if (!q) return false;
+    const haystack = [
+      st.fullName,
+      st.studentId,
+      st.nationalId,
+      st.mobile,
+      st.fieldOfStudy,
+      st.city,
+      st.province,
+    ]
+      .map(normSearchText)
+      .join(' ');
+    return haystack.includes(q);
+  };
+
+  const filteredRooms = useMemo(() => {
+    return dormRooms.filter((r) => {
+      if (selectedFloor !== 'all' && r.floor !== selectedFloor) return false;
+      if (!normalizedSearch) return true;
+      if (normSearchText(r.roomNumber).includes(normalizedSearch)) return true;
+      const roomBeds = bedsByRoomId.get(r.id) || [];
+      return roomBeds.some((b) => {
+        if (!b.studentId) return false;
+        const st = studentById.get(b.studentId);
+        return st ? doesStudentMatchSearch(st, normalizedSearch) : false;
+      });
+    });
+  }, [dormRooms, selectedFloor, normalizedSearch, bedsByRoomId, studentById]);
+
+  const otherDormMatches = useMemo(() => {
+    if (!normalizedSearch) return [];
+    const results: {
+      dorm: Dormitory;
+      matchedRoomsCount: number;
+      matchedStudentNames: string[];
+    }[] = [];
+
+    dorms.forEach((d) => {
+      if (d.id === selectedDormId) return;
+      const dRooms = rooms.filter((r) => r.dormId === d.id);
+      let matchedRoomsCount = 0;
+      const matchedNames: string[] = [];
+
+      dRooms.forEach((r) => {
+        const roomBeds = bedsByRoomId.get(r.id) || [];
+        const matchedOccupants = roomBeds
+          .map((b) => (b.studentId ? studentById.get(b.studentId) : undefined))
+          .filter((st): st is Student => Boolean(st))
+          .filter((st) => doesStudentMatchSearch(st, normalizedSearch));
+
+        if (normSearchText(r.roomNumber).includes(normalizedSearch) || matchedOccupants.length > 0) {
+          matchedRoomsCount += 1;
+          matchedOccupants.forEach((st) => {
+            if (matchedNames.length < 4) matchedNames.push(`${st.fullName} (اتاق ${r.roomNumber})`);
+          });
+        }
+      });
+
+      if (matchedRoomsCount > 0) {
+        results.push({ dorm: d, matchedRoomsCount, matchedStudentNames: matchedNames });
+      }
+    });
+
+    return results;
+  }, [normalizedSearch, dorms, selectedDormId, rooms, bedsByRoomId, studentById]);
 
   // تخت‌های خالی این سرا برای جابجایی
   const vacantBedsInDorm = useMemo(
@@ -434,20 +500,74 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
               </button>
             )}
             <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               <input
                 type="text"
-                placeholder="جستجوی شماره اتاق..."
+                placeholder="جستجوی اتاق یا نام، کد دانشجویی، کد ملی..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pr-8 pl-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs w-40"
+                className="pr-8 pl-7 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs w-56 sm:w-72 focus:outline-none focus:ring-2 focus:ring-amber-400"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  title="پاک کردن جستجو"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
 
+      {/* راهنمای نتایج جستجو در سایر سراها */}
+      {normalizedSearch && otherDormMatches.length > 0 && (
+        <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-bold">
+            <Search className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>نتایجی مطابق جستجو در سایر سراها یافت شد:</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {otherDormMatches.map((item) => (
+              <button
+                key={item.dorm.id}
+                type="button"
+                onClick={() => {
+                  setSelectedDormId(item.dorm.id);
+                  setSelectedFloor('all');
+                }}
+                className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold transition cursor-pointer shadow-xs"
+                title={item.matchedStudentNames.join('، ')}
+              >
+                {item.dorm.name} ({item.matchedRoomsCount} اتاق
+                {item.matchedStudentNames.length > 0 ? ` — ${item.matchedStudentNames[0]}` : ''})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* لیست اتاق‌ها و ساکنین با اکشن‌های سرپرستی */}
+      {filteredRooms.length === 0 ? (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-10 border border-slate-200 dark:border-slate-800 text-center space-y-2">
+          <Search className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-700" />
+          <div className="text-sm font-bold text-slate-700 dark:text-slate-200">
+            اتاق یا دانشجویی مطابق جستجو در سرای فعلی یافت نشد.
+          </div>
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="px-3.5 py-1.5 rounded-xl bg-teal-600 text-white text-xs font-bold cursor-pointer"
+            >
+              نمایش همه اتاق‌های {currentDorm?.name || 'سرا'}
+            </button>
+          )}
+        </div>
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {filteredRooms.map((room) => {
           const roomBeds = bedsByRoomId.get(room.id) || [];
@@ -459,6 +579,14 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
             .filter((item): item is { bed: Bed; student: Student } => Boolean(item.student));
 
           const vacantCount = roomBeds.filter((b) => !b.studentId).length;
+          const matchingOccupantIds = normalizedSearch
+            ? new Set(
+                roomStudents
+                  .filter(({ student: st }) => doesStudentMatchSearch(st, normalizedSearch))
+                  .map(({ student: st }) => st.studentId)
+              )
+            : new Set<string>();
+          const hasRoomSearchHighlight = Boolean(normalizedSearch) && matchingOccupantIds.size > 0;
 
           // نماینده اتاق: در صورت عدم انتخاب دستی، نفر اول لیست ساکنین اتاق به صورت پیش‌فرض نماینده است
           const explicitRepItem = room.representativeStudentId
@@ -474,17 +602,27 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
           return (
             <div
               key={room.id}
-              className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs relative"
+              className={`bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-xs relative transition ${
+                hasRoomSearchHighlight
+                  ? 'border-2 border-amber-400 dark:border-amber-500 ring-2 ring-amber-400/30 shadow-md'
+                  : 'border border-slate-200/80 dark:border-slate-800'
+              }`}
             >
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4 gap-2 flex-wrap">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-extrabold text-base text-slate-900 dark:text-white">
                       اتاق {room.roomNumber}
                     </span>
                     <span className="text-[11px] px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                       طبقه {room.floor}
                     </span>
+                    {hasRoomSearchHighlight && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-lg bg-amber-400 text-slate-950 font-black flex items-center gap-1 shadow-xs">
+                        <Search className="w-3 h-3" />
+                        <span>نتیجه جستجو ({matchingOccupantIds.size} دانشجو)</span>
+                      </span>
+                    )}
                   </div>
                   <div className="text-[11px] text-slate-400 mt-0.5">
                     ظرفیت: {room.capacity} نفر ({roomStudents.length} ساکن، {vacantCount} تخت خالی)
@@ -640,17 +778,31 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                 <div className="space-y-3">
                   {roomStudents.map(({ bed, student: st }) => {
                     const isRepresentative = effectiveRepId === st.studentId;
+                    const isSearchMatch = matchingOccupantIds.has(st.studentId);
                     const curAtt = attendance[st.studentId] || 'present';
 
                     return (
                       <div
                         key={st.studentId}
                         className={`p-3.5 rounded-2xl text-xs transition ${
-                          isRepresentative
+                          isSearchMatch
+                            ? 'bg-gradient-to-l from-amber-100 via-yellow-50 to-amber-50 dark:from-amber-950/85 dark:via-amber-900/45 dark:to-yellow-950/35 border-2 border-amber-500 dark:border-amber-400 shadow-md ring-2 ring-amber-400/50'
+                            : isRepresentative
                             ? 'bg-gradient-to-l from-amber-50 via-purple-50/90 to-fuchsia-50/70 dark:from-purple-950/70 dark:via-indigo-950/55 dark:to-amber-950/35 border-2 border-purple-500 dark:border-purple-400 shadow-md ring-2 ring-purple-400/25'
                             : 'bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/60'
                         }`}
                       >
+                        {isSearchMatch && (
+                          <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-amber-300/80 dark:border-amber-700/60">
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-black text-amber-900 dark:text-amber-200">
+                              <Search className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                              <span>دانشجوی مطابق جستجو</span>
+                            </span>
+                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-amber-400 text-slate-950">
+                              کد: {st.studentId}
+                            </span>
+                          </div>
+                        )}
                         {isRepresentative && (
                           <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-purple-200/80 dark:border-purple-700/50">
                             <span className="inline-flex items-center gap-1.5 text-[11px] font-black text-purple-800 dark:text-purple-200">
@@ -866,6 +1018,7 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
           );
         })}
       </div>
+      )}
 
       {/* مدال جابجایی دستی دانشجو */}
       {movingStudent && (

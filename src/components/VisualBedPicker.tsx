@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import confetti from 'canvas-confetti';
 import { Dormitory, Room, Bed, Student, AppSettings } from '../types';
 import { Storage } from '../utils/storage';
+import { normSearchText } from '../utils/studentSearchSort';
 import {
   Bed as BedIcon,
   CheckCircle,
@@ -77,6 +78,25 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
   } | null>(null);
 
   const currentDorm = dorms.find((d) => d.id === selectedDormId) || dorms[0];
+  const studentById = useMemo(() => new Map(students.map((s) => [s.studentId, s])), [students]);
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const normalizedSearch = normSearchText(deferredSearchQuery);
+
+  const doesOccupantMatchSearch = (st?: Student, q?: string) => {
+    if (!isSupervisorMode || !st || !q) return false;
+    const haystack = [
+      st.fullName,
+      st.studentId,
+      st.nationalId,
+      st.mobile,
+      st.fieldOfStudy,
+      st.city,
+      st.province,
+    ]
+      .map(normSearchText)
+      .join(' ');
+    return haystack.includes(q);
+  };
 
   // فیلتر کردن اتاق‌ها
   const dormRooms = rooms.filter((r) => r.dormId === selectedDormId);
@@ -88,15 +108,50 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
 
     if (filterVacantOnly && vacantCount === 0) return false;
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim();
-      const matchesNum = room.roomNumber.includes(q);
-      const matchesField = room.allowedFields?.some((f) => f.includes(q));
-      if (!matchesNum && !matchesField) return false;
+    if (normalizedSearch) {
+      const matchesNum = normSearchText(room.roomNumber).includes(normalizedSearch);
+      const matchesField = room.allowedFields?.some((f) =>
+        normSearchText(f).includes(normalizedSearch)
+      );
+      const matchesOccupant =
+        isSupervisorMode &&
+        roomBeds.some((b) =>
+          b.studentId ? doesOccupantMatchSearch(studentById.get(b.studentId), normalizedSearch) : false
+        );
+      if (!matchesNum && !matchesField && !matchesOccupant) return false;
     }
 
     return true;
   });
+
+  const otherDormSearchMatches = useMemo(() => {
+    if (!isSupervisorMode || !normalizedSearch) return [];
+    const results: { dorm: Dormitory; count: number; sampleLabel: string }[] = [];
+    dorms.forEach((d) => {
+      if (d.id === selectedDormId) return;
+      const dRooms = rooms.filter((r) => r.dormId === d.id);
+      let count = 0;
+      let sampleLabel = '';
+      dRooms.forEach((r) => {
+        const roomBeds = beds.filter((b) => b.roomId === r.id);
+        const matched = roomBeds
+          .map((b) => (b.studentId ? studentById.get(b.studentId) : undefined))
+          .filter((st): st is Student => doesOccupantMatchSearch(st, normalizedSearch));
+        if (
+          normSearchText(r.roomNumber).includes(normalizedSearch) ||
+          r.allowedFields?.some((f) => normSearchText(f).includes(normalizedSearch)) ||
+          matched.length > 0
+        ) {
+          count += 1;
+          if (!sampleLabel && matched[0]) {
+            sampleLabel = `${matched[0].fullName} (اتاق ${r.roomNumber})`;
+          }
+        }
+      });
+      if (count > 0) results.push({ dorm: d, count, sampleLabel });
+    });
+    return results;
+  }, [isSupervisorMode, normalizedSearch, dorms, selectedDormId, rooms, beds, studentById]);
 
   // چک کردن مجاز بودن دانشجو برای این اتاق
   const checkEligibility = (room: Room): { eligible: boolean; reason?: string } => {
@@ -372,14 +427,26 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
             </label>
 
             <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="شماره اتاق یا رشته..."
-                className="pr-8 pl-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs w-36 sm:w-44 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                placeholder={isSupervisorMode ? 'جستجوی اتاق، رشته یا نام/کد دانشجو...' : 'شماره اتاق یا رشته...'}
+                className={`pr-8 pl-7 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 ${
+                  isSupervisorMode ? 'w-52 sm:w-64' : 'w-36 sm:w-44'
+                }`}
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  title="پاک کردن جستجو"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -420,6 +487,32 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
 
       </div>
 
+      {/* نتایج جستجو در سایر سراها (حالت سرپرستی و مدیر) */}
+      {isSupervisorMode && normalizedSearch && otherDormSearchMatches.length > 0 && (
+        <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-bold">
+            <Search className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>نتیجه جستجو در سایر سراها یافت شد:</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {otherDormSearchMatches.map((item) => (
+              <button
+                key={item.dorm.id}
+                type="button"
+                onClick={() => {
+                  setSelectedDormId(item.dorm.id);
+                  setSelectedFloor('all');
+                  setFilterVacantOnly(false);
+                }}
+                className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold transition cursor-pointer shadow-xs"
+              >
+                {item.dorm.name} ({item.count} اتاق{item.sampleLabel ? ` — ${item.sampleLabel}` : ''})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* شبکه نمایش اتاق‌ها */}
       {filteredRooms.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8">
@@ -444,24 +537,46 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
             });
 
             const hasCurrentStudentBed = roomBeds.some((b) => b.studentId === student?.studentId);
+            const matchingSearchStudentIds =
+              isSupervisorMode && normalizedSearch
+                ? new Set(
+                    roomBeds
+                      .filter((b) =>
+                        b.studentId
+                          ? doesOccupantMatchSearch(studentById.get(b.studentId), normalizedSearch)
+                          : false
+                      )
+                      .map((b) => b.studentId as string)
+                  )
+                : new Set<string>();
+            const hasSearchHighlightRoom = matchingSearchStudentIds.size > 0;
 
             return (
               <div
                 key={room.id}
                 className={`bg-white dark:bg-slate-900 rounded-3xl p-5 border transition-all duration-200 relative overflow-hidden shadow-xs hover:shadow-md ${
-                  hasCurrentStudentBed
+                  hasSearchHighlightRoom
+                    ? 'border-2 border-amber-500 dark:border-amber-400 ring-2 ring-amber-400/40 shadow-md'
+                    : hasCurrentStudentBed
                     ? 'border-amber-400 dark:border-amber-600 ring-2 ring-amber-400/20'
                     : !eligibility.eligible
                     ? 'border-slate-200 dark:border-slate-800 opacity-80'
                     : 'border-slate-200 dark:border-slate-800 hover:border-teal-400 dark:hover:border-teal-600'
                 }`}
               >
-                {/* بنر وضعیت شما در اتاق */}
-                {hasCurrentStudentBed && (
-                  <div className="absolute top-0 right-0 bg-gradient-to-l from-amber-500 to-amber-400 text-slate-900 font-extrabold text-[10px] px-3 py-1 rounded-bl-xl shadow-xs flex items-center gap-1">
-                    <Sparkles className="w-3 h-3" />
-                    <span>اتاق فعلی شما</span>
+                {/* بنر وضعیت شما یا نتیجه جستجو در اتاق */}
+                {hasSearchHighlightRoom ? (
+                  <div className="mb-3 -mx-1 px-3 py-1.5 rounded-xl bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 font-extrabold text-[11px] flex items-center gap-1.5">
+                    <Search className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>نتیجه جستجو ({matchingSearchStudentIds.size} دانشجو در این اتاق)</span>
                   </div>
+                ) : (
+                  hasCurrentStudentBed && (
+                    <div className="absolute top-0 right-0 bg-gradient-to-l from-amber-500 to-amber-400 text-slate-900 font-extrabold text-[10px] px-3 py-1 rounded-bl-xl shadow-xs flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" />
+                      <span>اتاق فعلی شما</span>
+                    </div>
+                  )
                 )}
 
                 {/* سربرگ کارت اتاق */}
@@ -529,6 +644,10 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
                             students={students}
                             isEligible={eligibility.eligible}
                             isSupervisorMode={isSupervisorMode}
+                            isSearchMatch={
+                              Boolean(pair.upper.studentId) &&
+                              matchingSearchStudentIds.has(pair.upper.studentId!)
+                            }
                             onClick={() => handleBedClick(pair.upper!, room)}
                           />
                         )}
@@ -542,6 +661,10 @@ export const VisualBedPicker: React.FC<VisualBedPickerProps> = ({
                             students={students}
                             isEligible={eligibility.eligible}
                             isSupervisorMode={isSupervisorMode}
+                            isSearchMatch={
+                              Boolean(pair.lower.studentId) &&
+                              matchingSearchStudentIds.has(pair.lower.studentId!)
+                            }
                             onClick={() => handleBedClick(pair.lower!, room)}
                           />
                         )}
@@ -723,6 +846,7 @@ interface BedUnitProps {
   students: Student[];
   isEligible: boolean;
   isSupervisorMode?: boolean;
+  isSearchMatch?: boolean;
   onClick: () => void;
 }
 
@@ -733,6 +857,7 @@ const BedUnit: React.FC<BedUnitProps> = ({
   students,
   isEligible,
   isSupervisorMode = false,
+  isSearchMatch = false,
   onClick,
 }) => {
   const isOccupied = Boolean(bed.studentId);
@@ -744,7 +869,12 @@ const BedUnit: React.FC<BedUnitProps> = ({
   let badgeClass = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';
   let statusText = 'خالی و آماده انتخاب';
 
-  if (isMyBed) {
+  if (isSearchMatch) {
+    bgClass =
+      'bg-amber-100/95 dark:bg-amber-950/75 border-2 border-amber-500 dark:border-amber-400 ring-2 ring-amber-400/60 shadow-md';
+    badgeClass = 'bg-amber-400 text-slate-950 font-black';
+    statusText = occupant?.fullName || 'نتیجه جستجو';
+  } else if (isMyBed) {
     bgClass = isTemporary
       ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-400 dark:border-amber-600 ring-2 ring-amber-400/40'
       : 'bg-teal-50 dark:bg-teal-950/40 border-teal-500 dark:border-teal-500 ring-2 ring-teal-500/40';
@@ -793,12 +923,24 @@ const BedUnit: React.FC<BedUnitProps> = ({
           </span>
         </span>
         <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold truncate max-w-[95px] ${badgeClass}`}>
-          {isMyBed ? (isTemporary ? 'تخت شما (موقت)' : 'تخت شما') : isOccupied ? (isTemporary ? 'رزرو موقت' : 'اشغال') : 'خالی'}
+          {isSearchMatch
+            ? 'نتیجه جستجو'
+            : isMyBed
+            ? isTemporary
+              ? 'تخت شما (موقت)'
+              : 'تخت شما'
+            : isOccupied
+            ? isTemporary
+              ? 'رزرو موقت'
+              : 'اشغال'
+            : 'خالی'}
         </span>
       </div>
 
       <div className="flex items-center gap-1.5 my-1">
-        {isMyBed ? (
+        {isSearchMatch ? (
+          <Search className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+        ) : isMyBed ? (
           <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
         ) : isOccupied ? (
           <User className="w-3.5 h-3.5 text-blue-500 shrink-0" />

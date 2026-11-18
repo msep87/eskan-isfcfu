@@ -23,6 +23,12 @@ import { SupervisorDashboard } from './SupervisorDashboard';
 import { StudentAffairsDashboard } from './StudentAffairsDashboard';
 import { CulturalDashboard } from './CulturalDashboard';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
+import { StudentReferralModal } from './StudentReferralModal';
+import {
+  StudentListPaginationBar,
+  DEFAULT_STUDENT_PAGE_SIZE,
+  getPaginationMeta,
+} from './StudentListPaginationBar';
 import {
   Landmark,
   ShieldCheck,
@@ -46,8 +52,6 @@ import {
   Clock,
   CheckCircle2,
   ArrowUpDown,
-  ChevronRight,
-  ChevronLeft,
   Wrench,
   Dumbbell,
   Vote,
@@ -164,9 +168,10 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
   >('all');
   const [sortKey, setSortKey] = useState<ReportSortKey>('fullName');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [pageSize, setPageSize] = useState<number>(50);
+  const [pageSize, setPageSize] = useState<number | 'all'>(DEFAULT_STUDENT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [referralTargetStudent, setReferralTargetStudent] = useState<Student | null>(null);
 
   // فیلترهای پایش پیام‌های کل سامانه
   const [msgDomainFilter, setMsgDomainFilter] = useState<string>('all');
@@ -424,13 +429,12 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
     studentFlagsMap,
   ]);
 
-  const totalReportPages = pageSize <= 0 ? 1 : Math.max(1, Math.ceil(filteredReportStudents.length / pageSize));
-  const safeReportPage = Math.min(currentPage, totalReportPages);
+  const { totalPages: totalReportPages, safePage: safeReportPage, startIndex: vdStartIdx, endIndex: vdEndIdx } =
+    getPaginationMeta(filteredReportStudents.length, currentPage, pageSize);
   const paginatedReportStudents = useMemo(() => {
-    if (pageSize <= 0) return filteredReportStudents;
-    const start = (safeReportPage - 1) * pageSize;
-    return filteredReportStudents.slice(start, start + pageSize);
-  }, [filteredReportStudents, safeReportPage, pageSize]);
+    if (pageSize === 'all') return filteredReportStudents;
+    return filteredReportStudents.slice(vdStartIdx, vdEndIdx);
+  }, [filteredReportStudents, pageSize, vdStartIdx, vdEndIdx]);
 
   // آمار تفکیکی بر اساس سرا
   const dormBreakdown = useMemo(() => {
@@ -1302,23 +1306,15 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
                 <BedIcon className="w-4 h-4 text-teal-600" />
                 <span>فهرست تفصیلی دانشجویان مطابق فیلترهای اعمال‌شده ({filteredReportStudents.length} نفر)</span>
               </h3>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-slate-500">تعداد در صفحه:</span>
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setCurrentPage(1);
-                  }}
-                  className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                >
-                  <option value={25}>۲۵</option>
-                  <option value={50}>۵۰</option>
-                  <option value={100}>۱۰۰</option>
-                  <option value={0}>نمایش همه ({filteredReportStudents.length})</option>
-                </select>
-              </div>
             </div>
+
+            <StudentListPaginationBar
+              totalItems={filteredReportStudents.length}
+              currentPage={safeReportPage}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={setPageSize}
+            />
 
             <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
               <table className="w-full text-right text-xs">
@@ -1363,18 +1359,19 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
                       </button>
                     </th>
                     <th className="p-2.5">سوابق (حراست/انضباط/اخطار)</th>
+                    <th className="p-2.5 text-center">عملیات</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {paginatedReportStudents.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-slate-400">
+                      <td colSpan={10} className="p-8 text-center text-slate-400">
                         دانشجویی با این ترکیب فیلتر یافت نشد.
                       </td>
                     </tr>
                   ) : (
                     paginatedReportStudents.map((s, idx) => {
-                      const rowNum = pageSize > 0 ? (safeReportPage - 1) * pageSize + idx + 1 : idx + 1;
+                      const rowNum = vdStartIdx + idx + 1;
                       const dormObj = s.assignedDormId ? dormMap.get(s.assignedDormId) : undefined;
                       const roomObj = s.assignedRoomId ? roomMap.get(s.assignedRoomId) : undefined;
                       const secC = studentFlagsMap.secCount.get(s.studentId) || 0;
@@ -1450,6 +1447,17 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
                               )}
                             </div>
                           </td>
+                          <td className="p-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setReferralTargetStudent(s)}
+                              className="px-2.5 py-1 rounded-xl bg-fuchsia-50 hover:bg-fuchsia-100 dark:bg-fuchsia-950/60 text-fuchsia-800 dark:text-fuchsia-300 border border-fuchsia-200 dark:border-fuchsia-800 text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                              title="ارجاع دانشجو به مشاور، امور دانشجویی یا حراست با ثبت گزارش"
+                            >
+                              <Send className="w-3 h-3" />
+                              <span>ارجاع / گزارش</span>
+                            </button>
+                          </td>
                         </tr>
                       );
                     })
@@ -1458,33 +1466,15 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
               </table>
             </div>
 
-            {pageSize > 0 && totalReportPages > 1 && (
-              <div className="flex items-center justify-between text-xs pt-2">
-                <span className="text-slate-500">
-                  صفحه {safeReportPage} از {totalReportPages}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    disabled={safeReportPage <= 1}
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 disabled:opacity-40 cursor-pointer flex items-center gap-1"
-                  >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                    <span>قبلی</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={safeReportPage >= totalReportPages}
-                    onClick={() => setCurrentPage((p) => Math.min(totalReportPages, p + 1))}
-                    className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 disabled:opacity-40 cursor-pointer flex items-center gap-1"
-                  >
-                    <span>بعدی</span>
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
+            <StudentListPaginationBar
+              totalItems={filteredReportStudents.length}
+              currentPage={safeReportPage}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={setPageSize}
+              showPageSizeSelector={false}
+              compact
+            />
           </div>
         </div>
       )}
@@ -1726,6 +1716,22 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
         rooms={rooms}
         onSuccess={(msg) => {
           setSecurityBanner(msg);
+          onRefreshData();
+        }}
+      />
+
+      <StudentReferralModal
+        isOpen={Boolean(referralTargetStudent)}
+        onClose={() => setReferralTargetStudent(null)}
+        student={referralTargetStudent}
+        dorms={dorms}
+        rooms={rooms}
+        actorId={staff.id}
+        actorName={staff.fullName}
+        actorRole="vice_dean"
+        onSuccess={(msg) => {
+          setSecurityBanner(msg);
+          setTimeout(() => setSecurityBanner(null), 4000);
           onRefreshData();
         }}
       />

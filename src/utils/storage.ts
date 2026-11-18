@@ -9072,7 +9072,17 @@ export const Storage = {
     referralText: string;
     referredById: string;
     referredByName: string;
-    referredByRole: 'supervisor' | 'admin' | 'vice_dean';
+    referredByRole:
+      | 'supervisor'
+      | 'admin'
+      | 'vice_dean'
+      | 'student_affairs'
+      | 'security'
+      | 'counselor'
+      | 'finance'
+      | 'education'
+      | 'cultural'
+      | 'maintenance';
     notifyStudentInbox?: boolean;
   }): { success: boolean; message: string; referrals?: DisciplinaryReferral[] } => {
     if (!payload.students || payload.students.length === 0) {
@@ -11344,7 +11354,17 @@ export const Storage = {
     description: string;
     reportedById: string;
     reportedByName: string;
-    reportedByRole: 'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'vice_dean';
+    reportedByRole:
+      | 'supervisor'
+      | 'admin'
+      | 'vice_dean'
+      | 'student_affairs'
+      | 'security'
+      | 'counselor'
+      | 'finance'
+      | 'education'
+      | 'cultural'
+      | 'maintenance';
   }): { success: boolean; message: string; report?: SecurityReport } => {
     if (!payload.students || payload.students.length === 0) {
       return { success: false, message: 'لطفاً حداقل یک دانشجو برای ارسال گزارش به حراست انتخاب نمایید.' };
@@ -11408,12 +11428,29 @@ export const Storage = {
     list.unshift(newReport);
     Storage.setSecurityReports(list);
 
-    const roleFa: Record<'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'vice_dean', string> = {
+    const roleFa: Record<
+      | 'supervisor'
+      | 'admin'
+      | 'vice_dean'
+      | 'student_affairs'
+      | 'security'
+      | 'counselor'
+      | 'finance'
+      | 'education'
+      | 'cultural'
+      | 'maintenance',
+      string
+    > = {
       supervisor: 'سرپرست سرا',
       admin: 'مدیر کل سامانه',
       maintenance: 'واحد تأسیسات',
       student_affairs: 'امور دانشجویی',
       vice_dean: 'معاونت دانشجویی',
+      security: 'واحد حراست',
+      counselor: 'مرکز مشاوره',
+      finance: 'امور مالی و حسابداری',
+      education: 'امور آموزش',
+      cultural: 'امور فرهنگی',
     };
 
     Storage.addActivityLog({

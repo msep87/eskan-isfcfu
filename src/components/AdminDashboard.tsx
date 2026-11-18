@@ -69,6 +69,7 @@ import { AdminSurveyManager } from './AdminSurveyManager';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { CloudConnectionDiagnosticsPanel } from './CloudConnectionDiagnosticsPanel';
 import { getStudentResidenceType } from '../utils/financeUtils';
+import { normSearchText } from '../utils/studentSearchSort';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
 import { STANDARD_FONTS, readMultipleFontFiles } from '../utils/fonts';
 import {
@@ -387,6 +388,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [roomFloorInput, setRoomFloorInput] = useState(1);
   const [roomCapacityInput, setRoomCapacityInput] = useState(4);
   const [structureDormFilter, setStructureDormFilter] = useState<string>(dorms[0]?.id || 'all');
+  const [structureSearchQuery, setStructureSearchQuery] = useState<string>('');
 
   // ویرایش و تغییر نام سرا و اتاق توسط مدیر
   const [editingDorm, setEditingDorm] = useState<Dormitory | null>(null);
@@ -2498,6 +2500,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           onEvictStudent={handleAdminEvictStudent}
           studentSecondaryEditEnabled={Boolean(localSettings.studentSecondaryEditEnabled)}
           onToggleStudentSecondaryEdit={handleToggleStudentSecondaryEdit}
+          actorId="admin"
+          actorName="مدیریت کل امور سراها"
+          actorRole="admin"
         />
       )}
 
@@ -2991,250 +2996,409 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </span>
               </div>
 
-              {/* فیلتر سرا */}
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-slate-500">مشاهده ساختار سرا:</span>
-                <button
-                  onClick={() => setStructureDormFilter('all')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    structureDormFilter === 'all'
-                      ? 'bg-amber-500 text-white shadow-xs'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                  }`}
-                >
-                  همه سراها ({dorms.length})
-                </button>
-                {dorms.map((d) => (
+              {/* فیلتر سرا و جستجوی اتاق / دانشجو */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-slate-500">مشاهده ساختار سرا:</span>
                   <button
-                    key={d.id}
-                    onClick={() => setStructureDormFilter(d.id)}
+                    onClick={() => setStructureDormFilter('all')}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
-                      structureDormFilter === d.id
+                      structureDormFilter === 'all'
                         ? 'bg-amber-500 text-white shadow-xs'
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                     }`}
                   >
-                    {d.name}
+                    همه سراها ({dorms.length})
                   </button>
-                ))}
+                  {dorms.map((d) => (
+                    <button
+                      key={d.id}
+                      onClick={() => setStructureDormFilter(d.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                        structureDormFilter === d.id
+                          ? 'bg-amber-500 text-white shadow-xs'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      {d.name}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative w-full lg:w-80">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={structureSearchQuery}
+                    onChange={(e) => setStructureSearchQuery(e.target.value)}
+                    placeholder="جستجوی اتاق یا نام، کد دانشجویی، کد ملی دانشجو..."
+                    className="w-full pr-9 pl-8 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                  {structureSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setStructureSearchQuery('')}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                      title="پاک کردن جستجو"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* نمایش اطلاعات و ساختار سراهای فیلترشده */}
-              <div className="space-y-6">
-                {(structureDormFilter === 'all' ? dorms : dorms.filter((d) => d.id === structureDormFilter)).map((dorm) => {
+              {(() => {
+                const q = normSearchText(structureSearchQuery);
+                const doesResidentMatch = (st?: Student) => {
+                  if (!q || !st) return false;
+                  return [
+                    st.fullName,
+                    st.studentId,
+                    st.nationalId,
+                    st.mobile,
+                    st.fieldOfStudy,
+                    st.city,
+                    st.province,
+                  ]
+                    .map(normSearchText)
+                    .join(' ')
+                    .includes(q);
+                };
+
+                const otherDormHits = q
+                  ? dorms
+                      .filter((d) => structureDormFilter !== 'all' && d.id !== structureDormFilter)
+                      .map((d) => {
+                        const dRooms = rooms.filter((r) => r.dormId === d.id);
+                        let matchedRoomCount = 0;
+                        let sampleLabel = '';
+                        dRooms.forEach((rm) => {
+                          const rmBeds = beds.filter((b) => b.roomId === rm.id);
+                          const matchedStudents = rmBeds
+                            .map((b) => (b.studentId ? students.find((s) => s.studentId === b.studentId) : undefined))
+                            .filter((st): st is Student => doesResidentMatch(st));
+                          if (normSearchText(rm.roomNumber).includes(q) || matchedStudents.length > 0) {
+                            matchedRoomCount += 1;
+                            if (!sampleLabel && matchedStudents[0]) {
+                              sampleLabel = `${matchedStudents[0].fullName} (اتاق ${rm.roomNumber})`;
+                            }
+                          }
+                        });
+                        return { dorm: d, matchedRoomCount, sampleLabel };
+                      })
+                      .filter((x) => x.matchedRoomCount > 0)
+                  : [];
+
+                const visibleDorms = (
+                  structureDormFilter === 'all' ? dorms : dorms.filter((d) => d.id === structureDormFilter)
+                ).filter((dorm) => {
+                  if (!q || structureDormFilter !== 'all') return true;
                   const dormRooms = rooms.filter((r) => r.dormId === dorm.id);
-                  const dormBeds = beds.filter((b) => b.dormId === dorm.id);
-                  const dormOccupied = dormBeds.filter((b) => b.studentId).length;
-                  const dormVacant = dormBeds.length - dormOccupied;
+                  return dormRooms.some((room) => {
+                    if (normSearchText(room.roomNumber).includes(q)) return true;
+                    const roomBeds = beds.filter((b) => b.roomId === room.id);
+                    return roomBeds.some((b) => {
+                      const resident = b.studentId
+                        ? students.find((s) => s.studentId === b.studentId)
+                        : undefined;
+                      return doesResidentMatch(resident);
+                    });
+                  });
+                });
 
-                  return (
-                    <div
-                      key={dorm.id}
-                      className="p-5 rounded-3xl border border-slate-200/90 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-4"
-                    >
-                      {/* سربرگ سرا */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-700/60">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="p-1.5 rounded-lg bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300">
-                              <Building2 className="w-4 h-4" />
-                            </span>
-                            <h4 className="font-extrabold text-base text-slate-900 dark:text-white">
-                              {dorm.name}
-                            </h4>
-                            <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
-                              {dorm.gender === 'brothers' ? 'برادران' : 'خواهران'}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                            {dorm.campus} • تعداد طبقات: {dorm.totalFloors} • سرپرست: {dorm.supervisorName || 'تعیین نشده'}
-                          </p>
+                return (
+                  <div className="space-y-6">
+                    {otherDormHits.length > 0 && (
+                      <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-bold">
+                          <Search className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span>نتایج جستجو در سایر سراها نیز یافت شد:</span>
                         </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs px-2.5 py-1 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold">
-                            {dormRooms.length} اتاق • {dormBeds.length} تخت ({dormVacant} خالی)
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditDorm(dorm)}
-                            className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
-                            title="تغییر نام و ویرایش مشخصات این سرا"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            <span>تغییر نام / ویرایش سرا</span>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteDormitory(dorm.id, dorm.name)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 transition cursor-pointer"
-                            title="حذف کامل این سرا"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {otherDormHits.map((hit) => (
+                            <button
+                              key={hit.dorm.id}
+                              type="button"
+                              onClick={() => setStructureDormFilter(hit.dorm.id)}
+                              className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold transition cursor-pointer shadow-xs"
+                            >
+                              {hit.dorm.name} ({hit.matchedRoomCount} اتاق{hit.sampleLabel ? ` — ${hit.sampleLabel}` : ''})
+                            </button>
+                          ))}
                         </div>
                       </div>
+                    )}
 
-                      {/* لیست اتاق‌های این سرا */}
-                      {dormRooms.length === 0 ? (
-                        <div className="p-6 text-center text-xs text-slate-400 bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                          هیچ اتاقی در این سرا ثبت نشده است. با کلیک بر روی «ثبت اتاق جدید با تخت‌ها» اقدام به ایجاد اتاق نمایید.
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {dormRooms.map((room) => {
-                            const roomBeds = beds.filter((b) => b.roomId === room.id);
-                            const occupiedBeds = roomBeds.filter((b) => b.studentId);
-                            const isFull = occupiedBeds.length >= roomBeds.length;
+                    {visibleDorms.length === 0 ? (
+                      <div className="p-10 text-center rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 space-y-2">
+                        <p>هیچ اتاق یا دانشجویی مطابق جستجو در سراها یافت نشد.</p>
+                        <button
+                          type="button"
+                          onClick={() => setStructureSearchQuery('')}
+                          className="px-3.5 py-1.5 rounded-xl bg-teal-600 text-white font-bold cursor-pointer"
+                        >
+                          پاک کردن جستجو
+                        </button>
+                      </div>
+                    ) : (
+                      visibleDorms.map((dorm) => {
+                        const allDormRooms = rooms.filter((r) => r.dormId === dorm.id);
+                        const dormRooms = q
+                          ? allDormRooms.filter((room) => {
+                              if (normSearchText(room.roomNumber).includes(q)) return true;
+                              const roomBeds = beds.filter((b) => b.roomId === room.id);
+                              return roomBeds.some((b) => {
+                                const resident = b.studentId
+                                  ? students.find((s) => s.studentId === b.studentId)
+                                  : undefined;
+                                return doesResidentMatch(resident);
+                              });
+                            })
+                          : allDormRooms;
+                        const dormBeds = beds.filter((b) => b.dormId === dorm.id);
+                        const dormOccupied = dormBeds.filter((b) => b.studentId).length;
+                        const dormVacant = dormBeds.length - dormOccupied;
 
-                            return (
-                              <div
-                                key={room.id}
-                                className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 shadow-xs space-y-3"
-                              >
-                                <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-                                  <div className="flex items-center gap-1.5">
-                                    <DoorOpen className="w-4 h-4 text-teal-600" />
-                                    <span className="font-extrabold text-sm text-slate-900 dark:text-white">
-                                      اتاق {room.roomNumber}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400">
-                                      (طبقه {room.floor === 0 ? 'همکف' : room.floor})
-                                    </span>
-                                  </div>
+                        return (
+                          <div
+                            key={dorm.id}
+                            className="p-5 rounded-3xl border border-slate-200/90 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-4"
+                          >
+                            {/* سربرگ سرا */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-700/60">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="p-1.5 rounded-lg bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300">
+                                    <Building2 className="w-4 h-4" />
+                                  </span>
+                                  <h4 className="font-extrabold text-base text-slate-900 dark:text-white">
+                                    {dorm.name}
+                                  </h4>
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
+                                    {dorm.gender === 'brothers' ? 'برادران' : 'خواهران'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                  {dorm.campus} • تعداد طبقات: {dorm.totalFloors} • سرپرست: {dorm.supervisorName || 'تعیین نشده'}
+                                </p>
+                              </div>
 
-                                  <div className="flex items-center gap-1">
-                                    <span
-                                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                                        isFull
-                                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                                          : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs px-2.5 py-1 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold">
+                                  {allDormRooms.length} اتاق • {dormBeds.length} تخت ({dormVacant} خالی)
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditDorm(dorm)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                                  title="تغییر نام و ویرایش مشخصات این سرا"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                  <span>تغییر نام / ویرایش سرا</span>
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteDormitory(dorm.id, dorm.name)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                                  title="حذف کامل این سرا"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* لیست اتاق‌های این سرا */}
+                            {dormRooms.length === 0 ? (
+                              <div className="p-6 text-center text-xs text-slate-400 bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+                                {q
+                                  ? 'اتاق یا دانشجویی مطابق جستجو در این سرا یافت نشد.'
+                                  : 'هیچ اتاقی در این سرا ثبت نشده است. با کلیک بر روی «ثبت اتاق جدید با تخت‌ها» اقدام به ایجاد اتاق نمایید.'}
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {dormRooms.map((room) => {
+                                  const roomBeds = beds.filter((b) => b.roomId === room.id);
+                                  const occupiedBeds = roomBeds.filter((b) => b.studentId);
+                                  const isFull = occupiedBeds.length >= roomBeds.length;
+                                  const matchedResidentCount = q
+                                    ? roomBeds.filter((b) => {
+                                        const resident = b.studentId
+                                          ? students.find((s) => s.studentId === b.studentId)
+                                          : undefined;
+                                        return doesResidentMatch(resident);
+                                      }).length
+                                    : 0;
+                                  const isRoomHighlighted = Boolean(q) && matchedResidentCount > 0;
+
+                                  return (
+                                    <div
+                                      key={room.id}
+                                      className={`bg-white dark:bg-slate-900 rounded-2xl p-4 shadow-xs space-y-3 transition ${
+                                        isRoomHighlighted
+                                          ? 'border-2 border-amber-500 dark:border-amber-400 ring-2 ring-amber-400/35 shadow-md'
+                                          : 'border border-slate-200 dark:border-slate-700'
                                       }`}
                                     >
-                                      {occupiedBeds.length} از {roomBeds.length} تخت پر
-                                    </span>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenEditRoom(room)}
-                                      className="p-1 text-slate-400 hover:text-amber-600 transition cursor-pointer"
-                                      title="تغییر نام / شماره و طبقه اتاق"
-                                    >
-                                      <Edit3 className="w-3.5 h-3.5" />
-                                    </button>
-
-                                    <button
-                                      onClick={() => handleDeleteRoom(room.id, room.roomNumber)}
-                                      className="p-1 text-slate-300 hover:text-rose-600 transition cursor-pointer"
-                                      title="حذف کامل اتاق و تخت‌های آن"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* لیست تخت‌های این اتاق */}
-                                <div className="space-y-1.5 text-xs">
-                                  {roomBeds.map((bed) => {
-                                    const resident = students.find((s) => s.studentId === bed.studentId);
-
-                                    return (
-                                      <div
-                                        key={bed.id}
-                                        className={`p-2 rounded-xl border flex items-center justify-between gap-2 ${
-                                          resident
-                                            ? 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
-                                            : 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/50'
-                                        }`}
-                                      >
-                                        <div className="flex items-center gap-1.5 truncate">
-                                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 shrink-0 font-mono">
-                                            تخت {bed.bedNumber ?? (bed.bunkNumber ? (bed.tier === 'lower' ? bed.bunkNumber * 2 - 1 : bed.bunkNumber * 2) : '')} ({bed.tier === 'lower' ? 'پایین ⬇️' : 'بالا ⬆️'})
+                                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800 gap-1 flex-wrap">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <DoorOpen className="w-4 h-4 text-teal-600" />
+                                          <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                                            اتاق {room.roomNumber}
                                           </span>
-                                          {resident ? (
-                                            <div className="truncate">
-                                              <span className="font-bold text-slate-800 dark:text-slate-200">
-                                                {resident.fullName}
-                                              </span>
-                                              <span className="text-[10px] text-slate-400 mr-1 font-mono">
-                                                ({resident.studentId})
-                                              </span>
-                                            </div>
-                                          ) : (
-                                            <span className="text-emerald-700 dark:text-emerald-300 font-bold text-[11px]">
-                                              (خالی و آماده اسکان)
+                                          <span className="text-[10px] text-slate-400">
+                                            (طبقه {room.floor === 0 ? 'همکف' : room.floor})
+                                          </span>
+                                          {isRoomHighlighted && (
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-400 text-slate-950 font-black">
+                                              {matchedResidentCount} نتیجه
                                             </span>
                                           )}
                                         </div>
 
-                                        <div className="flex items-center gap-1 shrink-0">
-                                          {resident ? (
-                                            <button
-                                              onClick={() => handleAdminEvictStudent(resident)}
-                                              className="p-1 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 text-[10px] font-bold transition cursor-pointer"
-                                              title="تخلیه دانشجو از این تخت"
-                                            >
-                                              <UserMinus className="w-3 h-3" />
-                                            </button>
-                                          ) : (
-                                            <>
-                                              <button
-                                                onClick={() => {
-                                                  const unassigned = students.find((s) => !s.assignedBedId || s.assignmentStatus === 'none');
-                                                  if (unassigned) {
-                                                    handleOpenAssignStudentModal(unassigned);
-                                                    setAssignTargetDormId(dorm.id);
-                                                    setAssignTargetRoomId(room.id);
-                                                    setAssignTargetBedId(bed.id);
-                                                  } else {
-                                                    setAdminNoticeDialog({
-                                                      title: 'عدم وجود دانشجوی فاقد اسکان',
-                                                      message: 'در حال حاضر هیچ دانشجوی فاقد اسکانی در سیستم یافت نشد.',
-                                                      tone: 'error',
-                                                    });
-                                                  }
-                                                }}
-                                                className="p-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-bold transition cursor-pointer"
-                                                title="تخصیص به دانشجو"
-                                              >
-                                                <UserCheck className="w-3 h-3" />
-                                              </button>
-                                              <button
-                                                onClick={() => handleDeleteBed(bed.id, bed.label)}
-                                                className="p-1 text-slate-300 hover:text-rose-500 transition cursor-pointer"
-                                                title="حذف این تخت"
-                                              >
-                                                <Trash2 className="w-3 h-3" />
-                                              </button>
-                                            </>
-                                          )}
+                                        <div className="flex items-center gap-1">
+                                          <span
+                                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                              isFull
+                                                ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                                : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                            }`}
+                                          >
+                                            {occupiedBeds.length} از {roomBeds.length} تخت پر
+                                          </span>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenEditRoom(room)}
+                                            className="p-1 text-slate-400 hover:text-amber-600 transition cursor-pointer"
+                                            title="تغییر نام / شماره و طبقه اتاق"
+                                          >
+                                            <Edit3 className="w-3.5 h-3.5" />
+                                          </button>
+
+                                          <button
+                                            onClick={() => handleDeleteRoom(room.id, room.roomNumber)}
+                                            className="p-1 text-slate-300 hover:text-rose-600 transition cursor-pointer"
+                                            title="حذف کامل اتاق و تخت‌های آن"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
                                         </div>
                                       </div>
-                                    );
-                                  })}
-                                </div>
 
-                                {/* افزودن تخت به اتاق با رعایت قاعده زوج بالا / فرد پایین */}
-                                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
-                                  <span className="text-slate-500 font-medium">
-                                    تخت بعدی: شماره {roomBeds.length + 1} ({(roomBeds.length + 1) % 2 === 1 ? 'طبقه پایین ⬇️' : 'طبقه بالا ⬆️'})
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleAddBedToRoom(room.id, (roomBeds.length + 1) % 2 === 1 ? 'lower' : 'upper')}
-                                    className="px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold cursor-pointer transition shadow-xs"
-                                  >
-                                    + افزودن تخت شماره {roomBeds.length + 1} ({(roomBeds.length + 1) % 2 === 1 ? 'پایین' : 'بالا'})
-                                  </button>
-                                </div>
+                                      {/* لیست تخت‌های این اتاق */}
+                                      <div className="space-y-1.5 text-xs">
+                                        {roomBeds.map((bed) => {
+                                          const resident = students.find((s) => s.studentId === bed.studentId);
+                                          const isResidentHighlighted = doesResidentMatch(resident);
+
+                                          return (
+                                            <div
+                                              key={bed.id}
+                                              className={`p-2 rounded-xl border flex items-center justify-between gap-2 transition ${
+                                                isResidentHighlighted
+                                                  ? 'bg-amber-100/95 dark:bg-amber-950/75 border-2 border-amber-500 dark:border-amber-400 ring-2 ring-amber-400/50 shadow-xs'
+                                                  : resident
+                                                  ? 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                                                  : 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/50'
+                                              }`}
+                                            >
+                                              <div className="flex items-center gap-1.5 truncate">
+                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 shrink-0 font-mono">
+                                                  تخت {bed.bedNumber ?? (bed.bunkNumber ? (bed.tier === 'lower' ? bed.bunkNumber * 2 - 1 : bed.bunkNumber * 2) : '')} ({bed.tier === 'lower' ? 'پایین ⬇️' : 'بالا ⬆️'})
+                                                </span>
+                                                {resident ? (
+                                                  <div className="truncate flex items-center gap-1">
+                                                    {isResidentHighlighted && (
+                                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 font-black shrink-0">
+                                                        نتیجه جستجو
+                                                      </span>
+                                                    )}
+                                                    <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
+                                                      {resident.fullName}
+                                                    </span>
+                                                    <span className="text-[10px] text-slate-500 dark:text-slate-400 mr-0.5 font-mono shrink-0">
+                                                      ({resident.studentId})
+                                                    </span>
+                                                  </div>
+                                                ) : (
+                                                  <span className="text-emerald-700 dark:text-emerald-300 font-bold text-[11px]">
+                                                    (خالی و آماده اسکان)
+                                                  </span>
+                                                )}
+                                              </div>
+
+                                              <div className="flex items-center gap-1 shrink-0">
+                                                {resident ? (
+                                                  <button
+                                                    onClick={() => handleAdminEvictStudent(resident)}
+                                                    className="p-1 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 text-[10px] font-bold transition cursor-pointer"
+                                                    title="تخلیه دانشجو از این تخت"
+                                                  >
+                                                    <UserMinus className="w-3 h-3" />
+                                                  </button>
+                                                ) : (
+                                                  <>
+                                                    <button
+                                                      onClick={() => {
+                                                        const unassigned = students.find((s) => !s.assignedBedId || s.assignmentStatus === 'none');
+                                                        if (unassigned) {
+                                                          handleOpenAssignStudentModal(unassigned);
+                                                          setAssignTargetDormId(dorm.id);
+                                                          setAssignTargetRoomId(room.id);
+                                                          setAssignTargetBedId(bed.id);
+                                                        } else {
+                                                          setAdminNoticeDialog({
+                                                            title: 'عدم وجود دانشجوی فاقد اسکان',
+                                                            message: 'در حال حاضر هیچ دانشجوی فاقد اسکانی در سیستم یافت نشد.',
+                                                            tone: 'error',
+                                                          });
+                                                        }
+                                                      }}
+                                                      className="p-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-bold transition cursor-pointer"
+                                                      title="تخصیص به دانشجو"
+                                                    >
+                                                      <UserCheck className="w-3 h-3" />
+                                                    </button>
+                                                    <button
+                                                      onClick={() => handleDeleteBed(bed.id, bed.label)}
+                                                      className="p-1 text-slate-300 hover:text-rose-500 transition cursor-pointer"
+                                                      title="حذف این تخت"
+                                                    >
+                                                      <Trash2 className="w-3 h-3" />
+                                                    </button>
+                                                  </>
+                                                )}
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+
+                                      {/* افزودن تخت به اتاق با رعایت قاعده زوج بالا / فرد پایین */}
+                                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+                                        <span className="text-slate-500 font-medium">
+                                          تخت بعدی: شماره {roomBeds.length + 1} ({(roomBeds.length + 1) % 2 === 1 ? 'طبقه پایین ⬇️' : 'طبقه بالا ⬆️'})
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAddBedToRoom(room.id, (roomBeds.length + 1) % 2 === 1 ? 'lower' : 'upper')}
+                                          className="px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold cursor-pointer transition shadow-xs"
+                                        >
+                                          + افزودن تخت شماره {roomBeds.length + 1} ({(roomBeds.length + 1) % 2 === 1 ? 'پایین' : 'بالا'})
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 

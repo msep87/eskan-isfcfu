@@ -25,6 +25,12 @@ import {
   toEnglishDigits,
 } from '../utils/excelUtils';
 import { compareStudents, normSearchText, StudentSortKey } from '../utils/studentSearchSort';
+import { StudentReferralModal } from './StudentReferralModal';
+import {
+  StudentListPaginationBar,
+  DEFAULT_STUDENT_PAGE_SIZE,
+  getPaginationMeta,
+} from './StudentListPaginationBar';
 import {
   AlertCircle,
   ArrowDown,
@@ -34,8 +40,6 @@ import {
   Building2,
   Calculator,
   CheckCircle,
-  ChevronLeft,
-  ChevronRight,
   Download,
   Edit3,
   FileSpreadsheet,
@@ -65,8 +69,6 @@ interface FinanceDashboardProps {
   onOpenUserGuide?: (role?: 'finance') => void;
 }
 
-const PAGE_SIZE = 25;
-
 export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   staff,
   dorms,
@@ -94,7 +96,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const [dormFilter, setDormFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<StudentSortKey>('default');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [pageSize, setPageSize] = useState<number | 'all'>(DEFAULT_STUDENT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = useState(1);
+  const [referralTargetStudent, setReferralTargetStudent] = useState<Student | null>(null);
 
   // پیام بازخورد
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -334,12 +338,12 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     return list;
   }, [filteredRows, sortBy, sortDir, rooms, dorms, financeMap]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
-  const safePage = Math.min(currentPage, totalPages);
+  const { totalPages: totalPages, safePage: safePage, startIndex: financeStartIdx, endIndex: financeEndIdx } =
+    getPaginationMeta(sortedRows.length, currentPage, pageSize);
   const paginatedRows = useMemo(() => {
-    const start = (safePage - 1) * PAGE_SIZE;
-    return sortedRows.slice(start, start + PAGE_SIZE);
-  }, [sortedRows, safePage]);
+    if (pageSize === 'all') return sortedRows;
+    return sortedRows.slice(financeStartIdx, financeEndIdx);
+  }, [sortedRows, pageSize, financeStartIdx, financeEndIdx]);
 
   const toggleSort = (key: Exclude<StudentSortKey, 'default'>) => {
     if (sortBy === key) {
@@ -1398,6 +1402,16 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
                           <Send className="w-3.5 h-3.5" />
                           <span>پیام</span>
                         </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setReferralTargetStudent(st)}
+                          className="px-2.5 py-1.5 rounded-xl bg-fuchsia-50 dark:bg-fuchsia-950/60 hover:bg-fuchsia-100 text-fuchsia-800 dark:text-fuchsia-200 border border-fuchsia-200 dark:border-fuchsia-800 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                          title="ارجاع دانشجو به مشاور، امور دانشجویی یا حراست با ثبت گزارش"
+                        >
+                          <AlertCircle className="w-3.5 h-3.5" />
+                          <span>ارجاع</span>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1407,37 +1421,14 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
           </div>
         )}
 
-        {/* صفحه‌بندی */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between pt-2 text-xs text-slate-600 dark:text-slate-400">
-            <span className="tabular-nums">
-              نمایش {((safePage - 1) * PAGE_SIZE + 1).toLocaleString('fa-IR')} تا{' '}
-              {Math.min(safePage * PAGE_SIZE, sortedRows.length).toLocaleString('fa-IR')} از{' '}
-              {sortedRows.length.toLocaleString('fa-IR')} دانشجو
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                disabled={safePage <= 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-              <span className="font-bold tabular-nums">
-                صفحه {safePage.toLocaleString('fa-IR')} از {totalPages.toLocaleString('fa-IR')}
-              </span>
-              <button
-                type="button"
-                disabled={safePage >= totalPages}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
+        {/* صفحه‌بندی پیش‌فرض ۵۰ دانشجو با قابلیت انتخاب تعداد در صفحه */}
+        <StudentListPaginationBar
+          totalItems={sortedRows.length}
+          currentPage={safePage}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+        />
       </div>
 
       {/* مدال ویرایش وضعیت مالی و کسورات دانشجو */}
@@ -1782,6 +1773,20 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
           </div>
         </div>
       )}
+      <StudentReferralModal
+        isOpen={Boolean(referralTargetStudent)}
+        onClose={() => setReferralTargetStudent(null)}
+        student={referralTargetStudent}
+        dorms={dorms}
+        rooms={rooms}
+        actorId={staff.id}
+        actorName={staff.fullName}
+        actorRole="finance"
+        onSuccess={(msg) => {
+          showToast('success', msg);
+          onRefreshData();
+        }}
+      />
     </div>
   );
 };

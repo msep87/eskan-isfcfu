@@ -322,6 +322,18 @@ export interface SecurityReportStudentSnapshot {
   roomNumber?: string;
 }
 
+export type StaffReferralActorRole =
+  | 'supervisor'
+  | 'admin'
+  | 'vice_dean'
+  | 'student_affairs'
+  | 'security'
+  | 'counselor'
+  | 'finance'
+  | 'education'
+  | 'cultural'
+  | 'maintenance';
+
 export interface SecurityReport {
   id: string;
   reportCode: string; // مثلاً SEC-101
@@ -339,7 +351,7 @@ export interface SecurityReport {
   studentsSnapshot: SecurityReportStudentSnapshot[];
   reportedById: string;
   reportedByName: string;
-  reportedByRole: 'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'vice_dean';
+  reportedByRole: StaffReferralActorRole;
   reportedAt: string;
   status: SecurityReportStatus;
   securityNotes?: string;
@@ -772,7 +784,8 @@ export type ActivityLogCategory =
   | 'survey'
   | 'settings'
   | 'backup'
-  | 'excel';
+  | 'excel'
+  | 'counseling';
 
 export type GuestEligibilityType =
   | 'first_degree_relative'
@@ -1123,7 +1136,7 @@ export interface DisciplinaryReferral {
   referralText: string;
   referredById: string;
   referredByName: string;
-  referredByRole: 'supervisor' | 'admin' | 'vice_dean';
+  referredByRole: StaffReferralActorRole;
   referredAt: string;
   status: DisciplinaryReferralStatus;
   sessionDate?: string;

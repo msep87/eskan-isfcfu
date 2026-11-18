@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Supervisor,
   Dormitory,
@@ -25,8 +25,14 @@ import { StudentEvaluationModal } from './StudentEvaluationModal';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 import { SupervisorGuestRequestsPanel } from './SupervisorGuestRequestsPanel';
 import { RichTextDisplay } from './RichTextEditor';
-import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
+import { ImageLightboxModal, AnnouncementImageBox } from './ImageLightboxModal';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
+import { StudentReferralModal } from './StudentReferralModal';
+import {
+  StudentListPaginationBar,
+  DEFAULT_STUDENT_PAGE_SIZE,
+  getPaginationMeta,
+} from './StudentListPaginationBar';
 import {
   Building2,
   Users,
@@ -66,6 +72,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Send,
 } from 'lucide-react';
 
 interface SupervisorDashboardProps {
@@ -151,6 +158,27 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   const [stProfileFilter, setStProfileFilter] = useState<'all' | 'completed' | 'incomplete'>('all');
   const [stSortBy, setStSortBy] = useState<StudentSortKey>('default');
   const [stSortDir, setStSortDir] = useState<'asc' | 'desc'>('asc');
+  const [studentPageSize, setStudentPageSize] = useState<number | 'all'>(DEFAULT_STUDENT_PAGE_SIZE);
+  const [studentCurrentPage, setStudentCurrentPage] = useState<number>(1);
+  const [referralTargetStudent, setReferralTargetStudent] = useState<Student | null>(null);
+
+  useEffect(() => {
+    setStudentCurrentPage(1);
+  }, [
+    stQuery,
+    stNameFilter,
+    stNationalIdFilter,
+    stStudentIdFilter,
+    stLocationFilter,
+    stFieldFilter,
+    stEntryFilter,
+    stDormFilter,
+    stRoomFilter,
+    stAssignFilter,
+    stProfileFilter,
+    stSortBy,
+    stSortDir,
+  ]);
 
   // فرم ثبت مستقیم خرابی تأسیسات توسط سرپرست
   const [isAddMaintenanceModalOpen, setIsAddMaintenanceModalOpen] = useState(false);
@@ -1552,8 +1580,24 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                 </button>
               )}
             </div>
-          ) : (
-            <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
+          ) : (() => {
+            const { safePage: safeSupPage, startIndex: supStartIdx, endIndex: supEndIdx } =
+              getPaginationMeta(sortedTabStudents.length, studentCurrentPage, studentPageSize);
+            const paginatedTabStudents =
+              studentPageSize === 'all'
+                ? sortedTabStudents
+                : sortedTabStudents.slice(supStartIdx, supEndIdx);
+
+            return (
+              <div className="space-y-3">
+                <StudentListPaginationBar
+                  totalItems={sortedTabStudents.length}
+                  currentPage={safeSupPage}
+                  pageSize={studentPageSize}
+                  onPageChange={setStudentCurrentPage}
+                  onPageSizeChange={setStudentPageSize}
+                />
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
               <table className="w-full text-right text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
                   <tr>
@@ -1655,7 +1699,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {sortedTabStudents.map((st) => {
+                  {paginatedTabStudents.map((st) => {
                     const d = dorms.find((dm) => dm.id === st.assignedDormId);
                     const r = rooms.find((rm) => rm.id === st.assignedRoomId);
                     const b = beds.find((bd) => bd.id === st.assignedBedId);
@@ -1752,6 +1796,15 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                             </button>
                             <button
                               type="button"
+                              onClick={() => setReferralTargetStudent(st)}
+                              className="px-2 py-1 rounded-lg bg-fuchsia-50 dark:bg-fuchsia-950/70 text-fuchsia-800 dark:text-fuchsia-300 hover:bg-fuchsia-100 border border-fuchsia-200 dark:border-fuchsia-800 transition cursor-pointer inline-flex items-center gap-1 text-[10px] font-extrabold"
+                              title="ارجاع دانشجو به مشاور، امور دانشجویی یا حراست با ثبت گزارش"
+                            >
+                              <Send className="w-3.5 h-3.5 shrink-0" />
+                              <span>ارجاع / گزارش</span>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => setViewCardStudent(st)}
                               className="p-1.5 rounded-lg bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 hover:bg-teal-100 border border-teal-200 dark:border-teal-800 transition cursor-pointer"
                               title="مشاهده و چاپ کارت شناسایی و اسکان سرا"
@@ -1766,7 +1819,18 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                 </tbody>
               </table>
             </div>
-          )}
+            <StudentListPaginationBar
+              totalItems={sortedTabStudents.length}
+              currentPage={safeSupPage}
+              pageSize={studentPageSize}
+              onPageChange={setStudentCurrentPage}
+              onPageSizeChange={setStudentPageSize}
+              showPageSizeSelector={false}
+              compact
+            />
+          </div>
+            );
+          })()}
         </div>
       )}
 
@@ -3074,6 +3138,22 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
         dorms={dorms}
         rooms={rooms}
         defaultDormId={selectedDormId !== 'all' ? selectedDormId : myDorms[0]?.id}
+        onSuccess={(msg) => {
+          setActionFeedback(msg);
+          setTimeout(() => setActionFeedback(null), 4000);
+          onRefreshData();
+        }}
+      />
+
+      <StudentReferralModal
+        isOpen={Boolean(referralTargetStudent)}
+        onClose={() => setReferralTargetStudent(null)}
+        student={referralTargetStudent}
+        dorms={dorms}
+        rooms={rooms}
+        actorId={supervisor.id}
+        actorName={supervisor.fullName}
+        actorRole="supervisor"
         onSuccess={(msg) => {
           setActionFeedback(msg);
           setTimeout(() => setActionFeedback(null), 4000);

@@ -27,6 +27,12 @@ import {
 } from '../utils/excelUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
+import { StudentReferralModal } from './StudentReferralModal';
+import {
+  StudentListPaginationBar,
+  DEFAULT_STUDENT_PAGE_SIZE,
+  getPaginationMeta,
+} from './StudentListPaginationBar';
 import {
   Award,
   Users,
@@ -54,6 +60,7 @@ import {
   Activity,
   Edit3,
   MapPin,
+  Send,
 } from 'lucide-react';
 
 interface StudentAffairsDashboardProps {
@@ -186,6 +193,9 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
   const [fieldFilter, setFieldFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [studentPageSize, setStudentPageSize] = useState<number | 'all'>(DEFAULT_STUDENT_PAGE_SIZE);
+  const [studentCurrentPage, setStudentCurrentPage] = useState<number>(1);
+  const [referralTargetStudent, setReferralTargetStudent] = useState<Student | null>(null);
 
   // ۱.۵ تب برنامه‌ریزی ورزشی و تربیت بدنی
   const [sportsPrograms, setSportsPrograms] = useState<SportsProgram[]>(() =>
@@ -989,7 +999,10 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
                   <input
                     type="text"
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setStudentCurrentPage(1);
+                    }}
                     placeholder="جستجو بر اساس نام، شماره دانشجویی، کد ملی، رشته یا شهر..."
                     className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
                   />
@@ -998,9 +1011,10 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
 
                 <select
                   value={residencyFilter}
-                  onChange={(e) =>
-                    setResidencyFilter(e.target.value as 'all' | 'dorm' | 'commuter')
-                  }
+                  onChange={(e) => {
+                    setResidencyFilter(e.target.value as 'all' | 'dorm' | 'commuter');
+                    setStudentCurrentPage(1);
+                  }}
                   className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
                 >
                   <option value="all">همه (خوابگاهی و ترددی)</option>
@@ -1010,7 +1024,10 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
 
                 <select
                   value={dormFilter}
-                  onChange={(e) => setDormFilter(e.target.value)}
+                  onChange={(e) => {
+                    setDormFilter(e.target.value);
+                    setStudentCurrentPage(1);
+                  }}
                   className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
                 >
                   <option value="all">همه سراها</option>
@@ -1023,7 +1040,10 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
 
                 <select
                   value={fieldFilter}
-                  onChange={(e) => setFieldFilter(e.target.value)}
+                  onChange={(e) => {
+                    setFieldFilter(e.target.value);
+                    setStudentCurrentPage(1);
+                  }}
                   className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
                 >
                   <option value="all">همه رشته‌ها</option>
@@ -1065,75 +1085,126 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-x-auto">
-            <table className="w-full text-right text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                <tr>
-                  <th className="p-3">#</th>
-                  <th className="p-3">نام و نام خانوادگی</th>
-                  <th className="p-3">کد دانشجویی</th>
-                  <th className="p-3">وضعیت اسکان</th>
-                  <th className="p-3">سرا / اتاق</th>
-                  <th className="p-3">رشته و ورودی</th>
-                  <th className="p-3">موبایل</th>
-                  <th className="p-3">استان / شهر</th>
-                  <th className="p-3 text-center">مشاهده</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {filteredStudents.slice(0, 200).map((s, idx) => {
-                  const resident = isStudentDormResident(s);
-                  const dorm = dorms.find((d) => d.id === s.assignedDormId);
-                  const room = rooms.find((r) => r.id === s.assignedRoomId);
-                  return (
-                    <tr
-                      key={s.studentId}
-                      className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
-                    >
-                      <td className="p-3 tabular-nums text-slate-400">{idx + 1}</td>
-                      <td className="p-3 font-bold text-slate-900 dark:text-white">{s.fullName}</td>
-                      <td className="p-3 font-mono">{s.studentId}</td>
-                      <td className="p-3">
-                        <span
-                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
-                            resident
-                              ? 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300'
-                              : 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300'
-                          }`}
-                        >
-                          {resident ? 'خوابگاهی' : 'ترددی'}
-                        </span>
-                      </td>
-                      <td className="p-3">
-                        {dorm ? `${dorm.name} - اتاق ${room?.roomNumber || s.assignedRoomNumber || '-'}` : '-'}
-                      </td>
-                      <td className="p-3">
-                        {s.fieldOfStudy} ({s.entryTerm})
-                      </td>
-                      <td className="p-3 font-mono">{s.mobile || s.phone || '-'}</td>
-                      <td className="p-3">
-                        {s.province} / {s.city}
-                      </td>
-                      <td className="p-3 text-center">
-                        <button
-                          onClick={() => setSelectedStudent(s)}
-                          className="px-2.5 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>پرونده</span>
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {filteredStudents.length > 200 && (
-              <div className="p-3 text-center text-[11px] text-slate-500 bg-slate-50 dark:bg-slate-800/50">
-                نمایش ۲۰۰ ردیف اول در جدول مرورگر؛ برای دریافت کل {filteredStudents.length} ردیف از دکمه «خروجی اکسل» استفاده فرمایید.
+          {(() => {
+            const { safePage: safeStPage, startIndex: stStart, endIndex: stEnd } =
+              getPaginationMeta(filteredStudents.length, studentCurrentPage, studentPageSize);
+            const paginatedStudents =
+              studentPageSize === 'all'
+                ? filteredStudents
+                : filteredStudents.slice(stStart, stEnd);
+
+            return (
+              <div className="space-y-3">
+                <StudentListPaginationBar
+                  totalItems={filteredStudents.length}
+                  currentPage={safeStPage}
+                  pageSize={studentPageSize}
+                  onPageChange={setStudentCurrentPage}
+                  onPageSizeChange={setStudentPageSize}
+                />
+
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                      <tr>
+                        <th className="p-3">#</th>
+                        <th className="p-3">نام و نام خانوادگی</th>
+                        <th className="p-3">کد دانشجویی</th>
+                        <th className="p-3">وضعیت اسکان</th>
+                        <th className="p-3">سرا / اتاق</th>
+                        <th className="p-3">رشته و ورودی</th>
+                        <th className="p-3">موبایل</th>
+                        <th className="p-3">استان / شهر</th>
+                        <th className="p-3 text-center">عملیات</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {paginatedStudents.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="p-8 text-center text-slate-400">
+                            هیچ دانشجویی با فیلترهای انتخاب‌شده یافت نشد.
+                          </td>
+                        </tr>
+                      ) : (
+                        paginatedStudents.map((s, idx) => {
+                          const resident = isStudentDormResident(s);
+                          const dorm = dorms.find((d) => d.id === s.assignedDormId);
+                          const room = rooms.find((r) => r.id === s.assignedRoomId);
+                          return (
+                            <tr
+                              key={s.studentId}
+                              className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
+                            >
+                              <td className="p-3 tabular-nums text-slate-400">
+                                {(stStart + idx + 1).toLocaleString('fa-IR')}
+                              </td>
+                              <td className="p-3 font-bold text-slate-900 dark:text-white">
+                                {s.fullName}
+                              </td>
+                              <td className="p-3 font-mono">{s.studentId}</td>
+                              <td className="p-3">
+                                <span
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                                    resident
+                                      ? 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300'
+                                      : 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300'
+                                  }`}
+                                >
+                                  {resident ? 'خوابگاهی' : 'ترددی'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                {dorm
+                                  ? `${dorm.name} - اتاق ${room?.roomNumber || s.assignedRoomNumber || '-'}`
+                                  : '-'}
+                              </td>
+                              <td className="p-3">
+                                {s.fieldOfStudy} ({s.entryTerm})
+                              </td>
+                              <td className="p-3 font-mono">{s.mobile || s.phone || '-'}</td>
+                              <td className="p-3">
+                                {s.province} / {s.city}
+                              </td>
+                              <td className="p-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                  <button
+                                    onClick={() => setSelectedStudent(s)}
+                                    className="px-2.5 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    <span>پرونده</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setReferralTargetStudent(s)}
+                                    className="px-2.5 py-1 bg-fuchsia-50 hover:bg-fuchsia-100 dark:bg-fuchsia-950/60 text-fuchsia-800 dark:text-fuchsia-300 border border-fuchsia-200 dark:border-fuchsia-800 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                                    title="ارجاع دانشجو به مشاور، امور دانشجویی یا حراست با ثبت گزارش"
+                                  >
+                                    <Send className="w-3 h-3" />
+                                    <span>ارجاع</span>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <StudentListPaginationBar
+                  totalItems={filteredStudents.length}
+                  currentPage={safeStPage}
+                  pageSize={studentPageSize}
+                  onPageChange={setStudentCurrentPage}
+                  onPageSizeChange={setStudentPageSize}
+                  showPageSizeSelector={false}
+                  compact
+                />
               </div>
-            )}
-          </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1376,6 +1447,20 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
                           ? 'مدیر کل'
                           : ref.referredByRole === 'vice_dean'
                           ? 'معاونت دانشجویی'
+                          : ref.referredByRole === 'student_affairs'
+                          ? 'امور دانشجویی'
+                          : ref.referredByRole === 'security'
+                          ? 'حراست'
+                          : ref.referredByRole === 'counselor'
+                          ? 'مرکز مشاوره'
+                          : ref.referredByRole === 'finance'
+                          ? 'امور مالی'
+                          : ref.referredByRole === 'education'
+                          ? 'آموزش'
+                          : ref.referredByRole === 'cultural'
+                          ? 'امور فرهنگی'
+                          : ref.referredByRole === 'maintenance'
+                          ? 'تأسیسات'
                           : 'سرپرست سرا'})
                       </span>
                       <span>تاریخ معرفی: {ref.referredAt}</span>
@@ -2489,6 +2574,21 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
         students={students}
         dorms={dorms}
         rooms={rooms}
+        onSuccess={(msg) => {
+          setFeedback({ ok: true, msg });
+          setTimeout(() => setFeedback(null), 4000);
+          reloadLocal();
+        }}
+      />
+      <StudentReferralModal
+        isOpen={Boolean(referralTargetStudent)}
+        onClose={() => setReferralTargetStudent(null)}
+        student={referralTargetStudent}
+        dorms={dorms}
+        rooms={rooms}
+        actorId={staff.id}
+        actorName={staff.fullName}
+        actorRole="student_affairs"
         onSuccess={(msg) => {
           setFeedback({ ok: true, msg });
           setTimeout(() => setFeedback(null), 4000);

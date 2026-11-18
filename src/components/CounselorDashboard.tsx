@@ -509,10 +509,15 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
                     className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-teal-300 transition"
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="px-2 py-0.5 rounded-lg bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 text-[11px] font-black">
                           درخواست مشاوره
                         </span>
+                        {msg.subject.startsWith('[ارجاع کارتابل]') && (
+                          <span className="px-2 py-0.5 rounded-lg bg-fuchsia-100 dark:bg-fuchsia-950/60 text-fuchsia-800 dark:text-fuchsia-300 border border-fuchsia-200 dark:border-fuchsia-800 text-[11px] font-black">
+                            ارجاع همکاران
+                          </span>
+                        )}
                         <h4 className="font-bold text-sm text-slate-900 dark:text-white">
                           {msg.subject}
                         </h4>
