@@ -68,6 +68,8 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Landmark,
+  UtensilsCrossed,
+  ArrowLeftRight,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -109,6 +111,7 @@ interface AdminUsersPanelProps {
   onEditStudent: (student: Student) => void;
   onDeleteStudent: (student: Student) => void;
   onViewStudentCard: (student: Student) => void;
+  onOpenDiningMealCard?: (student: Student) => void;
   onEvaluateStudent: (student: Student) => void;
   onAssignStudentRoom: (student: Student) => void;
   onEvictStudent: (student: Student) => void;
@@ -162,6 +165,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   onEditStudent,
   onDeleteStudent,
   onViewStudentCard,
+  onOpenDiningMealCard,
   onEvaluateStudent,
   onAssignStudentRoom,
   onEvictStudent,
@@ -2596,7 +2600,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                               </span>
                             </div>
                           ) : (
-                            <span className="text-slate-400">فاقد اسکان</span>
+                            <div className="flex flex-col items-start gap-1">
+                              <span className="text-slate-400 text-[11px]">فاقد اسکان</span>
+                              <button
+                                type="button"
+                                onClick={() => onAssignStudentRoom(st)}
+                                className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 text-[10px] font-bold transition cursor-pointer"
+                              >
+                                + تعیین اتاق
+                              </button>
+                            </div>
                           )}
                         </td>
                         <td className="p-3">
@@ -2673,6 +2686,18 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                               <QrCode className="w-3.5 h-3.5" />
                             </button>
 
+                            {onOpenDiningMealCard && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenDiningMealCard(st)}
+                                className="px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer inline-flex items-center gap-1 text-[10px] font-extrabold"
+                                title="صدور کارت تغذیه موقت یک‌ماهه سلف (استثناء اثر انگشت کالینان)"
+                              >
+                                <UtensilsCrossed className="w-3.5 h-3.5 shrink-0" />
+                                <span>کارت تغذیه</span>
+                              </button>
+                            )}
+
                             <button
                               type="button"
                               onClick={() => onEvaluateStudent(st)}
@@ -2687,10 +2712,11 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => onAssignStudentRoom(st)}
-                                  className="p-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 hover:bg-sky-100 border border-sky-200 dark:border-sky-800 transition cursor-pointer"
-                                  title="تغییر اتاق یا تخت"
+                                  className="px-2 py-1 rounded-lg bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 hover:bg-sky-100 border border-sky-200 dark:border-sky-800 transition cursor-pointer inline-flex items-center gap-1 text-[10px] font-extrabold"
+                                  title="تعیین و جابجایی اتاق یا تخت دانشجو"
                                 >
-                                  <BedIcon className="w-3.5 h-3.5" />
+                                  <ArrowLeftRight className="w-3.5 h-3.5 shrink-0" />
+                                  <span>جابجایی اتاق</span>
                                 </button>
                                 <button
                                   type="button"
@@ -2705,10 +2731,11 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                               <button
                                 type="button"
                                 onClick={() => onAssignStudentRoom(st)}
-                                className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
-                                title="تخصیص اتاق و تخت"
+                                className="px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer inline-flex items-center gap-1 text-[10px] font-extrabold"
+                                title="تعیین اتاق و تخت برای دانشجوی فاقد اسکان"
                               >
-                                <UserCheck className="w-3.5 h-3.5" />
+                                <BedIcon className="w-3.5 h-3.5 shrink-0" />
+                                <span>تعیین اتاق</span>
                               </button>
                             )}
 

@@ -442,6 +442,7 @@ let coalescedFlushTimer: ReturnType<typeof setTimeout> | undefined;
 let activeSyncPromise: Promise<boolean> | null = null;
 let batchEndpointSupported: boolean | null = null;
 let versionEndpointSupported: boolean | null = null;
+let manifestEndpointSupported: boolean | null = null;
 let lastSyncRevision: string | number | null = null;
 let lastSyncEtag: string | null = null;
 let lastStudentsEtag: string | null = null;
@@ -449,12 +450,270 @@ const SYNCABLE_KEYS = Object.values(STORAGE_KEYS).filter((k) => k !== STORAGE_KE
 const CLOUD_SYNC_DEBOUNCE_MS = 140;
 const MAX_RETRY_QUEUE_KEYS = 25;
 
+const utf8Encoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+function getUtf8ByteLength(str: string): number {
+  if (!str) return 0;
+  if (utf8Encoder) return utf8Encoder.encode(str).length;
+  return str.length * 2;
+}
+
+export type CloudTrafficDirection = 'up' | 'down' | 'probe';
+
+export interface CloudTrafficEvent {
+  id: string;
+  timestamp: string;
+  timeShort: string;
+  direction: CloudTrafficDirection;
+  endpoint: string;
+  method: 'GET' | 'POST' | 'DELETE';
+  status: number | null;
+  ok: boolean;
+  durationMs: number;
+  bytes: number;
+  detail: string;
+}
+
+export interface CloudLiveMetrics {
+  apiBaseUrl: string;
+  hasSyncToken: boolean;
+  browserOnline: boolean;
+  lastSyncRevision: string | number | null;
+  lastSyncAt: string | null;
+  lastHealthLatencyMs: number | null;
+  lastHealthOk: boolean | null;
+  lastDbName: string | null;
+  lastServerCounts: { syncKv: number; students: number; photos: number } | null;
+  totalRequests: number;
+  successfulRequests: number;
+  failedRequests: number;
+  bytesSentUtf8: number;
+  bytesReceivedUtf8: number;
+  pendingKeysCount: number;
+  inFlightKeysCount: number;
+  failedRetryQueueKeys: string[];
+  endpointCapabilities: {
+    version: boolean | null;
+    manifest: boolean | null;
+    batch: boolean | null;
+  };
+  lastError: {
+    timestamp: string;
+    endpoint: string;
+    status: number | null;
+    message: string;
+  } | null;
+  recentEvents: CloudTrafficEvent[];
+}
+
+export type CloudDiagnosticCheckStatus = 'pass' | 'warn' | 'fail';
+
+export interface CloudDiagnosticCheckItem {
+  id: string;
+  title: string;
+  category: 'network' | 'server' | 'database' | 'sync' | 'traffic';
+  status: CloudDiagnosticCheckStatus;
+  latencyMs: number | null;
+  summary: string;
+  details: string[];
+}
+
+export interface LocalCloudKeyAuditItem {
+  key: string;
+  label: string;
+  bytesUtf8: number;
+  percentOfVercelLimit: number;
+  nearLimit: boolean;
+  overLimit: boolean;
+}
+
+export interface LocalCloudPayloadSummary {
+  presentKeysCount: number;
+  totalSyncableKeys: number;
+  totalBytesUtf8: number;
+  oversizedKeys: LocalCloudKeyAuditItem[];
+  nearLimitKeys: LocalCloudKeyAuditItem[];
+  topKeys: LocalCloudKeyAuditItem[];
+}
+
+export interface CloudDiagnosticReport {
+  checkedAt: string;
+  overallStatus: CloudDiagnosticCheckStatus;
+  totalDurationMs: number;
+  apiBaseUrl: string;
+  serverHealthy: boolean;
+  dbName: string | null;
+  serverCounts: { syncKv: number; students: number; photos: number } | null;
+  serverRevision: string | number | null;
+  serverUpdatedAt: string | null;
+  throughputKbps: number | null;
+  manifestKeysCount: number | null;
+  manifestTotalBytes: number | null;
+  missingOnServerKeys: string[];
+  oversizedOnServerKeys: Array<{ key: string; sizeBytes: number }>;
+  localSummary: LocalCloudPayloadSummary;
+  checks: CloudDiagnosticCheckItem[];
+  recommendations: string[];
+}
+
+const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
+  [STORAGE_KEYS.SETTINGS]: 'تنظیمات عمومی، فونت‌ها، تصاویر و درباره ما',
+  [STORAGE_KEYS.STUDENTS]: 'پرونده دانشجویان',
+  [STORAGE_KEYS.DORMITORIES]: 'سراهای دانشجویی',
+  [STORAGE_KEYS.ROOMS]: 'اتاق‌ها',
+  [STORAGE_KEYS.BEDS]: 'تخت‌ها',
+  [STORAGE_KEYS.SUPERVISORS]: 'سرپرستان سرا',
+  [STORAGE_KEYS.ANNOUNCEMENTS]: 'اطلاعیه‌ها و اخبار',
+  [STORAGE_KEYS.MESSAGES]: 'پیام‌ها و مکاتبات',
+  [STORAGE_KEYS.WARNINGS]: 'اخطارهای انضباطی و اتاق',
+  [STORAGE_KEYS.ACTIVITY_LOGS]: 'گزارش فعالیت‌ها (Audit Log)',
+  [STORAGE_KEYS.MAINTENANCE_TASKS]: 'درخواست‌ها و امور تأسیسات',
+  [STORAGE_KEYS.STUDENT_EVALUATIONS]: 'ارزیابی دانشجویان',
+  [STORAGE_KEYS.SECURITY_REPORTS]: 'گزارش‌های حراست و انتظامات',
+  [STORAGE_KEYS.DISCIPLINARY_REFERRALS]: 'ارجاعات شورای انضباطی',
+  [STORAGE_KEYS.SPORTS_PROGRAMS]: 'برنامه‌های ورزشی',
+  [STORAGE_KEYS.SPORTS_REGISTRATIONS]: 'ثبت‌نام‌های ورزشی',
+  [STORAGE_KEYS.CULTURAL_PROGRAMS]: 'برنامه‌های فرهنگی',
+  [STORAGE_KEYS.STUDENT_FINANCES]: 'سوابق مالی دانشجویان',
+  [STORAGE_KEYS.INVENTORY_ITEMS]: 'اقلام انبار و تجهیزات',
+};
+
+const cloudTelemetryState = {
+  totalRequests: 0,
+  successfulRequests: 0,
+  failedRequests: 0,
+  bytesSentUtf8: 0,
+  bytesReceivedUtf8: 0,
+  lastSyncAt: null as string | null,
+  lastHealthLatencyMs: null as number | null,
+  lastHealthOk: null as boolean | null,
+  lastDbName: null as string | null,
+  lastServerCounts: null as { syncKv: number; students: number; photos: number } | null,
+  lastError: null as CloudLiveMetrics['lastError'],
+  recentEvents: [] as CloudTrafficEvent[],
+};
+
+const cloudMetricsSubscribers = new Set<(metrics: CloudLiveMetrics) => void>();
+let metricsNotifyScheduled = false;
+
+function buildCloudLiveMetricsSnapshot(): CloudLiveMetrics {
+  return {
+    apiBaseUrl: API_BASE_URL,
+    hasSyncToken: Boolean(ENV_SYNC_TOKEN && ENV_SYNC_TOKEN.trim()),
+    browserOnline: typeof navigator !== 'undefined' ? navigator.onLine !== false : true,
+    lastSyncRevision,
+    lastSyncAt: cloudTelemetryState.lastSyncAt,
+    lastHealthLatencyMs: cloudTelemetryState.lastHealthLatencyMs,
+    lastHealthOk: cloudTelemetryState.lastHealthOk,
+    lastDbName: cloudTelemetryState.lastDbName,
+    lastServerCounts: cloudTelemetryState.lastServerCounts
+      ? { ...cloudTelemetryState.lastServerCounts }
+      : null,
+    totalRequests: cloudTelemetryState.totalRequests,
+    successfulRequests: cloudTelemetryState.successfulRequests,
+    failedRequests: cloudTelemetryState.failedRequests,
+    bytesSentUtf8: cloudTelemetryState.bytesSentUtf8,
+    bytesReceivedUtf8: cloudTelemetryState.bytesReceivedUtf8,
+    pendingKeysCount: Object.keys(pendingCloudValues).length,
+    inFlightKeysCount: Object.keys(pendingCloudRequests).length,
+    failedRetryQueueKeys: Object.keys(failedCloudRetryQueue),
+    endpointCapabilities: {
+      version: versionEndpointSupported,
+      manifest: manifestEndpointSupported,
+      batch: batchEndpointSupported,
+    },
+    lastError: cloudTelemetryState.lastError ? { ...cloudTelemetryState.lastError } : null,
+    recentEvents: cloudTelemetryState.recentEvents.map((ev) => ({ ...ev })),
+  };
+}
+
+function notifyCloudMetricsSubscribers(): void {
+  if (cloudMetricsSubscribers.size === 0 || metricsNotifyScheduled) return;
+  metricsNotifyScheduled = true;
+  const run = () => {
+    metricsNotifyScheduled = false;
+    const snap = buildCloudLiveMetricsSnapshot();
+    cloudMetricsSubscribers.forEach((cb) => {
+      try {
+        cb(snap);
+      } catch {
+        // ignore subscriber callback error
+      }
+    });
+  };
+  if (typeof queueMicrotask === 'function') {
+    queueMicrotask(run);
+  } else {
+    setTimeout(run, 0);
+  }
+}
+
+function recordCloudTrafficEvent(ev: {
+  direction: CloudTrafficDirection;
+  endpoint: string;
+  method: 'GET' | 'POST' | 'DELETE';
+  status: number | null;
+  ok: boolean;
+  durationMs: number;
+  bytes: number;
+  detail: string;
+  errorMessage?: string;
+}): void {
+  const now = new Date();
+  const timeShort = now.toLocaleTimeString('fa-IR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const iso = now.toISOString();
+
+  cloudTelemetryState.totalRequests += 1;
+  if (ev.ok) {
+    cloudTelemetryState.successfulRequests += 1;
+    cloudTelemetryState.lastSyncAt = iso;
+  } else {
+    cloudTelemetryState.failedRequests += 1;
+    cloudTelemetryState.lastError = {
+      timestamp: timeShort,
+      endpoint: ev.endpoint,
+      status: ev.status,
+      message: ev.errorMessage || ev.detail,
+    };
+  }
+
+  if (ev.direction === 'up') {
+    cloudTelemetryState.bytesSentUtf8 += Math.max(0, ev.bytes);
+  } else {
+    cloudTelemetryState.bytesReceivedUtf8 += Math.max(0, ev.bytes);
+  }
+
+  cloudTelemetryState.recentEvents.unshift({
+    id: makeUniqueId('cev'),
+    timestamp: iso,
+    timeShort,
+    direction: ev.direction,
+    endpoint: ev.endpoint,
+    method: ev.method,
+    status: ev.status,
+    ok: ev.ok,
+    durationMs: Math.max(0, Math.round(ev.durationMs)),
+    bytes: Math.max(0, Math.round(ev.bytes)),
+    detail: ev.detail,
+  });
+
+  if (cloudTelemetryState.recentEvents.length > 25) {
+    cloudTelemetryState.recentEvents.length = 25;
+  }
+
+  notifyCloudMetricsSubscribers();
+}
+
 function enqueueFailedWrite(key: string, value: unknown): void {
   if (Object.keys(failedCloudRetryQueue).length >= MAX_RETRY_QUEUE_KEYS && !(key in failedCloudRetryQueue)) {
     const oldestKey = Object.keys(failedCloudRetryQueue)[0];
     if (oldestKey) delete failedCloudRetryQueue[oldestKey];
   }
   failedCloudRetryQueue[key] = value;
+  notifyCloudMetricsSubscribers();
 }
 
 function sendSingleKeyPost(key: string, value: unknown, keepalive = false): Promise<boolean> {
@@ -465,6 +724,8 @@ function sendSingleKeyPost(key: string, value: unknown, keepalive = false): Prom
     return Promise.resolve(false);
   }
 
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const payloadBytes = getUtf8ByteLength(bodyStr);
   const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
   const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : undefined;
   const useKeepalive = keepalive && bodyStr.length < 60000;
@@ -478,9 +739,21 @@ function sendSingleKeyPost(key: string, value: unknown, keepalive = false): Prom
 
   const reqPromise = fetch(`${API_BASE_URL}/sync`, reqOptions)
     .then(async (res) => {
+      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
       if (!res.ok) {
         console.warn(`Cloud sync POST non-OK (${res.status}) for key ${key}`);
         enqueueFailedWrite(key, value);
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/sync',
+          method: 'POST',
+          status: res.status,
+          ok: false,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: `خطا در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+          errorMessage: `HTTP ${res.status}`,
+        });
         return false;
       }
       const data = (await res.json().catch(() => null)) as { revision?: string | number } | null;
@@ -488,11 +761,33 @@ function sendSingleKeyPost(key: string, value: unknown, keepalive = false): Prom
         lastSyncRevision = data.revision;
       }
       delete failedCloudRetryQueue[key];
+      recordCloudTrafficEvent({
+        direction: 'up',
+        endpoint: '/sync',
+        method: 'POST',
+        status: res.status,
+        ok: true,
+        durationMs: dur,
+        bytes: payloadBytes,
+        detail: `ذخیره ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+      });
       return true;
     })
     .catch((err) => {
+      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
       console.warn(`Cloud sync POST failed for key ${key}:`, err);
       enqueueFailedWrite(key, value);
+      recordCloudTrafficEvent({
+        direction: 'up',
+        endpoint: '/sync',
+        method: 'POST',
+        status: null,
+        ok: false,
+        durationMs: dur,
+        bytes: payloadBytes,
+        detail: `عدم پاسخ در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+        errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
+      });
       return false;
     })
     .finally(() => {
@@ -500,9 +795,11 @@ function sendSingleKeyPost(key: string, value: unknown, keepalive = false): Prom
       if (pendingCloudRequests[key] === reqPromise) {
         delete pendingCloudRequests[key];
       }
+      notifyCloudMetricsSubscribers();
     });
 
   pendingCloudRequests[key] = reqPromise;
+  notifyCloudMetricsSubscribers();
   return reqPromise;
 }
 
@@ -537,6 +834,8 @@ function flushAllPendingCloudTimers(keepalive = false): void {
       return;
     }
 
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const payloadBytes = getUtf8ByteLength(batchBody);
     const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
     const timeoutId = controller ? setTimeout(() => controller.abort(), 18000) : undefined;
     const useKeepalive = keepalive && batchBody.length < 60000;
@@ -548,6 +847,7 @@ function flushAllPendingCloudTimers(keepalive = false): void {
       ...(useKeepalive ? { keepalive: true } : { signal: controller?.signal }),
     })
       .then(async (res) => {
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
         if (res.status === 404 || res.status === 405) {
           batchEndpointSupported = false;
           const fallbacks = await Promise.all(entriesToSend.map((e) => sendSingleKeyPost(e.key, e.value, keepalive)));
@@ -555,6 +855,17 @@ function flushAllPendingCloudTimers(keepalive = false): void {
         }
         if (!res.ok) {
           entriesToSend.forEach((e) => enqueueFailedWrite(e.key, e.value));
+          recordCloudTrafficEvent({
+            direction: 'up',
+            endpoint: '/sync/batch',
+            method: 'POST',
+            status: res.status,
+            ok: false,
+            durationMs: dur,
+            bytes: payloadBytes,
+            detail: `خطا در ارسال دسته‌ای (${entriesToSend.length} جدول)`,
+            errorMessage: `HTTP ${res.status}`,
+          });
           return false;
         }
         batchEndpointSupported = true;
@@ -565,10 +876,32 @@ function flushAllPendingCloudTimers(keepalive = false): void {
         entriesToSend.forEach((e) => {
           delete failedCloudRetryQueue[e.key];
         });
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/sync/batch',
+          method: 'POST',
+          status: res.status,
+          ok: true,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: `ذخیره دسته‌ای ${entriesToSend.length} جدول در ابر`,
+        });
         return true;
       })
-      .catch(() => {
+      .catch((err) => {
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
         entriesToSend.forEach((e) => enqueueFailedWrite(e.key, e.value));
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/sync/batch',
+          method: 'POST',
+          status: null,
+          ok: false,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: `قطع ارتباط در ارسال دسته‌ای (${entriesToSend.length} جدول)`,
+          errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
+        });
         return false;
       })
       .finally(() => {
@@ -578,11 +911,13 @@ function flushAllPendingCloudTimers(keepalive = false): void {
             delete pendingCloudRequests[e.key];
           }
         });
+        notifyCloudMetricsSubscribers();
       });
 
     entriesToSend.forEach((e) => {
       pendingCloudRequests[e.key] = batchPromise;
     });
+    notifyCloudMetricsSubscribers();
     return;
   }
 
@@ -609,7 +944,11 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     flushAllPendingCloudTimers(true);
   });
   window.addEventListener('online', () => {
+    notifyCloudMetricsSubscribers();
     flushFailedRetryQueue();
+  });
+  window.addEventListener('offline', () => {
+    notifyCloudMetricsSubscribers();
   });
 }
 
@@ -3008,6 +3347,8 @@ export const Storage = {
     restoredPhotosCount: number;
     uploadedPhotosToCloudCount: number;
     restoredFilesCount: number;
+    failedSyncKeys?: string[];
+    oversizedKeys?: string[];
     errorMessage?: string;
   }> => {
     type PhotoRole =
@@ -3275,7 +3616,8 @@ export const Storage = {
 
       // گام ۴: همگام‌سازی کامل با دیتابیس ابری (MongoDB sync_kv + students collection)
       onProgress?.('در حال بازسازی و همگام‌سازی کامل پایگاه داده ابری سرور...');
-      const cloudSynced = await Storage.syncAllToCloud();
+      const detailedSync = await Storage.syncAllToCloudDetailed(onProgress);
+      const cloudSynced = detailedSync.ok;
 
       let studentsSynced = false;
       const restoredStudents = Storage.getStudents();
@@ -3283,24 +3625,53 @@ export const Storage = {
         studentsSynced = true;
       } else {
         try {
+          const allIds = restoredStudents.map((s) => s.studentId).filter(Boolean);
           const fullPayloadStr = JSON.stringify({ students: restoredStudents, replaceAll: true });
-          if (fullPayloadStr.length <= 3_500_000) {
-            const stRes = await fetch(`${API_BASE_URL}/students`, {
-              method: 'POST',
-              headers: buildApiHeaders(true),
-              body: fullPayloadStr,
-            });
-            studentsSynced = stRes.ok;
+          const postStudentsPayload = async (bodyStr: string): Promise<boolean> => {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(), 30000);
+              try {
+                const stRes = await fetch(`${API_BASE_URL}/students`, {
+                  method: 'POST',
+                  headers: buildApiHeaders(true),
+                  body: bodyStr,
+                  signal: controller.signal,
+                });
+                clearTimeout(timer);
+                if (stRes.ok) return true;
+                if (attempt === 0 && (stRes.status === 429 || stRes.status >= 500)) {
+                  await new Promise((r) => setTimeout(r, 700));
+                  continue;
+                }
+                return false;
+              } catch {
+                clearTimeout(timer);
+                if (attempt === 0) {
+                  await new Promise((r) => setTimeout(r, 700));
+                  continue;
+                }
+                return false;
+              }
+            }
+            return false;
+          };
+
+          if (getUtf8ByteLength(fullPayloadStr) <= 1_800_000) {
+            studentsSynced = await postStudentsPayload(fullPayloadStr);
           } else {
             let allChunksOk = true;
-            for (let i = 0; i < restoredStudents.length; i += 250) {
-              const chunk = restoredStudents.slice(i, i + 250);
-              const stRes = await fetch(`${API_BASE_URL}/students`, {
-                method: 'POST',
-                headers: buildApiHeaders(true),
-                body: JSON.stringify({ students: chunk }),
-              });
-              if (!stRes.ok) {
+            const chunkSize = 200;
+            const totalChunks = Math.ceil(restoredStudents.length / chunkSize);
+            for (let i = 0, cIdx = 0; i < restoredStudents.length; i += chunkSize, cIdx += 1) {
+              const chunk = restoredStudents.slice(i, i + chunkSize);
+              const isLast = i + chunkSize >= restoredStudents.length;
+              onProgress?.(`در حال ثبت پرونده دانشجویان در سرور ابری (دسته ${cIdx + 1} از ${totalChunks})...`);
+              const payloadObj = isLast
+                ? { students: chunk, keepStudentIds: allIds }
+                : { students: chunk };
+              const chunkOk = await postStudentsPayload(JSON.stringify(payloadObj));
+              if (!chunkOk) {
                 allChunksOk = false;
                 break;
               }
@@ -3322,6 +3693,8 @@ export const Storage = {
         restoredPhotosCount,
         uploadedPhotosToCloudCount,
         restoredFilesCount,
+        failedSyncKeys: detailedSync.failedKeys,
+        oversizedKeys: detailedSync.oversizedKeys,
       };
     } catch (e) {
       console.error('importFullBackupJsonAsync failed:', e);
@@ -8399,29 +8772,85 @@ export const Storage = {
   // -------------------------------------------------------------
   fetchStudentsFromDB: async (): Promise<Student[] | null> => {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(`${API_BASE_URL}/students`, {
-        method: 'GET',
-        cache: 'no-store',
-        ...(ENV_SYNC_TOKEN ? { headers: buildApiHeaders(false) } : {}),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+      const collected: Student[] = [];
+      let skip = 0;
+      const limit = 400;
+      let keepFetching = true;
 
-      if (!res.ok) return null;
-      const rawData = await res.json();
-      if (!Array.isArray(rawData)) return null;
+      while (keepFetching) {
+        const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 25000);
+        const res = await fetch(`${API_BASE_URL}/students?skip=${skip}&limit=${limit}`, {
+          method: 'GET',
+          cache: 'no-store',
+          ...(ENV_SYNC_TOKEN ? { headers: buildApiHeaders(false) } : {}),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
 
-      const cleanStudents: Student[] = rawData.map((item: Record<string, unknown>) =>
-        normalizeStudentRecord(sanitizePlainValue(item))
-      );
+        if (!res.ok) {
+          recordCloudTrafficEvent({
+            direction: 'down',
+            endpoint: `/students?skip=${skip}`,
+            method: 'GET',
+            status: res.status,
+            ok: false,
+            durationMs: dur,
+            bytes: 0,
+            detail: 'خطا در دریافت صفحه دانشجویان از سرور',
+            errorMessage: `HTTP ${res.status}`,
+          });
+          return null;
+        }
+        const rawText = await res.text();
+        const rxBytes = getUtf8ByteLength(rawText);
+        const rawData = JSON.parse(rawText) as
+          | Array<Record<string, unknown>>
+          | { students?: Array<Record<string, unknown>>; hasMore?: boolean; nextSkip?: number };
+
+        if (Array.isArray(rawData)) {
+          for (const item of rawData) {
+            collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
+          }
+          keepFetching = false;
+          recordCloudTrafficEvent({
+            direction: 'down',
+            endpoint: '/students',
+            method: 'GET',
+            status: res.status,
+            ok: true,
+            durationMs: dur,
+            bytes: rxBytes,
+            detail: `دریافت ${rawData.length.toLocaleString('fa-IR')} پرونده دانشجو`,
+          });
+        } else if (rawData && Array.isArray(rawData.students)) {
+          for (const item of rawData.students) {
+            collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
+          }
+          keepFetching = Boolean(rawData.hasMore) && rawData.students.length > 0;
+          skip = typeof rawData.nextSkip === 'number' ? rawData.nextSkip : skip + rawData.students.length;
+          recordCloudTrafficEvent({
+            direction: 'down',
+            endpoint: `/students?skip=${skip}`,
+            method: 'GET',
+            status: res.status,
+            ok: true,
+            durationMs: dur,
+            bytes: rxBytes,
+            detail: `دریافت صفحه ${rawData.students.length.toLocaleString('fa-IR')} دانشجو (مجموع ${collected.length.toLocaleString('fa-IR')})`,
+          });
+        } else {
+          return null;
+        }
+      }
 
       const lastLocalWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
-      if (Date.now() - lastLocalWrite > 5000 && cleanStudents.length > 0) {
-        safeLocalStorageSet(STORAGE_KEYS.STUDENTS, JSON.stringify(cleanStudents), cleanStudents);
+      if (Date.now() - lastLocalWrite > 5000 && collected.length > 0) {
+        safeLocalStorageSet(STORAGE_KEYS.STUDENTS, JSON.stringify(collected), collected);
       }
-      return cleanStudents;
+      return collected;
     } catch (err) {
       console.warn('fetchStudentsFromDB error:', err);
       return null;
@@ -8514,62 +8943,79 @@ export const Storage = {
         userId: it.userId.trim(),
         dataUrl: it.dataUrl,
       }));
+      const bodyStr = JSON.stringify({ items: chunk });
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000);
-      try {
-        const res = await fetch(`${API_BASE_URL}/photos/batch`, {
-          method: 'POST',
-          headers: buildApiHeaders(true),
-          body: JSON.stringify({ items: chunk }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
+      let chunkSucceeded = false;
+      let lastErrorMessage = '';
 
-        if (res.status === 404 || res.status === 405) {
-          return {
-            supported: false,
-            ok: false,
-            urls: {},
-            errorMessage:
-              'مسیر ذخیره ابری عکس‌ها (/api/photos/batch) در بک‌اند khabgah-api فعال نیست.',
+      for (let attempt = 0; attempt < 2 && !chunkSucceeded; attempt += 1) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 25000);
+        try {
+          const res = await fetch(`${API_BASE_URL}/photos/batch`, {
+            method: 'POST',
+            headers: buildApiHeaders(true),
+            body: bodyStr,
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (res.status === 404 || res.status === 405) {
+            return {
+              supported: false,
+              ok: false,
+              urls: {},
+              errorMessage:
+                'مسیر ذخیره ابری عکس‌ها (/api/photos/batch) در بک‌اند khabgah-api فعال نیست.',
+            };
+          }
+
+          if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            lastErrorMessage = `خطای سرور ابری (${res.status}): ${errText || 'خطا در ذخیره عکس‌ها'}`;
+            if (attempt === 0 && (res.status === 429 || res.status >= 500)) {
+              await new Promise((r) => setTimeout(r, 700));
+              continue;
+            }
+            return {
+              supported: true,
+              ok: false,
+              urls,
+              errorMessage: lastErrorMessage,
+            };
+          }
+
+          const data = (await res.json().catch(() => ({}))) as {
+            urls?: Record<string, string>;
           };
-        }
-
-        if (!res.ok) {
-          const errText = await res.text().catch(() => '');
+          if (data?.urls && typeof data.urls === 'object') {
+            Object.assign(urls, data.urls);
+          } else {
+            const ts = Date.now();
+            chunk.forEach((c) => {
+              urls[c.userId] = `${API_BASE_URL}/photo/${encodeURIComponent(role)}/${encodeURIComponent(
+                c.userId
+              )}?v=${ts}`;
+            });
+          }
+          chunkSucceeded = true;
+        } catch (err) {
+          clearTimeout(timeoutId);
+          lastErrorMessage =
+            err instanceof Error && err.name === 'AbortError'
+              ? 'زمان اتصال به سرور ابری برای بارگذاری عکس‌ها به پایان رسید.'
+              : 'عدم امکان اتصال به سرور ابری (khabgah-api) هنگام بارگذاری عکس‌ها.';
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 700));
+            continue;
+          }
           return {
             supported: true,
             ok: false,
             urls,
-            errorMessage: `خطای سرور ابری (${res.status}): ${errText || 'خطا در ذخیره عکس‌ها'}`,
+            errorMessage: lastErrorMessage,
           };
         }
-
-        const data = (await res.json().catch(() => ({}))) as {
-          urls?: Record<string, string>;
-        };
-        if (data?.urls && typeof data.urls === 'object') {
-          Object.assign(urls, data.urls);
-        } else {
-          const ts = Date.now();
-          chunk.forEach((c) => {
-            urls[c.userId] = `${API_BASE_URL}/photo/${encodeURIComponent(role)}/${encodeURIComponent(
-              c.userId
-            )}?v=${ts}`;
-          });
-        }
-      } catch (err) {
-        clearTimeout(timeoutId);
-        return {
-          supported: true,
-          ok: false,
-          urls,
-          errorMessage:
-            err instanceof Error && err.name === 'AbortError'
-              ? 'زمان اتصال به سرور ابری برای بارگذاری عکس‌ها به پایان رسید.'
-              : 'عدم امکان اتصال به سرور ابری (khabgah-api) هنگام بارگذاری عکس‌ها.',
-        };
       }
     }
 
@@ -8618,88 +9064,282 @@ export const Storage = {
     return { success: failedKeys.length === 0, failedKeys };
   },
 
-  syncAllToCloud: async (): Promise<boolean> => {
+  syncAllToCloudDetailed: async (
+    onProgress?: (message: string) => void
+  ): Promise<{
+    ok: boolean;
+    syncedCount: number;
+    totalCount: number;
+    failedKeys: string[];
+    oversizedKeys: string[];
+  }> => {
+    const failedKeys: string[] = [];
+    const oversizedKeys: string[] = [];
+    let syncedCount = 0;
+
     try {
       flushAllPendingCloudTimers(false);
       const allEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
       for (const key of SYNCABLE_KEYS) {
         let parsedVal: unknown = undefined;
-        let serializedLen = 0;
+        let serializedUtf8Bytes = 0;
         if (parsedCache.has(key)) {
           parsedVal = cloneValue(parsedCache.get(key));
           try {
-            serializedLen = JSON.stringify(parsedVal).length;
+            serializedUtf8Bytes = getUtf8ByteLength(JSON.stringify(parsedVal));
           } catch {
-            serializedLen = 0;
+            serializedUtf8Bytes = 0;
           }
         } else {
           const raw = localStorage.getItem(key);
           if (!raw) continue;
           try {
             parsedVal = JSON.parse(raw);
-            serializedLen = raw.length;
+            serializedUtf8Bytes = getUtf8ByteLength(raw);
           } catch {
             continue;
           }
         }
         if (parsedVal !== undefined) {
-          allEntries.push({ key, value: parsedVal, byteEstimate: serializedLen });
+          allEntries.push({ key, value: parsedVal, byteEstimate: serializedUtf8Bytes });
           keyWriteTimestamps[key] = Date.now();
         }
       }
-      if (allEntries.length === 0) return true;
 
-      if (batchEndpointSupported !== false) {
-        let allBatchOk = true;
-        const batches: Array<Array<{ key: string; value: unknown }>> = [];
-        let currentBatch: Array<{ key: string; value: unknown }> = [];
-        let currentBytes = 0;
-        const MAX_BATCH_BYTES = 2_400_000;
+      const totalCount = allEntries.length;
+      if (totalCount === 0) {
+        return { ok: true, syncedCount: 0, totalCount: 0, failedKeys, oversizedKeys };
+      }
 
-        for (const item of allEntries) {
-          if (
-            currentBatch.length > 0 &&
-            (currentBatch.length >= 15 || currentBytes + item.byteEstimate > MAX_BATCH_BYTES)
-          ) {
+      const postSingleWithRetry = async (key: string, value: unknown, utf8Bytes: number): Promise<boolean> => {
+        if (utf8Bytes > 4_300_000) {
+          oversizedKeys.push(key);
+          failedKeys.push(key);
+          recordCloudTrafficEvent({
+            direction: 'up',
+            endpoint: '/sync',
+            method: 'POST',
+            status: 413,
+            ok: false,
+            durationMs: 0,
+            bytes: utf8Bytes,
+            detail: `حجم ${FRIENDLY_SYNC_KEY_LABELS[key] || key} بیش از سقف ۴.۵MB سرور است`,
+            errorMessage: 'Payload exceeds 4.3MB limit',
+          });
+          return false;
+        }
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 30000);
+          try {
+            const bodyStr = JSON.stringify({ key, value });
+            const reqBytes = getUtf8ByteLength(bodyStr);
+            const res = await fetch(`${API_BASE_URL}/sync`, {
+              method: 'POST',
+              headers: buildApiHeaders(true),
+              body: bodyStr,
+              signal: controller.signal,
+            });
+            clearTimeout(timer);
+            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+            if (res.ok) {
+              delete failedCloudRetryQueue[key];
+              recordCloudTrafficEvent({
+                direction: 'up',
+                endpoint: '/sync',
+                method: 'POST',
+                status: res.status,
+                ok: true,
+                durationMs: dur,
+                bytes: reqBytes,
+                detail: `ارسال جدول ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+              });
+              return true;
+            }
+            if (res.status === 413) {
+              oversizedKeys.push(key);
+              failedKeys.push(key);
+              recordCloudTrafficEvent({
+                direction: 'up',
+                endpoint: '/sync',
+                method: 'POST',
+                status: 413,
+                ok: false,
+                durationMs: dur,
+                bytes: reqBytes,
+                detail: `خطای حجم ۴۱۳ برای ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+                errorMessage: 'HTTP 413 Payload Too Large',
+              });
+              return false;
+            }
+            recordCloudTrafficEvent({
+              direction: 'up',
+              endpoint: '/sync',
+              method: 'POST',
+              status: res.status,
+              ok: false,
+              durationMs: dur,
+              bytes: reqBytes,
+              detail: `خطای ${res.status} در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+              errorMessage: `HTTP ${res.status}`,
+            });
+            if (attempt === 0 && (res.status === 429 || res.status >= 500)) {
+              await new Promise((r) => setTimeout(r, 650));
+              continue;
+            }
+            failedKeys.push(key);
+            return false;
+          } catch (err) {
+            clearTimeout(timer);
+            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+            recordCloudTrafficEvent({
+              direction: 'up',
+              endpoint: '/sync',
+              method: 'POST',
+              status: null,
+              ok: false,
+              durationMs: dur,
+              bytes: utf8Bytes,
+              detail: `خطای شبکه در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+              errorMessage: err instanceof Error ? err.message : 'Network error',
+            });
+            if (attempt === 0) {
+              await new Promise((r) => setTimeout(r, 650));
+              continue;
+            }
+            failedKeys.push(key);
+            return false;
+          }
+        }
+        failedKeys.push(key);
+        return false;
+      };
+
+      // دسته‌های سبک (حداکثر ۹۰۰ کیلوبایت UTF-8 و ۸ کلید) تا هیچ درخواستی به سقف ۴.۵ مگابایت Vercel نرسد
+      const batches: Array<Array<{ key: string; value: unknown; byteEstimate: number }>> = [];
+      let currentBatch: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
+      let currentBytes = 0;
+      const MAX_BATCH_UTF8_BYTES = 900_000;
+
+      for (const item of allEntries) {
+        if (item.byteEstimate > MAX_BATCH_UTF8_BYTES) {
+          if (currentBatch.length > 0) {
             batches.push(currentBatch);
             currentBatch = [];
             currentBytes = 0;
           }
-          currentBatch.push({ key: item.key, value: item.value });
-          currentBytes += item.byteEstimate;
+          batches.push([item]);
+          continue;
         }
-        if (currentBatch.length > 0) batches.push(currentBatch);
+        if (
+          currentBatch.length > 0 &&
+          (currentBatch.length >= 8 || currentBytes + item.byteEstimate > MAX_BATCH_UTF8_BYTES)
+        ) {
+          batches.push(currentBatch);
+          currentBatch = [];
+          currentBytes = 0;
+        }
+        currentBatch.push(item);
+        currentBytes += item.byteEstimate;
+      }
+      if (currentBatch.length > 0) batches.push(currentBatch);
 
-        for (const chunk of batches) {
-          const res = await fetch(`${API_BASE_URL}/sync/batch`, {
-            method: 'POST',
-            headers: buildApiHeaders(true),
-            body: JSON.stringify({ entries: chunk }),
+      for (let bIdx = 0; bIdx < batches.length; bIdx += 1) {
+        const chunk = batches[bIdx];
+        onProgress?.(
+          `در حال ارسال بخش‌های پایگاه داده به سرور ابری (دسته ${bIdx + 1} از ${batches.length})...`
+        );
+
+        let batchOk = false;
+        if (batchEndpointSupported !== false && chunk.length > 1) {
+          const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 30000);
+          const bodyStr = JSON.stringify({
+            entries: chunk.map((c) => ({ key: c.key, value: c.value })),
           });
-          if (res.status === 404 || res.status === 405) {
-            batchEndpointSupported = false;
-            allBatchOk = false;
-            break;
+          const reqBytes = getUtf8ByteLength(bodyStr);
+          try {
+            const res = await fetch(`${API_BASE_URL}/sync/batch`, {
+              method: 'POST',
+              headers: buildApiHeaders(true),
+              body: bodyStr,
+              signal: controller.signal,
+            });
+            clearTimeout(timer);
+            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+            if (res.status === 404 || res.status === 405) {
+              batchEndpointSupported = false;
+            } else if (res.ok) {
+              batchEndpointSupported = true;
+              batchOk = true;
+              syncedCount += chunk.length;
+              chunk.forEach((c) => delete failedCloudRetryQueue[c.key]);
+              recordCloudTrafficEvent({
+                direction: 'up',
+                endpoint: '/sync/batch',
+                method: 'POST',
+                status: res.status,
+                ok: true,
+                durationMs: dur,
+                bytes: reqBytes,
+                detail: `ارسال دسته ${bIdx + 1} از ${batches.length} (${chunk.length} جدول)`,
+              });
+            } else {
+              recordCloudTrafficEvent({
+                direction: 'up',
+                endpoint: '/sync/batch',
+                method: 'POST',
+                status: res.status,
+                ok: false,
+                durationMs: dur,
+                bytes: reqBytes,
+                detail: `خطای ${res.status} در دسته ${bIdx + 1} (تلاش تکی خودکار)`,
+                errorMessage: `HTTP ${res.status}`,
+              });
+            }
+          } catch (err) {
+            clearTimeout(timer);
+            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+            recordCloudTrafficEvent({
+              direction: 'up',
+              endpoint: '/sync/batch',
+              method: 'POST',
+              status: null,
+              ok: false,
+              durationMs: dur,
+              bytes: reqBytes,
+              detail: `قطع در دسته ${bIdx + 1} (تلاش تکی خودکار)`,
+              errorMessage: err instanceof Error ? err.message : 'Network error',
+            });
           }
-          if (!res.ok) return false;
-          batchEndpointSupported = true;
         }
-        if (batchEndpointSupported && allBatchOk) return true;
+
+        if (!batchOk) {
+          for (const item of chunk) {
+            const okSingle = await postSingleWithRetry(item.key, item.value, item.byteEstimate);
+            if (okSingle) syncedCount += 1;
+          }
+        }
       }
 
-      for (const { key, value } of allEntries) {
-        const res = await fetch(`${API_BASE_URL}/sync`, {
-          method: 'POST',
-          headers: buildApiHeaders(true),
-          body: JSON.stringify({ key, value }),
-        });
-        if (!res.ok) return false;
-      }
-      return true;
+      return {
+        ok: failedKeys.length === 0,
+        syncedCount,
+        totalCount,
+        failedKeys,
+        oversizedKeys,
+      };
     } catch (err) {
-      console.warn('syncAllToCloud error:', err);
-      return false;
+      console.warn('syncAllToCloudDetailed error:', err);
+      return { ok: false, syncedCount, totalCount: 0, failedKeys, oversizedKeys };
     }
+  },
+
+  syncAllToCloud: async (): Promise<boolean> => {
+    const res = await Storage.syncAllToCloudDetailed();
+    return res.ok;
   },
 
   syncFromCloud: async (): Promise<boolean> => {
@@ -8714,15 +9354,12 @@ export const Storage = {
     flushFailedRetryQueue();
 
     activeSyncPromise = (async () => {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 11000);
-
       try {
-        // گام ۱: بررسی فوق‌سبک نسخه سرور (اگر مسیر /sync/version در بک‌اند فعال باشد از دانلود بی‌مورد کل دیتابیس جلوگیری می‌کند)
+        // گام ۱: بررسی فوق‌سبک نسخه سرور
         if (versionEndpointSupported !== false) {
           try {
             const verController = new AbortController();
-            const verTimer = setTimeout(() => verController.abort(), 4000);
+            const verTimer = setTimeout(() => verController.abort(), 6000);
             const verRes = await fetch(`${API_BASE_URL}/sync/version`, {
               method: 'GET',
               cache: 'no-store',
@@ -8753,105 +9390,275 @@ export const Storage = {
           }
         }
 
-        const syncHeaders: Record<string, string> | undefined = lastSyncEtag
-          ? { 'If-None-Match': lastSyncEtag }
-          : undefined;
-        const studentsHeaders: Record<string, string> | undefined = lastStudentsEtag
-          ? { 'If-None-Match': lastStudentsEtag }
-          : undefined;
-
-        const [syncResult, studentsResult] = await Promise.allSettled([
-          fetch(`${API_BASE_URL}/sync`, {
-            method: 'GET',
-            cache: 'no-store',
-            ...(syncHeaders ? { headers: syncHeaders } : {}),
-            signal: controller.signal,
-          }),
-          fetch(`${API_BASE_URL}/students`, {
-            method: 'GET',
-            cache: 'no-store',
-            ...(studentsHeaders ? { headers: studentsHeaders } : {}),
-            signal: controller.signal,
-          }),
-        ]);
-
         let hasRemoteChanges = false;
-        let cloudMap: Record<string, unknown> | null = null;
+        const cloudMap: Record<string, unknown> = {};
 
-        if (syncResult.status === 'fulfilled') {
-          const res = syncResult.value;
-          const etag = res.headers?.get?.('etag');
-          if (etag) lastSyncEtag = etag;
-
-          if (res.status === 304) {
-            // بدون تغییر از آخرین دریافت
-          } else if (res.ok) {
-            const rawParsed = await res.json();
-            // پشتیبانی از هر دو فرمت پاسخ مستقیم و ساختار { data, revision }
-            const unwrapped =
-              rawParsed &&
-              typeof rawParsed === 'object' &&
-              !Array.isArray(rawParsed) &&
-              'data' in rawParsed &&
-              typeof (rawParsed as Record<string, unknown>).data === 'object' &&
-              !(STORAGE_KEYS.STUDENTS in (rawParsed as Record<string, unknown>))
-                ? ((rawParsed as { data: Record<string, unknown>; revision?: string | number }).data)
-                : rawParsed;
-
-            if (
-              rawParsed &&
-              typeof rawParsed === 'object' &&
-              'revision' in rawParsed &&
-              (rawParsed as { revision?: string | number }).revision !== undefined
-            ) {
-              lastSyncRevision = (rawParsed as { revision?: string | number }).revision ?? lastSyncRevision;
+        const applyCloudKvEntries = (entriesObj: Record<string, unknown>) => {
+          for (const [key, val] of Object.entries(entriesObj)) {
+            if (!SYNCABLE_KEYS.includes(key)) continue;
+            if (val === undefined || val === null) continue;
+            cloudMap[key] = val;
+            if (pendingCloudRequests[key] || key in pendingCloudValues) continue;
+            const lastLocalWrite = keyWriteTimestamps[key] || 0;
+            if (Date.now() - lastLocalWrite < 5000) continue;
+            const serialized = JSON.stringify(val);
+            if (localStorage.getItem(key) !== serialized) {
+              safeLocalStorageSet(key, serialized, val);
+              hasRemoteChanges = true;
             }
+          }
+        };
 
-            if (unwrapped && typeof unwrapped === 'object' && !Array.isArray(unwrapped)) {
-              cloudMap = sanitizePlainValue(unwrapped as Record<string, unknown>);
+        // گام ۲: همگام‌سازی تکه‌ای سریع با /api/sync/manifest تا هیچ کلید بزرگی باعث Timeout یا خطای ۴.۵MB نشود
+        let usedManifestSync = false;
+        if (manifestEndpointSupported !== false) {
+          try {
+            const mController = new AbortController();
+            const mTimer = setTimeout(() => mController.abort(), 10000);
+            const mRes = await fetch(`${API_BASE_URL}/sync/manifest`, {
+              method: 'GET',
+              cache: 'no-store',
+              signal: mController.signal,
+            });
+            clearTimeout(mTimer);
 
-              for (const [key, val] of Object.entries(cloudMap)) {
-                if (!SYNCABLE_KEYS.includes(key)) continue;
-                if (val === undefined || val === null) continue;
-                if (pendingCloudRequests[key] || key in pendingCloudValues) continue;
-                const lastLocalWrite = keyWriteTimestamps[key] || 0;
-                if (Date.now() - lastLocalWrite < 5000) continue;
-                const serialized = JSON.stringify(val);
-                if (localStorage.getItem(key) !== serialized) {
-                  safeLocalStorageSet(key, serialized, val);
-                  hasRemoteChanges = true;
+            if (mRes.status === 404 || mRes.status === 405) {
+              manifestEndpointSupported = false;
+            } else if (mRes.ok) {
+              manifestEndpointSupported = true;
+              const manifestData = (await mRes.json().catch(() => null)) as {
+                revision?: string | number;
+                keys?: Array<{ key: string; sizeBytes?: number | null }>;
+              } | null;
+
+              if (manifestData?.revision !== undefined) {
+                lastSyncRevision = manifestData.revision;
+              }
+
+              const serverKeys = Array.isArray(manifestData?.keys)
+                ? manifestData.keys.filter((k) => k?.key && SYNCABLE_KEYS.includes(k.key))
+                : [];
+
+              if (serverKeys.length > 0) {
+                usedManifestSync = true;
+                const keyChunks: string[][] = [];
+                let curKeys: string[] = [];
+                let curSize = 0;
+
+                for (const kInfo of serverKeys) {
+                  const estSize = typeof kInfo.sizeBytes === 'number' ? kInfo.sizeBytes : 120_000;
+                  if (estSize > 700_000) {
+                    if (curKeys.length > 0) {
+                      keyChunks.push(curKeys);
+                      curKeys = [];
+                      curSize = 0;
+                    }
+                    keyChunks.push([kInfo.key]);
+                    continue;
+                  }
+                  if (curKeys.length > 0 && (curKeys.length >= 6 || curSize + estSize > 700_000)) {
+                    keyChunks.push(curKeys);
+                    curKeys = [];
+                    curSize = 0;
+                  }
+                  curKeys.push(kInfo.key);
+                  curSize += estSize;
                 }
+                if (curKeys.length > 0) keyChunks.push(curKeys);
+
+                let cursor = 0;
+                const workers = Array.from({ length: Math.min(3, keyChunks.length) }, async () => {
+                  while (cursor < keyChunks.length) {
+                    const idx = cursor++;
+                    const chunkKeys = keyChunks[idx];
+                    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                    const kCtrl = new AbortController();
+                    const kTimer = setTimeout(() => kCtrl.abort(), 25000);
+                    try {
+                      const res = await fetch(
+                        `${API_BASE_URL}/sync?keys=${encodeURIComponent(chunkKeys.join(','))}`,
+                        {
+                          method: 'GET',
+                          cache: 'no-store',
+                          signal: kCtrl.signal,
+                        }
+                      );
+                      clearTimeout(kTimer);
+                      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+                      if (res.ok) {
+                        const rawTxt = await res.text();
+                        const rxBytes = getUtf8ByteLength(rawTxt);
+                        const chunkJson = ((): unknown => {
+                          try {
+                            return JSON.parse(rawTxt);
+                          } catch {
+                            return null;
+                          }
+                        })();
+                        recordCloudTrafficEvent({
+                          direction: 'down',
+                          endpoint: `/sync?keys(${chunkKeys.length})`,
+                          method: 'GET',
+                          status: res.status,
+                          ok: true,
+                          durationMs: dur,
+                          bytes: rxBytes,
+                          detail: `دریافت تکه همگام‌سازی (${chunkKeys.length} جدول)`,
+                        });
+                        if (chunkJson && typeof chunkJson === 'object' && !Array.isArray(chunkJson)) {
+                          applyCloudKvEntries(sanitizePlainValue(chunkJson as Record<string, unknown>));
+                        }
+                      } else {
+                        recordCloudTrafficEvent({
+                          direction: 'down',
+                          endpoint: `/sync?keys(${chunkKeys.length})`,
+                          method: 'GET',
+                          status: res.status,
+                          ok: false,
+                          durationMs: dur,
+                          bytes: 0,
+                          detail: `خطا در دریافت تکه همگام‌سازی (${chunkKeys.length} جدول)`,
+                          errorMessage: `HTTP ${res.status}`,
+                        });
+                      }
+                    } catch (err) {
+                      clearTimeout(kTimer);
+                      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+                      recordCloudTrafficEvent({
+                        direction: 'down',
+                        endpoint: `/sync?keys(${chunkKeys.length})`,
+                        method: 'GET',
+                        status: null,
+                        ok: false,
+                        durationMs: dur,
+                        bytes: 0,
+                        detail: `قطع ارتباط در دریافت تکه همگام‌سازی`,
+                        errorMessage: err instanceof Error ? err.message : 'Network error',
+                      });
+                    }
+                  }
+                });
+                await Promise.all(workers);
+              } else {
+                usedManifestSync = true;
               }
             }
+          } catch {
+            // ادامه به روش استاندارد در صورت خطای شبکه
           }
         }
 
-        if (studentsResult.status === 'fulfilled') {
-          const res = studentsResult.value;
-          const etag = res.headers?.get?.('etag');
-          if (etag) lastStudentsEtag = etag;
+        if (!usedManifestSync) {
+          const syncHeaders: Record<string, string> | undefined = lastSyncEtag
+            ? { 'If-None-Match': lastSyncEtag }
+            : undefined;
+          const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          const sController = new AbortController();
+          const sTimer = setTimeout(() => sController.abort(), 28000);
+          try {
+            const res = await fetch(`${API_BASE_URL}/sync`, {
+              method: 'GET',
+              cache: 'no-store',
+              ...(syncHeaders ? { headers: syncHeaders } : {}),
+              signal: sController.signal,
+            });
+            clearTimeout(sTimer);
+            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+            const etag = res.headers?.get?.('etag');
+            if (etag) lastSyncEtag = etag;
 
-          if (res.status !== 304 && res.ok) {
-            const rawStudents = await res.json();
-            if (Array.isArray(rawStudents)) {
-              const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
+            if (res.status === 304) {
+              recordCloudTrafficEvent({
+                direction: 'down',
+                endpoint: '/sync',
+                method: 'GET',
+                status: 304,
+                ok: true,
+                durationMs: dur,
+                bytes: 0,
+                detail: 'بررسی ETag: داده‌های مرورگر به‌روز هستند (۳۰۴)',
+              });
+            } else if (res.ok) {
+              const rawTxt = await res.text();
+              const rxBytes = getUtf8ByteLength(rawTxt);
+              const rawParsed = JSON.parse(rawTxt);
+              recordCloudTrafficEvent({
+                direction: 'down',
+                endpoint: '/sync',
+                method: 'GET',
+                status: res.status,
+                ok: true,
+                durationMs: dur,
+                bytes: rxBytes,
+                detail: 'دریافت کامل داده‌های همگام‌سازی از ابر',
+              });
+              const unwrapped =
+                rawParsed &&
+                typeof rawParsed === 'object' &&
+                !Array.isArray(rawParsed) &&
+                'data' in rawParsed &&
+                typeof (rawParsed as Record<string, unknown>).data === 'object' &&
+                !(STORAGE_KEYS.STUDENTS in (rawParsed as Record<string, unknown>))
+                  ? (rawParsed as { data: Record<string, unknown>; revision?: string | number }).data
+                  : rawParsed;
+
               if (
-                !pendingCloudRequests[STORAGE_KEYS.STUDENTS] &&
-                !(STORAGE_KEYS.STUDENTS in pendingCloudValues) &&
-                Date.now() - lastStudentWrite >= 5000
+                rawParsed &&
+                typeof rawParsed === 'object' &&
+                'revision' in rawParsed &&
+                (rawParsed as { revision?: string | number }).revision !== undefined
               ) {
-                const cleanStudents: Student[] = rawStudents.map((item: Record<string, unknown>) =>
-                  normalizeStudentRecord(sanitizePlainValue(item))
-                );
+                lastSyncRevision =
+                  (rawParsed as { revision?: string | number }).revision ?? lastSyncRevision;
+              }
 
-                const cloudSyncStudents = cloudMap?.[STORAGE_KEYS.STUDENTS];
-                if (!Array.isArray(cloudSyncStudents) && cleanStudents.length > 0) {
-                  const serializedStudents = JSON.stringify(cleanStudents);
-                  if (localStorage.getItem(STORAGE_KEYS.STUDENTS) !== serializedStudents) {
-                    safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, cleanStudents);
-                    hasRemoteChanges = true;
-                  }
-                }
+              if (unwrapped && typeof unwrapped === 'object' && !Array.isArray(unwrapped)) {
+                applyCloudKvEntries(sanitizePlainValue(unwrapped as Record<string, unknown>));
+              }
+            } else {
+              recordCloudTrafficEvent({
+                direction: 'down',
+                endpoint: '/sync',
+                method: 'GET',
+                status: res.status,
+                ok: false,
+                durationMs: dur,
+                bytes: 0,
+                detail: 'خطا در دریافت داده‌های همگام‌سازی از سرور',
+                errorMessage: `HTTP ${res.status}`,
+              });
+            }
+          } catch (err) {
+            clearTimeout(sTimer);
+            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+            recordCloudTrafficEvent({
+              direction: 'down',
+              endpoint: '/sync',
+              method: 'GET',
+              status: null,
+              ok: false,
+              durationMs: dur,
+              bytes: 0,
+              detail: 'عدم دریافت پاسخ از /api/sync',
+              errorMessage: err instanceof Error ? err.message : 'Network error',
+            });
+          }
+        }
+
+        // گام ۳: اگر کلید دانشجویان از sync_kv دریافت نشده بود، به‌صورت صفحه‌بندی‌شده از /api/students دریافت شود
+        if (!Array.isArray(cloudMap[STORAGE_KEYS.STUDENTS])) {
+          const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
+          if (
+            !pendingCloudRequests[STORAGE_KEYS.STUDENTS] &&
+            !(STORAGE_KEYS.STUDENTS in pendingCloudValues) &&
+            Date.now() - lastStudentWrite >= 5000
+          ) {
+            const fetchedStudents = await Storage.fetchStudentsFromDB();
+            if (Array.isArray(fetchedStudents) && fetchedStudents.length > 0) {
+              const serializedStudents = JSON.stringify(fetchedStudents);
+              if (localStorage.getItem(STORAGE_KEYS.STUDENTS) !== serializedStudents) {
+                safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, fetchedStudents);
+                hasRemoteChanges = true;
               }
             }
           }
@@ -8862,7 +9669,6 @@ export const Storage = {
         console.warn('syncFromCloud error:', err);
         return false;
       } finally {
-        clearTimeout(timeoutId);
         activeSyncPromise = null;
       }
     })();
@@ -9414,6 +10220,743 @@ export const Storage = {
       });
     }
     return { success: true, message: 'کاربر معاونت دانشجویی با موفقیت حذف گردید.' };
+  },
+
+  // -------------------------------------------------------------
+  // ابزارهای پایش زنده، ممیزی حجم محلی و عیب‌یابی کامل سرور ابری و دیتابیس
+  // -------------------------------------------------------------
+  getCloudLiveMetrics: (): CloudLiveMetrics => buildCloudLiveMetricsSnapshot(),
+
+  subscribeCloudMetrics: (listener: (metrics: CloudLiveMetrics) => void): (() => void) => {
+    cloudMetricsSubscribers.add(listener);
+    try {
+      listener(buildCloudLiveMetricsSnapshot());
+    } catch {
+      // ignore initial listener error
+    }
+    return () => {
+      cloudMetricsSubscribers.delete(listener);
+    };
+  },
+
+  getLocalCloudPayloadSummary: (): LocalCloudPayloadSummary => {
+    const auditItems: LocalCloudKeyAuditItem[] = [];
+    let totalBytesUtf8 = 0;
+
+    for (const key of SYNCABLE_KEYS) {
+      let rawStr: string | null = null;
+      if (parsedCache.has(key)) {
+        try {
+          rawStr = JSON.stringify(parsedCache.get(key));
+        } catch {
+          rawStr = null;
+        }
+      } else {
+        try {
+          rawStr = localStorage.getItem(key);
+        } catch {
+          rawStr = null;
+        }
+      }
+      if (!rawStr) continue;
+      const bytesUtf8 = getUtf8ByteLength(rawStr);
+      totalBytesUtf8 += bytesUtf8;
+      const percentOfVercelLimit = Math.round((bytesUtf8 / 4_500_000) * 1000) / 10;
+      auditItems.push({
+        key,
+        label: FRIENDLY_SYNC_KEY_LABELS[key] || key.replace('farhangian_dorm_', '').replace('_prod', ''),
+        bytesUtf8,
+        percentOfVercelLimit,
+        nearLimit: bytesUtf8 >= 2_500_000 && bytesUtf8 <= 4_300_000,
+        overLimit: bytesUtf8 > 4_300_000,
+      });
+    }
+
+    auditItems.sort((a, b) => b.bytesUtf8 - a.bytesUtf8);
+    return {
+      presentKeysCount: auditItems.length,
+      totalSyncableKeys: SYNCABLE_KEYS.length,
+      totalBytesUtf8,
+      oversizedKeys: auditItems.filter((i) => i.overLimit),
+      nearLimitKeys: auditItems.filter((i) => i.nearLimit),
+      topKeys: auditItems.slice(0, 8),
+    };
+  },
+
+  pollCloudLiveHealth: async (): Promise<{
+    ok: boolean;
+    latencyMs: number;
+    dbName: string | null;
+    counts: { syncKv: number; students: number; photos: number } | null;
+    revision: string | number | null;
+    updatedAt: string | null;
+    errorMessage?: string;
+  }> => {
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      const [hRes, vRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/health`, { method: 'GET', cache: 'no-store', signal: controller.signal }),
+        fetch(`${API_BASE_URL}/sync/version`, {
+          method: 'GET',
+          cache: 'no-store',
+          signal: controller.signal,
+        }).catch(() => null),
+      ]);
+      clearTimeout(timer);
+      const latencyMs = Math.round(
+        (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt
+      );
+
+      const hText = await hRes.text();
+      const hBytes = getUtf8ByteLength(hText);
+      const hJson = ((): Record<string, unknown> | null => {
+        try {
+          return JSON.parse(hText) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })();
+
+      let revision: string | number | null = lastSyncRevision;
+      let updatedAt: string | null = null;
+      if (vRes && vRes.ok) {
+        versionEndpointSupported = true;
+        const vJson = (await vRes.json().catch(() => null)) as {
+          revision?: string | number;
+          updatedAt?: string | null;
+        } | null;
+        if (vJson?.revision !== undefined) {
+          revision = vJson.revision;
+          lastSyncRevision = vJson.revision;
+        }
+        updatedAt = vJson?.updatedAt || null;
+      }
+
+      const countsRaw =
+        hJson && typeof hJson.counts === 'object' && hJson.counts
+          ? (hJson.counts as { syncKv?: unknown; students?: unknown; photos?: unknown })
+          : null;
+      const counts = countsRaw
+        ? {
+            syncKv: Number(countsRaw.syncKv || 0),
+            students: Number(countsRaw.students || 0),
+            photos: Number(countsRaw.photos || 0),
+          }
+        : null;
+      const dbName = hJson && typeof hJson.dbName === 'string' ? hJson.dbName : null;
+      const ok = Boolean(hRes.ok && hJson && hJson.ok !== false);
+
+      cloudTelemetryState.lastHealthLatencyMs = latencyMs;
+      cloudTelemetryState.lastHealthOk = ok;
+      cloudTelemetryState.lastDbName = dbName;
+      cloudTelemetryState.lastServerCounts = counts;
+
+      recordCloudTrafficEvent({
+        direction: 'probe',
+        endpoint: '/health',
+        method: 'GET',
+        status: hRes.status,
+        ok,
+        durationMs: latencyMs,
+        bytes: hBytes,
+        detail: ok
+          ? `پایش زنده: دیتابیس ${dbName || '-'} فعال (${latencyMs}ms)`
+          : `پایش زنده ناموفق (${hRes.status})`,
+        errorMessage: ok ? undefined : String(hJson?.message || `HTTP ${hRes.status}`),
+      });
+
+      return {
+        ok,
+        latencyMs,
+        dbName,
+        counts,
+        revision,
+        updatedAt,
+        errorMessage: ok ? undefined : String(hJson?.message || `خطای HTTP ${hRes.status}`),
+      };
+    } catch (err) {
+      const latencyMs = Math.round(
+        (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt
+      );
+      cloudTelemetryState.lastHealthLatencyMs = latencyMs;
+      cloudTelemetryState.lastHealthOk = false;
+      const msg =
+        err instanceof Error && err.name === 'AbortError'
+          ? 'انقضای مهلت ۱۲ ثانیه‌ای هنگام بررسی سلامت سرور'
+          : 'عدم دسترسی به سرور ابری (CORS، اینترنت یا خاموش بودن سرویس)';
+      recordCloudTrafficEvent({
+        direction: 'probe',
+        endpoint: '/health',
+        method: 'GET',
+        status: null,
+        ok: false,
+        durationMs: latencyMs,
+        bytes: 0,
+        detail: 'خطای اتصال در پایش زنده سرور',
+        errorMessage: msg,
+      });
+      return {
+        ok: false,
+        latencyMs,
+        dbName: null,
+        counts: null,
+        revision: lastSyncRevision,
+        updatedAt: null,
+        errorMessage: msg,
+      };
+    }
+  },
+
+  runCloudDiagnostics: async (
+    onStep?: (stepMessage: string) => void
+  ): Promise<CloudDiagnosticReport> => {
+    const overallStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const checks: CloudDiagnosticCheckItem[] = [];
+    const recommendations: string[] = [];
+
+    const localSummary = Storage.getLocalCloudPayloadSummary();
+    let serverHealthy = false;
+    let dbName: string | null = null;
+    let serverCounts: { syncKv: number; students: number; photos: number } | null = null;
+    let serverRevision: string | number | null = null;
+    let serverUpdatedAt: string | null = null;
+    let throughputKbps: number | null = null;
+    let manifestKeysCount: number | null = null;
+    let manifestTotalBytes: number | null = null;
+    let missingOnServerKeys: string[] = [];
+    let oversizedOnServerKeys: Array<{ key: string; sizeBytes: number }> = [];
+
+    // ۱. بررسی وضعیت شبکه مرورگر و اطلاعات اتصال
+    onStep?.('۱/۶ بررسی اتصال شبکه مرورگر و پارامترهای ارتباطی...');
+    const isBrowserOnline = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+    const navConn =
+      typeof navigator !== 'undefined'
+        ? (navigator as unknown as {
+            connection?: { effectiveType?: string; downlink?: number; rtt?: number; saveData?: boolean };
+          }).connection
+        : undefined;
+    const netDetails: string[] = [
+      `وضعیت آنلاین مرورگر: ${isBrowserOnline ? 'متصل' : 'قطع (Offline)'}`,
+      `نشانی سرور ابری: ${API_BASE_URL}`,
+      `توکن امنیتی همگام‌سازی: ${ENV_SYNC_TOKEN && ENV_SYNC_TOKEN.trim() ? 'تنظیم شده (Bearer)' : 'عمومی / بدون توکن اجباری'}`,
+    ];
+    if (navConn) {
+      if (navConn.effectiveType) netDetails.push(`نوع شبکه مرورگر: ${navConn.effectiveType.toUpperCase()}`);
+      if (typeof navConn.downlink === 'number') netDetails.push(`پهنای باند تخمینی: ${navConn.downlink} Mbps`);
+      if (typeof navConn.rtt === 'number') netDetails.push(`تأخیر پایه شبکه: ${navConn.rtt} ms`);
+    }
+    checks.push({
+      id: 'browser_network',
+      title: 'شبکه مرورگر و پیکربندی نشانی سرور',
+      category: 'network',
+      status: isBrowserOnline ? 'pass' : 'fail',
+      latencyMs: typeof navConn?.rtt === 'number' ? navConn.rtt : null,
+      summary: isBrowserOnline
+        ? 'مرورگر به شبکه متصل است و پیکربندی سرور ابری معتبر است.'
+        : 'مرورگر در حالت آفلاین است و امکان برقراری ارتباط وجود ندارد.',
+      details: netDetails,
+    });
+    if (!isBrowserOnline) {
+      recommendations.push('اتصال اینترنت دستگاه را بررسی و سپس آزمایش را تکرار نمایید.');
+    }
+
+    // ۲. بررسی سلامت سرور ابری و پایگاه داده MongoDB Atlas
+    onStep?.('۲/۶ بررسی سلامت سرویس khabgah-api و اتصال به MongoDB Atlas...');
+    const healthStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    try {
+      const hCtrl = new AbortController();
+      const hTimer = setTimeout(() => hCtrl.abort(), 15000);
+      const hRes = await fetch(`${API_BASE_URL}/health`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: hCtrl.signal,
+      });
+      clearTimeout(hTimer);
+      const hLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - healthStarted);
+      const hText = await hRes.text();
+      const hBytes = getUtf8ByteLength(hText);
+      const hData = ((): Record<string, unknown> | null => {
+        try {
+          return JSON.parse(hText) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })();
+
+      if (hRes.ok && hData && hData.ok !== false) {
+        serverHealthy = true;
+        dbName = typeof hData.dbName === 'string' ? hData.dbName : null;
+        const rawCounts =
+          typeof hData.counts === 'object' && hData.counts
+            ? (hData.counts as Record<string, unknown>)
+            : null;
+        if (rawCounts) {
+          serverCounts = {
+            syncKv: Number(rawCounts.syncKv || 0),
+            students: Number(rawCounts.students || 0),
+            photos: Number(rawCounts.photos || 0),
+          };
+        }
+        cloudTelemetryState.lastHealthLatencyMs = hLat;
+        cloudTelemetryState.lastHealthOk = true;
+        cloudTelemetryState.lastDbName = dbName;
+        cloudTelemetryState.lastServerCounts = serverCounts;
+        recordCloudTrafficEvent({
+          direction: 'probe',
+          endpoint: '/health',
+          method: 'GET',
+          status: hRes.status,
+          ok: true,
+          durationMs: hLat,
+          bytes: hBytes,
+          detail: `تست سلامت موفق (${dbName || 'DB'} / ${hLat}ms)`,
+        });
+        checks.push({
+          id: 'api_and_db_health',
+          title: 'سلامت سرور Vercel و پایگاه داده MongoDB Atlas',
+          category: 'database',
+          status: hLat > 4000 ? 'warn' : 'pass',
+          latencyMs: hLat,
+          summary: `ارتباط برقرار است؛ پایگاه داده «${dbName || 'نامشخص'}» در ${hLat.toLocaleString('fa-IR')} میلی‌ثانیه پاسخ داد.`,
+          details: [
+            `کد وضعیت HTTP: ${hRes.status}`,
+            `پایگاه داده متصل: ${dbName || 'نامشخص'}`,
+            `تعداد جداول در sync_kv: ${(serverCounts?.syncKv ?? 0).toLocaleString('fa-IR')}`,
+            `تعداد دانشجویان در کالکشن students: ${(serverCounts?.students ?? 0).toLocaleString('fa-IR')}`,
+            `تعداد عکس‌های ابری در photos: ${(serverCounts?.photos ?? 0).toLocaleString('fa-IR')}`,
+          ],
+        });
+        if (hLat > 4000) {
+          recommendations.push('زمان پاسخ اولیه سرور کمی بالا است (معمولاً به‌علت Cold Start در Vercel یا Atlas M0). در درخواست‌های بعدی سریع‌تر می‌شود.');
+        }
+      } else {
+        cloudTelemetryState.lastHealthOk = false;
+        const msg = String(hData?.message || `کد خطا ${hRes.status}`);
+        recordCloudTrafficEvent({
+          direction: 'probe',
+          endpoint: '/health',
+          method: 'GET',
+          status: hRes.status,
+          ok: false,
+          durationMs: hLat,
+          bytes: hBytes,
+          detail: `خطا در سلامت سرور/دیتابیس (${hRes.status})`,
+          errorMessage: msg,
+        });
+        checks.push({
+          id: 'api_and_db_health',
+          title: 'سلامت سرور Vercel و پایگاه داده MongoDB Atlas',
+          category: 'database',
+          status: 'fail',
+          latencyMs: hLat,
+          summary: `سرور خطای ${hRes.status} برگرداند: ${msg}`,
+          details: [
+            `کد وضعیت HTTP: ${hRes.status}`,
+            `پیام سرور: ${msg}`,
+            'بررسی کنید متغیر محیطی MONGODB_URI در تنظیمات Vercel پروژه khabgah-api صحیح و بدون فاصله باشد و IP دسترسی MongoDB Atlas روی 0.0.0.0/0 باز باشد.',
+          ],
+        });
+        recommendations.push('تنظیمات MONGODB_URI و دسترسی شبکه MongoDB Atlas (Network Access 0.0.0.0/0) را در پروژه khabgah-api بررسی کنید.');
+      }
+    } catch (err) {
+      const hLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - healthStarted);
+      cloudTelemetryState.lastHealthOk = false;
+      const errMsg = err instanceof Error && err.name === 'AbortError'
+        ? 'زمان انتظار ۱۵ ثانیه‌ای بدون دریافت پاسخ تمام شد.'
+        : 'امکان برقراری ارتباط شبکه یا CORS با khabgah-api وجود ندارد.';
+      recordCloudTrafficEvent({
+        direction: 'probe',
+        endpoint: '/health',
+        method: 'GET',
+        status: null,
+        ok: false,
+        durationMs: hLat,
+        bytes: 0,
+        detail: 'عدم دسترسی به /api/health',
+        errorMessage: errMsg,
+      });
+      checks.push({
+        id: 'api_and_db_health',
+        title: 'سلامت سرور Vercel و پایگاه داده MongoDB Atlas',
+        category: 'database',
+        status: 'fail',
+        latencyMs: hLat,
+        summary: errMsg,
+        details: [
+          `جزئیات فنی: ${err instanceof Error ? err.message : String(err)}`,
+          `نشانی آزمایش‌شده: ${API_BASE_URL}/health`,
+        ],
+      });
+      recommendations.push('از فعال بودن سرویس khabgah-api روی Vercel، عدم مسدودسازی CORS و برقراری اینترنت اطمینان حاصل نمایید.');
+    }
+
+    // ۳. بررسی نسخه و آخرین زمان همگام‌سازی سرور
+    onStep?.('۳/۶ بررسی نسخه (Revision) و زمان آخرین همگام‌سازی...');
+    const verStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    try {
+      const vCtrl = new AbortController();
+      const vTimer = setTimeout(() => vCtrl.abort(), 12000);
+      const vRes = await fetch(`${API_BASE_URL}/sync/version`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: vCtrl.signal,
+      });
+      clearTimeout(vTimer);
+      const vLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - verStarted);
+      const vText = await vRes.text();
+      const vData = ((): { revision?: string | number; updatedAt?: string | null } | null => {
+        try {
+          return JSON.parse(vText) as { revision?: string | number; updatedAt?: string | null };
+        } catch {
+          return null;
+        }
+      })();
+      if (vRes.ok && vData) {
+        versionEndpointSupported = true;
+        serverRevision = vData.revision ?? null;
+        serverUpdatedAt = vData.updatedAt ?? null;
+        recordCloudTrafficEvent({
+          direction: 'probe',
+          endpoint: '/sync/version',
+          method: 'GET',
+          status: vRes.status,
+          ok: true,
+          durationMs: vLat,
+          bytes: getUtf8ByteLength(vText),
+          detail: `نسخه سرور: #${String(serverRevision ?? 0)}`,
+        });
+        checks.push({
+          id: 'sync_version',
+          title: 'کنترل نسخه همگام‌سازی (Revision & Timestamp)',
+          category: 'sync',
+          status: 'pass',
+          latencyMs: vLat,
+          summary: `نسخه فعال سرور #${String(serverRevision ?? 0)} در ${vLat.toLocaleString('fa-IR')}ms دریافت شد.`,
+          details: [
+            `نسخه روی سرور: ${String(serverRevision ?? 'نامشخص')}`,
+            `نسخه کش مرورگر: ${String(lastSyncRevision ?? 'همگام‌سازی نشده')}`,
+            `زمان آخرین تغییر سرور: ${serverUpdatedAt ? new Date(serverUpdatedAt).toLocaleString('fa-IR') : 'ثبت نشده'}`,
+          ],
+        });
+      } else {
+        checks.push({
+          id: 'sync_version',
+          title: 'کنترل نسخه همگام‌سازی (Revision & Timestamp)',
+          category: 'sync',
+          status: 'warn',
+          latencyMs: vLat,
+          summary: `مسیر /api/sync/version وضعیت ${vRes.status} برگرداند.`,
+          details: ['این وضعیت نشان می‌دهد نسخه قدیمی‌تر بک‌اند روی سرور فعال است.'],
+        });
+      }
+    } catch {
+      const vLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - verStarted);
+      checks.push({
+        id: 'sync_version',
+        title: 'کنترل نسخه همگام‌سازی (Revision & Timestamp)',
+        category: 'sync',
+        status: 'fail',
+        latencyMs: vLat,
+        summary: 'دریافت نسخه سرور با خطا یا انقضای زمان مواجه شد.',
+        details: [],
+      });
+    }
+
+    // ۴. بررسی مانیفست کلیدهای sync_kv و تطابق ۴۵ جدول محلی با سرور ابری
+    onStep?.('۴/۶ ممیزی جداول پایگاه داده ابری (Manifest) و حجم هر جدول...');
+    const manStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    try {
+      const mCtrl = new AbortController();
+      const mTimer = setTimeout(() => mCtrl.abort(), 15000);
+      const mRes = await fetch(`${API_BASE_URL}/sync/manifest`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: mCtrl.signal,
+      });
+      clearTimeout(mTimer);
+      const mLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - manStarted);
+      const mText = await mRes.text();
+      const mBytes = getUtf8ByteLength(mText);
+
+      if (mRes.status === 404 || mRes.status === 405) {
+        manifestEndpointSupported = false;
+        recordCloudTrafficEvent({
+          direction: 'probe',
+          endpoint: '/sync/manifest',
+          method: 'GET',
+          status: mRes.status,
+          ok: false,
+          durationMs: mLat,
+          bytes: mBytes,
+          detail: 'مسیر مانیفست تکه‌ای در سرور فعال نیست (نیاز به آپدیت server.js)',
+          errorMessage: `HTTP ${mRes.status}`,
+        });
+        checks.push({
+          id: 'sync_manifest',
+          title: 'همگام‌سازی تکه‌ای جداول (/api/sync/manifest)',
+          category: 'sync',
+          status: 'warn',
+          latencyMs: mLat,
+          summary: 'مسیر /api/sync/manifest در سرور فعال نیست (خطای ۴۰۴). بک‌اند khabgah-api را به نسخه جدید آپدیت کنید.',
+          details: [
+            'بدون مسیر /api/sync/manifest، خواندن یکجای تمام کلیدها ممکن است در حجم بالا دچار خطای ۵۰۰ یا سقف ۴.۵MB شود.',
+          ],
+        });
+        recommendations.push('فایل server.js جدید را روی مخزن khabgah-api قرار دهید و دیپلوی کنید تا مسیر /api/sync/manifest فعال شود.');
+      } else if (mRes.ok) {
+        manifestEndpointSupported = true;
+        const mJson = ((): {
+          keys?: Array<{ key: string; sizeBytes?: number | null; updatedAt?: string | null }>;
+        } | null => {
+          try {
+            return JSON.parse(mText) as {
+              keys?: Array<{ key: string; sizeBytes?: number | null; updatedAt?: string | null }>;
+            };
+          } catch {
+            return null;
+          }
+        })();
+        const serverKeysList = Array.isArray(mJson?.keys) ? mJson.keys : [];
+        const serverKeySet = new Set(serverKeysList.map((k) => k.key));
+        manifestKeysCount = serverKeysList.length;
+        manifestTotalBytes = serverKeysList.reduce(
+          (acc, k) => acc + (typeof k.sizeBytes === 'number' ? k.sizeBytes : 0),
+          0
+        );
+        oversizedOnServerKeys = serverKeysList
+          .filter((k) => typeof k.sizeBytes === 'number' && k.sizeBytes > 3_800_000)
+          .map((k) => ({ key: k.key, sizeBytes: Number(k.sizeBytes || 0) }));
+        missingOnServerKeys = SYNCABLE_KEYS.filter((k) => localStorage.getItem(k) && !serverKeySet.has(k));
+
+        recordCloudTrafficEvent({
+          direction: 'probe',
+          endpoint: '/sync/manifest',
+          method: 'GET',
+          status: mRes.status,
+          ok: true,
+          durationMs: mLat,
+          bytes: mBytes,
+          detail: `مانیفست ${manifestKeysCount} جدول (${Math.round(manifestTotalBytes / 1024).toLocaleString('fa-IR')} KB)`,
+        });
+
+        const manifestStatus: CloudDiagnosticCheckStatus =
+          oversizedOnServerKeys.length > 0 || missingOnServerKeys.length > 5
+            ? 'warn'
+            : missingOnServerKeys.length > 0
+            ? 'warn'
+            : 'pass';
+        checks.push({
+          id: 'sync_manifest',
+          title: 'همگام‌سازی تکه‌ای جداول (/api/sync/manifest) و تطابق ۴۵ جدول',
+          category: 'sync',
+          status: manifestStatus,
+          latencyMs: mLat,
+          summary: `${manifestKeysCount.toLocaleString('fa-IR')} جدول روی سرور (حجم کل ${Math.round(manifestTotalBytes / 1024).toLocaleString('fa-IR')} کیلوبایت) در ${mLat.toLocaleString('fa-IR')}ms بررسی شد.`,
+          details: [
+            `جداول موجود در مرورگر: ${localSummary.presentKeysCount.toLocaleString('fa-IR')} از ${localSummary.totalSyncableKeys.toLocaleString('fa-IR')}`,
+            `جداول موجود در سرور ابری: ${manifestKeysCount.toLocaleString('fa-IR')}`,
+            missingOnServerKeys.length > 0
+              ? `جداول موجود در مرورگر ولی غایب در سرور (${missingOnServerKeys.length.toLocaleString('fa-IR')} مورد): ${missingOnServerKeys.slice(0, 5).map((k) => FRIENDLY_SYNC_KEY_LABELS[k] || k).join('، ')}`
+              : 'تمام جداول فعال مرورگر روی سرور ابری ثبت شده‌اند.',
+            oversizedOnServerKeys.length > 0
+              ? `کلیدهای نزدیک/بیش از سقف ۴.۵MB در سرور: ${oversizedOnServerKeys.map((o) => `${FRIENDLY_SYNC_KEY_LABELS[o.key] || o.key} (${Math.round(o.sizeBytes / 1024)} KB)`).join('، ')}`
+              : 'حجم هیچ‌یک از کلیدهای سرور از آستانه خطر عبور نکرده است.',
+          ],
+        });
+        if (missingOnServerKeys.length > 0) {
+          recommendations.push(
+            `${missingOnServerKeys.length.toLocaleString('fa-IR')} جدول در مرورگر شما ذخیره است که هنوز روی سرور ابری ثبت نشده؛ از دکمه «همگام‌سازی کامل مرورگر به سرور» استفاده کنید.`
+          );
+        }
+      } else {
+        checks.push({
+          id: 'sync_manifest',
+          title: 'همگام‌سازی تکه‌ای جداول (/api/sync/manifest)',
+          category: 'sync',
+          status: 'fail',
+          latencyMs: mLat,
+          summary: `دریافت مانیفست با کد خطای HTTP ${mRes.status} مواجه شد.`,
+          details: [],
+        });
+      }
+    } catch {
+      const mLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - manStarted);
+      checks.push({
+        id: 'sync_manifest',
+        title: 'همگام‌سازی تکه‌ای جداول (/api/sync/manifest)',
+        category: 'sync',
+        status: 'fail',
+        latencyMs: mLat,
+        summary: 'عدم دریافت پاسخ از /api/sync/manifest.',
+        details: [],
+      });
+    }
+
+    // ۵. تست انتقال داده واقعی و سرعت پهنای باند روی کالکشن دانشجویان و عکس‌ها
+    onStep?.('۵/۶ تست سرعت انتقال داده (دانشجویان و تصاویر ابری)...');
+    const trStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    try {
+      const tCtrl = new AbortController();
+      const tTimer = setTimeout(() => tCtrl.abort(), 20000);
+      const [sTestRes, pTestRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/students?skip=0&limit=50`, {
+          method: 'GET',
+          cache: 'no-store',
+          signal: tCtrl.signal,
+        }),
+        fetch(`${API_BASE_URL}/photos/export?skip=0&limit=2`, {
+          method: 'GET',
+          cache: 'no-store',
+          signal: tCtrl.signal,
+        }).catch(() => null),
+      ]);
+      clearTimeout(tTimer);
+      const tLat = Math.max(
+        1,
+        Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - trStarted)
+      );
+
+      const sText = await sTestRes.text();
+      const pText = pTestRes ? await pTestRes.text().catch(() => '') : '';
+      const totalSampleBytes = getUtf8ByteLength(sText) + getUtf8ByteLength(pText);
+      throughputKbps = Math.round(((totalSampleBytes / 1024) / (tLat / 1000)) * 10) / 10;
+
+      const sParsed = ((): unknown => {
+        try {
+          return JSON.parse(sText);
+        } catch {
+          return null;
+        }
+      })();
+      const supportsPaginatedStudents =
+        Boolean(sParsed && typeof sParsed === 'object' && !Array.isArray(sParsed) && 'students' in sParsed);
+      const pParsed = ((): { total?: number } | null => {
+        try {
+          return pText ? (JSON.parse(pText) as { total?: number }) : null;
+        } catch {
+          return null;
+        }
+      })();
+
+      recordCloudTrafficEvent({
+        direction: 'down',
+        endpoint: '/students?limit=50 & /photos/export',
+        method: 'GET',
+        status: sTestRes.status,
+        ok: sTestRes.ok,
+        durationMs: tLat,
+        bytes: totalSampleBytes,
+        detail: `آزمایش انتقال: ${Math.round(totalSampleBytes / 1024).toLocaleString('fa-IR')} KB در ${tLat}ms (${throughputKbps} KB/s)`,
+      });
+
+      checks.push({
+        id: 'data_transfer_speed',
+        title: 'آزمایش ترافیک، سرعت انتقال داده و صفحه‌بندی دانشجویان/عکس‌ها',
+        category: 'traffic',
+        status: !sTestRes.ok ? 'fail' : supportsPaginatedStudents ? 'pass' : 'warn',
+        latencyMs: tLat,
+        summary: sTestRes.ok
+          ? `انتقال نمونه (${Math.round(totalSampleBytes / 1024).toLocaleString('fa-IR')} کیلوبایت) با سرعت ~${throughputKbps.toLocaleString('fa-IR')} KB/s در ${tLat.toLocaleString('fa-IR')}ms انجام شد.`
+          : `تست دریافت نمونه دانشجویان با کد ${sTestRes.status} خطا داد.`,
+        details: [
+          `حالت صفحه‌بندی سریع دانشجویان: ${supportsPaginatedStudents ? 'فعال (Paginated 400/page)' : 'غیرفعال (نسخه قدیمی سرور)'}`,
+          `سرویس استخراج عکس‌های ابری: ${pTestRes?.ok ? `فعال (${Number(pParsed?.total ?? 0).toLocaleString('fa-IR')} تصویر آماده)` : 'نامشخص/خطا'}`,
+          `سرعت انتقال اندازه گیری‌شده: ${throughputKbps.toLocaleString('fa-IR')} کیلوبایت بر ثانیه`,
+        ],
+      });
+      if (!supportsPaginatedStudents) {
+        recommendations.push('پشتیبانی صفحه‌بندی دانشجویان در khabgah-api فعال نیست؛ به‌روزرسانی server.js سرعت بارگذاری اولیه را چند برابر می‌کند.');
+      }
+    } catch {
+      const tLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - trStarted);
+      checks.push({
+        id: 'data_transfer_speed',
+        title: 'آزمایش ترافیک، سرعت انتقال داده و صفحه‌بندی',
+        category: 'traffic',
+        status: 'fail',
+        latencyMs: tLat,
+        summary: 'آزمایش انتقال داده با خطای شبکه یا انقضای مهلت ۲۰ ثانیه‌ای متوقف شد.',
+        details: [],
+      });
+    }
+
+    // ۶. بررسی صف همگام‌سازی محلی و سقف ۴.۵ مگابایت مرورگر
+    onStep?.('۶/۶ بررسی صف انتظار همگام‌سازی و حجم داده‌های مرورگر...');
+    const pendingCount = Object.keys(pendingCloudValues).length;
+    const inFlightCount = Object.keys(pendingCloudRequests).length;
+    const failedKeys = Object.keys(failedCloudRetryQueue);
+    const localQueueStatus: CloudDiagnosticCheckStatus =
+      localSummary.oversizedKeys.length > 0 || failedKeys.length > 0 ? 'warn' : 'pass';
+
+    checks.push({
+      id: 'local_payload_and_queue',
+      title: 'حجم داده‌های محلی (سقف ۴.۵MB سرور) و صف همگام‌سازی',
+      category: 'traffic',
+      status: localQueueStatus,
+      latencyMs: null,
+      summary:
+        localSummary.oversizedKeys.length > 0
+          ? `هشدار: ${localSummary.oversizedKeys.length.toLocaleString('fa-IR')} جدول بزرگ‌تر از سقف ۴.۳ مگابایت است!`
+          : failedKeys.length > 0
+          ? `${failedKeys.length.toLocaleString('fa-IR')} جدول در صف تلاش مجدد ارسال قرار دارند.`
+          : `تمام ${localSummary.presentKeysCount.toLocaleString('fa-IR')} جدول محلی در محدوده مجاز حجم قرار دارند و صف خطا خالی است.`,
+      details: [
+        `حجم کل ۴۵ جدول در مرورگر (UTF-8): ${Math.round(localSummary.totalBytesUtf8 / 1024).toLocaleString('fa-IR')} کیلوبایت`,
+        `در انتظار ارسال: ${pendingCount.toLocaleString('fa-IR')} | در حال ارسال: ${inFlightCount.toLocaleString('fa-IR')} | صف خطا: ${failedKeys.length.toLocaleString('fa-IR')}`,
+        ...(localSummary.oversizedKeys.length > 0
+          ? localSummary.oversizedKeys.map(
+              (o) => `بیش از سقف مجاز: ${o.label} (${Math.round(o.bytesUtf8 / 1024).toLocaleString('fa-IR')} KB)`
+            )
+          : []),
+      ],
+    });
+    if (localSummary.oversizedKeys.length > 0) {
+      recommendations.push(
+        `حجم جدول «${localSummary.oversizedKeys.map((o) => o.label).join('، ')}» از سقف ۴.۵ مگابایت Vercel عبور کرده است؛ فایل‌ها یا فونت‌های بسیار حجیم اضافی را کاهش دهید تا همگام‌سازی ابری کامل شود.`
+      );
+    }
+    if (failedKeys.length > 0) {
+      recommendations.push(
+        `در حال حاضر ${failedKeys.length.toLocaleString('fa-IR')} مورد در صف خطای ارسال قرار دارد؛ با کلیک روی «همگام‌سازی فوری به سرور» صف را تخلیه کنید.`
+      );
+    }
+
+    const totalDurationMs = Math.round(
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()) - overallStartedAt
+    );
+    const hasFail = checks.some((c) => c.status === 'fail');
+    const hasWarn = checks.some((c) => c.status === 'warn');
+    const overallStatus: CloudDiagnosticCheckStatus = hasFail ? 'fail' : hasWarn ? 'warn' : 'pass';
+
+    if (recommendations.length === 0) {
+      recommendations.push('تمام بخش‌های ارتباطی، پایگاه داده ابری، انتقال داده و صف‌های همگام‌سازی در وضعیت مطلوب قرار دارند.');
+    }
+
+    return {
+      checkedAt: new Date().toLocaleTimeString('fa-IR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }),
+      overallStatus,
+      totalDurationMs,
+      apiBaseUrl: API_BASE_URL,
+      serverHealthy,
+      dbName,
+      serverCounts,
+      serverRevision,
+      serverUpdatedAt,
+      throughputKbps,
+      manifestKeysCount,
+      manifestTotalBytes,
+      missingOnServerKeys,
+      oversizedOnServerKeys,
+      localSummary,
+      checks,
+      recommendations,
+    };
   },
 };
 

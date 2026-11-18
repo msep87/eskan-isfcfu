@@ -57,6 +57,7 @@ import { SupervisorRoomManager } from './SupervisorRoomManager';
 import { VisualBedPicker } from './VisualBedPicker';
 import { RoomWarningModal } from './RoomWarningModal';
 import { DormIdCardModal } from './DormIdCardModal';
+import { DiningMealCardModal } from './DiningMealCardModal';
 import { StudentEvaluationModal } from './StudentEvaluationModal';
 import { RoomRosterPrintModal } from './RoomRosterPrintModal';
 import { SupervisorGuestRequestsPanel } from './SupervisorGuestRequestsPanel';
@@ -65,6 +66,7 @@ import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
 import { AdminUsersPanel, UserCategoryKey } from './AdminUsersPanel';
 import { AdminSurveyManager } from './AdminSurveyManager';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
+import { CloudConnectionDiagnosticsPanel } from './CloudConnectionDiagnosticsPanel';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
 import { STANDARD_FONTS, readMultipleFontFiles } from '../utils/fonts';
 import {
@@ -546,6 +548,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isAddStudentModalOpen, setIsAddStudentModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [viewCardStudent, setViewCardStudent] = useState<Student | null>(null);
+  const [diningCardStudent, setDiningCardStudent] = useState<Student | null>(null);
 
   // فیلدهای فرم دانشجو
   const [stFormFullName, setStFormFullName] = useState('');
@@ -835,17 +838,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
   };
 
-  // باز کردن مدال تخصیص اتاق و تخت به دانشجو
+  // باز کردن مدال تعیین یا جابجایی اتاق و تخت دانشجو
   const handleOpenAssignStudentModal = (st: Student) => {
     setAssigningStudent(st);
-    const firstDorm = dorms[0]?.id || '';
+    const vacantBedByRoomId = new Map<string, Bed[]>();
+    beds.forEach((b) => {
+      if (!b.studentId) {
+        const list = vacantBedByRoomId.get(b.roomId) || [];
+        list.push(b);
+        vacantBedByRoomId.set(b.roomId, list);
+      }
+    });
+
+    const preferredDorm =
+      (st.assignedDormId && dorms.find((d) => d.id === st.assignedDormId)) ||
+      dorms.find((d) =>
+        rooms.some((r) => r.dormId === d.id && (vacantBedByRoomId.get(r.id)?.length || 0) > 0)
+      ) ||
+      dorms[0];
+
+    const firstDorm = preferredDorm?.id || '';
     setAssignTargetDormId(firstDorm);
+
     const dormRooms = rooms.filter((r) => r.dormId === firstDorm);
-    const firstRoom = dormRooms[0]?.id || '';
+    const firstRoomWithVacancy =
+      dormRooms.find((r) => (vacantBedByRoomId.get(r.id)?.length || 0) > 0) || dormRooms[0];
+    const firstRoom = firstRoomWithVacancy?.id || '';
     setAssignTargetRoomId(firstRoom);
+
     const availableBeds = beds.filter((b) => b.roomId === firstRoom && !b.studentId);
     setAssignTargetBedId(availableBeds[0]?.id || '');
-    setAssignIsConfirmed(true);
+    setAssignIsConfirmed(st.assignmentStatus === 'temporary' ? false : true);
     setAssignFeedback(null);
   };
 
@@ -2083,13 +2106,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           if (res.ok) {
             onRefreshData();
             const fullySynced = res.cloudSynced && res.studentsSynced;
+            const oversizedCount = res.oversizedKeys?.length || 0;
+            const failedCount = res.failedSyncKeys?.length || 0;
+            const partialDetails: string[] = [];
+            if (!res.cloudSynced) {
+              if (oversizedCount > 0) {
+                partialDetails.push(
+                  `${oversizedCount.toLocaleString('fa-IR')} مجموعه داده (از جمله تنظیمات/فایل‌های پیوست حجیم‌تر از سقف ۴.۵ مگابایت سرور ابری)`
+                );
+              }
+              const otherFailed = Math.max(0, failedCount - oversizedCount);
+              if (otherFailed > 0 || oversizedCount === 0) {
+                partialDetails.push(
+                  otherFailed > 0
+                    ? `${otherFailed.toLocaleString('fa-IR')} جدول سامانه`
+                    : 'داده‌های سامانه'
+                );
+              }
+            }
+            if (!res.studentsSynced) {
+              partialDetails.push('فهرست دانشجویان');
+            }
             setAdminNoticeDialog({
               title: res.isFullArchive
                 ? 'بازیابی کامل سامانه با موفقیت انجام شد'
                 : 'بازیابی نسخه پشتیبان JSON',
               message: fullySynced
                 ? `تمام اطلاعات، تنظیمات${res.restoredPhotosCount > 0 ? `، ${res.restoredPhotosCount.toLocaleString('fa-IR')} تصویر پروفایل (${res.uploadedPhotosToCloudCount.toLocaleString('fa-IR')} تصویر روی سرور ابری)` : ''}${res.restoredFilesCount > 0 ? ` و ${res.restoredFilesCount.toLocaleString('fa-IR')} فایل/فونت و رسانه` : ''} با موفقیت بازیابی و در سرور و دیتابیس ابری بازسازی شد.`
-                : `اطلاعات${res.restoredPhotosCount > 0 ? ` و ${res.restoredPhotosCount.toLocaleString('fa-IR')} تصویر` : ''} در مرورگر بازیابی شد، اما همگام‌سازی کامل با سرور ابری (${!res.cloudSynced ? 'داده‌های سامانه' : 'فهرست دانشجویان'}) با خطا مواجه شد. لطفاً پس از اطمینان از اتصال اینترنت دوباره بررسی فرمایید.`,
+                : `اطلاعات${res.restoredPhotosCount > 0 ? ` و ${res.restoredPhotosCount.toLocaleString('fa-IR')} تصویر (${res.uploadedPhotosToCloudCount.toLocaleString('fa-IR')} تصویر روی سرور ابری)` : ''} در مرورگر بازیابی شد، اما همگام‌سازی کامل با سرور ابری (${partialDetails.join(' و ')}) با خطا مواجه شد. لطفاً پس از اطمینان از به‌روزبودن سرویس khabgah-api و اتصال اینترنت دوباره بررسی فرمایید.`,
               tone: fullySynced ? 'success' : 'error',
             });
           } else {
@@ -2556,6 +2600,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           onEditStudent={handleOpenEditStudent}
           onDeleteStudent={handleDeleteStudent}
           onViewStudentCard={(st) => setViewCardStudent(st)}
+          onOpenDiningMealCard={(st) => setDiningCardStudent(st)}
           onEvaluateStudent={(st) => {
             setEvalTargetStudent(st);
             setIsStudentEvalModalOpen(true);
@@ -6477,6 +6522,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
+          {/* پنل بررسی اتصال به سرور ابری، دیتابیس و گزارش آنلاین ترافیک */}
+          <CloudConnectionDiagnosticsPanel onRefreshData={onRefreshData} />
+
           {/* بخش تنظیمات سال تحصیلی، نیمسال و بازه زمانی مجاز انتخاب اتاق */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
@@ -8406,6 +8454,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         />
       )}
 
+      {/* مدال مشاهده و پرینت کارت تغذیه موقت یک‌ماهه سلف (استثناء کالینان) */}
+      {diningCardStudent && (
+        <DiningMealCardModal
+          isOpen={!!diningCardStudent}
+          onClose={() => setDiningCardStudent(null)}
+          student={diningCardStudent}
+          dorm={dorms.find((d) => d.id === diningCardStudent.assignedDormId)}
+          room={rooms.find((r) => r.id === diningCardStudent.assignedRoomId)}
+          bed={beds.find((b) => b.id === diningCardStudent.assignedBedId)}
+          settings={settings}
+        />
+      )}
+
       {/* لایت‌باکس بزرگ‌نمایی و نمایش در ابعاد واقعی تصویر اطلاعیه برای مدیر */}
       <ImageLightboxModal
         src={annPreviewImage}
@@ -8413,14 +8474,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         onClose={() => setAnnPreviewImage(null)}
       />
 
-      {/* مدال تخصیص اتاق و تخت به دانشجو توسط مدیر */}
+      {/* مدال تعیین یا جابجایی اتاق و تخت دانشجو توسط مدیر */}
       {assigningStudent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
                 <BedIcon className="w-5 h-5 text-teal-600" />
-                <span>تخصیص اتاق و تخت به دانشجو</span>
+                <span>
+                  {assigningStudent.assignedBedId && assigningStudent.assignmentStatus !== 'none'
+                    ? 'تعیین و جابجایی اتاق و تخت دانشجو'
+                    : 'تعیین اتاق و تخت دانشجوی فاقد اسکان'}
+                </span>
               </h3>
               <button
                 onClick={() => setAssigningStudent(null)}
@@ -8439,7 +8504,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 شماره دانشجویی: <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{assigningStudent.studentId}</span> • رشته: {assigningStudent.fieldOfStudy} (ورودی {assigningStudent.entryTerm})
               </div>
               <div className="text-[11px] text-teal-700 dark:text-teal-300 font-semibold">
-                وضعیت فعلی: {assigningStudent.assignedBedId ? 'دارای اتاق (تخصیص مجدد/تغییر)' : 'فاقد اتاق و اسکان'}
+                {(() => {
+                  const curDorm = dorms.find((d) => d.id === assigningStudent.assignedDormId);
+                  const curRoom = rooms.find((r) => r.id === assigningStudent.assignedRoomId);
+                  const curBed = beds.find((b) => b.id === assigningStudent.assignedBedId);
+                  if (curDorm && curRoom && curBed && assigningStudent.assignmentStatus !== 'none') {
+                    return `اسکان فعلی (آماده جابجایی): ${curDorm.name} • اتاق ${curRoom.roomNumber} • ${curBed.label}`;
+                  }
+                  return 'وضعیت فعلی: فاقد اتاق و اسکان (آماده تعیین اتاق)';
+                })()}
               </div>
             </div>
 
@@ -8461,18 +8534,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     const newDormId = e.target.value;
                     setAssignTargetDormId(newDormId);
                     const dormRooms = rooms.filter((r) => r.dormId === newDormId);
-                    const firstRoom = dormRooms[0]?.id || '';
+                    const firstRoomWithVacancy =
+                      dormRooms.find((r) => beds.some((b) => b.roomId === r.id && !b.studentId)) ||
+                      dormRooms[0];
+                    const firstRoom = firstRoomWithVacancy?.id || '';
                     setAssignTargetRoomId(firstRoom);
                     const availableBeds = beds.filter((b) => b.roomId === firstRoom && !b.studentId);
                     setAssignTargetBedId(availableBeds[0]?.id || '');
+                    setAssignFeedback(null);
                   }}
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
                 >
-                  {dorms.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} ({d.campus})
-                    </option>
-                  ))}
+                  {dorms.map((d) => {
+                    const dormVacant = beds.filter((b) => b.dormId === d.id && !b.studentId).length;
+                    return (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.campus}) — {dormVacant} تخت خالی
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
@@ -8589,7 +8669,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   className="px-5 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md"
                 >
                   <CheckCircle className="w-4 h-4" />
-                  <span>تأیید و ثبت تخصیص اسکان</span>
+                  <span>
+                    {assigningStudent.assignedBedId && assigningStudent.assignmentStatus !== 'none'
+                      ? 'ثبت جابجایی اتاق و تخت'
+                      : 'تأیید و تعیین اتاق دانشجو'}
+                  </span>
                 </button>
               </div>
             </form>
