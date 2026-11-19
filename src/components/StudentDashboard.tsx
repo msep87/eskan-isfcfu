@@ -67,6 +67,12 @@ import {
   Dumbbell,
   Activity,
   XCircle,
+  Globe,
+  ExternalLink,
+  UtensilsCrossed,
+  Megaphone,
+  Cpu,
+  Landmark,
 } from 'lucide-react';
 
 interface StudentDashboardProps {
@@ -97,7 +103,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onOpenUserGuide,
 }) => {
   // تب‌های داشبورد
-  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections' | 'library' | 'clearance'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections' | 'library' | 'clearance' | 'portals'>('overview');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isIdCardModalOpen, setIsIdCardModalOpen] = useState(false);
   const [previewAnnImage, setPreviewAnnImage] = useState<string | null>(null);
@@ -649,6 +655,27 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               {myClearance.status === 'completed' ? 'تکمیل (آماده چاپ)' : myClearance.status === 'rejected_education' ? 'نیازمند اصلاح' : 'در جریان'}
             </span>
           )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('portals')}
+          className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+            activeTab === 'portals'
+              ? 'bg-cyan-700 text-white shadow-cyan-700/20'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <Globe className={`w-4 h-4 ${activeTab === 'portals' ? 'text-white' : 'text-cyan-600'}`} />
+          <span>سامانه‌ها</span>
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+              activeTab === 'portals'
+                ? 'bg-white/20 text-white'
+                : 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300'
+            }`}
+          >
+            ۵ لینک
+          </span>
         </button>
 
         <button
@@ -1974,6 +2001,171 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           onDataChange={onRefreshData}
         />
       )}
+
+      {/* تب سامانه‌ها و درگاه‌های رسمی دانشگاه فرهنگیان */}
+      {activeTab === 'portals' && (() => {
+        const universityPortals = [
+          {
+            id: 'golestan',
+            title: 'سامانه گلستان دانشگاه فرهنگیان',
+            category: 'امور آموزشی',
+            description:
+              'سامانه جامع آموزشی دانشگاه فرهنگیان جهت انتخاب واحد، مشاهده برنامه کلاسی، کارنامه، ثبت درخواست‌های آموزشی و ارزشیابی اساتید.',
+            url: 'https://education.cfu.ac.ir/',
+            displayUrl: 'education.cfu.ac.ir',
+            ctaLabel: 'ورود به سامانه گلستان',
+            icon: GraduationCap,
+            accentWrap:
+              'bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800',
+            badgeCls:
+              'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300',
+            btnCls:
+              'bg-teal-600 hover:bg-teal-700 text-white shadow-teal-600/20',
+          },
+          {
+            id: 'colinan',
+            title: 'سامانه کالینان دانشگاه فرهنگیان شهید باهنر اصفهان',
+            category: 'تغذیه و سلف',
+            description:
+              'سامانه رزرو و مدیریت تغذیه، شارژ اعتبار سلف، انتخاب وعده‌های غذایی و پیگیری امور تغذیه پردیس شهید باهنر اصفهان.',
+            url: 'https://t1420.cfu.ac.ir/',
+            displayUrl: 't1420.cfu.ac.ir',
+            ctaLabel: 'ورود به سامانه کالینان',
+            icon: UtensilsCrossed,
+            accentWrap:
+              'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+            badgeCls:
+              'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+            btnCls:
+              'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/20',
+          },
+          {
+            id: 'eitaa',
+            title: 'کانال اطلاع‌رسانی دانشگاه فرهنگیان شهید باهنر اصفهان (ایتا)',
+            category: 'اطلاع‌رسانی رسمی',
+            description:
+              'کانال رسمی دانشگاه فرهنگیان شهید باهنر اصفهان در پیام‌رسان ایتا برای دریافت فوری اخبار، اطلاعیه‌ها و بخشنامه‌های دانشجویی.',
+            url: 'https://eitaa.com/isfcfu',
+            displayUrl: 'eitaa.com/isfcfu',
+            ctaLabel: 'ورود به کانال رسمی در ایتا',
+            icon: Megaphone,
+            accentWrap:
+              'bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800',
+            badgeCls:
+              'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
+            btnCls:
+              'bg-sky-600 hover:bg-sky-700 text-white shadow-sky-600/20',
+          },
+          {
+            id: 'hadaf',
+            title: 'سامانه هدف (هوشمندسازی دانشگاه فرهنگیان)',
+            category: 'هوشمندسازی دانشگاه',
+            description:
+              'درگاه یکپارچه هوشمندسازی دانشگاه فرهنگیان شامل زیرسامانه‌های مختلف اداری و دانشجویی از جمله سامانه سجداد (سامانه جامع درآمدهای اختصاصی).',
+            url: 'https://hadaf.cfu.ac.ir/',
+            displayUrl: 'hadaf.cfu.ac.ir',
+            ctaLabel: 'ورود به سامانه هدف',
+            icon: Cpu,
+            accentWrap:
+              'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
+            badgeCls:
+              'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300',
+            btnCls:
+              'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20',
+          },
+          {
+            id: 'sajdad',
+            title: 'سامانه سجداد (سامانه جامع درآمدهای اختصاصی)',
+            category: 'زیرسامانه هدف • مالی و پرداخت',
+            description:
+              'ورود مستقیم به سامانه سجداد (از زیرسامانه‌های سامانه هدف) ویژه پرداخت‌ها، ثبت درخواست‌ها و خدمات درآمدهای اختصاصی دانشگاه فرهنگیان.',
+            url: 'https://hadaf.cfu.ac.ir/Pages/Sajdad/Public/Default.aspx',
+            displayUrl: 'hadaf.cfu.ac.ir/Pages/Sajdad',
+            ctaLabel: 'ورود مستقیم به سامانه سجداد',
+            icon: Landmark,
+            accentWrap:
+              'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+            badgeCls:
+              'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+            btnCls:
+              'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20',
+          },
+        ];
+
+        return (
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800">
+                  <Globe className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white">
+                    سامانه‌ها و درگاه‌های رسمی دانشگاه فرهنگیان
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    دسترسی سریع به سامانه‌های پرکاربرد آموزشی، تغذیه، هوشمندسازی، مالی و کانال رسمی اطلاع‌رسانی (تمامی لینک‌ها در صفحه جدید باز می‌شوند)
+                  </p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1.5 self-start sm:self-auto px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold">
+                <ExternalLink className="w-3.5 h-3.5 text-cyan-600" />
+                <span>باز شدن در تب جدید مرورگر</span>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {universityPortals.map((portal) => {
+                const PortalIcon = portal.icon;
+                return (
+                  <div
+                    key={portal.id}
+                    className="flex flex-col justify-between p-5 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/90 dark:border-slate-800 hover:border-cyan-400/70 dark:hover:border-cyan-700 transition shadow-xs space-y-4"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className={`p-2.5 rounded-xl border ${portal.accentWrap}`}>
+                          <PortalIcon className="w-5 h-5" />
+                        </div>
+                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold ${portal.badgeCls}`}>
+                          {portal.category}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <h4 className="font-black text-sm text-slate-900 dark:text-white leading-snug">
+                          {portal.title}
+                        </h4>
+                        <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                          {portal.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5 pt-2 border-t border-slate-200/70 dark:border-slate-700/60">
+                      <div
+                        className="text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate bg-white dark:bg-slate-900/70 px-2.5 py-1.5 rounded-lg border border-slate-200/80 dark:border-slate-700"
+                        dir="ltr"
+                      >
+                        {portal.displayUrl}
+                      </div>
+                      <a
+                        href={portal.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`w-full py-2.5 px-4 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-2 shadow-sm ${portal.btnCls}`}
+                      >
+                        <span>{portal.ctaLabel}</span>
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* مدال کارت شناسایی و مجوز اسکان سرا */}
       <DormIdCardModal
