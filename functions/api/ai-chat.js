@@ -1,197 +1,163 @@
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Access-Control-Max-Age': '86400',
-};
-
-const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const PRIMARY_MODEL = 'llama-3.1-8b-instant';
-const FALLBACK_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
-
-function jsonResponse(payload, status = 200) {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      ...CORS_HEADERS,
-    },
-  });
-}
-
-function cleanAndTruncate(obj, maxLength = 2500) {
-  if (!obj) return '';
-  try {
-    const str =
-      typeof obj === 'string'
-        ? obj
-        : JSON.stringify(obj, (_key, value) => {
-            if (typeof value === 'string') {
-              if (value.startsWith('data:image') || value.startsWith('data:application')) {
-                return '[تصویر/فایل حذف شد]';
-              }
-              if (value.length > 500) {
-                return value.slice(0, 500) + '... [خلاصه شده]';
-              }
-            }
-            return value;
-          });
-    return str.length > maxLength ? str.slice(0, maxLength) + '... [خلاصه شده]' : str;
-  } catch {
-    return '';
-  }
-}
-
-async function requestGroqCompletion(apiKey, model, messages) {
-  const res = await fetch(GROQ_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: 0.4,
-      max_tokens: 1024,
-    }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  return { res, data };
-}
-
 export async function onRequestOptions() {
   return new Response(null, {
     status: 204,
-    headers: CORS_HEADERS,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
   });
 }
 
+export async function onRequestGet(context) {
+  const hasGroqKey = Boolean((context?.env?.GROQ_API_KEY || '').trim());
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      status: 'ready',
+      endpoint: '/api/ai-chat',
+      hasGroqKey,
+    }),
+    {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+      },
+    }
+  );
+}
+
 export async function onRequestPost(context) {
+  const corsHeaders = {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+  };
+
   try {
-    const apiKey = String(context?.env?.GROQ_API_KEY || '').trim();
-    if (!apiKey) {
-      return jsonResponse(
-        {
-          ok: false,
-          reply:
-            'کلید GROQ_API_KEY در تنظیمات متغیرهای محیطی Cloudflare Pages یافت نشد. لطفاً آن را در بخش Environment Variables پروژه تنظیم نمایید.',
-          error: 'MISSING_GROQ_API_KEY',
-        },
-        500
-      );
-    }
-
-    let body = {};
-    try {
-      body = await context.request.json();
-    } catch {
-      return jsonResponse(
-        {
-          ok: false,
-          reply: 'ساختار درخواست ارسال‌شده معتبر نیست.',
-          error: 'INVALID_JSON',
-        },
-        400
-      );
-    }
-
+    const body = await context.request.json();
     const { message, history, publicContext, studentInfo } = body || {};
-    const safeMessage = String(message || '').trim().slice(0, 1500);
-    if (!safeMessage) {
-      return jsonResponse(
-        {
+    const apiKey = (context?.env?.GROQ_API_KEY || '').trim();
+
+    if (!apiKey) {
+      return new Response(
+        JSON.stringify({
           ok: false,
-          reply: 'لطفاً متن پیام یا سوال خود را وارد نمایید.',
-          error: 'EMPTY_MESSAGE',
-        },
-        400
+          reply: 'کلید GROQ_API_KEY در تنظیمات Cloudflare یافت نشد.',
+        }),
+        { status: 500, headers: corsHeaders }
       );
     }
 
-    const safeContext = cleanAndTruncate(publicContext, 3200);
+    const cleanAndTruncate = (obj, maxLength = 2500) => {
+      if (!obj) return '';
+      try {
+        const str =
+          typeof obj === 'string'
+            ? obj
+            : JSON.stringify(obj, (_key, value) => {
+                if (
+                  typeof value === 'string' &&
+                  (value.startsWith('data:image') || value.length > 500)
+                ) {
+                  return '[حذف شد]';
+                }
+                return value;
+              });
+        return str.length > maxLength ? str.substring(0, maxLength) + '...' : str;
+      } catch {
+        return '';
+      }
+    };
+
     const resolvedStudentInfo =
       studentInfo ||
-      (publicContext && typeof publicContext === 'object' ? publicContext.currentUserContext : null);
-    const safeStudent = cleanAndTruncate(resolvedStudentInfo, 800);
+      (publicContext && typeof publicContext === 'object'
+        ? publicContext.currentUserContext
+        : null);
 
-    const systemInstruction = [
-      'تو دستیار هوشمند رسمی «سامانه اسکان و امور سراهای دانشجویی دانشگاه فرهنگیان اصفهان» هستی.',
-      'به سوالات دانشجویان درباره اطلاعات سراهای دانشجویی، ظرفیت‌ها، اطلاعیه‌ها، آیین‌نامه‌ها، خدمات مشاوره، مسائل خوابگاهی و آموزشی به زبان فارسی روان، دقیق و محترمانه پاسخ بده.',
-      'خط قرمز امنیتی: هرگز اطلاعات شخصی و حساس (کد ملی، شماره تماس، رمز عبور، آدرس و محل اسکان سایر افراد) را فاش نکن.',
-      safeContext ? `\nخلاصه اطلاعات عمومی سامانه:\n${safeContext}` : '',
-      safeStudent ? `\nاطلاعات کاربر فعلی:\n${safeStudent}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const systemInstruction = `
+تو دستیار هوشمند رسمی «سامانه اسکان و امور سراهای دانشجویی دانشگاه فرهنگیان اصفهان» هستی.
+به سوالات دانشجویان درباره اطلاعات سراها، اطلاعیه‌ها، مسائل خوابگاهی و آموزشی به زبان فارسی روان و محترمانه پاسخ بده.
+خط قرمز امنیتی: هرگز اطلاعات شخصی و حساس (کد ملی، شماره تماس، رمز عبور، آدرس و محل اسکان سایر افراد) را فاش نکن.
+
+خلاصه اطلاعات سامانه:
+${cleanAndTruncate(publicContext, 2500)}
+
+اطلاعات کاربر فعلی:
+${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
+`.trim();
 
     const chatMessages = [{ role: 'system', content: systemInstruction }];
-
     if (Array.isArray(history)) {
-      for (const item of history.slice(-8)) {
+      for (const item of history.slice(-6)) {
         if (!item || typeof item !== 'object') continue;
-        const text = String(item.text || item.content || '').trim().slice(0, 800);
+        const text = String(item.text || item.content || '').trim().substring(0, 600);
         if (!text) continue;
         const role = item.role === 'model' || item.role === 'assistant' ? 'assistant' : 'user';
         chatMessages.push({ role, content: text });
       }
     }
+    chatMessages.push({
+      role: 'user',
+      content: String(message || 'سلام').substring(0, 1000),
+    });
 
-    chatMessages.push({ role: 'user', content: safeMessage });
+    const models = [
+      'llama-3.1-8b-instant',
+      'meta-llama/llama-4-scout-17b-16e-instruct',
+      'llama-3.3-70b-versatile',
+    ];
 
-    const configuredModel = String(context?.env?.GROQ_MODEL || '').trim();
-    const firstModel = configuredModel || PRIMARY_MODEL;
+    let lastError = 'خطا در ارتباط با Groq';
 
-    let { res: groqRes, data: groqData } = await requestGroqCompletion(
-      apiKey,
-      firstModel,
-      chatMessages
+    for (const model of models) {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: chatMessages,
+          temperature: 0.5,
+          max_tokens: 512,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (response.ok && data?.choices?.[0]?.message?.content) {
+        const reply = data.choices[0].message.content
+          .replace(/<think>[\s\S]*?<\/think>/g, '')
+          .trim();
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            success: true,
+            reply,
+            text: reply,
+            answer: reply,
+          }),
+          { status: 200, headers: corsHeaders }
+        );
+      } else {
+        lastError = data?.error?.message || `HTTP ${response.status}`;
+      }
+    }
+
+    return new Response(
+      JSON.stringify({ ok: false, reply: `خطای سرویس هوش مصنوعی: ${lastError}` }),
+      { status: 400, headers: corsHeaders }
     );
-
-    if (!groqRes.ok && firstModel !== FALLBACK_MODEL && (groqRes.status === 400 || groqRes.status === 404)) {
-      ({ res: groqRes, data: groqData } = await requestGroqCompletion(
-        apiKey,
-        FALLBACK_MODEL,
-        chatMessages
-      ));
-    }
-
-    if (!groqRes.ok) {
-      const apiErr =
-        groqData?.error?.message || `خطای سرویس هوش مصنوعی (کد ${groqRes.status})`;
-      return jsonResponse(
-        {
-          ok: false,
-          reply:
-            'در حال حاضر سرویس پاسخ‌گویی هوشمند با خطا مواجه شده است. لطفاً چند لحظه دیگر مجدداً تلاش نمایید.',
-          error: apiErr,
-        },
-        groqRes.status >= 400 && groqRes.status < 600 ? groqRes.status : 502
-      );
-    }
-
-    const reply = String(groqData?.choices?.[0]?.message?.content || '').trim();
-    if (!reply) {
-      return jsonResponse(
-        {
-          ok: false,
-          reply: 'پاسخی از مدل هوشمند دریافت نشد. لطفاً سوال خود را مجدداً مطرح کنید.',
-          error: 'EMPTY_REPLY',
-        },
-        502
-      );
-    }
-
-    return jsonResponse({ ok: true, reply }, 200);
   } catch (err) {
-    return jsonResponse(
-      {
+    return new Response(
+      JSON.stringify({
         ok: false,
-        reply: 'خطای داخلی در پردازش پیام دستیار هوشمند رخ داد. لطفاً دوباره تلاش کنید.',
-        error: err instanceof Error ? err.message : 'INTERNAL_ERROR',
-      },
-      500
+        reply: `خطای داخلی سرور: ${err instanceof Error ? err.message : String(err)}`,
+      }),
+      { status: 500, headers: corsHeaders }
     );
   }
 }

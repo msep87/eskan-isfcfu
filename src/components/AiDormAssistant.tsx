@@ -438,16 +438,23 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
 
       window.clearTimeout(timeoutId);
 
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(
+          'تابع سرور دستیار هوشمند (/api/ai-chat) پاسخ JSON برنگرداند (احتمالاً صفحه اصلی سایت برگشت داده شده است). لطفاً استقرار پوشه functions در ریشه پروژه روی Cloudflare Pages و تنظیم کلید GROQ_API_KEY را بررسی نمایید.'
+        );
+      }
+
       const data = await response.json().catch(() => ({} as Record<string, unknown>));
 
       if (!response.ok) {
         const errMessage =
-          typeof data?.error === 'string'
+          typeof data?.reply === 'string' && data.reply.trim()
+            ? data.reply
+            : typeof data?.error === 'string'
             ? data.error
             : typeof data?.message === 'string'
             ? data.message
-            : typeof data?.reply === 'string'
-            ? data.reply
             : 'در حال حاضر ارتباط با سرویس دستیار هوشمند با خطا مواجه شد.';
         throw new Error(errMessage);
       }
