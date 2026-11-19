@@ -22,7 +22,7 @@ import {
 } from '../types';
 import { Storage } from '../utils/storage';
 
-const AI_CHAT_ENDPOINT = 'https://khabgah-api.vercel.app/api/ai-chat';
+const AI_CHAT_ENDPOINT = '/api/ai-chat';
 
 interface GroundingSource {
   title: string;
@@ -431,6 +431,7 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
           message: trimmed,
           history: historyForApi,
           publicContext,
+          studentInfo: publicContext.currentUserContext,
         }),
         signal: controller.signal,
       });
@@ -495,7 +496,7 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
       const fallbackMsg = isTimeout
         ? 'زمان پاسخ‌گویی سرور دستیار هوشمند به پایان رسید. لطفاً چند لحظه دیگر دوباره تلاش نمایید.'
         : isNetworkOrCorsCrash || !rawErrMsg
-        ? 'امکان برقراری ارتباط با سرور دستیار هوشمند (khabgah-api.vercel.app) وجود ندارد. سرور بک‌اند در حال حاضر خطای راه‌اندازی (500 / FUNCTION_INVOCATION_FAILED) یا خطای شبکه/CORS دارد؛ لطفاً لاگ‌های Vercel و فایل server.js بک‌اند را بررسی و مجدداً دیپلوی نمایید.'
+        ? 'امکان برقراری ارتباط با سرویس دستیار هوشمند (/api/ai-chat) وجود ندارد. لطفاً اتصال اینترنت و تنظیم متغیر محیطی GROQ_API_KEY در Cloudflare Pages را بررسی نمایید.'
         : rawErrMsg;
 
       setMessages((prev) => [
