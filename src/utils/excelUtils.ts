@@ -903,10 +903,22 @@ export async function importShiftScheduleFromExcel(
           const endTime = String(row['ساعت پایان'] || '').trim();
           const notes = String(row['توضیحات'] || row['توضیحات و دستورکار'] || '').trim();
 
+          if (!supName && !dormName && !notes) return;
+
           // جستجوی سرپرست
-          const matchedSup = supervisors.find((s) => s.fullName.includes(supName) || supName.includes(s.fullName)) || supervisors[0];
+          const matchedSup =
+            (supName
+              ? supervisors.find((s) => s.fullName.includes(supName) || supName.includes(s.fullName))
+              : undefined) || supervisors[0];
           // جستجوی سرا
-          const matchedDorm = dorms.find((d) => d.name.includes(dormName) || dormName.includes(d.name)) || dorms[0];
+          const isAllDorms =
+            !dormName ||
+            dormName.includes('همه') ||
+            dormName.includes('کلیه') ||
+            dormName.toLowerCase() === 'all';
+          const matchedDorm = isAllDorms
+            ? null
+            : dorms.find((d) => d.name.includes(dormName) || dormName.includes(d.name)) || dorms[0];
 
           const dayOfWeek = DAY_EN_MAP[dayFa] || 'all';
           const shiftType = SHIFT_EN_MAP[shiftFa] || 'full_day';
@@ -914,15 +926,15 @@ export async function importShiftScheduleFromExcel(
 
           if (matchedSup) {
             newSchedules.push({
-              id: `sched_import_${Date.now()}_${i}`,
+              id: `sched_import_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
               supervisorId: matchedSup.id,
               supervisorName: matchedSup.fullName,
-              dormId: matchedDorm?.id || 'all',
-              dormName: matchedDorm?.name || 'سراهای دانشجویی',
+              dormId: matchedDorm ? matchedDorm.id : 'all',
+              dormName: matchedDorm ? matchedDorm.name : 'کلیه سراهای دانشجویی پردیس',
               dayOfWeek,
               shiftType,
-              startTime: startTime || (shiftType === 'morning' ? '۰۷:۳۰' : shiftType === 'evening' ? '۱۵:۰۰' : '۲۲:۰۰'),
-              endTime: endTime || (shiftType === 'morning' ? '۱۵:۳۰' : shiftType === 'evening' ? '۲۳:۰۰' : '۰۷:۳۰'),
+              startTime: startTime || (shiftType === 'morning' ? '۰۷:۳۰' : shiftType === 'evening' ? '۱۵:۰۰' : shiftType === 'night' ? '۲۲:۰۰' : '۰۸:۰۰'),
+              endTime: endTime || (shiftType === 'morning' ? '۱۵:۳۰' : shiftType === 'evening' ? '۲۳:۰۰' : shiftType === 'night' ? '۰۷:۳۰' : '۲۰:۰۰'),
               notes,
               isEveryDay,
             });

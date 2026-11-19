@@ -27,6 +27,7 @@ import {
   ClipboardCheck,
   Building2,
   X,
+  LogIn,
 } from 'lucide-react';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
 import { RoomRosterPrintModal } from './RoomRosterPrintModal';
@@ -45,6 +46,7 @@ interface SupervisorRoomManagerProps {
   actorRole?: 'admin' | 'supervisor';
   actorId?: string;
   onEditStudent?: (student: Student) => void;
+  onImpersonateStudent?: (student: Student) => void;
 }
 
 export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
@@ -59,6 +61,7 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
   actorRole = 'supervisor',
   actorId,
   onEditStudent,
+  onImpersonateStudent,
 }) => {
   const [selectedDormId, setSelectedDormId] = useState(
     supervisorDormId && supervisorDormId !== 'all' ? supervisorDormId : dorms[0]?.id || ''
@@ -913,6 +916,18 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                               <FileText className="w-3 h-3" />
                               <span>پرونده / گزارش و پیام</span>
                             </button>
+
+                            {actorRole === 'admin' && onImpersonateStudent && (
+                              <button
+                                type="button"
+                                onClick={() => onImpersonateStudent(st)}
+                                className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
+                                title={`ورود مستقیم به کارتابل ${st.fullName}`}
+                              >
+                                <LogIn className="w-3 h-3" />
+                                <span>ورود به کارتابل</span>
+                              </button>
+                            )}
 
                             {!isRepresentative && (
                               <button

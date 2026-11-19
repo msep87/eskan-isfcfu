@@ -3267,6 +3267,46 @@ export const Storage = {
   getCurrentUser: (): CurrentUser => get(STORAGE_KEYS.CURRENT_USER, null),
   setCurrentUser: (user: CurrentUser) => set(STORAGE_KEYS.CURRENT_USER, user),
 
+  // نگهداری نشست مدیر کل هنگام ورود مستقیم به کارتابل سایر کاربران (در sessionStorage تب جاری)
+  getAdminImpersonator: (): { role: 'admin'; name: string; username: string } | null => {
+    try {
+      if (typeof sessionStorage === 'undefined') return null;
+      const raw = sessionStorage.getItem('farhangian_admin_impersonator_v1');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.role === 'admin' && typeof parsed.username === 'string') {
+        return {
+          role: 'admin',
+          name: typeof parsed.name === 'string' ? parsed.name : 'مدیر کل سامانه جامع خدمات دانشجویی',
+          username: parsed.username,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
+  setAdminImpersonator: (admin: { role: 'admin'; name: string; username: string } | null): void => {
+    try {
+      if (typeof sessionStorage === 'undefined') return;
+      if (!admin) {
+        sessionStorage.removeItem('farhangian_admin_impersonator_v1');
+      } else {
+        sessionStorage.setItem('farhangian_admin_impersonator_v1', JSON.stringify(admin));
+      }
+    } catch {
+      // ignore sessionStorage quota/privacy errors
+    }
+  },
+  clearAdminImpersonator: (): void => {
+    try {
+      if (typeof sessionStorage === 'undefined') return;
+      sessionStorage.removeItem('farhangian_admin_impersonator_v1');
+    } catch {
+      // ignore
+    }
+  },
+
   // تخصیص تخت به دانشجو (توسط دانشجو: موقت | توسط سرپرست یا مدیر: قطعی)
   assignBedToStudent: (
     studentId: string,
@@ -11364,13 +11404,20 @@ export const Storage = {
           if (!singleRes.ok) {
             hadFetchError = true;
           } else if (singleRes.student) {
-            const singleArray = [singleRes.student];
-            const serializedSingle = JSON.stringify(singleArray);
-            const changed = lastAppliedSerializedByKey.get(STORAGE_KEYS.STUDENTS) !== serializedSingle;
-            if (changed) {
-              safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedSingle, singleArray);
+            if (Storage.getAdminImpersonator()) {
+              // در حالت ورود مدیر به کارتابل دانشجو، فهرست کامل دانشجویان محلی مدیر حفظ شده و فقط همین ردیف بروزرسانی می‌شود
+              upsertLocalSingleStudent(singleRes.student, false);
               hasRemoteChanges = true;
               notifyCloudDataChanged();
+            } else {
+              const singleArray = [singleRes.student];
+              const serializedSingle = JSON.stringify(singleArray);
+              const changed = lastAppliedSerializedByKey.get(STORAGE_KEYS.STUDENTS) !== serializedSingle;
+              if (changed) {
+                safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedSingle, singleArray);
+                hasRemoteChanges = true;
+                notifyCloudDataChanged();
+              }
             }
           }
         } else if (effectiveScope === 'staff' && canApplyRemoteStudents) {

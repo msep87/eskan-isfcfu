@@ -39,6 +39,7 @@ import {
   AboutCapabilityItem,
   AboutAttachmentFile,
   AboutContentSettings,
+  CurrentUser,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { ExcelImportTab } from './ExcelImportModal';
@@ -192,6 +193,7 @@ interface AdminDashboardProps {
       | 'vice_dean'
       | 'student'
   ) => void;
+  onImpersonateUser?: (user: NonNullable<CurrentUser>) => void;
   cloudSyncTick?: number;
   focusAboutEditorTick?: number;
 }
@@ -214,6 +216,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onOpenChangePassword,
   onUpdateSettings,
   onOpenUserGuide,
+  onImpersonateUser,
   cloudSyncTick = 0,
   focusAboutEditorTick = 0,
 }) => {
@@ -329,8 +332,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setAcademicNotices(Storage.getAcademicNotices());
   }, [cloudSyncTick]);
 
-  // فرم ثبت شیفت دستی جدید توسط مدیر
+  // فرم ثبت و ویرایش دستی نوبت کاری سرپرستان توسط مدیر
   const [isAddShiftModalOpen, setIsAddShiftModalOpen] = useState(false);
+  const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
   const [newShiftSupId, setNewShiftSupId] = useState(supervisors[0]?.id || '');
   const [newShiftDormId, setNewShiftDormId] = useState(dorms[0]?.id || 'all');
   const [newShiftDay, setNewShiftDay] = useState<DayOfWeek | 'all'>('saturday');
@@ -339,6 +343,89 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newShiftEndTime, setNewShiftEndTime] = useState('۲۳:۰۰');
   const [newShiftNotes, setNewShiftNotes] = useState('');
   const [newShiftIsEveryDay, setNewShiftIsEveryDay] = useState(false);
+
+  // فرم ثبت سریع تک‌به‌تک نوبت کاری مستقیماً در بالای جدول نوبت‌ها
+  const [quickShiftSupId, setQuickShiftSupId] = useState(supervisors[0]?.id || '');
+  const [quickShiftDormId, setQuickShiftDormId] = useState(dorms[0]?.id || 'all');
+  const [quickShiftDay, setQuickShiftDay] = useState<DayOfWeek | 'all'>('saturday');
+  const [quickShiftType, setQuickShiftType] = useState<ShiftLogReport['shiftType']>('evening');
+  const [quickShiftStartTime, setQuickShiftStartTime] = useState('۱۵:۰۰');
+  const [quickShiftEndTime, setQuickShiftEndTime] = useState('۲۳:۰۰');
+  const [quickShiftNotes, setQuickShiftNotes] = useState('');
+
+  const normalizeShiftDay = (rawDay: string): DayOfWeek | 'all' => {
+    const map: Record<string, DayOfWeek | 'all'> = {
+      saturday: 'saturday',
+      sat: 'saturday',
+      sunday: 'sunday',
+      sun: 'sunday',
+      monday: 'monday',
+      mon: 'monday',
+      tuesday: 'tuesday',
+      tue: 'tuesday',
+      wednesday: 'wednesday',
+      wed: 'wednesday',
+      thursday: 'thursday',
+      thu: 'thursday',
+      friday: 'friday',
+      fri: 'friday',
+      all: 'all',
+    };
+    return map[String(rawDay || '').toLowerCase()] || 'all';
+  };
+
+  const getDefaultShiftHours = (type: ShiftLogReport['shiftType']): { start: string; end: string } => {
+    if (type === 'morning') return { start: '۰۷:۳۰', end: '۱۵:۳۰' };
+    if (type === 'evening') return { start: '۱۵:۰۰', end: '۲۳:۰۰' };
+    if (type === 'night') return { start: '۲۲:۰۰', end: '۰۷:۳۰' };
+    return { start: '۰۸:۰۰', end: '۲۰:۰۰' };
+  };
+
+  const openCreateShiftModal = () => {
+    setEditingShiftId(null);
+    setNewShiftSupId(supervisors[0]?.id || '');
+    setNewShiftDormId(dorms[0]?.id || 'all');
+    setNewShiftDay('saturday');
+    setNewShiftType('evening');
+    setNewShiftStartTime('۱۵:۰۰');
+    setNewShiftEndTime('۲۳:۰۰');
+    setNewShiftNotes('');
+    setNewShiftIsEveryDay(false);
+    setIsAddShiftModalOpen(true);
+  };
+
+  const openEditShiftModal = (sched: SupervisorShiftSchedule) => {
+    const matchedSup =
+      supervisors.find((s) => s.id === sched.supervisorId) ||
+      supervisors.find((s) => s.fullName === sched.supervisorName) ||
+      supervisors[0];
+    const matchedDormId =
+      sched.dormId === 'all'
+        ? 'all'
+        : dorms.some((d) => d.id === sched.dormId)
+        ? sched.dormId
+        : dorms.find((d) => d.name === sched.dormName)?.id || 'all';
+    const normalizedDay = normalizeShiftDay(sched.dayOfWeek);
+    const normalizedType: ShiftLogReport['shiftType'] =
+      sched.shiftType === 'morning' ||
+      sched.shiftType === 'evening' ||
+      sched.shiftType === 'night' ||
+      sched.shiftType === 'full_day'
+        ? sched.shiftType
+        : 'full_day';
+    const fallbackHours = getDefaultShiftHours(normalizedType);
+
+    setEditingShiftId(sched.id);
+    setNewShiftSupId(matchedSup?.id || '');
+    setNewShiftDormId(matchedDormId);
+    setNewShiftDay(normalizedDay);
+    setNewShiftType(normalizedType);
+    setNewShiftStartTime(sched.startTime || fallbackHours.start);
+    setNewShiftEndTime(sched.endTime || fallbackHours.end);
+    setNewShiftNotes(sched.notes || '');
+    setNewShiftIsEveryDay(normalizedDay === 'all' || Boolean(sched.isEveryDay));
+    setIsAddShiftModalOpen(true);
+  };
 
   // زیرتب‌های کارتابل سرپرستی مدیر
   const [cartableSubTab, setCartableSubTab] = useState<'manager' | 'visual_picker' | 'warnings' | 'structure'>('manager');
@@ -445,7 +532,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (supervisors.length > 0 && (!newShiftSupId || !supervisors.some((s) => s.id === newShiftSupId))) {
       setNewShiftSupId(supervisors[0].id);
     }
-  }, [supervisors, newShiftSupId]);
+    if (supervisors.length > 0 && (!quickShiftSupId || !supervisors.some((s) => s.id === quickShiftSupId))) {
+      setQuickShiftSupId(supervisors[0].id);
+    }
+  }, [supervisors, newShiftSupId, quickShiftSupId]);
 
   useEffect(() => {
     if (counselorsList.length > 0 && (!newCnsShiftCounselorId || !counselorsList.some((c) => c.id === newCnsShiftCounselorId))) {
@@ -2525,6 +2615,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           actorId="admin"
           actorName="مدیر کل سامانه"
           actorRole="admin"
+          onImpersonateUser={onImpersonateUser}
         />
       )}
 
@@ -2713,6 +2804,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               actorRole="admin"
               actorId="admin"
               onEditStudent={handleOpenEditStudent}
+              onImpersonateStudent={
+                onImpersonateUser
+                  ? (st) => onImpersonateUser({ role: 'student', student: st })
+                  : undefined
+              }
             />
           )}
 
@@ -4652,7 +4748,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 {/* دکمه افزودن دستی شیفت جدید */}
                 <button
-                  onClick={() => setIsAddShiftModalOpen(true)}
+                  type="button"
+                  onClick={openCreateShiftModal}
                   className="px-4 py-2.5 bg-teal-500 hover:bg-teal-400 text-slate-900 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-lg shadow-teal-500/30 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
@@ -4700,15 +4797,181 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </h3>
               </div>
 
-              {/* دکمه خروجی اکسل گزارشات دفتر وقایع */}
-              <button
-                onClick={() => exportShiftReportsToExcel(shiftReports)}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-teal-600" />
-                <span>خروجی اکسل دفتر وقایع شیفت‌ها</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={openCreateShiftModal}
+                  className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>افزودن نوبت جدید</span>
+                </button>
+                {/* دکمه خروجی اکسل گزارشات دفتر وقایع */}
+                <button
+                  type="button"
+                  onClick={() => exportShiftReportsToExcel(shiftReports)}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-teal-600" />
+                  <span>خروجی اکسل دفتر وقایع شیفت‌ها</span>
+                </button>
+              </div>
             </div>
+
+            {/* فرم ثبت سریع دستی و تک‌به‌تک نوبت کاری سرپرستان */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const sup = supervisors.find((s) => s.id === quickShiftSupId);
+                if (!sup) {
+                  setShiftFeedback('لطفاً ابتدا حداقل یک سرپرست سرا در بخش مدیریت کاربران ثبت نمایید.');
+                  return;
+                }
+                const dorm = quickShiftDormId === 'all' ? null : dorms.find((d) => d.id === quickShiftDormId);
+                Storage.addShiftSchedule({
+                  supervisorId: sup.id,
+                  supervisorName: sup.fullName,
+                  dormId: dorm ? dorm.id : 'all',
+                  dormName: dorm ? dorm.name : 'کلیه سراهای دانشجویی پردیس',
+                  dayOfWeek: quickShiftDay,
+                  shiftType: quickShiftType,
+                  startTime: quickShiftStartTime.trim(),
+                  endTime: quickShiftEndTime.trim(),
+                  notes: quickShiftNotes.trim(),
+                  isEveryDay: quickShiftDay === 'all',
+                });
+                setShiftSchedules(Storage.getShiftSchedules());
+                setQuickShiftNotes('');
+                setShiftFeedback(`نوبت کاری جدید برای «${sup.fullName}» با موفقیت به جدول اضافه شد.`);
+              }}
+              className="p-4 rounded-2xl bg-teal-50/70 dark:bg-teal-950/25 border border-teal-200/80 dark:border-teal-800/60 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-black text-teal-900 dark:text-teal-200">
+                  <Plus className="w-4 h-4 text-teal-600" />
+                  <span>ثبت سریع و تک‌به‌تک نوبت کاری جدید در جدول</span>
+                </div>
+                <span className="text-[11px] text-teal-700/80 dark:text-teal-300/80 font-medium">
+                  هر ردیف (دستی یا واردشده از اکسل) از ستون عملیات قابل ویرایش و اصلاح است
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">سرپرست سرا *</label>
+                  <select
+                    value={quickShiftSupId}
+                    onChange={(e) => setQuickShiftSupId(e.target.value)}
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    required
+                  >
+                    {supervisors.length === 0 && <option value="">سرپرستی ثبت نشده است</option>}
+                    {supervisors.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.fullName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">سرای مربوطه *</label>
+                  <select
+                    value={quickShiftDormId}
+                    onChange={(e) => setQuickShiftDormId(e.target.value)}
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="all">کلیه سراهای دانشجویی پردیس</option>
+                    {dorms.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">روز هفته *</label>
+                  <select
+                    value={quickShiftDay}
+                    onChange={(e) => setQuickShiftDay(e.target.value as DayOfWeek | 'all')}
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="all">همه روزها (حضور روزانه)</option>
+                    <option value="saturday">شنبه</option>
+                    <option value="sunday">یکشنبه</option>
+                    <option value="monday">دوشنبه</option>
+                    <option value="tuesday">سه‌شنبه</option>
+                    <option value="wednesday">چهارشنبه</option>
+                    <option value="thursday">پنجشنبه</option>
+                    <option value="friday">جمعه</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">نوبت شیفت *</label>
+                  <select
+                    value={quickShiftType}
+                    onChange={(e) => {
+                      const val = e.target.value as ShiftLogReport['shiftType'];
+                      setQuickShiftType(val);
+                      const defHours = getDefaultShiftHours(val);
+                      setQuickShiftStartTime(defHours.start);
+                      setQuickShiftEndTime(defHours.end);
+                    }}
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="morning">شیفت صبح</option>
+                    <option value="evening">شیفت عصر</option>
+                    <option value="night">شیفت شب</option>
+                    <option value="full_day">تمام‌وقت / روزانه</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 text-xs items-end">
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">ساعت شروع</label>
+                  <input
+                    type="text"
+                    value={quickShiftStartTime}
+                    onChange={(e) => setQuickShiftStartTime(e.target.value)}
+                    placeholder="۱۵:۰۰"
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-center font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">ساعت پایان</label>
+                  <input
+                    type="text"
+                    value={quickShiftEndTime}
+                    onChange={(e) => setQuickShiftEndTime(e.target.value)}
+                    placeholder="۲۳:۰۰"
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-center font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                <div className="sm:col-span-5">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">توضیحات و دستورکار</label>
+                  <input
+                    type="text"
+                    value={quickShiftNotes}
+                    onChange={(e) => setQuickShiftNotes(e.target.value)}
+                    placeholder="نظارت بر سالن مطالعه، گشت شبانه، هماهنگی..."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                <div className="sm:col-span-3">
+                  <button
+                    type="submit"
+                    disabled={supervisors.length === 0}
+                    className="w-full py-2 px-3 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-extrabold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>افزودن به جدول</span>
+                  </button>
+                </div>
+              </div>
+            </form>
 
             {/* فیلترها و جستجو */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -4774,40 +5037,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
-                  {shiftSchedules
-                    .filter((s) => {
+                  {(() => {
+                    const filteredShiftRows = shiftSchedules.filter((s) => {
                       if (shiftDormFilter !== 'all' && s.dormId !== shiftDormFilter && s.dormId !== 'all') return false;
-                      if (shiftDayFilter !== 'all' && s.dayOfWeek !== shiftDayFilter && s.dayOfWeek !== 'all') return false;
+                      const normDay = normalizeShiftDay(s.dayOfWeek);
+                      if (shiftDayFilter !== 'all' && normDay !== shiftDayFilter && normDay !== 'all') return false;
                       if (shiftSearch.trim()) {
                         const q = shiftSearch.toLowerCase();
-                        return s.supervisorName.toLowerCase().includes(q) || (s.notes && s.notes.toLowerCase().includes(q));
+                        return (
+                          s.supervisorName.toLowerCase().includes(q) ||
+                          (s.dormName && s.dormName.toLowerCase().includes(q)) ||
+                          (s.notes && s.notes.toLowerCase().includes(q))
+                        );
                       }
                       return true;
-                    })
-                    .map((s) => {
-                      const dayLabels: Record<string, string> = {
-                        saturday: 'شنبه',
-                        sunday: 'یکشنبه',
-                        monday: 'دوشنبه',
-                        tuesday: 'سه‌شنبه',
-                        wednesday: 'چهارشنبه',
-                        thursday: 'پنجشنبه',
-                        friday: 'جمعه',
-                        sat: 'شنبه',
-                        sun: 'یکشنبه',
-                        mon: 'دوشنبه',
-                        tue: 'سه‌شنبه',
-                        wed: 'چهارشنبه',
-                        thu: 'پنجشنبه',
-                        fri: 'جمعه',
-                        all: 'همه روزها (حضور روزانه)',
-                      };
-                      const shiftLabels: Record<string, { label: string; color: string }> = {
-                        morning: { label: 'شیفت صبح', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' },
-                        evening: { label: 'شیفت عصر', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300' },
-                        night: { label: 'شیفت شب', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300' },
-                        full_day: { label: 'تمام‌وقت / روزانه', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300' },
-                      };
+                    });
+
+                    if (filteredShiftRows.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={7} className="p-8 text-center text-slate-400">
+                            هیچ نوبت کاری مطابق فیلتر انتخابی ثبت نشده است. می‌توانید از فرم بالا به صورت دستی نوبت ثبت کنید یا فایل اکسل بارگذاری نمایید.
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    const dayLabels: Record<string, string> = {
+                      saturday: 'شنبه',
+                      sunday: 'یکشنبه',
+                      monday: 'دوشنبه',
+                      tuesday: 'سه‌شنبه',
+                      wednesday: 'چهارشنبه',
+                      thursday: 'پنجشنبه',
+                      friday: 'جمعه',
+                      sat: 'شنبه',
+                      sun: 'یکشنبه',
+                      mon: 'دوشنبه',
+                      tue: 'سه‌شنبه',
+                      wed: 'چهارشنبه',
+                      thu: 'پنجشنبه',
+                      fri: 'جمعه',
+                      all: 'همه روزها (حضور روزانه)',
+                    };
+                    const shiftLabels: Record<string, { label: string; color: string }> = {
+                      morning: { label: 'شیفت صبح', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' },
+                      evening: { label: 'شیفت عصر', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300' },
+                      night: { label: 'شیفت شب', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300' },
+                      full_day: { label: 'تمام‌وقت / روزانه', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300' },
+                    };
+
+                    return filteredShiftRows.map((s) => {
                       const sInfo = shiftLabels[s.shiftType] || { label: s.shiftType, color: 'bg-slate-100 text-slate-700' };
 
                       return (
@@ -4834,32 +5114,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <td className="p-3 font-mono text-[11px] dir-ltr text-slate-500 dark:text-slate-400">
                             {s.startTime && s.endTime ? `${s.startTime} الی ${s.endTime}` : 'تمام وقت'}
                           </td>
-                          <td className="p-3 text-slate-500 dark:text-slate-400 max-w-xs truncate">
+                          <td className="p-3 text-slate-500 dark:text-slate-400 max-w-xs truncate" title={s.notes || ''}>
                             {s.notes || '-'}
                           </td>
                           <td className="p-3 text-center">
-                            <button
-                              onClick={() => {
-                                setAdminConfirmDialog({
-                                  title: 'حذف برنامه شیفت',
-                                  message: `آیا از حذف شیفت ${s.supervisorName} مطمئن هستید؟`,
-                                  confirmLabel: 'تأیید و حذف شیفت',
-                                  onConfirm: () => {
-                                    Storage.deleteShiftSchedule(s.id);
-                                    setShiftSchedules(Storage.getShiftSchedules());
-                                    setShiftFeedback('شیفت مورد نظر با موفقیت حذف گردید.');
-                                  },
-                                });
-                              }}
-                              className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 transition cursor-pointer"
-                              title="حذف این شیفت"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => openEditShiftModal(s)}
+                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                                title="ویرایش و اصلاح این نوبت کاری"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAdminConfirmDialog({
+                                    title: 'حذف برنامه شیفت',
+                                    message: `آیا از حذف شیفت ${s.supervisorName} مطمئن هستید؟`,
+                                    confirmLabel: 'تأیید و حذف شیفت',
+                                    onConfirm: () => {
+                                      Storage.deleteShiftSchedule(s.id);
+                                      setShiftSchedules(Storage.getShiftSchedules());
+                                      setShiftFeedback('شیفت مورد نظر با موفقیت حذف گردید.');
+                                    },
+                                  });
+                                }}
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                                title="حذف این شیفت"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
-                    })}
+                    });
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -4982,16 +5274,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* مودال ثبت دستی شیفت جدید توسط مدیر */}
+          {/* مودال ثبت دستی یا ویرایش نوبت کاری سرپرست توسط مدیر */}
           {isAddShiftModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
               <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 w-full max-w-lg border border-slate-200 dark:border-slate-800 shadow-2xl text-right">
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
                   <h3 className="font-black text-base text-slate-900 dark:text-white flex items-center gap-2">
-                    <Calendar className="w-5 h-5 text-teal-600" />
-                    <span>ثبت دستی شیفت سرپرست سرا</span>
+                    {editingShiftId ? (
+                      <Edit3 className="w-5 h-5 text-amber-600" />
+                    ) : (
+                      <Calendar className="w-5 h-5 text-teal-600" />
+                    )}
+                    <span>
+                      {editingShiftId ? 'ویرایش و اصلاح نوبت کاری سرپرست سرا' : 'ثبت دستی نوبت کاری سرپرست سرا'}
+                    </span>
                   </h3>
-                  <button onClick={() => setIsAddShiftModalOpen(false)} className="p-1 hover:opacity-75 cursor-pointer">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddShiftModalOpen(false);
+                      setEditingShiftId(null);
+                    }}
+                    className="p-1 hover:opacity-75 cursor-pointer"
+                  >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
@@ -5000,27 +5305,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   onSubmit={(e) => {
                     e.preventDefault();
                     const sup = supervisors.find((s) => s.id === newShiftSupId);
-                    const dorm = dorms.find((d) => d.id === newShiftDormId);
+                    const dorm = newShiftDormId === 'all' ? null : dorms.find((d) => d.id === newShiftDormId);
                     if (!sup) return;
 
-                    const newSchedule: SupervisorShiftSchedule = {
-                      id: `shift_${Date.now()}`,
+                    const payload: Omit<SupervisorShiftSchedule, 'id'> = {
                       supervisorId: sup.id,
                       supervisorName: sup.fullName,
                       dormId: dorm ? dorm.id : 'all',
-                      dormName: dorm ? dorm.name : 'سراهای دانشجویی',
+                      dormName: dorm ? dorm.name : 'کلیه سراهای دانشجویی پردیس',
                       dayOfWeek: newShiftDay,
                       shiftType: newShiftType,
-                      startTime: newShiftStartTime,
-                      endTime: newShiftEndTime,
-                      notes: newShiftNotes,
+                      startTime: newShiftStartTime.trim(),
+                      endTime: newShiftEndTime.trim(),
+                      notes: newShiftNotes.trim(),
                       isEveryDay: newShiftDay === 'all' || newShiftIsEveryDay,
                     };
 
-                    Storage.addShiftSchedule(newSchedule);
-                    setShiftSchedules(Storage.getShiftSchedules());
-                    setIsAddShiftModalOpen(false);
-                    setShiftFeedback(`شیفت جدید برای ${sup.fullName} با موفقیت ثبت شد.`);
+                    if (editingShiftId) {
+                      Storage.updateShiftSchedule(editingShiftId, payload);
+                      setShiftSchedules(Storage.getShiftSchedules());
+                      setIsAddShiftModalOpen(false);
+                      setEditingShiftId(null);
+                      setShiftFeedback(`نوبت کاری «${sup.fullName}» با موفقیت ویرایش و ذخیره شد.`);
+                    } else {
+                      Storage.addShiftSchedule(payload);
+                      setShiftSchedules(Storage.getShiftSchedules());
+                      setNewShiftNotes('');
+                      setIsAddShiftModalOpen(false);
+                      setShiftFeedback(`شیفت جدید برای «${sup.fullName}» با موفقیت ثبت شد.`);
+                    }
                   }}
                   className="space-y-4 text-xs"
                 >
@@ -5057,7 +5370,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">روز هفته *</label>
                       <select
                         value={newShiftDay}
-                        onChange={(e) => setNewShiftDay(e.target.value as DayOfWeek | 'all')}
+                        onChange={(e) => {
+                          const dayVal = e.target.value as DayOfWeek | 'all';
+                          setNewShiftDay(dayVal);
+                          setNewShiftIsEveryDay(dayVal === 'all');
+                        }}
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                       >
                         <option value="all">همه روزها (حضور روزانه)</option>
@@ -5078,19 +5395,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         onChange={(e) => {
                           const val = e.target.value as ShiftLogReport['shiftType'];
                           setNewShiftType(val);
-                          if (val === 'morning') {
-                            setNewShiftStartTime('۰۷:۳۰');
-                            setNewShiftEndTime('۱۵:۳۰');
-                          } else if (val === 'evening') {
-                            setNewShiftStartTime('۱۵:۰۰');
-                            setNewShiftEndTime('۲۳:۰۰');
-                          } else if (val === 'night') {
-                            setNewShiftStartTime('۲۲:۰۰');
-                            setNewShiftEndTime('۰۷:۳۰');
-                          } else {
-                            setNewShiftStartTime('۰۸:۰۰');
-                            setNewShiftEndTime('۲۰:۰۰');
-                          }
+                          const defHours = getDefaultShiftHours(val);
+                          setNewShiftStartTime(defHours.start);
+                          setNewShiftEndTime(defHours.end);
                         }}
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                       >
@@ -5136,17 +5443,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     />
                   </div>
 
-                  <div className="flex gap-2 pt-2">
+                  <div className="flex flex-wrap gap-2 pt-2">
                     <button
                       type="submit"
-                      className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+                      className={`flex-1 py-2.5 text-white rounded-xl font-bold transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer ${
+                        editingShiftId
+                          ? 'bg-amber-600 hover:bg-amber-700'
+                          : 'bg-teal-600 hover:bg-teal-700'
+                      }`}
                     >
-                      <CheckCircle className="w-4 h-4" />
-                      <span>ثبت و ذخیره شیفت</span>
+                      <Save className="w-4 h-4" />
+                      <span>{editingShiftId ? 'ذخیره تغییرات نوبت کاری' : 'ثبت و ذخیره شیفت'}</span>
                     </button>
+                    {!editingShiftId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sup = supervisors.find((s) => s.id === newShiftSupId);
+                          const dorm = newShiftDormId === 'all' ? null : dorms.find((d) => d.id === newShiftDormId);
+                          if (!sup) return;
+                          Storage.addShiftSchedule({
+                            supervisorId: sup.id,
+                            supervisorName: sup.fullName,
+                            dormId: dorm ? dorm.id : 'all',
+                            dormName: dorm ? dorm.name : 'کلیه سراهای دانشجویی پردیس',
+                            dayOfWeek: newShiftDay,
+                            shiftType: newShiftType,
+                            startTime: newShiftStartTime.trim(),
+                            endTime: newShiftEndTime.trim(),
+                            notes: newShiftNotes.trim(),
+                            isEveryDay: newShiftDay === 'all' || newShiftIsEveryDay,
+                          });
+                          setShiftSchedules(Storage.getShiftSchedules());
+                          setNewShiftNotes('');
+                          setShiftFeedback(`نوبت کاری برای «${sup.fullName}» ثبت شد. می‌توانید نوبت بعدی را وارد کنید.`);
+                        }}
+                        className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>ثبت و افزودن بعدی</span>
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => setIsAddShiftModalOpen(false)}
+                      onClick={() => {
+                        setIsAddShiftModalOpen(false);
+                        setEditingShiftId(null);
+                      }}
                       className="px-4 py-2.5 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl font-semibold hover:bg-slate-100 cursor-pointer"
                     >
                       انصراف

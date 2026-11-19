@@ -77,11 +77,117 @@ import {
   Info,
   BookOpen,
   MessageCircle,
+  RotateCcw,
+  UserCheck,
 } from 'lucide-react';
+
+function getImpersonatedUserMeta(user: NonNullable<CurrentUser>): {
+  fullName: string;
+  roleLabel: string;
+  identifier: string;
+} {
+  switch (user.role) {
+    case 'student':
+      return {
+        fullName: user.student.fullName,
+        roleLabel: 'دانشجو',
+        identifier: user.student.studentId,
+      };
+    case 'supervisor':
+      return {
+        fullName: user.supervisor.fullName,
+        roleLabel: 'سرپرست سرای دانشجویی',
+        identifier: user.supervisor.username,
+      };
+    case 'maintenance':
+      return {
+        fullName: user.technician.fullName,
+        roleLabel: 'تکنسین و کارشناس تأسیسات',
+        identifier: user.technician.username,
+      };
+    case 'warehouse':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'مسئول انبار تجهیزات',
+        identifier: user.staff.username,
+      };
+    case 'procurement':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'کارپرداز و واحد خرید',
+        identifier: user.staff.username,
+      };
+    case 'counselor':
+      return {
+        fullName: user.counselor.fullName,
+        roleLabel: 'مشاور و روانشناس',
+        identifier: user.counselor.username,
+      };
+    case 'finance':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'کارشناس امور مالی و حسابداری',
+        identifier: user.staff.username,
+      };
+    case 'education':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'کارشناس آموزش',
+        identifier: user.staff.username,
+      };
+    case 'cultural':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'کارشناس امور فرهنگی',
+        identifier: user.staff.username,
+      };
+    case 'student_affairs':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'کارشناس امور دانشجویی و تربیت بدنی',
+        identifier: user.staff.username,
+      };
+    case 'security':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'کارشناس حراست و انتظامات',
+        identifier: user.staff.username,
+      };
+    case 'vice_dean':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'معاونت دانشجویی',
+        identifier: user.staff.username,
+      };
+    case 'library':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'مسئول کتابخانه و پژوهش',
+        identifier: user.staff.username,
+      };
+    case 'smart_campus':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'کارشناس واحد هوشمندسازی',
+        identifier: user.staff.username,
+      };
+    case 'admin':
+      return {
+        fullName: user.name,
+        roleLabel: 'مدیر کل سامانه',
+        identifier: user.username,
+      };
+  }
+}
 
 export default function App() {
   const [settings, setSettings] = useState<AppSettings>(Storage.getSettings());
   const [currentUser, setCurrentUser] = useState<CurrentUser>(Storage.getCurrentUser());
+  const [impersonatingAdmin, setImpersonatingAdmin] = useState<{
+    role: 'admin';
+    name: string;
+    username: string;
+  } | null>(() => Storage.getAdminImpersonator());
   const [dorms, setDorms] = useState<Dormitory[]>(Storage.getDormitories());
   const [rooms, setRooms] = useState<Room[]>(Storage.getRooms());
   const [beds, setBeds] = useState<Bed[]>(Storage.getBeds());
@@ -325,6 +431,8 @@ export default function App() {
   };
 
   const handleLoginSuccess = (user: NonNullable<CurrentUser>) => {
+    Storage.clearAdminImpersonator();
+    setImpersonatingAdmin(null);
     setCurrentUser(user);
     Storage.setCurrentUser(user);
     refreshAllData();
@@ -341,6 +449,82 @@ export default function App() {
     });
   };
 
+  // ورود مستقیم مدیر کل به کارتابل هر دانشجو یا کارمند با امکان بازگشت یک‌کلیکه به پنل مدیر کل
+  const handleImpersonateUser = useCallback(
+    (targetUser: NonNullable<CurrentUser>) => {
+      if (!currentUser || currentUser.role !== 'admin') return;
+      if (targetUser.role === 'admin') return;
+
+      const adminSnapshot = {
+        role: 'admin' as const,
+        name: currentUser.name,
+        username: currentUser.username,
+      };
+      const meta = getImpersonatedUserMeta(targetUser);
+
+      Storage.setAdminImpersonator(adminSnapshot);
+      setImpersonatingAdmin(adminSnapshot);
+
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'ورود مستقیم مدیر کل به کارتابل کاربر',
+        details: `مدیر کل وارد کارتابل «${meta.fullName}» (${meta.roleLabel} • ${meta.identifier}) شد.`,
+      });
+
+      setIsAiChatOpen(false);
+      setIsMessagesModalOpen(false);
+      setIsReportsModalOpen(false);
+      setCurrentUser(targetUser);
+      Storage.setCurrentUser(targetUser);
+      refreshAllData();
+
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+    [currentUser, refreshAllData]
+  );
+
+  // بازگشت مستقیم از حالت مشاهده کارتابل کاربر به پنل مدیر کل
+  const handleReturnToAdmin = useCallback(() => {
+    const adminSnapshot =
+      impersonatingAdmin ||
+      Storage.getAdminImpersonator() || {
+        role: 'admin' as const,
+        name: 'مدیر کل سامانه جامع خدمات دانشجویی',
+        username: 'admin',
+      };
+
+    if (currentUser && currentUser.role !== 'admin') {
+      const meta = getImpersonatedUserMeta(currentUser);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'بازگشت مدیر کل از کارتابل کاربر',
+        details: `مدیر کل از کارتابل «${meta.fullName}» (${meta.roleLabel}) به پنل مدیر کل بازگشت.`,
+      });
+    }
+
+    Storage.clearAdminImpersonator();
+    setImpersonatingAdmin(null);
+    setIsAiChatOpen(false);
+    setIsMessagesModalOpen(false);
+    setIsReportsModalOpen(false);
+    setCurrentUser(adminSnapshot);
+    Storage.setCurrentUser(adminSnapshot);
+    refreshAllData();
+
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    lastSyncCheckRef.current = Date.now();
+    void Storage.syncFromCloud({ roleScope: 'staff' }).then((changed) => {
+      if (changed) {
+        refreshAllData();
+      }
+    });
+  }, [currentUser, impersonatingAdmin, refreshAllData]);
+
   const handleLogout = () => {
     if (currentUser) {
       Storage.addActivityLog({
@@ -349,6 +533,8 @@ export default function App() {
         details: 'کاربر با انتخاب گزینه خروج از حساب کاربری خارج شد.',
       });
     }
+    Storage.clearAdminImpersonator();
+    setImpersonatingAdmin(null);
     setIsAiChatOpen(false);
     setCurrentUser(null);
     Storage.setCurrentUser(null);
@@ -417,6 +603,38 @@ export default function App() {
         onRefreshCloud={() => void handleManualCloudRefresh()}
         isRefreshingCloud={isManualRefreshing}
       />
+
+      {/* نوار هشدار و بازگشت سریع هنگام ورود مستقیم مدیر کل به کارتابل کاربر */}
+      {impersonatingAdmin && currentUser && currentUser.role !== 'admin' && (() => {
+        const meta = getImpersonatedUserMeta(currentUser);
+        return (
+          <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white py-2.5 px-4 shadow-md border-b border-amber-300/40 sticky top-0 z-40">
+            <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5 text-xs">
+              <div className="flex items-center gap-2 font-bold">
+                <div className="p-1.5 rounded-lg bg-white/20 shrink-0">
+                  <UserCheck className="w-4 h-4 text-white" />
+                </div>
+                <span>
+                  حالت ورود مستقیم مدیر کل: در حال مشاهده کارتابل{' '}
+                  <span className="underline decoration-white/60 underline-offset-4 font-black">
+                    {meta.fullName}
+                  </span>{' '}
+                  ({meta.roleLabel}
+                  {meta.identifier ? ` • ${meta.identifier}` : ''})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleReturnToAdmin}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-sm transition cursor-pointer shrink-0"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>بازگشت به پنل مدیر کل</span>
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* بنر اطلاعیه سراسری در بالای صفحه */}
       {settings.announcementBanner && (
@@ -717,6 +935,7 @@ export default function App() {
               refreshAllData();
             }}
             onOpenUserGuide={(r) => handleOpenUserGuide(r || 'admin')}
+            onImpersonateUser={handleImpersonateUser}
             cloudSyncTick={cloudSyncTick}
             focusAboutEditorTick={focusAboutEditorTick}
           />

@@ -17,6 +17,7 @@ import {
   ViceDeanStaff,
   LibraryStaff,
   SmartCampusStaff,
+  CurrentUser,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
@@ -79,6 +80,7 @@ import {
   Send,
   BookOpen,
   Cpu,
+  LogIn,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -133,6 +135,7 @@ interface AdminUsersPanelProps {
   actorId?: string;
   actorName?: string;
   actorRole?: 'admin' | 'supervisor' | 'vice_dean';
+  onImpersonateUser?: (user: NonNullable<CurrentUser>) => void;
 }
 
 type StaffRole =
@@ -194,6 +197,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   actorId = 'admin',
   actorName = 'مدیریت کل امور سراها',
   actorRole = 'admin',
+  onImpersonateUser,
 }) => {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null
@@ -2938,6 +2942,17 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                         </td>
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1 flex-wrap">
+                            {actorRole === 'admin' && onImpersonateUser && (
+                              <button
+                                type="button"
+                                onClick={() => onImpersonateUser({ role: 'student', student: st })}
+                                className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                title={`ورود مستقیم به کارتابل دانشجو (${st.fullName})`}
+                              >
+                                <LogIn className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
                             <button
                               type="button"
                               onClick={() => setProfileModalStudentId(st.studentId)}
@@ -3531,6 +3546,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'supervisor', supervisor: sup })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل سرپرست (${sup.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس سرپرست"
@@ -3691,6 +3716,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'maintenance', technician: tech })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل تأسیسات (${tech.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس کارشناس"
@@ -3828,6 +3863,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'warehouse', staff: wh })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل انبار (${wh.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس کاربر انبار"
@@ -3993,6 +4038,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'counselor', counselor: cns })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل مشاور (${cns.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس مشاور"
@@ -4135,6 +4190,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'finance', staff: fin })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل امور مالی (${fin.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس کاربر امور مالی"
@@ -4277,6 +4342,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'procurement', staff: proc })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل کارپرداز (${proc.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس کارپرداز"
@@ -4419,6 +4494,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'education', staff: edu })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل آموزش (${edu.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس کارشناس آموزش"
@@ -4561,6 +4646,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'cultural', staff: cul })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل امور فرهنگی (${cul.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس امور فرهنگی"
@@ -4703,6 +4798,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'student_affairs', staff: sa })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل امور دانشجویی (${sa.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس امور دانشجویی"
@@ -4865,6 +4970,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'security', staff: sec })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل حراست (${sec.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس کارشناس حراست"
@@ -5012,6 +5127,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'vice_dean', staff: vd })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل معاونت دانشجویی (${vd.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label
                                 className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
                                 title="بارگذاری یا تغییر عکس کاربر معاونت"
@@ -5152,6 +5277,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'library', staff: lib })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل کتابخانه و پژوهش (${lib.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer">
                                 <Camera className="w-3.5 h-3.5" />
                                 <input
@@ -5286,6 +5421,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'smart_campus', staff: sm })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل واحد هوشمندسازی (${sm.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <label className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer">
                                 <Camera className="w-3.5 h-3.5" />
                                 <input
