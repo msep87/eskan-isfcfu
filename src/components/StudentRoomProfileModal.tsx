@@ -424,6 +424,8 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                   <img
                     src={student.photoUrl}
                     alt={student.fullName}
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
                   />
                   <span className="absolute bottom-1.5 left-1.5 p-1 rounded-lg bg-black/60 text-white opacity-90 group-hover:opacity-100">
@@ -1410,6 +1412,8 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
             <img
               src={student.photoUrl}
               alt={student.fullName}
+              loading="lazy"
+              decoding="async"
               className="w-full max-h-[75vh] object-contain rounded-2xl"
             />
             <div className="mt-2 text-center text-xs font-extrabold text-slate-800 dark:text-white">

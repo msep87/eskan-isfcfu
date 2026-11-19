@@ -872,7 +872,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                 >
                   <div className="flex items-center gap-3">
                     {st.photoUrl ? (
-                      <img src={st.photoUrl} alt="" className="w-9 h-9 rounded-full object-cover" />
+                      <img src={st.photoUrl} alt={st.fullName} loading="lazy" decoding="async" className="w-9 h-9 rounded-full object-cover" />
                     ) : (
                       <div
                         className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-xs"
@@ -1713,6 +1713,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                               <img
                                 src={st.photoUrl}
                                 alt={st.fullName}
+                                loading="lazy"
+                                decoding="async"
                                 className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700 shrink-0"
                               />
                             ) : (

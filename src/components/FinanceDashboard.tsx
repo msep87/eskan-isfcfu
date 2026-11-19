@@ -1270,6 +1270,8 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
                           <img
                             src={st.photoUrl}
                             alt={st.fullName}
+                            loading="lazy"
+                            decoding="async"
                             className="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 shrink-0"
                           />
                         ) : (

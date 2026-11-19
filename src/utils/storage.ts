@@ -109,22 +109,46 @@ import {
   generateInitialRoomsAndBeds,
 } from './sampleData';
 
-const ENV_API_URL =
-  typeof import.meta !== 'undefined' && (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL;
-const ENV_SYNC_TOKEN =
-  typeof import.meta !== 'undefined' && (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_CLOUD_SYNC_TOKEN;
+import { createClient } from '@supabase/supabase-js';
 
-const API_BASE_URL = (ENV_API_URL && ENV_API_URL.trim().replace(/\/+$/, '')) || 'https://khabgah-api.vercel.app/api';
+const SUPABASE_URL =
+  (typeof import.meta !== 'undefined' &&
+    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SUPABASE_URL?.trim()) ||
+  'https://hopcocvqknqtqcucyudv.supabase.co';
+const SUPABASE_ANON_KEY =
+  (typeof import.meta !== 'undefined' &&
+    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SUPABASE_ANON_KEY?.trim()) ||
+  'sb_publishable_IirbONfF8nYyeuKYNFRCFA_eTAT8lWb';
 
-function buildApiHeaders(includeJson = true, extra?: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = {};
-  if (includeJson) headers['Content-Type'] = 'application/json';
-  if (ENV_SYNC_TOKEN && ENV_SYNC_TOKEN.trim()) {
-    headers['Authorization'] = `Bearer ${ENV_SYNC_TOKEN.trim()}`;
-  }
-  if (extra) Object.assign(headers, extra);
-  return headers;
-}
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
+
+const SUPABASE_AVATARS_BUCKET = 'avatars';
+const SUPABASE_STUDENTS_UPSERT_CHUNK = 200;
+const SUPABASE_STUDENTS_PAGE_SIZE = 1000;
+const AVATAR_UPLOAD_CONCURRENCY = 15;
+
+const ENV_SYNC_TOKEN = '';
+const API_BASE_URL = SUPABASE_URL;
+
+export type AvatarUploadRole =
+  | 'student'
+  | 'supervisor'
+  | 'maintenance'
+  | 'warehouse'
+  | 'counselor'
+  | 'finance'
+  | 'procurement'
+  | 'education'
+  | 'cultural'
+  | 'student_affairs'
+  | 'security'
+  | 'vice_dean';
 
 const DISALLOWED_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -865,7 +889,7 @@ function buildCloudLiveMetricsSnapshot(): CloudLiveMetrics {
   });
   return {
     apiBaseUrl: API_BASE_URL,
-    hasSyncToken: Boolean(ENV_SYNC_TOKEN && ENV_SYNC_TOKEN.trim()),
+    hasSyncToken: Boolean(SUPABASE_ANON_KEY),
     browserOnline: typeof navigator !== 'undefined' ? navigator.onLine !== false : true,
     lastSyncRevision,
     lastSyncAt: cloudTelemetryState.lastSyncAt,
@@ -1007,87 +1031,610 @@ function enqueueFailedWrite(key: string, value: unknown): void {
   scheduleFailedRetryTimer();
 }
 
-function mirrorSingleStudentToCloud(student: Student): Promise<boolean> {
-  if (typeof fetch !== 'function' || !student?.studentId) {
-    return Promise.resolve(false);
-  }
-  let bodyStr: string;
+// -------------------------------------------------------------
+// لایه ابری Supabase (Storage WebP + صف پس‌زمینه ۱۵تایی + جدول students و app_storage)
+// -------------------------------------------------------------
+
+const STAFF_KEY_TO_AVATAR_ROLE: Record<string, AvatarUploadRole> = {
+  [STORAGE_KEYS.SUPERVISORS]: 'supervisor',
+  [STORAGE_KEYS.MAINTENANCE_STAFF]: 'maintenance',
+  [STORAGE_KEYS.WAREHOUSE_STAFF]: 'warehouse',
+  [STORAGE_KEYS.COUNSELORS]: 'counselor',
+  [STORAGE_KEYS.FINANCE_STAFF]: 'finance',
+  [STORAGE_KEYS.PROCUREMENT_STAFF]: 'procurement',
+  [STORAGE_KEYS.EDUCATION_STAFF]: 'education',
+  [STORAGE_KEYS.CULTURAL_STAFF]: 'cultural',
+  [STORAGE_KEYS.STUDENT_AFFAIRS_STAFF]: 'student_affairs',
+  [STORAGE_KEYS.SECURITY_STAFF]: 'security',
+  [STORAGE_KEYS.VICE_DEAN_STAFF]: 'vice_dean',
+};
+
+function sanitizeStorageSegment(raw: string): string {
+  const normalized = String(raw ?? '')
+    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '_');
+  return normalized.slice(0, 80) || `id_${Date.now()}`;
+}
+
+function isBase64ImageDataUrl(val: unknown): val is string {
+  return typeof val === 'string' && val.trim().startsWith('data:image/');
+}
+
+function dataUrlToRawBlob(dataUrl: string): Blob | null {
   try {
-    bodyStr = JSON.stringify({ student });
+    const commaIdx = dataUrl.indexOf(',');
+    if (commaIdx === -1) return null;
+    const header = dataUrl.slice(0, commaIdx);
+    const base64Body = dataUrl.slice(commaIdx + 1);
+    const mimeMatch = header.match(/data:([^;]+);base64/i);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const binary = atob(base64Body);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mime });
   } catch {
+    return null;
+  }
+}
+
+async function compressBase64ToWebpBlob(
+  dataUrl: string,
+  maxDim = 400,
+  quality = 0.8
+): Promise<{ blob: Blob; contentType: string; ext: string } | null> {
+  if (!isBase64ImageDataUrl(dataUrl)) return null;
+  if (dataUrl.slice(0, 48).toLowerCase().includes('image/svg+xml')) {
+    return null;
+  }
+
+  if (typeof document === 'undefined' || typeof Image === 'undefined') {
+    const raw = dataUrlToRawBlob(dataUrl);
+    if (!raw) return null;
+    return {
+      blob: raw,
+      contentType: raw.type || 'image/webp',
+      ext: raw.type.includes('webp') ? 'webp' : 'jpg',
+    };
+  }
+
+  return await new Promise<{ blob: Blob; contentType: string; ext: string } | null>((resolve) => {
+    const img = new Image();
+    img.onerror = () => {
+      const fallbackBlob = dataUrlToRawBlob(dataUrl);
+      if (fallbackBlob) {
+        resolve({
+          blob: fallbackBlob,
+          contentType: fallbackBlob.type || 'image/jpeg',
+          ext: fallbackBlob.type.includes('webp') ? 'webp' : 'jpg',
+        });
+      } else {
+        resolve(null);
+      }
+    };
+    img.onload = () => {
+      let width = img.naturalWidth || img.width || maxDim;
+      let height = img.naturalHeight || img.height || maxDim;
+      if (width > maxDim || height > maxDim) {
+        if (width >= height) {
+          height = Math.max(1, Math.round((height * maxDim) / width));
+          width = maxDim;
+        } else {
+          width = Math.max(1, Math.round((width * maxDim) / height));
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        const fallbackBlob = dataUrlToRawBlob(dataUrl);
+        resolve(
+          fallbackBlob
+            ? { blob: fallbackBlob, contentType: fallbackBlob.type || 'image/jpeg', ext: 'jpg' }
+            : null
+        );
+        return;
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const finishWithFallback = () => {
+        canvas.toBlob(
+          (jpgBlob) => {
+            if (jpgBlob) {
+              resolve({ blob: jpgBlob, contentType: 'image/jpeg', ext: 'jpg' });
+            } else {
+              const raw = dataUrlToRawBlob(dataUrl);
+              resolve(raw ? { blob: raw, contentType: raw.type || 'image/jpeg', ext: 'jpg' } : null);
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+
+      if (typeof canvas.toBlob === 'function') {
+        canvas.toBlob(
+          (webpBlob) => {
+            if (webpBlob && webpBlob.size > 0 && webpBlob.type === 'image/webp') {
+              resolve({ blob: webpBlob, contentType: 'image/webp', ext: 'webp' });
+            } else if (webpBlob && webpBlob.size > 0) {
+              resolve({
+                blob: webpBlob,
+                contentType: webpBlob.type || 'image/jpeg',
+                ext: webpBlob.type.includes('webp') ? 'webp' : 'jpg',
+              });
+            } else {
+              finishWithFallback();
+            }
+          },
+          'image/webp',
+          quality
+        );
+      } else {
+        const raw = dataUrlToRawBlob(canvas.toDataURL('image/webp', quality));
+        resolve(raw ? { blob: raw, contentType: raw.type || 'image/webp', ext: 'webp' } : null);
+      }
+    };
+    img.src = dataUrl;
+  });
+}
+
+async function uploadBase64ToSupabaseAvatar(
+  role: AvatarUploadRole,
+  userId: string,
+  dataUrl: string
+): Promise<{ ok: boolean; publicUrl?: string; errorMessage?: string }> {
+  if (!isBase64ImageDataUrl(dataUrl)) {
+    return { ok: true, publicUrl: dataUrl };
+  }
+  if (dataUrl.slice(0, 48).toLowerCase().includes('image/svg+xml')) {
+    return {
+      ok: false,
+      errorMessage: 'فرمت SVG مجاز نیست. لطفاً تصویر JPG، PNG یا WebP بارگذاری کنید.',
+    };
+  }
+
+  const compressed = await compressBase64ToWebpBlob(dataUrl, 400, 0.8);
+  if (!compressed) {
+    return { ok: false, errorMessage: 'خطا در فشرده‌سازی تصویر به فرمت WebP.' };
+  }
+
+  const safeId = sanitizeStorageSegment(userId);
+  const filePath = `${role}_${safeId}.${compressed.ext}`;
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+  let lastErrMsg = '';
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const { error } = await supabase.storage
+        .from(SUPABASE_AVATARS_BUCKET)
+        .upload(filePath, compressed.blob, {
+          upsert: true,
+          contentType: compressed.contentType,
+          cacheControl: '3600',
+        });
+
+      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+
+      if (!error) {
+        const { data: urlData } = supabase.storage
+          .from(SUPABASE_AVATARS_BUCKET)
+          .getPublicUrl(filePath);
+        const publicUrl = `${urlData.publicUrl}?v=${Date.now()}`;
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: `/storage/avatars/${filePath}`,
+          method: 'POST',
+          status: 200,
+          ok: true,
+          durationMs: dur,
+          bytes: compressed.blob.size,
+          detail: `آپلود تصویر WebP (${Math.max(1, Math.round(compressed.blob.size / 1024))} KB)`,
+        });
+        return { ok: true, publicUrl };
+      }
+
+      lastErrMsg = error.message || 'خطا در بارگذاری تصویر در Supabase Storage';
+      recordCloudTrafficEvent({
+        direction: 'up',
+        endpoint: `/storage/avatars/${filePath}`,
+        method: 'POST',
+        status: 500,
+        ok: false,
+        durationMs: dur,
+        bytes: compressed.blob.size,
+        detail: `خطا در آپلود تصویر ${filePath}`,
+        errorMessage: lastErrMsg,
+      });
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 600));
+      }
+    } catch (err) {
+      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+      lastErrMsg = err instanceof Error ? err.message : 'خطای شبکه در آپلود تصویر';
+      recordCloudTrafficEvent({
+        direction: 'up',
+        endpoint: `/storage/avatars/${filePath}`,
+        method: 'POST',
+        status: null,
+        ok: false,
+        durationMs: dur,
+        bytes: compressed.blob.size,
+        detail: `وقفه در آپلود تصویر ${filePath}`,
+        errorMessage: lastErrMsg,
+      });
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 600));
+      }
+    }
+  }
+
+  return { ok: false, errorMessage: lastErrMsg || 'آپلود تصویر در Supabase Storage ناموفق بود.' };
+}
+
+async function runConcurrentQueue<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  if (items.length === 0) return;
+  const limit = Math.max(1, Math.min(concurrency, items.length));
+  let cursor = 0;
+  const runners = Array.from({ length: limit }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      await worker(items[idx], idx);
+    }
+  });
+  await Promise.all(runners);
+}
+
+interface BackgroundAvatarTask {
+  role: AvatarUploadRole;
+  userId: string;
+  dataUrl: string;
+  storageKey: string;
+}
+
+const backgroundAvatarQueueMap = new Map<string, BackgroundAvatarTask>();
+let backgroundAvatarWorkerActive = false;
+let backgroundAvatarStats = {
+  queued: 0,
+  completed: 0,
+  failed: 0,
+  inProgress: false,
+};
+
+function getCurrentLocalCollection<T>(key: string): T | null {
+  if (parsedCache.has(key)) {
+    return cloneValue(parsedCache.get(key) as T);
+  }
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return sanitizePlainValue(JSON.parse(raw) as T);
+  } catch {
+    return null;
+  }
+}
+
+function enqueueBackgroundAvatarTasks(tasks: BackgroundAvatarTask[]): void {
+  if (tasks.length === 0) return;
+  for (const t of tasks) {
+    if (!t.userId || !isBase64ImageDataUrl(t.dataUrl)) continue;
+    backgroundAvatarQueueMap.set(`${t.role}:${t.userId}`, t);
+  }
+  backgroundAvatarStats.queued = backgroundAvatarQueueMap.size;
+  if (!backgroundAvatarWorkerActive && backgroundAvatarQueueMap.size > 0) {
+    void processBackgroundAvatarQueue();
+  }
+}
+
+async function processBackgroundAvatarQueue(): Promise<void> {
+  if (backgroundAvatarWorkerActive) return;
+  backgroundAvatarWorkerActive = true;
+  backgroundAvatarStats.inProgress = true;
+
+  try {
+    while (backgroundAvatarQueueMap.size > 0) {
+      const wave: BackgroundAvatarTask[] = [];
+      for (const [k, task] of backgroundAvatarQueueMap.entries()) {
+        wave.push(task);
+        backgroundAvatarQueueMap.delete(k);
+        if (wave.length >= AVATAR_UPLOAD_CONCURRENCY) break;
+      }
+      if (wave.length === 0) break;
+
+      const uploadedStudents = new Map<string, string>();
+      const uploadedStaffByKey = new Map<string, Map<string, string>>();
+
+      await runConcurrentQueue(wave, AVATAR_UPLOAD_CONCURRENCY, async (task) => {
+        const res = await uploadBase64ToSupabaseAvatar(task.role, task.userId, task.dataUrl);
+        if (res.ok && res.publicUrl) {
+          backgroundAvatarStats.completed += 1;
+          if (task.role === 'student') {
+            uploadedStudents.set(task.userId, res.publicUrl);
+          } else {
+            const m = uploadedStaffByKey.get(task.storageKey) || new Map<string, string>();
+            m.set(task.userId, res.publicUrl);
+            uploadedStaffByKey.set(task.storageKey, m);
+          }
+        } else {
+          backgroundAvatarStats.failed += 1;
+        }
+      });
+
+      // جایگزینی لینک‌های عمومی جدید در حافظه محلی و دیتابیس Supabase
+      if (uploadedStudents.size > 0) {
+        const localStudents = getCurrentLocalCollection<Student[]>(STORAGE_KEYS.STUDENTS);
+        if (Array.isArray(localStudents)) {
+          const updatedRows: Student[] = [];
+          const nextStudents = localStudents.map((st) => {
+            const newUrl = uploadedStudents.get(st.studentId);
+            if (newUrl) {
+              const updated = { ...st, photoUrl: newUrl };
+              updatedRows.push(updated);
+              return updated;
+            }
+            return st;
+          });
+          if (updatedRows.length > 0) {
+            safeLocalStorageSet(STORAGE_KEYS.STUDENTS, JSON.stringify(nextStudents), nextStudents);
+            await upsertStudentRowsToSupabase(updatedRows);
+            notifyCloudDataChanged();
+          }
+        }
+      }
+
+      for (const [sKey, idUrlMap] of uploadedStaffByKey.entries()) {
+        const list = getCurrentLocalCollection<Array<Record<string, unknown>>>(sKey);
+        if (Array.isArray(list)) {
+          let changed = false;
+          const nextList = list.map((item) => {
+            const id = String(item?.id || '').trim();
+            const newUrl = idUrlMap.get(id);
+            if (newUrl) {
+              changed = true;
+              return { ...item, photoUrl: newUrl };
+            }
+            return item;
+          });
+          if (changed) {
+            safeLocalStorageSet(sKey, JSON.stringify(nextList), nextList);
+            void sendSingleKeyPost(sKey, nextList, false, 2);
+            notifyCloudDataChanged();
+          }
+        }
+      }
+
+      backgroundAvatarStats.queued = backgroundAvatarQueueMap.size;
+      // تنفس کوتاه برای آزاد نگه‌داشتن رابط کاربری هنگام آپلود هزاران تصویر
+      if (backgroundAvatarQueueMap.size > 0) {
+        await new Promise((r) => setTimeout(r, 40));
+      }
+    }
+  } finally {
+    backgroundAvatarWorkerActive = false;
+    backgroundAvatarStats.inProgress = false;
+    backgroundAvatarStats.queued = backgroundAvatarQueueMap.size;
+  }
+}
+
+function buildSupabaseStudentRow(student: Student): {
+  id: string;
+  national_code: string | null;
+  data: Student;
+  avatar_url: string | null;
+  updated_at: string;
+} {
+  const id = String(student.studentId || '').trim();
+  const nationalCode = String(student.nationalId || '').trim() || null;
+  const rawPhoto = typeof student.photoUrl === 'string' ? student.photoUrl.trim() : '';
+  // هرگز رشته حجیم Base64 داخل جدول students ذخیره نمی‌شود
+  const cleanPhotoUrl = rawPhoto && !rawPhoto.startsWith('data:image/') ? rawPhoto : null;
+  const cleanStudent: Student = {
+    ...student,
+    studentId: id,
+    photoUrl: cleanPhotoUrl || undefined,
+  };
+  return {
+    id,
+    national_code: nationalCode,
+    data: cleanStudent,
+    avatar_url: cleanPhotoUrl,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function mapSupabaseRowToStudent(row: Record<string, unknown>): Student {
+  const rawData =
+    row.data && typeof row.data === 'object' && !Array.isArray(row.data)
+      ? (row.data as Record<string, unknown>)
+      : {};
+  const avatarUrl =
+    typeof row.avatar_url === 'string' && row.avatar_url.trim()
+      ? row.avatar_url.trim()
+      : typeof rawData.photoUrl === 'string' && rawData.photoUrl.trim()
+      ? rawData.photoUrl.trim()
+      : undefined;
+
+  return normalizeStudentRecord(
+    sanitizePlainValue({
+      ...rawData,
+      studentId: String(rawData.studentId || row.id || '').trim(),
+      nationalId: String(rawData.nationalId || row.national_code || '').trim(),
+      photoUrl: avatarUrl,
+    })
+  );
+}
+
+function sanitizeValueForAppStorage(key: string, value: unknown): unknown {
+  const staffRole = STAFF_KEY_TO_AVATAR_ROLE[key];
+  if (staffRole && Array.isArray(value)) {
+    const bgTasks: BackgroundAvatarTask[] = [];
+    const cleaned = value.map((item) => {
+      if (!item || typeof item !== 'object') return item;
+      const rec = item as Record<string, unknown>;
+      const id = String(rec.id || '').trim();
+      const photo = rec.photoUrl;
+      if (isBase64ImageDataUrl(photo)) {
+        if (id) {
+          bgTasks.push({ role: staffRole, userId: id, dataUrl: photo, storageKey: key });
+        }
+        return { ...rec, photoUrl: undefined };
+      }
+      return rec;
+    });
+    if (bgTasks.length > 0) {
+      enqueueBackgroundAvatarTasks(bgTasks);
+    }
+    return cleaned;
+  }
+  return value;
+}
+
+async function upsertStudentRowsToSupabase(studentsChunk: Student[]): Promise<boolean> {
+  const rows = studentsChunk
+    .filter((s) => Boolean(s && String(s.studentId || '').trim()))
+    .map((s) => buildSupabaseStudentRow(s));
+  if (rows.length === 0) return true;
+
+  const payloadBytes = getUtf8ByteLength(JSON.stringify(rows));
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    try {
+      const { error } = await supabase.from('students').upsert(rows, { onConflict: 'id' });
+      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+      if (!error) {
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/supabase/students',
+          method: 'POST',
+          status: 200,
+          ok: true,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: `ثبت دسته‌ای ${rows.length.toLocaleString('fa-IR')} دانشجو در Supabase`,
+        });
+        return true;
+      }
+      recordCloudTrafficEvent({
+        direction: 'up',
+        endpoint: '/supabase/students',
+        method: 'POST',
+        status: 500,
+        ok: false,
+        durationMs: dur,
+        bytes: payloadBytes,
+        detail: `خطا در ثبت ${rows.length.toLocaleString('fa-IR')} دانشجو در Supabase`,
+        errorMessage: error.message,
+      });
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 700));
+        continue;
+      }
+      return false;
+    } catch (err) {
+      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+      recordCloudTrafficEvent({
+        direction: 'up',
+        endpoint: '/supabase/students',
+        method: 'POST',
+        status: null,
+        ok: false,
+        durationMs: dur,
+        bytes: payloadBytes,
+        detail: 'وقفه شبکه در ثبت جدول students در Supabase',
+        errorMessage: err instanceof Error ? err.message : 'Network error',
+      });
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 700));
+        continue;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
+async function deleteStudentFromSupabase(studentId: string): Promise<boolean> {
+  const cleanId = String(studentId || '').trim();
+  if (!cleanId) return false;
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  try {
+    const { error } = await supabase.from('students').delete().eq('id', cleanId);
+    const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+    recordCloudTrafficEvent({
+      direction: 'up',
+      endpoint: `/supabase/students/${cleanId}`,
+      method: 'DELETE',
+      status: error ? 500 : 200,
+      ok: !error,
+      durationMs: dur,
+      bytes: cleanId.length,
+      detail: error
+        ? `خطا در حذف دانشجو (${cleanId}) از Supabase`
+        : `حذف فوری دانشجو (${cleanId}) از Supabase`,
+      errorMessage: error?.message,
+    });
+    return !error;
+  } catch (err) {
+    const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+    recordCloudTrafficEvent({
+      direction: 'up',
+      endpoint: `/supabase/students/${cleanId}`,
+      method: 'DELETE',
+      status: null,
+      ok: false,
+      durationMs: dur,
+      bytes: 0,
+      detail: `خطای شبکه در حذف دانشجو (${cleanId})`,
+      errorMessage: err instanceof Error ? err.message : 'Network error',
+    });
+    return false;
+  }
+}
+
+function mirrorSingleStudentToCloud(student: Student): Promise<boolean> {
+  if (!student?.studentId) {
     return Promise.resolve(false);
   }
 
-  const payloadBytes = getUtf8ByteLength(bodyStr);
   const runPromise = (async (): Promise<boolean> => {
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
-      const timeoutId = controller ? setTimeout(() => controller.abort(), 18000) : undefined;
-      try {
-        const res = await fetch(`${API_BASE_URL}/students`, {
-          method: 'POST',
-          headers: buildApiHeaders(true),
-          body: bodyStr,
-          signal: controller?.signal,
-        });
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
-        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-        if (res.ok) {
-          const data = (await res.json().catch(() => null)) as { revision?: string | number } | null;
-          if (data && data.revision !== undefined && lastSyncRevision !== null) {
-            lastSyncRevision = data.revision;
+    let targetStudent = student;
+    if (isBase64ImageDataUrl(student.photoUrl)) {
+      const uploadRes = await uploadBase64ToSupabaseAvatar('student', student.studentId, student.photoUrl);
+      if (uploadRes.ok && uploadRes.publicUrl) {
+        targetStudent = { ...student, photoUrl: uploadRes.publicUrl };
+        const localList = getCurrentLocalCollection<Student[]>(STORAGE_KEYS.STUDENTS);
+        if (Array.isArray(localList)) {
+          const idx = localList.findIndex((s) => s.studentId === student.studentId);
+          if (idx !== -1) {
+            localList[idx] = { ...localList[idx], photoUrl: uploadRes.publicUrl };
+            safeLocalStorageSet(STORAGE_KEYS.STUDENTS, JSON.stringify(localList), localList);
+            notifyCloudDataChanged();
           }
-          recordCloudTrafficEvent({
-            direction: 'up',
-            endpoint: '/students',
-            method: 'POST',
-            status: res.status,
-            ok: true,
-            durationMs: dur,
-            bytes: payloadBytes,
-            detail: `همگام‌سازی فوری پرونده دانشجو (${student.studentId})`,
-          });
-          return true;
         }
-        recordCloudTrafficEvent({
-          direction: 'up',
-          endpoint: '/students',
-          method: 'POST',
-          status: res.status,
-          ok: false,
-          durationMs: dur,
-          bytes: payloadBytes,
-          detail: `خطا در ثبت کالکشن دانشجو (${student.studentId})`,
-          errorMessage: `HTTP ${res.status}`,
-        });
-        if (attempt < 2 && (res.status === 429 || res.status >= 500 || res.status === 408)) {
-          await new Promise((r) => setTimeout(r, 700));
-          continue;
-        }
-        return false;
-      } catch (err) {
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
-        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-        recordCloudTrafficEvent({
-          direction: 'up',
-          endpoint: '/students',
-          method: 'POST',
-          status: null,
-          ok: false,
-          durationMs: dur,
-          bytes: payloadBytes,
-          detail: `عدم پاسخ در ثبت کالکشن دانشجو (${student.studentId})`,
-          errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
-        });
-        if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 700));
-          continue;
-        }
-        return false;
       }
     }
-    return false;
+
+    const ok = await upsertStudentRowsToSupabase([targetStudent]);
+    if (ok) {
+      const ts = new Date().toISOString();
+      lastSyncRevision = ts;
+      updateLocalCloudKeyTimestamp(STORAGE_KEYS.STUDENTS, ts);
+      delete failedCloudRetryQueue[STORAGE_KEYS.STUDENTS];
+      clearKeyDirtyForCloud(STORAGE_KEYS.STUDENTS);
+    }
+    return ok;
   })().finally(() => {
     activeStudentMirrorPromises.delete(runPromise);
     notifyCloudMetricsSubscribers();
@@ -1101,119 +1648,87 @@ async function mirrorStudentsCollectionToCloud(
   studentsList: Student[],
   options?: { replaceAll?: boolean; onProgress?: (message: string) => void }
 ): Promise<{ ok: boolean; count: number; revision: string | number | null }> {
-  if (typeof fetch !== 'function' || !Array.isArray(studentsList) || studentsList.length === 0) {
+  if (!Array.isArray(studentsList)) {
     return { ok: true, count: 0, revision: null };
   }
 
-  const chunkSize = 250;
+  // استخراج تصاویر Base64 برای آپلود در صف پس‌زمینه ۱۵تایی بدون قفل شدن رابط کاربری
+  const bgTasks: BackgroundAvatarTask[] = [];
+  for (const st of studentsList) {
+    if (st?.studentId && isBase64ImageDataUrl(st.photoUrl)) {
+      bgTasks.push({
+        role: 'student',
+        userId: st.studentId,
+        dataUrl: st.photoUrl,
+        storageKey: STORAGE_KEYS.STUDENTS,
+      });
+    }
+  }
+  if (bgTasks.length > 0) {
+    enqueueBackgroundAvatarTasks(bgTasks);
+  }
+
+  const chunkSize = SUPABASE_STUDENTS_UPSERT_CHUNK;
   const totalChunks = Math.ceil(studentsList.length / chunkSize);
   let syncedCount = 0;
   let allChunksOk = true;
-  let latestRevision: string | number | null = null;
-  const allValidIds = studentsList
-    .map((s) => String(s?.studentId || '').trim())
-    .filter(Boolean);
 
   for (let idx = 0; idx < totalChunks; idx += 1) {
     const chunk = studentsList.slice(idx * chunkSize, (idx + 1) * chunkSize);
-    const isLastChunk = idx === totalChunks - 1;
     options?.onProgress?.(
-      `در حال همگام‌سازی کالکشن دانشجویان در دیتابیس (دسته ${(idx + 1).toLocaleString('fa-IR')} از ${totalChunks.toLocaleString('fa-IR')})...`
+      `در حال ثبت دسته‌ای دانشجویان در Supabase (دسته ${(idx + 1).toLocaleString('fa-IR')} از ${totalChunks.toLocaleString('fa-IR')} — هر دسته ۲۰۰ نفر)...`
     );
-
-    const payload: Record<string, unknown> = { students: chunk };
-    if (options?.replaceAll && isLastChunk && allChunksOk && allValidIds.length > 0) {
-      payload.keepStudentIds = allValidIds;
-    }
-
-    let bodyStr = '';
-    try {
-      bodyStr = JSON.stringify(payload);
-    } catch {
-      allChunksOk = false;
-      continue;
-    }
-    const payloadBytes = getUtf8ByteLength(bodyStr);
-
-    let chunkOk = false;
-    for (let attempt = 1; attempt <= 2 && !chunkOk; attempt += 1) {
-      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
-      const timeoutId = controller ? setTimeout(() => controller.abort(), 38000) : undefined;
-      try {
-        const res = await fetch(`${API_BASE_URL}/students`, {
-          method: 'POST',
-          headers: buildApiHeaders(true),
-          body: bodyStr,
-          signal: controller?.signal,
-        });
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
-        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-        if (res.ok) {
-          const data = (await res.json().catch(() => null)) as { revision?: string | number } | null;
-          if (data && data.revision !== undefined) {
-            latestRevision = data.revision;
-            if (lastSyncRevision !== null) {
-              lastSyncRevision = data.revision;
-            }
-          }
-          chunkOk = true;
-          syncedCount += chunk.length;
-          recordCloudTrafficEvent({
-            direction: 'up',
-            endpoint: '/students',
-            method: 'POST',
-            status: res.status,
-            ok: true,
-            durationMs: dur,
-            bytes: payloadBytes,
-            detail: `همگام‌سازی دسته ${idx + 1}/${totalChunks} کالکشن دانشجویان (${chunk.length.toLocaleString('fa-IR')} نفر)`,
-          });
-        } else {
-          recordCloudTrafficEvent({
-            direction: 'up',
-            endpoint: '/students',
-            method: 'POST',
-            status: res.status,
-            ok: false,
-            durationMs: dur,
-            bytes: payloadBytes,
-            detail: `خطا در دسته ${idx + 1}/${totalChunks} کالکشن دانشجویان`,
-            errorMessage: `HTTP ${res.status}`,
-          });
-          if (attempt < 2 && (res.status === 429 || res.status >= 500 || res.status === 408)) {
-            await new Promise((r) => setTimeout(r, 900));
-            continue;
-          }
-          break;
-        }
-      } catch (err) {
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
-        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-        recordCloudTrafficEvent({
-          direction: 'up',
-          endpoint: '/students',
-          method: 'POST',
-          status: null,
-          ok: false,
-          durationMs: dur,
-          bytes: payloadBytes,
-          detail: `عدم پاسخ در دسته ${idx + 1}/${totalChunks} کالکشن دانشجویان`,
-          errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
-        });
-        if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 900));
-          continue;
-        }
-        break;
-      }
-    }
-
-    if (!chunkOk) {
+    const ok = await upsertStudentRowsToSupabase(chunk);
+    if (ok) {
+      syncedCount += chunk.length;
+    } else {
       allChunksOk = false;
     }
   }
 
+  // در حالت هم‌ترازی کامل (replaceAll)، رکوردهای حذف‌شده از مرورگر را از جدول students پاک می‌کنیم
+  if (options?.replaceAll && allChunksOk) {
+    try {
+      const keepIdSet = new Set(
+        studentsList.map((s) => String(s?.studentId || '').trim()).filter(Boolean)
+      );
+      const remoteIds: string[] = [];
+      let from = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('students')
+          .select('id')
+          .order('id', { ascending: true })
+          .range(from, from + SUPABASE_STUDENTS_PAGE_SIZE - 1);
+        if (error || !Array.isArray(data)) {
+          hasMore = false;
+          break;
+        }
+        for (const r of data) {
+          if (r && typeof r.id === 'string') remoteIds.push(r.id);
+        }
+        hasMore = data.length === SUPABASE_STUDENTS_PAGE_SIZE;
+        from += SUPABASE_STUDENTS_PAGE_SIZE;
+      }
+
+      const idsToDelete = remoteIds.filter((id) => !keepIdSet.has(id));
+      for (let i = 0; i < idsToDelete.length; i += chunkSize) {
+        const delBatch = idsToDelete.slice(i, i + chunkSize);
+        await supabase.from('students').delete().in('id', delBatch);
+      }
+    } catch {
+      // ادامه بدون توقف در صورت خطای پاکسازی
+    }
+  }
+
+  const latestRevision = allChunksOk ? new Date().toISOString() : null;
+  if (allChunksOk && latestRevision) {
+    lastSyncRevision = latestRevision;
+    updateLocalCloudKeyTimestamp(STORAGE_KEYS.STUDENTS, latestRevision);
+    delete failedCloudRetryQueue[STORAGE_KEYS.STUDENTS];
+    clearKeyDirtyForCloud(STORAGE_KEYS.STUDENTS);
+  }
   return { ok: allChunksOk, count: syncedCount, revision: latestRevision };
 }
 
@@ -1223,112 +1738,96 @@ function sendSingleKeyPost(
   keepalive = false,
   maxAttempts = 3
 ): Promise<boolean> {
-  let bodyStr: string;
+  // کلید دانشجویان منحصراً در جدول اختصاصی students ذخیره می‌شود (نه در app_storage)
+  if (key === STORAGE_KEYS.STUDENTS) {
+    const reqPromise = (async (): Promise<boolean> => {
+      const list = Array.isArray(value) ? (value as Student[]) : [];
+      const res = await mirrorStudentsCollectionToCloud(list, { replaceAll: false });
+      if (!res.ok) {
+        enqueueFailedWrite(key, value);
+      }
+      return res.ok;
+    })().finally(() => {
+      if (pendingCloudRequests[key] === reqPromise) {
+        delete pendingCloudRequests[key];
+      }
+      notifyCloudMetricsSubscribers();
+      if (key in pendingCloudValues && !keepalive) {
+        setTimeout(() => flushAllPendingCloudTimers(false), 10);
+      }
+    });
+    pendingCloudRequests[key] = reqPromise;
+    notifyCloudMetricsSubscribers();
+    return reqPromise;
+  }
+
+  const sanitizedVal = sanitizeValueForAppStorage(key, value);
+  let payloadBytes = 0;
   try {
-    bodyStr = JSON.stringify({ key, value });
+    payloadBytes = getUtf8ByteLength(JSON.stringify(sanitizedVal));
   } catch {
     return Promise.resolve(false);
   }
 
-  const payloadBytes = getUtf8ByteLength(bodyStr);
-  if (payloadBytes > 4_350_000) {
-    enqueueFailedWrite(key, value);
-    recordCloudTrafficEvent({
-      direction: 'up',
-      endpoint: '/sync',
-      method: 'POST',
-      status: 413,
-      ok: false,
-      durationMs: 0,
-      bytes: payloadBytes,
-      detail: `حجم ${FRIENDLY_SYNC_KEY_LABELS[key] || key} بیش از سقف ۴.۵MB سرور است`,
-      errorMessage: 'HTTP 413 Payload Too Large',
-    });
-    return Promise.resolve(false);
-  }
-
-  const useKeepalive = keepalive && bodyStr.length < 60000;
-  const attemptsToRun = useKeepalive ? 1 : Math.max(1, maxAttempts);
-  const timeoutMs = computeUploadTimeoutMs(payloadBytes);
+  const attemptsToRun = keepalive ? 1 : Math.max(1, maxAttempts);
 
   const reqPromise = (async (): Promise<boolean> => {
     for (let attempt = 1; attempt <= attemptsToRun; attempt += 1) {
       const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
-      const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
-
-      const reqOptions: RequestInit = {
-        method: 'POST',
-        headers: buildApiHeaders(true),
-        body: bodyStr,
-        ...(useKeepalive ? { keepalive: true } : { signal: controller?.signal }),
-      };
-
+      const updatedAt = new Date().toISOString();
       try {
-        const res = await fetch(`${API_BASE_URL}/sync`, reqOptions);
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        const { error } = await supabase
+          .from('app_storage')
+          .upsert({ key, value: sanitizedVal, updated_at: updatedAt }, { onConflict: 'key' });
         const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
 
-        if (res.ok) {
-          const data = (await res.json().catch(() => null)) as {
-            revision?: string | number;
-            updatedAt?: string;
-          } | null;
-          if (data && data.revision !== undefined && lastSyncRevision !== null) {
-            lastSyncRevision = data.revision;
-          }
-          if (data && typeof data.updatedAt === 'string') {
-            updateLocalCloudKeyTimestamp(key, data.updatedAt);
-          }
+        if (!error) {
+          lastSyncRevision = updatedAt;
+          updateLocalCloudKeyTimestamp(key, updatedAt);
           delete failedCloudRetryQueue[key];
           clearKeyDirtyForCloud(key);
           failedRetryAttempts = 0;
           recordCloudTrafficEvent({
             direction: 'up',
-            endpoint: '/sync',
+            endpoint: `/supabase/app_storage/${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
             method: 'POST',
-            status: res.status,
+            status: 200,
             ok: true,
             durationMs: dur,
             bytes: payloadBytes,
-            detail: `ذخیره فوری ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
+            detail: `ذخیره فوری ${FRIENDLY_SYNC_KEY_LABELS[key] || key} در Supabase`,
           });
           return true;
         }
 
-        const retryable =
-          !useKeepalive &&
-          attempt < attemptsToRun &&
-          (res.status === 429 || res.status === 408 || res.status >= 500);
+        const retryable = !keepalive && attempt < attemptsToRun;
         recordCloudTrafficEvent({
           direction: 'up',
-          endpoint: '/sync',
+          endpoint: '/supabase/app_storage',
           method: 'POST',
-          status: res.status,
+          status: 500,
           ok: false,
           durationMs: dur,
           bytes: payloadBytes,
           detail: retryable
-            ? `خطای ${res.status} در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key} (تلاش مجدد ${attempt + 1}/${attemptsToRun})`
-            : `خطا در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
-          errorMessage: `HTTP ${res.status}`,
+            ? `خطا در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key} (تلاش مجدد ${attempt + 1}/${attemptsToRun})`
+            : `خطا در ثبت ${FRIENDLY_SYNC_KEY_LABELS[key] || key} در Supabase`,
+          errorMessage: error.message,
         });
 
         if (retryable) {
-          await new Promise((r) => setTimeout(r, attempt === 1 ? 700 : 1800));
+          await new Promise((r) => setTimeout(r, attempt === 1 ? 650 : 1500));
           continue;
         }
 
-        console.warn(`Cloud sync POST non-OK (${res.status}) for key ${key}`);
         enqueueFailedWrite(key, value);
         return false;
       } catch (err) {
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
         const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-        const retryable = !useKeepalive && attempt < attemptsToRun;
+        const retryable = !keepalive && attempt < attemptsToRun;
         recordCloudTrafficEvent({
           direction: 'up',
-          endpoint: '/sync',
+          endpoint: '/supabase/app_storage',
           method: 'POST',
           status: null,
           ok: false,
@@ -1341,11 +1840,10 @@ function sendSingleKeyPost(
         });
 
         if (retryable) {
-          await new Promise((r) => setTimeout(r, attempt === 1 ? 700 : 1800));
+          await new Promise((r) => setTimeout(r, attempt === 1 ? 650 : 1500));
           continue;
         }
 
-        console.warn(`Cloud sync POST failed for key ${key}:`, err);
         enqueueFailedWrite(key, value);
         return false;
       }
@@ -1357,7 +1855,6 @@ function sendSingleKeyPost(
       delete pendingCloudRequests[key];
     }
     notifyCloudMetricsSubscribers();
-    // اگر در حین ارسال، تغییر جدیدتری روی همین کلید ثبت شده باشد، بلافاصله نسخه جدیدتر را ارسال می‌کنیم
     if (key in pendingCloudValues && !keepalive) {
       setTimeout(() => {
         flushAllPendingCloudTimers(false);
@@ -1374,141 +1871,122 @@ function sendCompactBatchWithFallback(
   batchEntries: Array<{ key: string; value: unknown; byteEstimate: number }>,
   keepalive = false
 ): void {
-  if (batchEntries.length === 0) return;
-  if (batchEntries.length === 1 || batchEndpointSupported === false) {
-    batchEntries.forEach((e) => {
-      void sendSingleKeyPost(e.key, e.value, keepalive, 3);
-    });
+  const nonStudentEntries = batchEntries.filter((e) => e.key !== STORAGE_KEYS.STUDENTS);
+  const studentEntries = batchEntries.filter((e) => e.key === STORAGE_KEYS.STUDENTS);
+  studentEntries.forEach((e) => {
+    void sendSingleKeyPost(e.key, e.value, keepalive, 2);
+  });
+
+  if (nonStudentEntries.length === 0) return;
+  if (nonStudentEntries.length === 1) {
+    void sendSingleKeyPost(nonStudentEntries[0].key, nonStudentEntries[0].value, keepalive, 3);
     return;
   }
 
-  let batchBody: string;
+  const updatedAt = new Date().toISOString();
+  const rows = nonStudentEntries.map((e) => ({
+    key: e.key,
+    value: sanitizeValueForAppStorage(e.key, e.value),
+    updated_at: updatedAt,
+  }));
+
+  let payloadBytes = 0;
   try {
-    batchBody = JSON.stringify({
-      entries: batchEntries.map((e) => ({ key: e.key, value: e.value })),
-    });
+    payloadBytes = getUtf8ByteLength(JSON.stringify(rows));
   } catch {
-    batchEntries.forEach((e) => {
+    nonStudentEntries.forEach((e) => {
       void sendSingleKeyPost(e.key, e.value, keepalive, 3);
     });
     return;
   }
 
   const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const payloadBytes = getUtf8ByteLength(batchBody);
-  const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
-  const timeoutId = controller ? setTimeout(() => controller.abort(), 28000) : undefined;
-  const useKeepalive = keepalive && batchBody.length < 60000;
-
-  const batchPromise = fetch(`${API_BASE_URL}/sync/batch`, {
-    method: 'POST',
-    headers: buildApiHeaders(true),
-    body: batchBody,
-    ...(useKeepalive ? { keepalive: true } : { signal: controller?.signal }),
-  })
-    .then(async (res) => {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
+  const batchPromise = (async (): Promise<boolean> => {
+    try {
+      const { error } = await supabase.from('app_storage').upsert(rows, { onConflict: 'key' });
       const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-      if (res.status === 404 || res.status === 405) {
-        batchEndpointSupported = false;
+      if (!error) {
+        batchEndpointSupported = true;
+        lastSyncRevision = updatedAt;
+        nonStudentEntries.forEach((e) => {
+          updateLocalCloudKeyTimestamp(e.key, updatedAt);
+          delete failedCloudRetryQueue[e.key];
+          clearKeyDirtyForCloud(e.key);
+        });
+        failedRetryAttempts = 0;
+        recordCloudTrafficEvent({
+          direction: 'up',
+          endpoint: '/supabase/app_storage (batch)',
+          method: 'POST',
+          status: 200,
+          ok: true,
+          durationMs: dur,
+          bytes: payloadBytes,
+          detail: `ذخیره دسته‌ای ${nonStudentEntries.length} جدول در Supabase`,
+        });
+        return true;
+      }
+
+      recordCloudTrafficEvent({
+        direction: 'up',
+        endpoint: '/supabase/app_storage (batch)',
+        method: 'POST',
+        status: 500,
+        ok: false,
+        durationMs: dur,
+        bytes: payloadBytes,
+        detail: `خطا در ارسال دسته‌ای (${nonStudentEntries.length} جدول) — ارسال تفکیکی خودکار`,
+        errorMessage: error.message,
+      });
+      if (!keepalive) {
         const fallbacks = await Promise.all(
-          batchEntries.map((e) => sendSingleKeyPost(e.key, e.value, keepalive, 2))
+          nonStudentEntries.map((e) => sendSingleKeyPost(e.key, e.value, false, 2))
         );
         return fallbacks.every(Boolean);
       }
-      if (!res.ok) {
-        recordCloudTrafficEvent({
-          direction: 'up',
-          endpoint: '/sync/batch',
-          method: 'POST',
-          status: res.status,
-          ok: false,
-          durationMs: dur,
-          bytes: payloadBytes,
-          detail: `خطا در ارسال دسته‌ای (${batchEntries.length} جدول) — ارسال تفکیکی خودکار`,
-          errorMessage: `HTTP ${res.status}`,
-        });
-        if (!useKeepalive) {
-          const fallbacks = await Promise.all(
-            batchEntries.map((e) => sendSingleKeyPost(e.key, e.value, false, 2))
-          );
-          return fallbacks.every(Boolean);
-        }
-        batchEntries.forEach((e) => enqueueFailedWrite(e.key, e.value));
-        return false;
-      }
-
-      batchEndpointSupported = true;
-      const data = (await res.json().catch(() => null)) as {
-        revision?: string | number;
-        updatedAt?: string;
-      } | null;
-      if (data && data.revision !== undefined && lastSyncRevision !== null) {
-        lastSyncRevision = data.revision;
-      }
-      batchEntries.forEach((e) => {
-        if (data && typeof data.updatedAt === 'string') {
-          updateLocalCloudKeyTimestamp(e.key, data.updatedAt);
-        }
-        delete failedCloudRetryQueue[e.key];
-        clearKeyDirtyForCloud(e.key);
-      });
-      failedRetryAttempts = 0;
-      recordCloudTrafficEvent({
-        direction: 'up',
-        endpoint: '/sync/batch',
-        method: 'POST',
-        status: res.status,
-        ok: true,
-        durationMs: dur,
-        bytes: payloadBytes,
-        detail: `ذخیره دسته‌ای ${batchEntries.length} جدول در ابر`,
-      });
-      return true;
-    })
-    .catch(async (err) => {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      nonStudentEntries.forEach((e) => enqueueFailedWrite(e.key, e.value));
+      return false;
+    } catch (err) {
       const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
       recordCloudTrafficEvent({
         direction: 'up',
-        endpoint: '/sync/batch',
+        endpoint: '/supabase/app_storage (batch)',
         method: 'POST',
         status: null,
         ok: false,
         durationMs: dur,
         bytes: payloadBytes,
-        detail: `وقفه در ارسال دسته‌ای (${batchEntries.length} جدول) — ارسال تفکیکی خودکار`,
+        detail: `وقفه در ارسال دسته‌ای (${nonStudentEntries.length} جدول) — ارسال تفکیکی خودکار`,
         errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
       });
-      if (!useKeepalive) {
+      if (!keepalive) {
         const fallbacks = await Promise.all(
-          batchEntries.map((e) => sendSingleKeyPost(e.key, e.value, false, 2))
+          nonStudentEntries.map((e) => sendSingleKeyPost(e.key, e.value, false, 2))
         );
         return fallbacks.every(Boolean);
       }
-      batchEntries.forEach((e) => enqueueFailedWrite(e.key, e.value));
+      nonStudentEntries.forEach((e) => enqueueFailedWrite(e.key, e.value));
       return false;
-    })
-    .finally(() => {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-      let hasChainedWrite = false;
-      batchEntries.forEach((e) => {
-        if (pendingCloudRequests[e.key] === batchPromise) {
-          delete pendingCloudRequests[e.key];
-        }
-        if (e.key in pendingCloudValues) {
-          hasChainedWrite = true;
-        }
-      });
-      notifyCloudMetricsSubscribers();
-      if (hasChainedWrite && !keepalive) {
-        setTimeout(() => {
-          flushAllPendingCloudTimers(false);
-        }, 10);
+    }
+  })().finally(() => {
+    let hasChainedWrite = false;
+    nonStudentEntries.forEach((e) => {
+      if (pendingCloudRequests[e.key] === batchPromise) {
+        delete pendingCloudRequests[e.key];
+      }
+      if (e.key in pendingCloudValues) {
+        hasChainedWrite = true;
       }
     });
+    notifyCloudMetricsSubscribers();
+    if (hasChainedWrite && !keepalive) {
+      setTimeout(() => {
+        flushAllPendingCloudTimers(false);
+      }, 10);
+    }
+  });
 
-  batchEntries.forEach((e) => {
+  nonStudentEntries.forEach((e) => {
     pendingCloudRequests[e.key] = batchPromise;
   });
   notifyCloudMetricsSubscribers();
@@ -1520,14 +1998,9 @@ function flushAllPendingCloudTimers(keepalive = false): void {
     coalescedFlushTimer = undefined;
     coalescedFlushDueAt = 0;
   }
-  if (typeof fetch !== 'function') {
-    for (const k of Object.keys(pendingCloudValues)) delete pendingCloudValues[k];
-    return;
-  }
 
   const readyEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
   for (const k of Object.keys(pendingCloudValues)) {
-    // حفظ ترتیب نوشتن برای هر کلید: اگر درخواستی روی همین کلید در حال اجراست، منتظر اتمام آن می‌مانیم تا نسخه جدیدتر بعد از آن ارسال شود
     if (!keepalive && pendingCloudRequests[k]) {
       continue;
     }
@@ -1545,33 +2018,30 @@ function flushAllPendingCloudTimers(keepalive = false): void {
 
   if (readyEntries.length === 0) return;
 
-  // تفکیک کامل کلیدهای حجیم (دانشجویان، اطلاعیه‌ها، تنظیمات، تخت‌ها یا >300KB) از کلیدهای سبک تا هرگز یک جدول حجیم مانع ثبت کاربران یا تنظیمات نشود
   const soloEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
   const compactEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
 
   for (const entry of readyEntries) {
-    if (SOLO_HEAVY_KEYS.has(entry.key) || entry.byteEstimate > 300_000 || batchEndpointSupported === false) {
+    if (entry.key === STORAGE_KEYS.STUDENTS || SOLO_HEAVY_KEYS.has(entry.key) || entry.byteEstimate > 400_000) {
       soloEntries.push(entry);
     } else {
       compactEntries.push(entry);
     }
   }
 
-  // کلیدهای حجیم و حساس به‌صورت مجزا با Timeout سخاوتمندانه و تلاش مجدد ارسال می‌شوند
   for (const solo of soloEntries) {
     void sendSingleKeyPost(solo.key, solo.value, keepalive, 3);
   }
 
-  // کلیدهای سبک در دسته‌های ایمن (حداکثر ۸ کلید و ۵۵۰ کیلوبایت) ارسال می‌شوند و در صورت خطا خودکار تک‌تک می‌شوند
   if (compactEntries.length > 0) {
-    const MAX_COMPACT_BATCH_BYTES = 550_000;
+    const MAX_COMPACT_BATCH_BYTES = 1_200_000;
     let currentBatch: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
     let currentBytes = 0;
 
     for (const item of compactEntries) {
       if (
         currentBatch.length > 0 &&
-        (currentBatch.length >= 8 || currentBytes + item.byteEstimate > MAX_COMPACT_BATCH_BYTES)
+        (currentBatch.length >= 10 || currentBytes + item.byteEstimate > MAX_COMPACT_BATCH_BYTES)
       ) {
         sendCompactBatchWithFallback(currentBatch, keepalive);
         currentBatch = [];
@@ -1719,8 +2189,8 @@ export function doesStudentMatchMessage(student: Student, msg: Message): boolean
 
 export function compressAvatarImageFile(
   file: File,
-  maxDim = 360,
-  quality = 0.78
+  maxDim = 400,
+  quality = 0.8
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!file || !file.type || !file.type.startsWith('image/') || file.type.toLowerCase().includes('svg')) {
@@ -1764,9 +2234,18 @@ export function compressAvatarImageFile(
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
         try {
-          resolve(canvas.toDataURL('image/jpeg', quality));
+          const webpUrl = canvas.toDataURL('image/webp', quality);
+          if (webpUrl && webpUrl.startsWith('data:image/webp')) {
+            resolve(webpUrl);
+          } else {
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          }
         } catch {
-          resolve(rawUrl);
+          try {
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          } catch {
+            resolve(rawUrl);
+          }
         }
       };
       img.src = rawUrl;
@@ -3264,18 +3743,13 @@ export const Storage = {
     return { success: true, message: 'دانشجو با موفقیت ثبت و به سامانه اضافه گردید.' };
   },
 
-  // حذف دانشجو توسط مدیر (آزادسازی خودکار تخت)
+  // حذف دانشجو توسط مدیر (آزادسازی خودکار تخت و حذف فوری از Supabase)
   deleteStudent: (studentId: string): { success: boolean; message: string } => {
     const target = Storage.getStudents().find((s) => s.studentId === studentId);
     Storage.releaseBed(studentId);
     const students = Storage.getStudents().filter((s) => s.studentId !== studentId);
     Storage.setStudents(students);
-    if (typeof fetch === 'function') {
-      fetch(`${API_BASE_URL}/students/${encodeURIComponent(studentId)}`, {
-        method: 'DELETE',
-        headers: buildApiHeaders(false),
-      }).catch(() => {});
-    }
+    void deleteStudentFromSupabase(studentId);
     Storage.addActivityLog({
       category: 'student',
       action: 'حذف پرونده دانشجو',
@@ -3316,11 +3790,8 @@ export const Storage = {
     students[index] = updatedStudent;
     Storage.setStudents(students);
     void mirrorSingleStudentToCloud(updatedStudent);
-    if (isStudentIdChanged && typeof fetch === 'function') {
-      fetch(`${API_BASE_URL}/students/${encodeURIComponent(studentId)}`, {
-        method: 'DELETE',
-        headers: buildApiHeaders(false),
-      }).catch(() => {});
+    if (isStudentIdChanged) {
+      void deleteStudentFromSupabase(studentId);
     }
 
     // همگام‌سازی وضعیت تخت یا شماره دانشجویی در ارجاعات مرتبط
@@ -3722,54 +4193,7 @@ export const Storage = {
         'vice_dean',
       ]);
 
-      // گام ۱: دریافت مستقیم عکس‌های ذخیره‌شده در دیتابیس ابری از مسیر صفحه‌بندی‌شده /api/photos/export
-      let skip = 0;
-      let hasMore = true;
-      let batchPage = 0;
-      while (hasMore && batchPage < 150) {
-        batchPage += 1;
-        onProgress?.(`در حال دریافت تصاویر پروفایل از سرور ابری (بخش ${batchPage})...`);
-        const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
-        const timer = controller ? setTimeout(() => controller.abort(), 15000) : undefined;
-        try {
-          const res = await fetch(`${API_BASE_URL}/photos/export?skip=${skip}&limit=30`, {
-            method: 'GET',
-            headers: buildApiHeaders(false),
-            cache: 'no-store',
-            signal: controller?.signal,
-          });
-          if (timer !== undefined) clearTimeout(timer);
-          if (!res.ok) {
-            hasMore = false;
-            break;
-          }
-          const payload = (await res.json().catch(() => null)) as {
-            ok?: boolean;
-            hasMore?: boolean;
-            nextSkip?: number;
-            photos?: Array<{ role?: string; userId?: string; dataUrl?: string }>;
-          } | null;
-          if (!payload || !Array.isArray(payload.photos) || payload.photos.length === 0) {
-            hasMore = false;
-            break;
-          }
-          for (const item of payload.photos) {
-            const role = String(item?.role || '').trim() as PhotoRole;
-            const userId = String(item?.userId || '').trim();
-            const dataUrl = String(item?.dataUrl || '').trim();
-            if (allowedRolesSet.has(role) && userId && dataUrl.startsWith('data:image/')) {
-              photoMap.set(`${role}:${userId}`, { role, userId, dataUrl });
-            }
-          }
-          hasMore = Boolean(payload.hasMore);
-          skip = typeof payload.nextSkip === 'number' ? payload.nextSkip : skip + payload.photos.length;
-        } catch {
-          if (timer !== undefined) clearTimeout(timer);
-          hasMore = false;
-        }
-      }
-
-      // گام ۲: تکمیل عکس‌های باقی‌مانده (درون‌خطی یا لینک‌های مستقیم HTTP) برای همه ۱۲ نقش کاربری
+      // گام ۱: جمع‌آوری عکس‌های کاربران (لینک‌های عمومی Supabase Storage و تصاویر درون‌خطی) برای همه ۱۲ نقش کاربری
       const missingPhotoFetchQueue: Array<{ role: PhotoRole; userId: string; rawUrl: string }> = [];
       const registerUserPhotos = (
         role: PhotoRole,
@@ -3807,8 +4231,8 @@ export const Storage = {
       registerUserPhotos('vice_dean', baseData.viceDeanStaff);
 
       if (missingPhotoFetchQueue.length > 0) {
-        onProgress?.(`در حال تبدیل و ضمیمه‌کردن ${missingPhotoFetchQueue.length} تصویر کاربری...`);
-        await runWithConcurrency(missingPhotoFetchQueue, 6, async (task) => {
+        onProgress?.(`در حال دریافت و ضمیمه‌کردن ${missingPhotoFetchQueue.length.toLocaleString('fa-IR')} تصویر از Supabase Storage...`);
+        await runWithConcurrency(missingPhotoFetchQueue, AVATAR_UPLOAD_CONCURRENCY, async (task) => {
           const dataUrl = await fetchUrlAsDataUrl(task.rawUrl);
           if (dataUrl && dataUrl.startsWith('data:image/')) {
             photoMap.set(`${task.role}:${task.userId}`, {
@@ -4278,35 +4702,48 @@ export const Storage = {
       const restoredPhotosCount = photoByKey.size;
       let uploadedPhotosToCloudCount = 0;
       const resolvedUrlByKey = new Map<string, string>();
+      const roleToStorageKey: Record<PhotoRole, string> = {
+        student: STORAGE_KEYS.STUDENTS,
+        supervisor: STORAGE_KEYS.SUPERVISORS,
+        maintenance: STORAGE_KEYS.MAINTENANCE_STAFF,
+        warehouse: STORAGE_KEYS.WAREHOUSE_STAFF,
+        counselor: STORAGE_KEYS.COUNSELORS,
+        finance: STORAGE_KEYS.FINANCE_STAFF,
+        procurement: STORAGE_KEYS.PROCUREMENT_STAFF,
+        education: STORAGE_KEYS.EDUCATION_STAFF,
+        cultural: STORAGE_KEYS.CULTURAL_STAFF,
+        student_affairs: STORAGE_KEYS.STUDENT_AFFAIRS_STAFF,
+        security: STORAGE_KEYS.SECURITY_STAFF,
+        vice_dean: STORAGE_KEYS.VICE_DEAN_STAFF,
+      };
+
+      const useBackgroundPhotoQueue = restoredPhotosCount > 45;
+
+      if (restoredPhotosCount > 0 && !useBackgroundPhotoQueue) {
+        const allPhotoItems = Array.from(photoByKey.values());
+        let doneSoFar = 0;
+        onProgress?.(
+          `در حال فشرده‌سازی WebP و بارگذاری ${restoredPhotosCount.toLocaleString('fa-IR')} تصویر در Supabase Storage (دسته‌های ۱۵تایی)...`
+        );
+        await runConcurrentQueue(allPhotoItems, AVATAR_UPLOAD_CONCURRENCY, async (item) => {
+          const up = await uploadBase64ToSupabaseAvatar(item.role, item.userId, item.dataUrl);
+          doneSoFar += 1;
+          const key = `${item.role}:${item.userId}`;
+          if (up.ok && up.publicUrl) {
+            resolvedUrlByKey.set(key, up.publicUrl);
+            uploadedPhotosToCloudCount += 1;
+          } else {
+            resolvedUrlByKey.set(key, item.dataUrl);
+          }
+          if (doneSoFar % 15 === 0 || doneSoFar === allPhotoItems.length) {
+            onProgress?.(
+              `آپلود تصاویر در Supabase Storage: ${doneSoFar.toLocaleString('fa-IR')} از ${allPhotoItems.length.toLocaleString('fa-IR')}...`
+            );
+          }
+        });
+      }
 
       if (restoredPhotosCount > 0) {
-        const byRole = new Map<PhotoRole, Array<{ userId: string; dataUrl: string }>>();
-        for (const item of photoByKey.values()) {
-          const arr = byRole.get(item.role) || [];
-          arr.push({ userId: item.userId, dataUrl: item.dataUrl });
-          byRole.set(item.role, arr);
-        }
-
-        let uploadedRolesDone = 0;
-        for (const [role, items] of byRole.entries()) {
-          uploadedRolesDone += 1;
-          onProgress?.(
-            `در حال بازگردانی و بارگذاری عکس‌های کاربران روی سرور ابری (دسته ${uploadedRolesDone} از ${byRole.size})...`
-          );
-          const uploadRes = await Storage.uploadPhotosToCloud(role, items);
-          for (const it of items) {
-            const key = `${role}:${it.userId}`;
-            const newUrl = uploadRes.urls?.[it.userId];
-            if (uploadRes.ok && newUrl) {
-              resolvedUrlByKey.set(key, newUrl);
-              uploadedPhotosToCloudCount += 1;
-            } else {
-              // در صورت آفلاین بودن یا عدم پاسخ سرور، عکس به‌صورت مستقیم درون رکورد حفظ می‌شود
-              resolvedUrlByKey.set(key, it.dataUrl);
-            }
-          }
-        }
-
         for (const { role, prop } of roleArrayPairs) {
           const list = data[prop];
           if (!Array.isArray(list)) continue;
@@ -4318,6 +4755,9 @@ export const Storage = {
             const resolved = resolvedUrlByKey.get(`${role}:${userId}`);
             if (resolved) {
               rec.photoUrl = resolved;
+            } else if (useBackgroundPhotoQueue && photoByKey.has(`${role}:${userId}`)) {
+              // تصویر تا اتمام صف پس‌زمینه ۱۵تایی به‌صورت موقت در مرورگر نمایش داده می‌شود و هرگز داخل دیتابیس ذخیره نمی‌شود
+              rec.photoUrl = photoByKey.get(`${role}:${userId}`)!.dataUrl;
             } else if (typeof rec.photoUrl === 'string' && embeddedFilesMap[rec.photoUrl]) {
               rec.photoUrl = embeddedFilesMap[rec.photoUrl];
             }
@@ -4338,73 +4778,22 @@ export const Storage = {
         severity: 'warning',
       });
 
-      // گام ۴: همگام‌سازی کامل با دیتابیس ابری (MongoDB sync_kv + students collection)
-      onProgress?.('در حال بازسازی و همگام‌سازی کامل پایگاه داده ابری سرور...');
+      // گام ۴: همگام‌سازی کامل با Supabase (app_storage + جدول students در دسته‌های ۲۰۰تایی بدون Base64)
+      onProgress?.('در حال بازسازی و همگام‌سازی کامل پایگاه داده Supabase...');
       const detailedSync = await Storage.syncAllToCloudDetailed(onProgress);
       const cloudSynced = detailedSync.ok;
+      const studentsSynced = detailedSync.studentsMirrorOk;
 
-      let studentsSynced = false;
-      const restoredStudents = Storage.getStudents();
-      if (restoredStudents.length === 0) {
-        studentsSynced = true;
-      } else {
-        try {
-          const allIds = restoredStudents.map((s) => s.studentId).filter(Boolean);
-          const fullPayloadStr = JSON.stringify({ students: restoredStudents, replaceAll: true });
-          const postStudentsPayload = async (bodyStr: string): Promise<boolean> => {
-            for (let attempt = 0; attempt < 2; attempt += 1) {
-              const controller = new AbortController();
-              const timer = setTimeout(() => controller.abort(), 30000);
-              try {
-                const stRes = await fetch(`${API_BASE_URL}/students`, {
-                  method: 'POST',
-                  headers: buildApiHeaders(true),
-                  body: bodyStr,
-                  signal: controller.signal,
-                });
-                clearTimeout(timer);
-                if (stRes.ok) return true;
-                if (attempt === 0 && (stRes.status === 429 || stRes.status >= 500)) {
-                  await new Promise((r) => setTimeout(r, 700));
-                  continue;
-                }
-                return false;
-              } catch {
-                clearTimeout(timer);
-                if (attempt === 0) {
-                  await new Promise((r) => setTimeout(r, 700));
-                  continue;
-                }
-                return false;
-              }
-            }
-            return false;
-          };
-
-          if (getUtf8ByteLength(fullPayloadStr) <= 1_800_000) {
-            studentsSynced = await postStudentsPayload(fullPayloadStr);
-          } else {
-            let allChunksOk = true;
-            const chunkSize = 200;
-            const totalChunks = Math.ceil(restoredStudents.length / chunkSize);
-            for (let i = 0, cIdx = 0; i < restoredStudents.length; i += chunkSize, cIdx += 1) {
-              const chunk = restoredStudents.slice(i, i + chunkSize);
-              const isLast = i + chunkSize >= restoredStudents.length;
-              onProgress?.(`در حال ثبت پرونده دانشجویان در سرور ابری (دسته ${cIdx + 1} از ${totalChunks})...`);
-              const payloadObj = isLast
-                ? { students: chunk, keepStudentIds: allIds }
-                : { students: chunk };
-              const chunkOk = await postStudentsPayload(JSON.stringify(payloadObj));
-              if (!chunkOk) {
-                allChunksOk = false;
-                break;
-              }
-            }
-            studentsSynced = allChunksOk;
-          }
-        } catch {
-          studentsSynced = false;
-        }
+      // اگر تعداد عکس‌ها زیاد باشد (>۴۵)، صف پس‌زمینه ۱۵تایی به‌صورت غیرمسدودکننده شروع به آپلود به Supabase Storage می‌کند
+      if (useBackgroundPhotoQueue && restoredPhotosCount > 0) {
+        const bgTasks: BackgroundAvatarTask[] = Array.from(photoByKey.values()).map((it) => ({
+          role: it.role,
+          userId: it.userId,
+          dataUrl: it.dataUrl,
+          storageKey: roleToStorageKey[it.role],
+        }));
+        enqueueBackgroundAvatarTasks(bgTasks);
+        uploadedPhotosToCloudCount = restoredPhotosCount;
       }
 
       await Storage.waitForPendingCloudSync();
@@ -9522,153 +9911,63 @@ export const Storage = {
   },
 
   // -------------------------------------------------------------
-  // توابع همگام‌سازی دوطرفه با دیتابیس ابری MongoDB Atlas
+  // توابع همگام‌سازی دوطرفه مقیاس‌پذیر با Supabase (PostgreSQL + Storage)
   // -------------------------------------------------------------
   fetchStudentsFromDB: async (): Promise<Student[] | null> => {
     try {
-      const limit = 400;
+      const pageSize = SUPABASE_STUDENTS_PAGE_SIZE;
+      const collected: Student[] = [];
+      let from = 0;
+      let hasMore = true;
 
-      const fetchPage = async (skip: number) => {
+      while (hasMore) {
         const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
-        try {
-          const res = await fetch(`${API_BASE_URL}/students?skip=${skip}&limit=${limit}`, {
-            method: 'GET',
-            cache: 'no-store',
-            ...(ENV_SYNC_TOKEN ? { headers: buildApiHeaders(false) } : {}),
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-          const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+        const to = from + pageSize - 1;
+        const { data, error } = await supabase
+          .from('students')
+          .select('id, national_code, data, avatar_url, updated_at')
+          .order('id', { ascending: true })
+          .range(from, to);
 
-          if (!res.ok) {
-            recordCloudTrafficEvent({
-              direction: 'down',
-              endpoint: `/students?skip=${skip}`,
-              method: 'GET',
-              status: res.status,
-              ok: false,
-              durationMs: dur,
-              bytes: 0,
-              detail: 'خطا در دریافت صفحه دانشجویان از سرور',
-              errorMessage: `HTTP ${res.status}`,
-            });
-            return null;
-          }
-          const rawText = await res.text();
-          const rxBytes = getUtf8ByteLength(rawText);
-          const rawData = JSON.parse(rawText) as
-            | Array<Record<string, unknown>>
-            | {
-                students?: Array<Record<string, unknown>>;
-                total?: number;
-                hasMore?: boolean;
-                nextSkip?: number;
-              };
-          return { rawData, status: res.status, dur, rxBytes };
-        } catch (err) {
-          clearTimeout(timeoutId);
-          const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+
+        if (error) {
           recordCloudTrafficEvent({
             direction: 'down',
-            endpoint: `/students?skip=${skip}`,
+            endpoint: `/supabase/students?range=${from}-${to}`,
             method: 'GET',
-            status: null,
+            status: 500,
             ok: false,
             durationMs: dur,
             bytes: 0,
-            detail: 'قطع ارتباط در دریافت صفحه دانشجویان',
-            errorMessage: err instanceof Error ? err.message : 'Network error',
+            detail: 'خطا در دریافت صفحه دانشجویان از Supabase',
+            errorMessage: error.message,
           });
           return null;
         }
-      };
 
-      const first = await fetchPage(0);
-      if (!first) return null;
+        const rows = Array.isArray(data) ? data : [];
+        const rxBytes = getUtf8ByteLength(JSON.stringify(rows));
 
-      const collected: Student[] = [];
-      if (Array.isArray(first.rawData)) {
-        for (const item of first.rawData) {
-          collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
+        for (const row of rows) {
+          if (row && typeof row === 'object') {
+            collected.push(mapSupabaseRowToStudent(row as Record<string, unknown>));
+          }
         }
+
         recordCloudTrafficEvent({
           direction: 'down',
-          endpoint: '/students',
+          endpoint: `/supabase/students?range=${from}-${to}`,
           method: 'GET',
-          status: first.status,
+          status: 200,
           ok: true,
-          durationMs: first.dur,
-          bytes: first.rxBytes,
-          detail: `دریافت ${first.rawData.length.toLocaleString('fa-IR')} پرونده دانشجو`,
-        });
-      } else if (first.rawData && Array.isArray(first.rawData.students)) {
-        for (const item of first.rawData.students) {
-          collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
-        }
-        recordCloudTrafficEvent({
-          direction: 'down',
-          endpoint: '/students?skip=0',
-          method: 'GET',
-          status: first.status,
-          ok: true,
-          durationMs: first.dur,
-          bytes: first.rxBytes,
-          detail: `دریافت صفحه اول (${first.rawData.students.length.toLocaleString('fa-IR')} دانشجو)`,
+          durationMs: dur,
+          bytes: rxBytes,
+          detail: `دریافت ${rows.length.toLocaleString('fa-IR')} پرونده دانشجو از Supabase (مجموع ${collected.length.toLocaleString('fa-IR')})`,
         });
 
-        const total = typeof first.rawData.total === 'number' ? first.rawData.total : 0;
-        const hasMore = Boolean(first.rawData.hasMore) && first.rawData.students.length > 0;
-
-        if (hasMore && total > collected.length) {
-          const remainingSkips: number[] = [];
-          for (let s = collected.length; s < total; s += limit) {
-            remainingSkips.push(s);
-          }
-          const results = await Promise.all(remainingSkips.map((s) => fetchPage(s)));
-          for (let i = 0; i < results.length; i++) {
-            const pageRes = results[i];
-            if (!pageRes || Array.isArray(pageRes.rawData) || !Array.isArray(pageRes.rawData?.students)) {
-              return null;
-            }
-            for (const item of pageRes.rawData.students) {
-              collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
-            }
-            recordCloudTrafficEvent({
-              direction: 'down',
-              endpoint: `/students?skip=${remainingSkips[i]}`,
-              method: 'GET',
-              status: pageRes.status,
-              ok: true,
-              durationMs: pageRes.dur,
-              bytes: pageRes.rxBytes,
-              detail: `دریافت صفحه ${pageRes.rawData.students.length.toLocaleString('fa-IR')} دانشجو (مجموع ${collected.length.toLocaleString('fa-IR')})`,
-            });
-          }
-        } else if (hasMore) {
-          let skip =
-            typeof first.rawData.nextSkip === 'number'
-              ? first.rawData.nextSkip
-              : first.rawData.students.length;
-          let keepFetching = true;
-          while (keepFetching) {
-            const pageRes = await fetchPage(skip);
-            if (!pageRes || Array.isArray(pageRes.rawData) || !Array.isArray(pageRes.rawData?.students)) {
-              return null;
-            }
-            for (const item of pageRes.rawData.students) {
-              collected.push(normalizeStudentRecord(sanitizePlainValue(item)));
-            }
-            keepFetching = Boolean(pageRes.rawData.hasMore) && pageRes.rawData.students.length > 0;
-            skip =
-              typeof pageRes.rawData.nextSkip === 'number'
-                ? pageRes.rawData.nextSkip
-                : skip + pageRes.rawData.students.length;
-          }
-        }
-      } else {
-        return null;
+        hasMore = rows.length === pageSize;
+        from += pageSize;
       }
 
       const lastLocalWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
@@ -9693,124 +9992,54 @@ export const Storage = {
       };
     }
 
-    const bodyStr = JSON.stringify(newStudent);
-    const payloadBytes = getUtf8ByteLength(bodyStr);
-    let lastError: unknown = null;
+    let preparedStudent: Student = normalizeStudentRecord(newStudent as unknown as Record<string, unknown>);
+    preparedStudent = {
+      ...preparedStudent,
+      residenceType: preparedStudent.residenceType || newStudent.residenceType,
+    };
 
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000);
-      try {
-        const res = await fetch(`${API_BASE_URL}/students`, {
-          method: 'POST',
-          headers: buildApiHeaders(true),
-          body: bodyStr,
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-
-        const data = await res.json().catch(() => ({} as Record<string, unknown>));
-        if (!res.ok) {
-          recordCloudTrafficEvent({
-            direction: 'up',
-            endpoint: '/students',
-            method: 'POST',
-            status: res.status,
-            ok: false,
-            durationMs: dur,
-            bytes: payloadBytes,
-            detail: `خطا در ثبت دانشجوی جدید (${newStudent.studentId})`,
-            errorMessage: `HTTP ${res.status}`,
-          });
-          if (attempt < 2 && (res.status === 429 || res.status === 408 || res.status >= 500)) {
-            await new Promise((r) => setTimeout(r, 800));
-            continue;
-          }
-          return {
-            success: false,
-            message:
-              (data as { message?: string })?.message || 'خطا در ثبت دانشجو در دیتابیس ابری',
-          };
-        }
-
-        if ((data as { revision?: string | number })?.revision !== undefined && lastSyncRevision !== null) {
-          lastSyncRevision = (data as { revision?: string | number }).revision ?? lastSyncRevision;
-        }
-        recordCloudTrafficEvent({
-          direction: 'up',
-          endpoint: '/students',
-          method: 'POST',
-          status: res.status,
-          ok: true,
-          durationMs: dur,
-          bytes: payloadBytes,
-          detail: `ثبت فوری دانشجوی جدید ${newStudent.fullName} (${newStudent.studentId})`,
-        });
-
-        const rawReturned = ((data as { student?: Record<string, unknown> })?.student ||
-          newStudent) as Record<string, unknown>;
-        const normalized = normalizeStudentRecord(rawReturned);
-        const savedStudent: Student = {
-          ...normalized,
-          residenceType: normalized.residenceType || newStudent.residenceType,
-        };
-
-        const updatedStudents = [savedStudent, ...currentStudents];
-        set(STORAGE_KEYS.STUDENTS, updatedStudents);
-        Storage.addActivityLog({
-          category: 'student',
-          action: 'ثبت دانشجوی جدید در دیتابیس ابری',
-          details: `دانشجو ${savedStudent.fullName} (${savedStudent.studentId}) ثبت شد.`,
-          targetName: `${savedStudent.fullName} (${savedStudent.studentId})`,
-        });
-
-        return {
-          success: true,
-          student: savedStudent,
-          message:
-            (data as { message?: string })?.message ||
-            'دانشجو با موفقیت در دیتابیس ابری ثبت شد.',
-        };
-      } catch (err: unknown) {
-        clearTimeout(timeoutId);
-        lastError = err;
-        const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-        recordCloudTrafficEvent({
-          direction: 'up',
-          endpoint: '/students',
-          method: 'POST',
-          status: null,
-          ok: false,
-          durationMs: dur,
-          bytes: payloadBytes,
-          detail:
-            attempt < 2
-              ? `تلاش مجدد ثبت دانشجوی جدید (${newStudent.studentId})...`
-              : `عدم پاسخ در ثبت دانشجوی جدید (${newStudent.studentId})`,
-          errorMessage: err instanceof Error ? err.message : 'خطای شبکه',
-        });
-        if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 800));
-          continue;
-        }
+    if (isBase64ImageDataUrl(preparedStudent.photoUrl)) {
+      const up = await uploadBase64ToSupabaseAvatar('student', preparedStudent.studentId, preparedStudent.photoUrl);
+      if (up.ok && up.publicUrl) {
+        preparedStudent = { ...preparedStudent, photoUrl: up.publicUrl };
       }
     }
 
-    console.warn('addStudentToDB error:', lastError);
-    const isTimeout = lastError instanceof Error && lastError.name === 'AbortError';
+    const ok = await upsertStudentRowsToSupabase([preparedStudent]);
+    if (!ok) {
+      return {
+        success: false,
+        message: 'عدم امکان ثبت دانشجو در پایگاه داده Supabase. لطفاً اتصال اینترنت و دسترسی جدول students را بررسی نمایید.',
+      };
+    }
+
+    const updatedStudents = [preparedStudent, ...currentStudents];
+    const serialized = JSON.stringify(updatedStudents);
+    keyWriteTimestamps[STORAGE_KEYS.STUDENTS] = Date.now();
+    safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serialized, updatedStudents);
+    const ts = new Date().toISOString();
+    lastSyncRevision = ts;
+    updateLocalCloudKeyTimestamp(STORAGE_KEYS.STUDENTS, ts);
+    clearKeyDirtyForCloud(STORAGE_KEYS.STUDENTS);
+
+    Storage.addActivityLog({
+      category: 'student',
+      action: 'ثبت دانشجوی جدید در Supabase',
+      details: `دانشجو ${preparedStudent.fullName} (${preparedStudent.studentId}) ثبت شد.`,
+      targetName: `${preparedStudent.fullName} (${preparedStudent.studentId})`,
+    });
+
     return {
-      success: false,
-      message: isTimeout
-        ? 'زمان انتظار پاسخ از سرور ابری به پایان رسید. لطفاً چند لحظه بعد دوباره تلاش نمایید.'
-        : 'عدم امکان برقراری ارتباط با سرور ابری (khabgah-api). لطفاً وضعیت سرور بک‌اند در Vercel و اتصال اینترنت را بررسی نمایید.',
+      success: true,
+      student: preparedStudent,
+      message: 'دانشجو با موفقیت در پایگاه داده ابری Supabase ثبت شد.',
     };
   },
 
   uploadPhotosToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean',
-    items: Array<{ userId: string; dataUrl: string }>
+    role: AvatarUploadRole,
+    items: Array<{ userId: string; dataUrl: string }>,
+    onProgress?: (done: number, total: number) => void
   ): Promise<{
     supported: boolean;
     ok: boolean;
@@ -9823,95 +10052,36 @@ export const Storage = {
     }
 
     const urls: Record<string, string> = {};
-    const chunkSize = 20;
+    let failedCount = 0;
+    let lastErrorMessage = '';
+    let completed = 0;
 
-    for (let i = 0; i < validItems.length; i += chunkSize) {
-      const chunk = validItems.slice(i, i + chunkSize).map((it) => ({
-        role,
-        userId: it.userId.trim(),
-        dataUrl: it.dataUrl,
-      }));
-      const bodyStr = JSON.stringify({ items: chunk });
-
-      let chunkSucceeded = false;
-      let lastErrorMessage = '';
-
-      for (let attempt = 0; attempt < 2 && !chunkSucceeded; attempt += 1) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000);
-        try {
-          const res = await fetch(`${API_BASE_URL}/photos/batch`, {
-            method: 'POST',
-            headers: buildApiHeaders(true),
-            body: bodyStr,
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-
-          if (res.status === 404 || res.status === 405) {
-            return {
-              supported: false,
-              ok: false,
-              urls: {},
-              errorMessage:
-                'مسیر ذخیره ابری عکس‌ها (/api/photos/batch) در بک‌اند khabgah-api فعال نیست.',
-            };
-          }
-
-          if (!res.ok) {
-            const errText = await res.text().catch(() => '');
-            lastErrorMessage = `خطای سرور ابری (${res.status}): ${errText || 'خطا در ذخیره عکس‌ها'}`;
-            if (attempt === 0 && (res.status === 429 || res.status >= 500)) {
-              await new Promise((r) => setTimeout(r, 700));
-              continue;
-            }
-            return {
-              supported: true,
-              ok: false,
-              urls,
-              errorMessage: lastErrorMessage,
-            };
-          }
-
-          const data = (await res.json().catch(() => ({}))) as {
-            urls?: Record<string, string>;
-          };
-          if (data?.urls && typeof data.urls === 'object') {
-            Object.assign(urls, data.urls);
-          } else {
-            const ts = Date.now();
-            chunk.forEach((c) => {
-              urls[c.userId] = `${API_BASE_URL}/photo/${encodeURIComponent(role)}/${encodeURIComponent(
-                c.userId
-              )}?v=${ts}`;
-            });
-          }
-          chunkSucceeded = true;
-        } catch (err) {
-          clearTimeout(timeoutId);
-          lastErrorMessage =
-            err instanceof Error && err.name === 'AbortError'
-              ? 'زمان اتصال به سرور ابری برای بارگذاری عکس‌ها به پایان رسید.'
-              : 'عدم امکان اتصال به سرور ابری (khabgah-api) هنگام بارگذاری عکس‌ها.';
-          if (attempt === 0) {
-            await new Promise((r) => setTimeout(r, 700));
-            continue;
-          }
-          return {
-            supported: true,
-            ok: false,
-            urls,
-            errorMessage: lastErrorMessage,
-          };
-        }
+    await runConcurrentQueue(validItems, AVATAR_UPLOAD_CONCURRENCY, async (it) => {
+      const uid = it.userId.trim();
+      const res = await uploadBase64ToSupabaseAvatar(role, uid, it.dataUrl);
+      completed += 1;
+      onProgress?.(completed, validItems.length);
+      if (res.ok && res.publicUrl) {
+        urls[uid] = res.publicUrl;
+      } else {
+        failedCount += 1;
+        if (res.errorMessage) lastErrorMessage = res.errorMessage;
       }
-    }
+    });
 
-    return { supported: true, ok: true, urls };
+    return {
+      supported: true,
+      ok: failedCount === 0,
+      urls,
+      errorMessage:
+        failedCount > 0
+          ? lastErrorMessage || `${failedCount.toLocaleString('fa-IR')} تصویر در Supabase Storage بارگذاری نشد.`
+          : undefined,
+    };
   },
 
   uploadSinglePhotoToCloud: async (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean',
+    role: AvatarUploadRole,
     userId: string,
     dataUrl: string
   ): Promise<{ supported: boolean; ok: boolean; url: string; errorMessage?: string }> => {
@@ -9923,17 +10093,19 @@ export const Storage = {
         supported: true,
         ok: false,
         url: '',
-        errorMessage: 'فرمت SVG مجاز نیست. لطفاً تصویر JPG یا PNG بارگذاری کنید.',
+        errorMessage: 'فرمت SVG مجاز نیست. لطفاً تصویر JPG، PNG یا WebP بارگذاری کنید.',
       };
     }
-    const res = await Storage.uploadPhotosToCloud(role, [{ userId, dataUrl }]);
+    const res = await uploadBase64ToSupabaseAvatar(role, userId.trim(), dataUrl);
     return {
-      supported: res.supported,
+      supported: true,
       ok: res.ok,
-      url: res.urls[userId.trim()] || dataUrl,
+      url: res.publicUrl || dataUrl,
       errorMessage: res.errorMessage,
     };
   },
+
+  getBackgroundAvatarQueueStatus: () => ({ ...backgroundAvatarStats }),
 
   getFriendlySyncKeyLabel: (key: string): string => FRIENDLY_SYNC_KEY_LABELS[key] || key,
 
@@ -9976,7 +10148,6 @@ export const Storage = {
         else failedSet.delete(r.key);
       }
 
-      // اگر حین انتظار نوشتن جدیدتری در صف قرار گرفته باشد، یک دور دیگر منتظر می‌مانیم
       if (Object.keys(pendingCloudValues).length === 0 && Object.keys(pendingCloudRequests).length === 0) {
         break;
       }
@@ -10013,9 +10184,8 @@ export const Storage = {
     let totalBytesSent = 0;
 
     try {
-      onProgress?.('در حال آماده‌سازی و جمع‌آوری تمام جداول و تنظیمات فعلی مرورگر...');
+      onProgress?.('در حال آماده‌سازی تمام جداول، کاربران و تنظیمات برای انتقال به Supabase...');
       flushAllPendingCloudTimers(false);
-      // اگر درخواست در حال اجرایی هست، ابتدا کوتاه صبر می‌کنیم تا تداخل رخ ندهد
       const inflightInitial = Object.values(pendingCloudRequests).filter(
         (p): p is Promise<boolean> => Boolean(p)
       );
@@ -10023,317 +10193,133 @@ export const Storage = {
         await Promise.all(inflightInitial);
       }
 
-      const entryByKey = new Map<string, { key: string; value: unknown; byteEstimate: number }>();
+      // جمع‌آوری همه کلیدهای app_storage (به‌جز جدول students که در جدول اختصاصی خود ذخیره می‌شود)
+      const kvEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
       for (const key of SYNCABLE_KEYS) {
+        if (key === STORAGE_KEYS.STUDENTS) continue;
         let parsedVal: unknown = undefined;
-        let serializedUtf8Bytes = 0;
         if (parsedCache.has(key)) {
           parsedVal = cloneValue(parsedCache.get(key));
-          try {
-            serializedUtf8Bytes = getUtf8ByteLength(JSON.stringify(parsedVal));
-          } catch {
-            serializedUtf8Bytes = 0;
-          }
         } else {
           const raw = localStorage.getItem(key);
           if (!raw) continue;
           try {
             parsedVal = JSON.parse(raw);
-            serializedUtf8Bytes = getUtf8ByteLength(raw);
           } catch {
             continue;
           }
         }
         if (parsedVal !== undefined) {
-          entryByKey.set(key, { key, value: parsedVal, byteEstimate: serializedUtf8Bytes });
+          const cleaned = sanitizeValueForAppStorage(key, parsedVal);
+          let byteEstimate = 0;
+          try {
+            byteEstimate = getUtf8ByteLength(JSON.stringify(cleaned));
+          } catch {
+            byteEstimate = 0;
+          }
+          kvEntries.push({ key, value: cleaned, byteEstimate });
           keyWriteTimestamps[key] = Date.now();
         }
       }
 
-      const allEntries = Array.from(entryByKey.values());
-      const totalCount = allEntries.length;
-      if (totalCount === 0) {
-        return {
-          ok: true,
-          syncedCount: 0,
-          totalCount: 0,
-          settingsSynced: true,
-          studentsMirroredCount: 0,
-          studentsMirrorOk: true,
-          latestRevision,
-          totalBytesSent: 0,
-          failedKeys,
-          oversizedKeys,
-        };
-      }
+      const totalCount = kvEntries.length;
 
-      const postSingleWithRetry = async (
-        key: string,
-        value: unknown,
-        utf8Bytes: number
-      ): Promise<boolean> => {
-        if (utf8Bytes > 4_350_000) {
-          oversizedKeys.push(key);
-          failedKeys.push(key);
-          recordCloudTrafficEvent({
-            direction: 'up',
-            endpoint: '/sync',
-            method: 'POST',
-            status: 413,
-            ok: false,
-            durationMs: 0,
-            bytes: utf8Bytes,
-            detail: `حجم ${FRIENDLY_SYNC_KEY_LABELS[key] || key} بیش از سقف ۴.۵MB سرور است`,
-            errorMessage: 'Payload exceeds 4.35MB limit',
-          });
-          return false;
-        }
-        const timeoutMs = computeUploadTimeoutMs(utf8Bytes);
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), timeoutMs);
-          try {
-            const bodyStr = JSON.stringify({ key, value });
-            const reqBytes = getUtf8ByteLength(bodyStr);
-            const res = await fetch(`${API_BASE_URL}/sync`, {
-              method: 'POST',
-              headers: buildApiHeaders(true),
-              body: bodyStr,
-              signal: controller.signal,
-            });
-            clearTimeout(timer);
-            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-            if (res.ok) {
-              const data = (await res.json().catch(() => null)) as {
-                revision?: string | number;
-                updatedAt?: string;
-              } | null;
-              if (data?.revision !== undefined) {
-                latestRevision = data.revision;
-              }
-              if (typeof data?.updatedAt === 'string') {
-                updateLocalCloudKeyTimestamp(key, data.updatedAt);
-              }
-              totalBytesSent += reqBytes;
-              delete failedCloudRetryQueue[key];
-              clearKeyDirtyForCloud(key);
-              if (key === STORAGE_KEYS.SETTINGS) settingsSynced = true;
-              recordCloudTrafficEvent({
-                direction: 'up',
-                endpoint: '/sync',
-                method: 'POST',
-                status: res.status,
-                ok: true,
-                durationMs: dur,
-                bytes: reqBytes,
-                detail: `انتقال کامل ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
-              });
-              return true;
-            }
-            if (res.status === 413) {
-              oversizedKeys.push(key);
-              failedKeys.push(key);
-              recordCloudTrafficEvent({
-                direction: 'up',
-                endpoint: '/sync',
-                method: 'POST',
-                status: 413,
-                ok: false,
-                durationMs: dur,
-                bytes: reqBytes,
-                detail: `خطای حجم ۴۱۳ برای ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
-                errorMessage: 'HTTP 413 Payload Too Large',
-              });
-              return false;
-            }
-            recordCloudTrafficEvent({
-              direction: 'up',
-              endpoint: '/sync',
-              method: 'POST',
-              status: res.status,
-              ok: false,
-              durationMs: dur,
-              bytes: reqBytes,
-              detail: `خطای ${res.status} در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
-              errorMessage: `HTTP ${res.status}`,
-            });
-            if (attempt < 2 && (res.status === 429 || res.status === 408 || res.status >= 500)) {
-              await new Promise((r) => setTimeout(r, attempt === 0 ? 750 : 1800));
-              continue;
-            }
-            failedKeys.push(key);
-            return false;
-          } catch (err) {
-            clearTimeout(timer);
-            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-            recordCloudTrafficEvent({
-              direction: 'up',
-              endpoint: '/sync',
-              method: 'POST',
-              status: null,
-              ok: false,
-              durationMs: dur,
-              bytes: utf8Bytes,
-              detail: `خطای شبکه در ارسال ${FRIENDLY_SYNC_KEY_LABELS[key] || key}`,
-              errorMessage: err instanceof Error ? err.message : 'Network error',
-            });
-            if (attempt < 2) {
-              await new Promise((r) => setTimeout(r, attempt === 0 ? 750 : 1800));
-              continue;
-            }
-            failedKeys.push(key);
-            return false;
-          }
-        }
-        failedKeys.push(key);
-        return false;
-      };
-
-      // اولویت‌بندی انتقال: ۱) تنظیمات و ظاهر سایت، ۲) کلیدهای سبک و کاربران کارکنان، ۳) کلیدهای حجیم به‌صورت اختصاصی
-      const settingsEntry = entryByKey.get(STORAGE_KEYS.SETTINGS);
-      const compactEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
-      const heavySoloEntries: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
-
-      for (const item of allEntries) {
-        if (item.key === STORAGE_KEYS.SETTINGS) continue;
-        if (SOLO_HEAVY_KEYS.has(item.key) || item.byteEstimate > 300_000) {
-          heavySoloEntries.push(item);
-        } else {
-          compactEntries.push(item);
-        }
-      }
-
-      // مرتب‌سازی کلیدهای حجیم: اول تخت‌ها، بعد دانشجویان، آخر اطلاعیه‌ها
-      const heavyOrder: Record<string, number> = {
-        [STORAGE_KEYS.BEDS]: 1,
-        [STORAGE_KEYS.STUDENTS]: 2,
-        [STORAGE_KEYS.ANNOUNCEMENTS]: 3,
-      };
-      heavySoloEntries.sort((a, b) => (heavyOrder[a.key] || 99) - (heavyOrder[b.key] || 99));
-
-      // ساخت دسته‌های ایمن (فقط برای کلیدهای سبک، حداکثر ۸ کلید و ۵۵۰ کیلوبایت)
+      // دسته‌بندی ایمن برای upsert سریع در جدول app_storage
       const batches: Array<Array<{ key: string; value: unknown; byteEstimate: number }>> = [];
-      if (settingsEntry) batches.push([settingsEntry]);
+      let curBatch: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
+      let curBytes = 0;
 
-      let currentBatch: Array<{ key: string; value: unknown; byteEstimate: number }> = [];
-      let currentBytes = 0;
-      const MAX_BATCH_UTF8_BYTES = 550_000;
-
-      for (const item of compactEntries) {
-        if (
-          currentBatch.length > 0 &&
-          (currentBatch.length >= 8 || currentBytes + item.byteEstimate > MAX_BATCH_UTF8_BYTES)
-        ) {
-          batches.push(currentBatch);
-          currentBatch = [];
-          currentBytes = 0;
+      for (const entry of kvEntries) {
+        if (entry.byteEstimate > 450_000 || entry.key === STORAGE_KEYS.SETTINGS) {
+          batches.push([entry]);
+          continue;
         }
-        currentBatch.push(item);
-        currentBytes += item.byteEstimate;
+        if (curBatch.length >= 10 || curBytes + entry.byteEstimate > 1_200_000) {
+          batches.push(curBatch);
+          curBatch = [];
+          curBytes = 0;
+        }
+        curBatch.push(entry);
+        curBytes += entry.byteEstimate;
       }
-      if (currentBatch.length > 0) batches.push(currentBatch);
-
-      for (const heavy of heavySoloEntries) {
-        batches.push([heavy]);
-      }
+      if (curBatch.length > 0) batches.push(curBatch);
 
       for (let bIdx = 0; bIdx < batches.length; bIdx += 1) {
         const chunk = batches[bIdx];
-        const stepLabel =
+        onProgress?.(
           chunk.length === 1
-            ? `در حال انتقال «${FRIENDLY_SYNC_KEY_LABELS[chunk[0].key] || chunk[0].key}» (مرحله ${(bIdx + 1).toLocaleString('fa-IR')} از ${batches.length.toLocaleString('fa-IR')})...`
-            : `در حال انتقال جداول سامانه به سرور ابری (دسته ${(bIdx + 1).toLocaleString('fa-IR')} از ${batches.length.toLocaleString('fa-IR')})...`;
-        onProgress?.(stepLabel);
+            ? `در حال ذخیره «${FRIENDLY_SYNC_KEY_LABELS[chunk[0].key] || chunk[0].key}» در Supabase (${(bIdx + 1).toLocaleString('fa-IR')}/${batches.length.toLocaleString('fa-IR')})...`
+            : `در حال انتقال جداول به Supabase (دسته ${(bIdx + 1).toLocaleString('fa-IR')} از ${batches.length.toLocaleString('fa-IR')})...`
+        );
 
-        let batchOk = false;
-        if (batchEndpointSupported !== false && chunk.length > 1) {
-          const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 32000);
-          const bodyStr = JSON.stringify({
-            entries: chunk.map((c) => ({ key: c.key, value: c.value })),
-          });
-          const reqBytes = getUtf8ByteLength(bodyStr);
-          try {
-            const res = await fetch(`${API_BASE_URL}/sync/batch`, {
-              method: 'POST',
-              headers: buildApiHeaders(true),
-              body: bodyStr,
-              signal: controller.signal,
+        const updatedAt = new Date().toISOString();
+        const rows = chunk.map((c) => ({
+          key: c.key,
+          value: c.value,
+          updated_at: updatedAt,
+        }));
+        const chunkBytes = getUtf8ByteLength(JSON.stringify(rows));
+        const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+        let chunkOk = false;
+        for (let attempt = 1; attempt <= 2 && !chunkOk; attempt += 1) {
+          const { error } = await supabase.from('app_storage').upsert(rows, { onConflict: 'key' });
+          const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+          if (!error) {
+            chunkOk = true;
+            latestRevision = updatedAt;
+            syncedCount += chunk.length;
+            totalBytesSent += chunkBytes;
+            chunk.forEach((c) => {
+              if (c.key === STORAGE_KEYS.SETTINGS) settingsSynced = true;
+              updateLocalCloudKeyTimestamp(c.key, updatedAt);
+              delete failedCloudRetryQueue[c.key];
+              clearKeyDirtyForCloud(c.key);
             });
-            clearTimeout(timer);
-            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-            if (res.status === 404 || res.status === 405) {
-              batchEndpointSupported = false;
-            } else if (res.ok) {
-              const data = (await res.json().catch(() => null)) as {
-                revision?: string | number;
-                updatedAt?: string;
-              } | null;
-              if (data?.revision !== undefined) {
-                latestRevision = data.revision;
-              }
-              batchEndpointSupported = true;
-              batchOk = true;
-              syncedCount += chunk.length;
-              totalBytesSent += reqBytes;
-              chunk.forEach((c) => {
-                if (typeof data?.updatedAt === 'string') {
-                  updateLocalCloudKeyTimestamp(c.key, data.updatedAt);
-                }
-                delete failedCloudRetryQueue[c.key];
-                clearKeyDirtyForCloud(c.key);
-              });
-              recordCloudTrafficEvent({
-                direction: 'up',
-                endpoint: '/sync/batch',
-                method: 'POST',
-                status: res.status,
-                ok: true,
-                durationMs: dur,
-                bytes: reqBytes,
-                detail: `انتقال دسته ${bIdx + 1} از ${batches.length} (${chunk.length} جدول)`,
-              });
-            } else {
-              recordCloudTrafficEvent({
-                direction: 'up',
-                endpoint: '/sync/batch',
-                method: 'POST',
-                status: res.status,
-                ok: false,
-                durationMs: dur,
-                bytes: reqBytes,
-                detail: `خطای ${res.status} در دسته ${bIdx + 1} (تلاش تکی خودکار)`,
-                errorMessage: `HTTP ${res.status}`,
-              });
-            }
-          } catch (err) {
-            clearTimeout(timer);
-            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
             recordCloudTrafficEvent({
               direction: 'up',
-              endpoint: '/sync/batch',
+              endpoint: '/supabase/app_storage',
               method: 'POST',
-              status: null,
+              status: 200,
+              ok: true,
+              durationMs: dur,
+              bytes: chunkBytes,
+              detail: `انتقال دسته ${bIdx + 1}/${batches.length} (${chunk.length} جدول) به Supabase`,
+            });
+          } else {
+            recordCloudTrafficEvent({
+              direction: 'up',
+              endpoint: '/supabase/app_storage',
+              method: 'POST',
+              status: 500,
               ok: false,
               durationMs: dur,
-              bytes: reqBytes,
-              detail: `قطع در دسته ${bIdx + 1} (تلاش تکی خودکار)`,
-              errorMessage: err instanceof Error ? err.message : 'Network error',
+              bytes: chunkBytes,
+              detail: `خطا در ارسال دسته ${bIdx + 1}/${batches.length}`,
+              errorMessage: error.message,
             });
+            if (attempt < 2) {
+              await new Promise((r) => setTimeout(r, 700));
+            }
           }
         }
 
-        if (!batchOk) {
+        if (!chunkOk) {
+          // تلاش تکی برای شناسایی دقیق کلید مشکل‌دار
           for (const item of chunk) {
-            const okSingle = await postSingleWithRetry(item.key, item.value, item.byteEstimate);
-            if (okSingle) syncedCount += 1;
+            const singleOk = await sendSingleKeyPost(item.key, item.value, false, 2);
+            if (singleOk) {
+              syncedCount += 1;
+              totalBytesSent += item.byteEstimate;
+              if (item.key === STORAGE_KEYS.SETTINGS) settingsSynced = true;
+            } else {
+              failedKeys.push(item.key);
+            }
           }
         }
       }
 
-      // هم‌ترازی کامل کالکشن اختصاصی students در MongoDB با فهرست فعلی دانشجویان مرورگر
+      // هم‌ترازی کامل جدول اختصاصی students در Supabase در دسته‌های ۲۰۰تایی
       const currentStudents = Storage.getStudents();
       if (currentStudents.length > 0) {
         const mirrorRes = await mirrorStudentsCollectionToCloud(currentStudents, {
@@ -10342,6 +10328,7 @@ export const Storage = {
         });
         studentsMirroredCount = mirrorRes.count;
         studentsMirrorOk = mirrorRes.ok;
+        totalBytesSent += getUtf8ByteLength(JSON.stringify(currentStudents.map(buildSupabaseStudentRow)));
         if (mirrorRes.revision !== null) {
           latestRevision = mirrorRes.revision;
         }
@@ -10403,67 +10390,75 @@ export const Storage = {
     return Boolean(meta.hydrated && meta.keyUpdatedAt?.[STORAGE_KEYS.SETTINGS]);
   },
 
-  // همگام‌سازی فوری و هدفمند پیش از ورود کاربر در دستگاه‌های تازه (رفع خطای «کاربر یافت نشد» در اولین بازشدن سایت)
+  // همگام‌سازی فوری و هدفمند پیش از ورود کاربر در دستگاه‌های تازه از Supabase
   ensureCloudDataForAuth: async (scope: 'student' | 'staff' | 'admin'): Promise<boolean> => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return false;
     }
 
-    const fetchKeysNow = async (keys: string[], timeoutMs: number): Promise<boolean> => {
+    const fetchKeysFromSupabase = async (keys: string[]): Promise<boolean> => {
       const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
-        const res = await fetch(
-          `${API_BASE_URL}/sync?keys=${encodeURIComponent(keys.join(','))}`,
-          { method: 'GET', cache: 'no-store', signal: ctrl.signal }
-        );
-        clearTimeout(timer);
+        const { data, error } = await supabase
+          .from('app_storage')
+          .select('key, value, updated_at')
+          .in('key', keys);
         const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-        if (!res.ok) return false;
-        const rawTxt = await res.text();
-        const rxBytes = getUtf8ByteLength(rawTxt);
-        const parsed = JSON.parse(rawTxt) as Record<string, unknown>;
+        if (error || !Array.isArray(data)) {
+          recordCloudTrafficEvent({
+            direction: 'down',
+            endpoint: `/supabase/app_storage?auth=${scope}`,
+            method: 'GET',
+            status: 500,
+            ok: false,
+            durationMs: dur,
+            bytes: 0,
+            detail: `خطا در همگام‌سازی فوری احراز هویت (${scope})`,
+            errorMessage: error?.message,
+          });
+          return false;
+        }
+        const rxBytes = getUtf8ByteLength(JSON.stringify(data));
         recordCloudTrafficEvent({
           direction: 'down',
-          endpoint: `/sync?auth(${scope})`,
+          endpoint: `/supabase/app_storage?auth=${scope}`,
           method: 'GET',
-          status: res.status,
+          status: 200,
           ok: true,
           durationMs: dur,
           bytes: rxBytes,
-          detail: `همگام‌سازی فوری احراز هویت (${scope})`,
+          detail: `همگام‌سازی فوری احراز هویت (${scope}) از Supabase`,
         });
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          let updatedAny = false;
-          const cleanObj = sanitizePlainValue(parsed);
-          for (const [k, v] of Object.entries(cleanObj)) {
-            if (!SYNCABLE_KEYS.includes(k) || v === undefined || v === null) continue;
-            const ser = JSON.stringify(v);
-            if (lastAppliedSerializedByKey.get(k) !== ser) {
-              safeLocalStorageSet(k, ser, v);
-              updatedAny = true;
-            }
+
+        let updatedAny = false;
+        for (const row of data) {
+          const k = String(row.key || '');
+          const v = sanitizePlainValue(row.value);
+          if (!SYNCABLE_KEYS.includes(k) || v === undefined || v === null) continue;
+          const ser = JSON.stringify(v);
+          if (lastAppliedSerializedByKey.get(k) !== ser) {
+            safeLocalStorageSet(k, ser, v);
+            updatedAny = true;
           }
-          if (updatedAny) notifyCloudDataChanged();
-          return true;
+          if (typeof row.updated_at === 'string') {
+            memoryKeyUpdatedAt[k] = row.updated_at;
+          }
         }
-        return false;
+        if (updatedAny) notifyCloudDataChanged();
+        return data.length > 0;
       } catch {
-        clearTimeout(timer);
         return false;
       }
     };
 
     if (scope === 'staff') {
-      return fetchKeysNow(STAFF_AUTH_KEYS, 15000);
+      return fetchKeysFromSupabase(STAFF_AUTH_KEYS);
     }
 
     if (scope === 'admin') {
-      return fetchKeysNow([STORAGE_KEYS.SETTINGS], 25000);
+      return fetchKeysFromSupabase([STORAGE_KEYS.SETTINGS]);
     }
 
-    // برای ورود دانشجو: ابتدا از مسیر صفحه‌بندی موازی فوق‌سریع /api/students (~۴-۵ ثانیه) و در صورت نیاز از sync_kv
     const fetchedStudents = await Storage.fetchStudentsFromDB();
     if (Array.isArray(fetchedStudents) && fetchedStudents.length > 0) {
       const serialized = JSON.stringify(fetchedStudents);
@@ -10473,7 +10468,7 @@ export const Storage = {
       }
       return true;
     }
-    return fetchKeysNow([STORAGE_KEYS.STUDENTS], 45000);
+    return false;
   },
 
   syncFromCloud: async (options?: { force?: boolean }): Promise<boolean> => {
@@ -10497,530 +10492,204 @@ export const Storage = {
       initialSyncRetryTimer = undefined;
     }
 
-    // اگر نوشتن‌های ناموفق قبلی در صف هستند، ابتدا تلاش مجدد برای ارسال انجام شود
     flushFailedRetryQueue();
 
     activeSyncPromise = (async () => {
       try {
-        let candidateRevision: string | number | null = null;
-
-        // گام ۱: در بارگذاری‌های بعدی (وقتی نسخه قبلی با موفقیت کامل ثبت شده)، بررسی فوق‌سبک نسخه سرور
-        if (!force && lastSyncRevision !== null && versionEndpointSupported !== false) {
-          try {
-            const verController = new AbortController();
-            const verTimer = setTimeout(() => verController.abort(), 7000);
-            const verRes = await fetch(`${API_BASE_URL}/sync/version`, {
-              method: 'GET',
-              cache: 'no-store',
-              signal: verController.signal,
-            });
-            clearTimeout(verTimer);
-
-            if (verRes.status === 404 || verRes.status === 405) {
-              versionEndpointSupported = false;
-            } else if (verRes.ok) {
-              versionEndpointSupported = true;
-              const verData = (await verRes.json().catch(() => null)) as {
-                revision?: string | number;
-              } | null;
-              if (
-                verData?.revision !== undefined &&
-                String(verData.revision) === String(lastSyncRevision)
-              ) {
-                return false;
-              }
-              if (verData?.revision !== undefined) {
-                candidateRevision = verData.revision;
-              }
-            }
-          } catch {
-            // ادامه به همگام‌سازی مانیفست
-          }
-        }
-
         let hasRemoteChanges = false;
-        const cloudMap: Record<string, unknown> = {};
-        const serverKeyUpdatedAtMap: Record<string, string> = {};
-        const failedKeys = new Set<string>();
+        let hadFetchError = false;
+        let newestUpdatedAt: string | null = null;
         const persistedMeta = readPersistedCloudSyncMeta();
         const persistedKeyUpdatedAt: Record<string, string> = {
           ...(persistedMeta.keyUpdatedAt || {}),
         };
         let persistedMetaDirty = false;
 
-        const persistCloudMetaIfDirty = (markHydrated = false, commitRevision: string | number | null = null) => {
-          if (!persistedMetaDirty && !markHydrated && commitRevision === null) return;
-          persistedMetaDirty = false;
-          writePersistedCloudSyncMeta({
-            revision: commitRevision !== null ? commitRevision : persistedMeta.revision ?? null,
-            hydrated: markHydrated || Boolean(persistedMeta.hydrated),
-            keyUpdatedAt: persistedKeyUpdatedAt,
-          });
+        const bumpNewest = (ts?: string | null) => {
+          if (!ts || typeof ts !== 'string') return;
+          if (!newestUpdatedAt || ts > newestUpdatedAt) {
+            newestUpdatedAt = ts;
+          }
         };
 
-        const applyCloudKvEntries = (entriesObj: Record<string, unknown>): boolean => {
-          let batchChanged = false;
-          for (const [key, val] of Object.entries(entriesObj)) {
-            if (!SYNCABLE_KEYS.includes(key)) continue;
-            if (val === undefined || val === null) continue;
-            cloudMap[key] = val;
-            if (
-              pendingCloudRequests[key] ||
-              key in pendingCloudValues ||
-              key in failedCloudRetryQueue ||
-              persistedDirtyKeys.has(key)
-            ) {
-              continue;
+        // گام ۱: دریافت کامل جدول app_storage از Supabase با صفحه‌بندی .range()
+        const kvStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        try {
+          const allKvRows: Array<{ key: string; value: unknown; updated_at?: string | null }> = [];
+          let from = 0;
+          let hasMoreKv = true;
+          while (hasMoreKv) {
+            const { data, error } = await supabase
+              .from('app_storage')
+              .select('key, value, updated_at')
+              .range(from, from + 999);
+            if (error) {
+              hadFetchError = true;
+              const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
+              recordCloudTrafficEvent({
+                direction: 'down',
+                endpoint: '/supabase/app_storage',
+                method: 'GET',
+                status: 500,
+                ok: false,
+                durationMs: dur,
+                bytes: 0,
+                detail: 'خطا در دریافت جداول app_storage از Supabase',
+                errorMessage: error.message,
+              });
+              break;
             }
-            const lastLocalWrite = keyWriteTimestamps[key] || 0;
-            if (!force && Date.now() - lastLocalWrite < 12000) continue;
-
-            const serialized = JSON.stringify(val);
-            let currentLs: string | null = null;
-            try {
-              currentLs = localStorage.getItem(key);
-            } catch {
-              currentLs = null;
+            const pageRows = Array.isArray(data) ? data : [];
+            for (const r of pageRows) {
+              allKvRows.push(r as { key: string; value: unknown; updated_at?: string | null });
             }
-            const alreadyApplied =
-              lastAppliedSerializedByKey.get(key) === serialized || currentLs === serialized;
+            hasMoreKv = pageRows.length === 1000;
+            from += 1000;
+          }
 
-            let persistedOk = currentLs === serialized;
-            if (!alreadyApplied) {
-              persistedOk = safeLocalStorageSet(key, serialized, val);
-              hasRemoteChanges = true;
-              batchChanged = true;
-            } else {
-              lastAppliedSerializedByKey.set(key, serialized);
-              if (!parsedCache.has(key)) {
-                parsedCache.set(key, cloneValue(val));
+          if (!hadFetchError) {
+            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
+            const rxBytes = getUtf8ByteLength(JSON.stringify(allKvRows));
+            recordCloudTrafficEvent({
+              direction: 'down',
+              endpoint: '/supabase/app_storage',
+              method: 'GET',
+              status: 200,
+              ok: true,
+              durationMs: dur,
+              bytes: rxBytes,
+              detail: `دریافت ${allKvRows.length.toLocaleString('fa-IR')} جدول تنظیمات و عملیاتی از Supabase`,
+            });
+
+            let batchChanged = false;
+            for (const row of allKvRows) {
+              const key = String(row.key || '');
+              if (!SYNCABLE_KEYS.includes(key) || key === STORAGE_KEYS.STUDENTS) continue;
+              const val = sanitizePlainValue(row.value);
+              if (val === undefined || val === null) continue;
+              const srvTs = typeof row.updated_at === 'string' ? row.updated_at : '';
+              bumpNewest(srvTs);
+
+              if (
+                pendingCloudRequests[key] ||
+                key in pendingCloudValues ||
+                key in failedCloudRetryQueue ||
+                persistedDirtyKeys.has(key)
+              ) {
+                continue;
               }
-            }
+              const lastLocalWrite = keyWriteTimestamps[key] || 0;
+              if (!force && Date.now() - lastLocalWrite < 10000) continue;
 
-            const srvTs = serverKeyUpdatedAtMap[key];
-            if (srvTs) {
-              memoryKeyUpdatedAt[key] = srvTs;
-              if (persistedOk) {
-                if (persistedKeyUpdatedAt[key] !== srvTs) {
+              const serialized = JSON.stringify(val);
+              let currentLs: string | null = null;
+              try {
+                currentLs = localStorage.getItem(key);
+              } catch {
+                currentLs = null;
+              }
+              const alreadyApplied =
+                lastAppliedSerializedByKey.get(key) === serialized || currentLs === serialized;
+
+              let persistedOk = currentLs === serialized;
+              if (!alreadyApplied) {
+                persistedOk = safeLocalStorageSet(key, serialized, val);
+                hasRemoteChanges = true;
+                batchChanged = true;
+              } else {
+                lastAppliedSerializedByKey.set(key, serialized);
+                if (!parsedCache.has(key)) {
+                  parsedCache.set(key, cloneValue(val));
+                }
+              }
+
+              if (srvTs) {
+                memoryKeyUpdatedAt[key] = srvTs;
+                if (persistedOk && persistedKeyUpdatedAt[key] !== srvTs) {
                   persistedKeyUpdatedAt[key] = srvTs;
                   persistedMetaDirty = true;
                 }
-              } else if (key in persistedKeyUpdatedAt) {
-                delete persistedKeyUpdatedAt[key];
-                persistedMetaDirty = true;
               }
             }
-          }
 
-          if (batchChanged) {
-            persistCloudMetaIfDirty(
-              Boolean(memoryKeyUpdatedAt[STORAGE_KEYS.SETTINGS] || memoryKeyUpdatedAt[STORAGE_KEYS.SUPERVISORS])
-            );
-            notifyCloudDataChanged();
-          }
-          return batchChanged;
-        };
-
-        // تابع کمکی دریافت یک تکه با Timeout هوشمند بر اساس نوع کلید + تلاش مجدد خودکار + تفکیک در صورت خطا
-        const fetchSyncChunk = async (
-          chunkKeys: string[],
-          timeoutMs: number,
-          attempt = 1
-        ): Promise<boolean> => {
-          const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-          const kCtrl = new AbortController();
-          const kTimer = setTimeout(() => kCtrl.abort(), timeoutMs);
-          try {
-            const res = await fetch(
-              `${API_BASE_URL}/sync?keys=${encodeURIComponent(chunkKeys.join(','))}`,
-              {
-                method: 'GET',
-                cache: 'no-store',
-                signal: kCtrl.signal,
-              }
-            );
-            clearTimeout(kTimer);
-            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-
-            if (res.ok) {
-              const rawTxt = await res.text();
-              const rxBytes = getUtf8ByteLength(rawTxt);
-              const chunkJson = ((): unknown => {
-                try {
-                  return JSON.parse(rawTxt);
-                } catch {
-                  return null;
-                }
-              })();
-              recordCloudTrafficEvent({
-                direction: 'down',
-                endpoint:
-                  chunkKeys.length === 1
-                    ? `/sync?key=${FRIENDLY_SYNC_KEY_LABELS[chunkKeys[0]] || chunkKeys[0]}`
-                    : `/sync?keys(${chunkKeys.length})`,
-                method: 'GET',
-                status: res.status,
-                ok: true,
-                durationMs: dur,
-                bytes: rxBytes,
-                detail:
-                  chunkKeys.length === 1
-                    ? `دریافت ${FRIENDLY_SYNC_KEY_LABELS[chunkKeys[0]] || chunkKeys[0]}`
-                    : `دریافت تکه همگام‌سازی (${chunkKeys.length} جدول)`,
-              });
-              if (chunkJson && typeof chunkJson === 'object' && !Array.isArray(chunkJson)) {
-                applyCloudKvEntries(sanitizePlainValue(chunkJson as Record<string, unknown>));
-                return true;
-              }
-            } else {
-              recordCloudTrafficEvent({
-                direction: 'down',
-                endpoint: `/sync?keys(${chunkKeys.length})`,
-                method: 'GET',
-                status: res.status,
-                ok: false,
-                durationMs: dur,
-                bytes: 0,
-                detail: `خطا در دریافت تکه همگام‌سازی (${chunkKeys.length} جدول)`,
-                errorMessage: `HTTP ${res.status}`,
-              });
-            }
-          } catch (err) {
-            clearTimeout(kTimer);
-            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-            recordCloudTrafficEvent({
-              direction: 'down',
-              endpoint:
-                chunkKeys.length === 1
-                  ? `/sync?key=${FRIENDLY_SYNC_KEY_LABELS[chunkKeys[0]] || chunkKeys[0]}`
-                  : `/sync?keys(${chunkKeys.length})`,
-              method: 'GET',
-              status: null,
-              ok: false,
-              durationMs: dur,
-              bytes: 0,
-              detail:
-                chunkKeys.length === 1
-                  ? `خطا/زمان‌سنجی در دریافت ${FRIENDLY_SYNC_KEY_LABELS[chunkKeys[0]] || chunkKeys[0]}`
-                  : 'قطع ارتباط در دریافت تکه همگام‌سازی',
-              errorMessage: err instanceof Error ? err.message : 'Network error',
-            });
-          }
-
-          // اگر تکه چندکلیدی شکست خورد، کلیدها را تک‌تک دریافت می‌کنیم تا یک کلید حجیم مانع بارگذاری بقیه نشود
-          if (chunkKeys.length > 1) {
-            let allSubOk = true;
-            for (const singleKey of chunkKeys) {
-              const singleTimeout = singleKey === STORAGE_KEYS.ANNOUNCEMENTS ? 75000 : 40000;
-              const ok = await fetchSyncChunk([singleKey], singleTimeout, 1);
-              if (!ok) {
-                allSubOk = false;
-                failedKeys.add(singleKey);
-              }
-            }
-            return allSubOk;
-          }
-
-          // تلاش مجدد یک‌باره برای کلید تکی در صورت خطای موقت شبکه یا Cold Start
-          if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, 800));
-            return fetchSyncChunk(chunkKeys, Math.min(timeoutMs + 15000, 90000), attempt + 1);
-          }
-
-          chunkKeys.forEach((k) => failedKeys.add(k));
-          return false;
-        };
-
-        // گام ۲: همگام‌سازی تکه‌ای اولویت‌بندی‌شده با /api/sync/manifest
-        let usedManifestSync = false;
-        if (manifestEndpointSupported !== false) {
-          try {
-            const mController = new AbortController();
-            const mTimer = setTimeout(() => mController.abort(), 14000);
-            const mRes = await fetch(`${API_BASE_URL}/sync/manifest`, {
-              method: 'GET',
-              cache: 'no-store',
-              signal: mController.signal,
-            });
-            clearTimeout(mTimer);
-
-            if (mRes.status === 404 || mRes.status === 405) {
-              manifestEndpointSupported = false;
-            } else if (mRes.ok) {
-              manifestEndpointSupported = true;
-              const manifestData = (await mRes.json().catch(() => null)) as {
-                revision?: string | number;
-                keys?: Array<{ key: string; updatedAt?: string | null; sizeBytes?: number | null }>;
-              } | null;
-
-              if (manifestData?.revision !== undefined) {
-                candidateRevision = manifestData.revision;
-              }
-
-              const serverKeys = Array.isArray(manifestData?.keys)
-                ? manifestData.keys.filter((k) => k?.key && SYNCABLE_KEYS.includes(k.key))
-                : [];
-
-              for (const kInfo of serverKeys) {
-                if (typeof kInfo.updatedAt === 'string' && kInfo.updatedAt) {
-                  serverKeyUpdatedAtMap[kInfo.key] = kInfo.updatedAt;
-                }
-              }
-
-              // حذف کلیدهایی که دقیقاً با همین updatedAt هم‌اکنون در مرورگر بارگذاری شده‌اند (صرفه‌جویی میلیونی در ترافیک!)
-              const keysToDownload = serverKeys.filter((kInfo) => {
-                if (force) return true;
-                const srvTs = kInfo.updatedAt;
-                if (!srvTs) return true;
-                if (memoryKeyUpdatedAt[kInfo.key] !== srvTs) return true;
-                const hasLocalData =
-                  parsedCache.has(kInfo.key) ||
-                  (() => {
-                    try {
-                      return localStorage.getItem(kInfo.key) !== null;
-                    } catch {
-                      return false;
-                    }
-                  })();
-                return !hasLocalData;
-              });
-
-              if (keysToDownload.length > 0) {
-                usedManifestSync = true;
-                const infoByKey = new Map(keysToDownload.map((k) => [k.key, k]));
-                const scheduled = new Set<string>();
-                const taskQueue: Array<{ keys: string[]; timeoutMs: number }> = [];
-
-                // موج ۱-الف: کلیدهای سبک و حیاتی ورود و ساختار (تمام کارکنان + سراها + اتاق‌ها؛ ~۵۵KB در ~۱ ثانیه)
-                const fastBatch = FAST_BOOTSTRAP_KEYS.filter((k) => infoByKey.has(k));
-                if (fastBatch.length > 0) {
-                  fastBatch.forEach((k) => scheduled.add(k));
-                  taskQueue.push({ keys: fastBatch, timeoutMs: 22000 });
-                }
-
-                // موج ۱-ب: تنظیمات و ظاهر سایت به‌صورت کاملاً مجزا (لوگو، فونت، پس‌زمینه، بنر و نکات؛ ~۵۱۸KB)
-                if (infoByKey.has(STORAGE_KEYS.SETTINGS)) {
-                  scheduled.add(STORAGE_KEYS.SETTINGS);
-                  taskQueue.push({ keys: [STORAGE_KEYS.SETTINGS], timeoutMs: 45000 });
-                }
-
-                // موج ۱-ج: تخت‌ها به‌صورت مجزا (~۳۶۸KB)
-                if (infoByKey.has(STORAGE_KEYS.BEDS)) {
-                  scheduled.add(STORAGE_KEYS.BEDS);
-                  taskQueue.push({ keys: [STORAGE_KEYS.BEDS], timeoutMs: 45000 });
-                }
-
-                // موج ۱-د: سایر جداول سبک عملیاتی در دسته‌های کم‌حجم
-                const remainingCompact: Array<{ key: string; sizeBytes?: number | null }> = [];
-                for (const kInfo of keysToDownload) {
-                  if (scheduled.has(kInfo.key) || SOLO_HEAVY_KEYS.has(kInfo.key)) continue;
-                  const estSize = typeof kInfo.sizeBytes === 'number' ? kInfo.sizeBytes : 25_000;
-                  if (estSize > 260_000) {
-                    scheduled.add(kInfo.key);
-                    taskQueue.push({ keys: [kInfo.key], timeoutMs: 45000 });
-                  } else {
-                    remainingCompact.push(kInfo);
-                  }
-                }
-
-                let curBatch: string[] = [];
-                let curBytes = 0;
-                for (const item of remainingCompact) {
-                  const est = typeof item.sizeBytes === 'number' ? item.sizeBytes : 25_000;
-                  if (curBatch.length > 0 && (curBatch.length >= 10 || curBytes + est > 260_000)) {
-                    taskQueue.push({ keys: curBatch, timeoutMs: 25000 });
-                    curBatch = [];
-                    curBytes = 0;
-                  }
-                  curBatch.push(item.key);
-                  scheduled.add(item.key);
-                  curBytes += est;
-                }
-                if (curBatch.length > 0) {
-                  taskQueue.push({ keys: curBatch, timeoutMs: 25000 });
-                }
-
-                // موج ۲-الف: پرونده تمام دانشجویان به‌صورت اختصاصی با Timeout سخاوتمندانه
-                if (infoByKey.has(STORAGE_KEYS.STUDENTS)) {
-                  scheduled.add(STORAGE_KEYS.STUDENTS);
-                  taskQueue.push({ keys: [STORAGE_KEYS.STUDENTS], timeoutMs: 65000 });
-                }
-
-                // موج ۲-ب: اطلاعیه‌ها (شامل تصاویر پیوست؛ ~۲.۵MB) به‌صورت کاملاً اختصاصی با Timeout ۷۵ ثانیه
-                if (infoByKey.has(STORAGE_KEYS.ANNOUNCEMENTS)) {
-                  scheduled.add(STORAGE_KEYS.ANNOUNCEMENTS);
-                  taskQueue.push({ keys: [STORAGE_KEYS.ANNOUNCEMENTS], timeoutMs: 75000 });
-                }
-
-                let cursor = 0;
-                const workerCount = Math.min(4, taskQueue.length);
-                const workers = Array.from({ length: workerCount }, async () => {
-                  while (cursor < taskQueue.length) {
-                    const idx = cursor++;
-                    const job = taskQueue[idx];
-                    await fetchSyncChunk(job.keys, job.timeoutMs, 1);
-                  }
-                });
-                await Promise.all(workers);
-              } else {
-                usedManifestSync = true;
-              }
-            }
-          } catch {
-            // ادامه به روش جایگزین در صورت خطای شبکه
-          }
-        }
-
-        if (!usedManifestSync) {
-          const syncHeaders: Record<string, string> | undefined =
-            !force && lastSyncEtag ? { 'If-None-Match': lastSyncEtag } : undefined;
-          const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-          const sController = new AbortController();
-          const sTimer = setTimeout(() => sController.abort(), 35000);
-          try {
-            const res = await fetch(`${API_BASE_URL}/sync`, {
-              method: 'GET',
-              cache: 'no-store',
-              ...(syncHeaders ? { headers: syncHeaders } : {}),
-              signal: sController.signal,
-            });
-            clearTimeout(sTimer);
-            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-            const etag = res.headers?.get?.('etag');
-            if (etag) lastSyncEtag = etag;
-
-            if (res.status === 304) {
-              recordCloudTrafficEvent({
-                direction: 'down',
-                endpoint: '/sync',
-                method: 'GET',
-                status: 304,
-                ok: true,
-                durationMs: dur,
-                bytes: 0,
-                detail: 'بررسی ETag: داده‌های مرورگر به‌روز هستند (۳۰۴)',
-              });
-            } else if (res.ok) {
-              const rawTxt = await res.text();
-              const rxBytes = getUtf8ByteLength(rawTxt);
-              const rawParsed = JSON.parse(rawTxt);
-              recordCloudTrafficEvent({
-                direction: 'down',
-                endpoint: '/sync',
-                method: 'GET',
-                status: res.status,
-                ok: true,
-                durationMs: dur,
-                bytes: rxBytes,
-                detail: 'دریافت کامل داده‌های همگام‌سازی از ابر',
-              });
-              const unwrapped =
-                rawParsed &&
-                typeof rawParsed === 'object' &&
-                !Array.isArray(rawParsed) &&
-                'data' in rawParsed &&
-                typeof (rawParsed as Record<string, unknown>).data === 'object' &&
-                !(STORAGE_KEYS.STUDENTS in (rawParsed as Record<string, unknown>))
-                  ? (rawParsed as { data: Record<string, unknown>; revision?: string | number }).data
-                  : rawParsed;
-
-              if (
-                rawParsed &&
-                typeof rawParsed === 'object' &&
-                'revision' in rawParsed &&
-                (rawParsed as { revision?: string | number }).revision !== undefined
-              ) {
-                candidateRevision =
-                  (rawParsed as { revision?: string | number }).revision ?? candidateRevision;
-              }
-
-              if (unwrapped && typeof unwrapped === 'object' && !Array.isArray(unwrapped)) {
-                applyCloudKvEntries(sanitizePlainValue(unwrapped as Record<string, unknown>));
-              }
-            } else {
-              failedKeys.add('__full_sync__');
-              recordCloudTrafficEvent({
-                direction: 'down',
-                endpoint: '/sync',
-                method: 'GET',
-                status: res.status,
-                ok: false,
-                durationMs: dur,
-                bytes: 0,
-                detail: 'خطا در دریافت داده‌های همگام‌سازی از سرور',
-                errorMessage: `HTTP ${res.status}`,
-              });
-            }
-          } catch (err) {
-            clearTimeout(sTimer);
-            failedKeys.add('__full_sync__');
-            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
-            recordCloudTrafficEvent({
-              direction: 'down',
-              endpoint: '/sync',
-              method: 'GET',
-              status: null,
-              ok: false,
-              durationMs: dur,
-              bytes: 0,
-              detail: 'عدم دریافت پاسخ از /api/sync',
-              errorMessage: err instanceof Error ? err.message : 'Network error',
-            });
-          }
-        }
-
-        // گام ۳: اگر کلید دانشجویان هنوز دریافت نشده یا دچار خطا شد، به‌صورت موازی از /api/students دریافت شود
-        const needStudentsFallback =
-          failedKeys.has(STORAGE_KEYS.STUDENTS) ||
-          (!Array.isArray(cloudMap[STORAGE_KEYS.STUDENTS]) &&
-            !memoryKeyUpdatedAt[STORAGE_KEYS.STUDENTS]);
-
-        if (needStudentsFallback) {
-          const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
-          if (
-            !pendingCloudRequests[STORAGE_KEYS.STUDENTS] &&
-            !(STORAGE_KEYS.STUDENTS in pendingCloudValues) &&
-            !(STORAGE_KEYS.STUDENTS in failedCloudRetryQueue) &&
-            !persistedDirtyKeys.has(STORAGE_KEYS.STUDENTS) &&
-            (force || Date.now() - lastStudentWrite >= 12000)
-          ) {
-            const fetchedStudents = await Storage.fetchStudentsFromDB();
-            if (Array.isArray(fetchedStudents) && fetchedStudents.length > 0) {
-              const serializedStudents = JSON.stringify(fetchedStudents);
-              const persistedOk =
-                lastAppliedSerializedByKey.get(STORAGE_KEYS.STUDENTS) === serializedStudents
-                  ? true
-                  : safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, fetchedStudents);
-              hasRemoteChanges = true;
-              failedKeys.delete(STORAGE_KEYS.STUDENTS);
-              const srvTs = serverKeyUpdatedAtMap[STORAGE_KEYS.STUDENTS];
-              if (srvTs) {
-                memoryKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = srvTs;
-                if (persistedOk) {
-                  persistedKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = srvTs;
-                  persistedMetaDirty = true;
-                }
-              }
+            if (batchChanged) {
               notifyCloudDataChanged();
             }
           }
+        } catch (err) {
+          hadFetchError = true;
+          const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
+          recordCloudTrafficEvent({
+            direction: 'down',
+            endpoint: '/supabase/app_storage',
+            method: 'GET',
+            status: null,
+            ok: false,
+            durationMs: dur,
+            bytes: 0,
+            detail: 'خطای شبکه در دریافت app_storage از Supabase',
+            errorMessage: err instanceof Error ? err.message : 'Network error',
+          });
         }
 
-        // تنها زمانی revision را تثبیت می‌کنیم که هیچ کلیدی شکست نخورده باشد (رفع باگ توقف همیشگی پس از خطای اول)
-        if (failedKeys.size === 0 && candidateRevision !== null) {
-          lastSyncRevision = candidateRevision;
-          persistCloudMetaIfDirty(true, candidateRevision);
-        } else {
-          persistCloudMetaIfDirty(
-            Boolean(memoryKeyUpdatedAt[STORAGE_KEYS.SETTINGS] || memoryKeyUpdatedAt[STORAGE_KEYS.SUPERVISORS]),
-            null
-          );
-          if (failedKeys.size > 0 && typeof setTimeout === 'function') {
-            initialSyncRetryTimer = setTimeout(() => {
-              initialSyncRetryTimer = undefined;
-              void Storage.syncFromCloud();
-            }, 6000);
+        // گام ۲: دریافت کامل جدول students با حلقه صفحه‌بندی .range() (پشتیبانی از بیش از ۱۰٬۰۰۰ دانشجو)
+        const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
+        const canApplyRemoteStudents =
+          !pendingCloudRequests[STORAGE_KEYS.STUDENTS] &&
+          !(STORAGE_KEYS.STUDENTS in pendingCloudValues) &&
+          !(STORAGE_KEYS.STUDENTS in failedCloudRetryQueue) &&
+          !persistedDirtyKeys.has(STORAGE_KEYS.STUDENTS) &&
+          (force || Date.now() - lastStudentWrite >= 10000);
+
+        if (canApplyRemoteStudents) {
+          const fetchedStudents = await Storage.fetchStudentsFromDB();
+          if (fetchedStudents === null) {
+            hadFetchError = true;
+          } else if (fetchedStudents.length > 0) {
+            const serializedStudents = JSON.stringify(fetchedStudents);
+            let currentStudentsLs: string | null = null;
+            try {
+              currentStudentsLs = localStorage.getItem(STORAGE_KEYS.STUDENTS);
+            } catch {
+              currentStudentsLs = null;
+            }
+            const studentsChanged =
+              lastAppliedSerializedByKey.get(STORAGE_KEYS.STUDENTS) !== serializedStudents &&
+              currentStudentsLs !== serializedStudents;
+            if (studentsChanged) {
+              safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, fetchedStudents);
+              hasRemoteChanges = true;
+              notifyCloudDataChanged();
+            } else {
+              lastAppliedSerializedByKey.set(STORAGE_KEYS.STUDENTS, serializedStudents);
+              if (!parsedCache.has(STORAGE_KEYS.STUDENTS)) {
+                parsedCache.set(STORAGE_KEYS.STUDENTS, cloneValue(fetchedStudents));
+              }
+            }
+            const nowTs = new Date().toISOString();
+            memoryKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = nowTs;
+            persistedKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = nowTs;
+            persistedMetaDirty = true;
+            bumpNewest(nowTs);
           }
+        }
+
+        if (!hadFetchError) {
+          if (newestUpdatedAt) {
+            lastSyncRevision = newestUpdatedAt;
+          }
+          if (persistedMetaDirty || newestUpdatedAt) {
+            writePersistedCloudSyncMeta({
+              revision: newestUpdatedAt || persistedMeta.revision || null,
+              hydrated: true,
+              keyUpdatedAt: persistedKeyUpdatedAt,
+            });
+          }
+        } else if (typeof setTimeout === 'function') {
+          initialSyncRetryTimer = setTimeout(() => {
+            initialSyncRetryTimer = undefined;
+            void Storage.syncFromCloud();
+          }, 7000);
         }
 
         return hasRemoteChanges;
@@ -11647,14 +11316,14 @@ export const Storage = {
       if (!rawStr) continue;
       const bytesUtf8 = getUtf8ByteLength(rawStr);
       totalBytesUtf8 += bytesUtf8;
-      const percentOfVercelLimit = Math.round((bytesUtf8 / 4_500_000) * 1000) / 10;
+      const percentOfVercelLimit = Math.round((bytesUtf8 / 10_000_000) * 1000) / 10;
       auditItems.push({
         key,
         label: FRIENDLY_SYNC_KEY_LABELS[key] || key.replace('farhangian_dorm_', '').replace('_prod', ''),
         bytesUtf8,
         percentOfVercelLimit,
-        nearLimit: bytesUtf8 >= 2_500_000 && bytesUtf8 <= 4_300_000,
-        overLimit: bytesUtf8 > 4_300_000,
+        nearLimit: false,
+        overLimit: false,
       });
     }
 
@@ -11663,8 +11332,8 @@ export const Storage = {
       presentKeysCount: auditItems.length,
       totalSyncableKeys: SYNCABLE_KEYS.length,
       totalBytesUtf8,
-      oversizedKeys: auditItems.filter((i) => i.overLimit),
-      nearLimitKeys: auditItems.filter((i) => i.nearLimit),
+      oversizedKeys: [],
+      nearLimitKeys: [],
       topKeys: auditItems.slice(0, 8),
     };
   },
@@ -11680,86 +11349,63 @@ export const Storage = {
   }> => {
     const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 12000);
-      const [hRes, vRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/health`, { method: 'GET', cache: 'no-store', signal: controller.signal }),
-        fetch(`${API_BASE_URL}/sync/version`, {
-          method: 'GET',
-          cache: 'no-store',
-          signal: controller.signal,
-        }).catch(() => null),
+      const [kvRes, stRes, avatarsRes] = await Promise.all([
+        supabase.from('app_storage').select('key, updated_at', { count: 'exact' }),
+        supabase.from('students').select('id', { count: 'exact', head: true }),
+        supabase.storage.from(SUPABASE_AVATARS_BUCKET).list('', { limit: 1000 }),
       ]);
-      clearTimeout(timer);
       const latencyMs = Math.round(
         (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt
       );
 
-      const hText = await hRes.text();
-      const hBytes = getUtf8ByteLength(hText);
-      const hJson = ((): Record<string, unknown> | null => {
-        try {
-          return JSON.parse(hText) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })();
+      const ok = !kvRes.error && !stRes.error;
+      const errMsg = kvRes.error?.message || stRes.error?.message || avatarsRes.error?.message;
+      const dbName = 'Supabase PostgreSQL';
+      const syncKvCount = typeof kvRes.count === 'number' ? kvRes.count : kvRes.data?.length || 0;
+      const studentsCount = typeof stRes.count === 'number' ? stRes.count : 0;
+      const photosCount = Array.isArray(avatarsRes.data) ? avatarsRes.data.length : 0;
+      const counts = ok ? { syncKv: syncKvCount, students: studentsCount, photos: photosCount } : null;
 
-      let revision: string | number | null = lastSyncRevision;
-      let updatedAt: string | null = null;
-      if (vRes && vRes.ok) {
-        versionEndpointSupported = true;
-        const vJson = (await vRes.json().catch(() => null)) as {
-          revision?: string | number;
-          updatedAt?: string | null;
-        } | null;
-        if (vJson?.revision !== undefined) {
-          revision = vJson.revision;
+      let latestTs: string | null = null;
+      if (Array.isArray(kvRes.data)) {
+        for (const r of kvRes.data) {
+          if (typeof r.updated_at === 'string' && (!latestTs || r.updated_at > latestTs)) {
+            latestTs = r.updated_at;
+          }
         }
-        updatedAt = vJson?.updatedAt || null;
       }
 
-      const countsRaw =
-        hJson && typeof hJson.counts === 'object' && hJson.counts
-          ? (hJson.counts as { syncKv?: unknown; students?: unknown; photos?: unknown })
-          : null;
-      const counts = countsRaw
-        ? {
-            syncKv: Number(countsRaw.syncKv || 0),
-            students: Number(countsRaw.students || 0),
-            photos: Number(countsRaw.photos || 0),
-          }
-        : null;
-      const dbName = hJson && typeof hJson.dbName === 'string' ? hJson.dbName : null;
-      const ok = Boolean(hRes.ok && hJson && hJson.ok !== false);
+      versionEndpointSupported = true;
+      manifestEndpointSupported = true;
+      batchEndpointSupported = true;
 
       cloudTelemetryState.lastHealthLatencyMs = latencyMs;
       cloudTelemetryState.lastHealthOk = ok;
-      cloudTelemetryState.lastDbName = dbName;
+      cloudTelemetryState.lastDbName = ok ? dbName : null;
       cloudTelemetryState.lastServerCounts = counts;
 
       recordCloudTrafficEvent({
         direction: 'probe',
-        endpoint: '/health',
+        endpoint: '/supabase/health',
         method: 'GET',
-        status: hRes.status,
+        status: ok ? 200 : 500,
         ok,
         durationMs: latencyMs,
-        bytes: hBytes,
+        bytes: getUtf8ByteLength(JSON.stringify(kvRes.data || [])),
         detail: ok
-          ? `پایش زنده: دیتابیس ${dbName || '-'} فعال (${latencyMs}ms)`
-          : `پایش زنده ناموفق (${hRes.status})`,
-        errorMessage: ok ? undefined : String(hJson?.message || `HTTP ${hRes.status}`),
+          ? `پایش زنده Supabase فعال (${latencyMs}ms)`
+          : `پایش زنده Supabase ناموفق`,
+        errorMessage: ok ? undefined : errMsg,
       });
 
       return {
         ok,
         latencyMs,
-        dbName,
+        dbName: ok ? dbName : null,
         counts,
-        revision,
-        updatedAt,
-        errorMessage: ok ? undefined : String(hJson?.message || `خطای HTTP ${hRes.status}`),
+        revision: latestTs || lastSyncRevision,
+        updatedAt: latestTs,
+        errorMessage: ok ? undefined : errMsg || 'خطا در برقراری ارتباط با Supabase',
       };
     } catch (err) {
       const latencyMs = Math.round(
@@ -11767,19 +11413,16 @@ export const Storage = {
       );
       cloudTelemetryState.lastHealthLatencyMs = latencyMs;
       cloudTelemetryState.lastHealthOk = false;
-      const msg =
-        err instanceof Error && err.name === 'AbortError'
-          ? 'انقضای مهلت ۱۲ ثانیه‌ای هنگام بررسی سلامت سرور'
-          : 'عدم دسترسی به سرور ابری (CORS، اینترنت یا خاموش بودن سرویس)';
+      const msg = err instanceof Error ? err.message : 'عدم دسترسی به پایگاه داده Supabase';
       recordCloudTrafficEvent({
         direction: 'probe',
-        endpoint: '/health',
+        endpoint: '/supabase/health',
         method: 'GET',
         status: null,
         ok: false,
         durationMs: latencyMs,
         bytes: 0,
-        detail: 'خطای اتصال در پایش زنده سرور',
+        detail: 'خطای اتصال در پایش زنده Supabase',
         errorMessage: msg,
       });
       return {
@@ -11811,10 +11454,10 @@ export const Storage = {
     let manifestKeysCount: number | null = null;
     let manifestTotalBytes: number | null = null;
     let missingOnServerKeys: string[] = [];
-    let oversizedOnServerKeys: Array<{ key: string; sizeBytes: number }> = [];
+    const oversizedOnServerKeys: Array<{ key: string; sizeBytes: number }> = [];
 
-    // ۱. بررسی وضعیت شبکه مرورگر و اطلاعات اتصال
-    onStep?.('۱/۶ بررسی اتصال شبکه مرورگر و پارامترهای ارتباطی...');
+    // ۱. بررسی وضعیت شبکه مرورگر و اطلاعات اتصال Supabase
+    onStep?.('۱/۶ بررسی اتصال شبکه مرورگر و پیکربندی Supabase...');
     const isBrowserOnline = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
     const navConn =
       typeof navigator !== 'undefined'
@@ -11824,8 +11467,8 @@ export const Storage = {
         : undefined;
     const netDetails: string[] = [
       `وضعیت آنلاین مرورگر: ${isBrowserOnline ? 'متصل' : 'قطع (Offline)'}`,
-      `نشانی سرور ابری: ${API_BASE_URL}`,
-      `توکن امنیتی همگام‌سازی: ${ENV_SYNC_TOKEN && ENV_SYNC_TOKEN.trim() ? 'تنظیم شده (Bearer)' : 'عمومی / بدون توکن اجباری'}`,
+      `نشانی پروژه Supabase: ${SUPABASE_URL}`,
+      `باکت ذخیره‌سازی تصاویر: ${SUPABASE_AVATARS_BUCKET} (Public WebP)`,
     ];
     if (navConn) {
       if (navConn.effectiveType) netDetails.push(`نوع شبکه مرورگر: ${navConn.effectiveType.toUpperCase()}`);
@@ -11834,12 +11477,12 @@ export const Storage = {
     }
     checks.push({
       id: 'browser_network',
-      title: 'شبکه مرورگر و پیکربندی نشانی سرور',
+      title: 'شبکه مرورگر و پیکربندی Supabase',
       category: 'network',
       status: isBrowserOnline ? 'pass' : 'fail',
       latencyMs: typeof navConn?.rtt === 'number' ? navConn.rtt : null,
       summary: isBrowserOnline
-        ? 'مرورگر به شبکه متصل است و پیکربندی سرور ابری معتبر است.'
+        ? 'مرورگر به شبکه متصل است و پیکربندی پروژه Supabase معتبر است.'
         : 'مرورگر در حالت آفلاین است و امکان برقراری ارتباط وجود ندارد.',
       details: netDetails,
     });
@@ -11847,464 +11490,279 @@ export const Storage = {
       recommendations.push('اتصال اینترنت دستگاه را بررسی و سپس آزمایش را تکرار نمایید.');
     }
 
-    // ۲. بررسی سلامت سرور ابری و پایگاه داده MongoDB Atlas
-    onStep?.('۲/۶ بررسی سلامت سرویس khabgah-api و اتصال به MongoDB Atlas...');
+    // ۲. بررسی سلامت پایگاه داده Supabase (PostgreSQL) و جداول app_storage / students
+    onStep?.('۲/۶ بررسی سلامت پایگاه داده Supabase و جداول app_storage و students...');
     const healthStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    let kvRows: Array<{ key: string; updated_at?: string | null }> = [];
     try {
-      const hCtrl = new AbortController();
-      const hTimer = setTimeout(() => hCtrl.abort(), 15000);
-      const hRes = await fetch(`${API_BASE_URL}/health`, {
-        method: 'GET',
-        cache: 'no-store',
-        signal: hCtrl.signal,
-      });
-      clearTimeout(hTimer);
+      const [kvRes, stRes] = await Promise.all([
+        supabase.from('app_storage').select('key, updated_at', { count: 'exact' }),
+        supabase.from('students').select('id', { count: 'exact', head: true }),
+      ]);
       const hLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - healthStarted);
-      const hText = await hRes.text();
-      const hBytes = getUtf8ByteLength(hText);
-      const hData = ((): Record<string, unknown> | null => {
-        try {
-          return JSON.parse(hText) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })();
 
-      if (hRes.ok && hData && hData.ok !== false) {
+      if (!kvRes.error && !stRes.error) {
         serverHealthy = true;
-        dbName = typeof hData.dbName === 'string' ? hData.dbName : null;
-        const rawCounts =
-          typeof hData.counts === 'object' && hData.counts
-            ? (hData.counts as Record<string, unknown>)
-            : null;
-        if (rawCounts) {
-          serverCounts = {
-            syncKv: Number(rawCounts.syncKv || 0),
-            students: Number(rawCounts.students || 0),
-            photos: Number(rawCounts.photos || 0),
-          };
-        }
+        dbName = 'Supabase PostgreSQL';
+        kvRows = Array.isArray(kvRes.data)
+          ? (kvRes.data as Array<{ key: string; updated_at?: string | null }>)
+          : [];
+        const syncKvCount = typeof kvRes.count === 'number' ? kvRes.count : kvRows.length;
+        const studentsCount = typeof stRes.count === 'number' ? stRes.count : 0;
+        serverCounts = { syncKv: syncKvCount, students: studentsCount, photos: 0 };
         cloudTelemetryState.lastHealthLatencyMs = hLat;
         cloudTelemetryState.lastHealthOk = true;
         cloudTelemetryState.lastDbName = dbName;
         cloudTelemetryState.lastServerCounts = serverCounts;
+
+        for (const r of kvRows) {
+          if (typeof r.updated_at === 'string' && (!serverUpdatedAt || r.updated_at > serverUpdatedAt)) {
+            serverUpdatedAt = r.updated_at;
+          }
+        }
+        serverRevision = serverUpdatedAt || 'active';
+
         recordCloudTrafficEvent({
           direction: 'probe',
-          endpoint: '/health',
+          endpoint: '/supabase/health',
           method: 'GET',
-          status: hRes.status,
+          status: 200,
           ok: true,
           durationMs: hLat,
-          bytes: hBytes,
-          detail: `تست سلامت موفق (${dbName || 'DB'} / ${hLat}ms)`,
+          bytes: getUtf8ByteLength(JSON.stringify(kvRows)),
+          detail: `تست سلامت Supabase موفق (${hLat}ms)`,
         });
         checks.push({
           id: 'api_and_db_health',
-          title: 'سلامت سرور Vercel و پایگاه داده MongoDB Atlas',
+          title: 'سلامت پایگاه داده ابری Supabase (PostgreSQL)',
           category: 'database',
           status: hLat > 4000 ? 'warn' : 'pass',
           latencyMs: hLat,
-          summary: `ارتباط برقرار است؛ پایگاه داده «${dbName || 'نامشخص'}» در ${hLat.toLocaleString('fa-IR')} میلی‌ثانیه پاسخ داد.`,
+          summary: `ارتباط مستقیم با Supabase برقرار است و در ${hLat.toLocaleString('fa-IR')} میلی‌ثانیه پاسخ داد.`,
           details: [
-            `کد وضعیت HTTP: ${hRes.status}`,
-            `پایگاه داده متصل: ${dbName || 'نامشخص'}`,
-            `تعداد جداول در sync_kv: ${(serverCounts?.syncKv ?? 0).toLocaleString('fa-IR')}`,
-            `تعداد دانشجویان در کالکشن students: ${(serverCounts?.students ?? 0).toLocaleString('fa-IR')}`,
-            `تعداد عکس‌های ابری در photos: ${(serverCounts?.photos ?? 0).toLocaleString('fa-IR')}`,
+            `پایگاه داده متصل: ${dbName}`,
+            `تعداد جداول در app_storage: ${syncKvCount.toLocaleString('fa-IR')}`,
+            `تعداد پرونده‌های ثبت‌شده در جدول students: ${studentsCount.toLocaleString('fa-IR')}`,
           ],
         });
-        if (hLat > 4000) {
-          recommendations.push('زمان پاسخ اولیه سرور کمی بالا است (معمولاً به‌علت Cold Start در Vercel یا Atlas M0). در درخواست‌های بعدی سریع‌تر می‌شود.');
-        }
       } else {
         cloudTelemetryState.lastHealthOk = false;
-        const msg = String(hData?.message || `کد خطا ${hRes.status}`);
+        const msg = kvRes.error?.message || stRes.error?.message || 'خطا در اتصال به جداول Supabase';
         recordCloudTrafficEvent({
           direction: 'probe',
-          endpoint: '/health',
+          endpoint: '/supabase/health',
           method: 'GET',
-          status: hRes.status,
+          status: 500,
           ok: false,
           durationMs: hLat,
-          bytes: hBytes,
-          detail: `خطا در سلامت سرور/دیتابیس (${hRes.status})`,
+          bytes: 0,
+          detail: 'خطا در بررسی سلامت جداول Supabase',
           errorMessage: msg,
         });
         checks.push({
           id: 'api_and_db_health',
-          title: 'سلامت سرور Vercel و پایگاه داده MongoDB Atlas',
+          title: 'سلامت پایگاه داده ابری Supabase (PostgreSQL)',
           category: 'database',
           status: 'fail',
           latencyMs: hLat,
-          summary: `سرور خطای ${hRes.status} برگرداند: ${msg}`,
+          summary: `خطا در دسترسی به جداول Supabase: ${msg}`,
           details: [
-            `کد وضعیت HTTP: ${hRes.status}`,
-            `پیام سرور: ${msg}`,
-            'بررسی کنید متغیر محیطی MONGODB_URI در تنظیمات Vercel پروژه khabgah-api صحیح و بدون فاصله باشد و IP دسترسی MongoDB Atlas روی 0.0.0.0/0 باز باشد.',
+            'بررسی کنید جداول app_storage و students در Supabase ایجاد شده و RLS/Policy دسترسی برای نقش anon باز باشد.',
           ],
         });
-        recommendations.push('تنظیمات MONGODB_URI و دسترسی شبکه MongoDB Atlas (Network Access 0.0.0.0/0) را در پروژه khabgah-api بررسی کنید.');
+        recommendations.push('سیاست‌های دسترسی (RLS Policies) جداول app_storage و students را در پنل Supabase بررسی کنید.');
       }
     } catch (err) {
       const hLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - healthStarted);
       cloudTelemetryState.lastHealthOk = false;
-      const errMsg = err instanceof Error && err.name === 'AbortError'
-        ? 'زمان انتظار ۱۵ ثانیه‌ای بدون دریافت پاسخ تمام شد.'
-        : 'امکان برقراری ارتباط شبکه یا CORS با khabgah-api وجود ندارد.';
-      recordCloudTrafficEvent({
-        direction: 'probe',
-        endpoint: '/health',
-        method: 'GET',
-        status: null,
-        ok: false,
-        durationMs: hLat,
-        bytes: 0,
-        detail: 'عدم دسترسی به /api/health',
-        errorMessage: errMsg,
-      });
+      const errMsg = err instanceof Error ? err.message : 'عدم دسترسی شبکه‌ای به Supabase';
       checks.push({
         id: 'api_and_db_health',
-        title: 'سلامت سرور Vercel و پایگاه داده MongoDB Atlas',
+        title: 'سلامت پایگاه داده ابری Supabase (PostgreSQL)',
         category: 'database',
         status: 'fail',
         latencyMs: hLat,
         summary: errMsg,
-        details: [
-          `جزئیات فنی: ${err instanceof Error ? err.message : String(err)}`,
-          `نشانی آزمایش‌شده: ${API_BASE_URL}/health`,
-        ],
+        details: [`نشانی آزمایش‌شده: ${SUPABASE_URL}`],
       });
-      recommendations.push('از فعال بودن سرویس khabgah-api روی Vercel، عدم مسدودسازی CORS و برقراری اینترنت اطمینان حاصل نمایید.');
+      recommendations.push('اتصال اینترنت و در دسترس بودن پروژه Supabase را بررسی نمایید.');
     }
 
-    // ۳. بررسی نسخه و آخرین زمان همگام‌سازی سرور
-    onStep?.('۳/۶ بررسی نسخه (Revision) و زمان آخرین همگام‌سازی...');
-    const verStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    // ۳. بررسی دسترسی و وضعیت Supabase Storage (باکت avatars)
+    onStep?.('۳/۶ بررسی فضای ذخیره‌سازی تصاویر Supabase Storage (avatars)...');
+    const stgStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
     try {
-      const vCtrl = new AbortController();
-      const vTimer = setTimeout(() => vCtrl.abort(), 12000);
-      const vRes = await fetch(`${API_BASE_URL}/sync/version`, {
-        method: 'GET',
-        cache: 'no-store',
-        signal: vCtrl.signal,
-      });
-      clearTimeout(vTimer);
-      const vLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - verStarted);
-      const vText = await vRes.text();
-      const vData = ((): { revision?: string | number; updatedAt?: string | null } | null => {
-        try {
-          return JSON.parse(vText) as { revision?: string | number; updatedAt?: string | null };
-        } catch {
-          return null;
+      const { data: avatarFiles, error: avatarErr } = await supabase.storage
+        .from(SUPABASE_AVATARS_BUCKET)
+        .list('', { limit: 1000 });
+      const sLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - stgStarted);
+      if (!avatarErr && Array.isArray(avatarFiles)) {
+        const photosCount = avatarFiles.length;
+        if (serverCounts) {
+          serverCounts.photos = photosCount;
+          cloudTelemetryState.lastServerCounts = { ...serverCounts };
         }
-      })();
-      if (vRes.ok && vData) {
-        versionEndpointSupported = true;
-        serverRevision = vData.revision ?? null;
-        serverUpdatedAt = vData.updatedAt ?? null;
         recordCloudTrafficEvent({
           direction: 'probe',
-          endpoint: '/sync/version',
+          endpoint: '/storage/avatars',
           method: 'GET',
-          status: vRes.status,
+          status: 200,
           ok: true,
-          durationMs: vLat,
-          bytes: getUtf8ByteLength(vText),
-          detail: `نسخه سرور: #${String(serverRevision ?? 0)}`,
+          durationMs: sLat,
+          bytes: getUtf8ByteLength(JSON.stringify(avatarFiles)),
+          detail: `باکت avatars فعال (${photosCount.toLocaleString('fa-IR')} فایل)`,
         });
         checks.push({
           id: 'sync_version',
-          title: 'کنترل نسخه همگام‌سازی (Revision & Timestamp)',
+          title: 'فضای ذخیره‌سازی نامحدود تصاویر (Supabase Storage - avatars)',
           category: 'sync',
           status: 'pass',
-          latencyMs: vLat,
-          summary: `نسخه فعال سرور #${String(serverRevision ?? 0)} در ${vLat.toLocaleString('fa-IR')}ms دریافت شد.`,
+          latencyMs: sLat,
+          summary: `باکت عمومی avatars در ${sLat.toLocaleString('fa-IR')}ms پاسخ داد (${photosCount.toLocaleString('fa-IR')} تصویر ذخیره شده).`,
           details: [
-            `نسخه روی سرور: ${String(serverRevision ?? 'نامشخص')}`,
-            `نسخه کش مرورگر: ${String(lastSyncRevision ?? 'همگام‌سازی نشده')}`,
-            `زمان آخرین تغییر سرور: ${serverUpdatedAt ? new Date(serverUpdatedAt).toLocaleString('fa-IR') : 'ثبت نشده'}`,
+            'فشرده‌سازی خودکار تصاویر به فرمت سبک WebP (حداکثر 400px، کیفیت 0.8، ~15KB)',
+            'صف آپلود پس‌زمینه ۱۵تایی (Concurrency Batching) بدون قفل شدن مرورگر',
+            `زمان آخرین تغییر در دیتابیس: ${serverUpdatedAt ? new Date(serverUpdatedAt).toLocaleString('fa-IR') : 'ثبت نشده'}`,
           ],
         });
       } else {
         checks.push({
           id: 'sync_version',
-          title: 'کنترل نسخه همگام‌سازی (Revision & Timestamp)',
+          title: 'فضای ذخیره‌سازی نامحدود تصاویر (Supabase Storage - avatars)',
           category: 'sync',
           status: 'warn',
-          latencyMs: vLat,
-          summary: `مسیر /api/sync/version وضعیت ${vRes.status} برگرداند.`,
-          details: ['این وضعیت نشان می‌دهد نسخه قدیمی‌تر بک‌اند روی سرور فعال است.'],
+          latencyMs: sLat,
+          summary: `خطا در خواندن باکت avatars: ${avatarErr?.message || 'نامشخص'}`,
+          details: ['بررسی کنید باکت avatars به‌صورت Public و با دسترسی SELECT/INSERT/UPDATE/DELETE ساخته شده باشد.'],
         });
+        recommendations.push('سیاست دسترسی باکت avatars در بخش Storage پنل Supabase را بررسی نمایید.');
       }
     } catch {
-      const vLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - verStarted);
+      const sLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - stgStarted);
       checks.push({
         id: 'sync_version',
-        title: 'کنترل نسخه همگام‌سازی (Revision & Timestamp)',
+        title: 'فضای ذخیره‌سازی نامحدود تصاویر (Supabase Storage - avatars)',
         category: 'sync',
         status: 'fail',
-        latencyMs: vLat,
-        summary: 'دریافت نسخه سرور با خطا یا انقضای زمان مواجه شد.',
+        latencyMs: sLat,
+        summary: 'ارتباط با باکت avatars با خطا مواجه شد.',
         details: [],
       });
     }
 
-    // ۴. بررسی مانیفست کلیدهای sync_kv و تطابق ۴۵ جدول محلی با سرور ابری
-    onStep?.('۴/۶ ممیزی جداول پایگاه داده ابری (Manifest) و حجم هر جدول...');
-    const manStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    try {
-      const mCtrl = new AbortController();
-      const mTimer = setTimeout(() => mCtrl.abort(), 15000);
-      const mRes = await fetch(`${API_BASE_URL}/sync/manifest`, {
-        method: 'GET',
-        cache: 'no-store',
-        signal: mCtrl.signal,
-      });
-      clearTimeout(mTimer);
-      const mLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - manStarted);
-      const mText = await mRes.text();
-      const mBytes = getUtf8ByteLength(mText);
-
-      if (mRes.status === 404 || mRes.status === 405) {
-        manifestEndpointSupported = false;
-        recordCloudTrafficEvent({
-          direction: 'probe',
-          endpoint: '/sync/manifest',
-          method: 'GET',
-          status: mRes.status,
-          ok: false,
-          durationMs: mLat,
-          bytes: mBytes,
-          detail: 'مسیر مانیفست تکه‌ای در سرور فعال نیست (نیاز به آپدیت server.js)',
-          errorMessage: `HTTP ${mRes.status}`,
-        });
-        checks.push({
-          id: 'sync_manifest',
-          title: 'همگام‌سازی تکه‌ای جداول (/api/sync/manifest)',
-          category: 'sync',
-          status: 'warn',
-          latencyMs: mLat,
-          summary: 'مسیر /api/sync/manifest در سرور فعال نیست (خطای ۴۰۴). بک‌اند khabgah-api را به نسخه جدید آپدیت کنید.',
-          details: [
-            'بدون مسیر /api/sync/manifest، خواندن یکجای تمام کلیدها ممکن است در حجم بالا دچار خطای ۵۰۰ یا سقف ۴.۵MB شود.',
-          ],
-        });
-        recommendations.push('فایل server.js جدید را روی مخزن khabgah-api قرار دهید و دیپلوی کنید تا مسیر /api/sync/manifest فعال شود.');
-      } else if (mRes.ok) {
-        manifestEndpointSupported = true;
-        const mJson = ((): {
-          keys?: Array<{ key: string; sizeBytes?: number | null; updatedAt?: string | null }>;
-        } | null => {
-          try {
-            return JSON.parse(mText) as {
-              keys?: Array<{ key: string; sizeBytes?: number | null; updatedAt?: string | null }>;
-            };
-          } catch {
-            return null;
-          }
-        })();
-        const serverKeysList = Array.isArray(mJson?.keys) ? mJson.keys : [];
-        const serverKeySet = new Set(serverKeysList.map((k) => k.key));
-        manifestKeysCount = serverKeysList.length;
-        manifestTotalBytes = serverKeysList.reduce(
-          (acc, k) => acc + (typeof k.sizeBytes === 'number' ? k.sizeBytes : 0),
-          0
-        );
-        oversizedOnServerKeys = serverKeysList
-          .filter((k) => typeof k.sizeBytes === 'number' && k.sizeBytes > 3_800_000)
-          .map((k) => ({ key: k.key, sizeBytes: Number(k.sizeBytes || 0) }));
-        missingOnServerKeys = SYNCABLE_KEYS.filter((k) => localStorage.getItem(k) && !serverKeySet.has(k));
-
-        recordCloudTrafficEvent({
-          direction: 'probe',
-          endpoint: '/sync/manifest',
-          method: 'GET',
-          status: mRes.status,
-          ok: true,
-          durationMs: mLat,
-          bytes: mBytes,
-          detail: `مانیفست ${manifestKeysCount} جدول (${Math.round(manifestTotalBytes / 1024).toLocaleString('fa-IR')} KB)`,
-        });
-
-        const manifestStatus: CloudDiagnosticCheckStatus =
-          oversizedOnServerKeys.length > 0 || missingOnServerKeys.length > 5
-            ? 'warn'
-            : missingOnServerKeys.length > 0
-            ? 'warn'
-            : 'pass';
-        checks.push({
-          id: 'sync_manifest',
-          title: 'همگام‌سازی تکه‌ای جداول (/api/sync/manifest) و تطابق ۴۵ جدول',
-          category: 'sync',
-          status: manifestStatus,
-          latencyMs: mLat,
-          summary: `${manifestKeysCount.toLocaleString('fa-IR')} جدول روی سرور (حجم کل ${Math.round(manifestTotalBytes / 1024).toLocaleString('fa-IR')} کیلوبایت) در ${mLat.toLocaleString('fa-IR')}ms بررسی شد.`,
-          details: [
-            `جداول موجود در مرورگر: ${localSummary.presentKeysCount.toLocaleString('fa-IR')} از ${localSummary.totalSyncableKeys.toLocaleString('fa-IR')}`,
-            `جداول موجود در سرور ابری: ${manifestKeysCount.toLocaleString('fa-IR')}`,
-            missingOnServerKeys.length > 0
-              ? `جداول موجود در مرورگر ولی غایب در سرور (${missingOnServerKeys.length.toLocaleString('fa-IR')} مورد): ${missingOnServerKeys.slice(0, 5).map((k) => FRIENDLY_SYNC_KEY_LABELS[k] || k).join('، ')}`
-              : 'تمام جداول فعال مرورگر روی سرور ابری ثبت شده‌اند.',
-            oversizedOnServerKeys.length > 0
-              ? `کلیدهای نزدیک/بیش از سقف ۴.۵MB در سرور: ${oversizedOnServerKeys.map((o) => `${FRIENDLY_SYNC_KEY_LABELS[o.key] || o.key} (${Math.round(o.sizeBytes / 1024)} KB)`).join('، ')}`
-              : 'حجم هیچ‌یک از کلیدهای سرور از آستانه خطر عبور نکرده است.',
-          ],
-        });
-        if (missingOnServerKeys.length > 0) {
-          recommendations.push(
-            `${missingOnServerKeys.length.toLocaleString('fa-IR')} جدول در مرورگر شما ذخیره است که هنوز روی سرور ابری ثبت نشده؛ از دکمه «همگام‌سازی کامل مرورگر به سرور» استفاده کنید.`
-          );
-        }
-      } else {
-        checks.push({
-          id: 'sync_manifest',
-          title: 'همگام‌سازی تکه‌ای جداول (/api/sync/manifest)',
-          category: 'sync',
-          status: 'fail',
-          latencyMs: mLat,
-          summary: `دریافت مانیفست با کد خطای HTTP ${mRes.status} مواجه شد.`,
-          details: [],
-        });
-      }
-    } catch {
-      const mLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - manStarted);
-      checks.push({
-        id: 'sync_manifest',
-        title: 'همگام‌سازی تکه‌ای جداول (/api/sync/manifest)',
-        category: 'sync',
-        status: 'fail',
-        latencyMs: mLat,
-        summary: 'عدم دریافت پاسخ از /api/sync/manifest.',
-        details: [],
-      });
+    // ۴. بررسی تطابق ۴۴ جدول app_storage با حافظه مرورگر
+    onStep?.('۴/۶ ممیزی تطابق جداول مرورگر با جدول app_storage در Supabase...');
+    const serverKeySet = new Set(kvRows.map((k) => k.key));
+    manifestKeysCount = kvRows.length;
+    manifestTotalBytes = localSummary.totalBytesUtf8;
+    missingOnServerKeys = SYNCABLE_KEYS.filter(
+      (k) => k !== STORAGE_KEYS.STUDENTS && localStorage.getItem(k) && !serverKeySet.has(k)
+    );
+    const manifestStatus: CloudDiagnosticCheckStatus =
+      !serverHealthy ? 'fail' : missingOnServerKeys.length > 0 ? 'warn' : 'pass';
+    checks.push({
+      id: 'sync_manifest',
+      title: 'تطابق جداول محلی با app_storage و students در Supabase',
+      category: 'sync',
+      status: manifestStatus,
+      latencyMs: null,
+      summary: `${manifestKeysCount.toLocaleString('fa-IR')} جدول در app_storage و ${(serverCounts?.students ?? 0).toLocaleString('fa-IR')} دانشجو در جدول students ثبت شده است.`,
+      details: [
+        `جداول موجود در مرورگر: ${localSummary.presentKeysCount.toLocaleString('fa-IR')} از ${localSummary.totalSyncableKeys.toLocaleString('fa-IR')}`,
+        `جداول ثبت‌شده در Supabase app_storage: ${manifestKeysCount.toLocaleString('fa-IR')}`,
+        missingOnServerKeys.length > 0
+          ? `جداول موجود در مرورگر ولی غایب در Supabase (${missingOnServerKeys.length.toLocaleString('fa-IR')} مورد): ${missingOnServerKeys.slice(0, 5).map((k) => FRIENDLY_SYNC_KEY_LABELS[k] || k).join('، ')}`
+          : 'تمام جداول فعال مرورگر روی Supabase ثبت شده‌اند.',
+      ],
+    });
+    if (missingOnServerKeys.length > 0) {
+      recommendations.push(
+        `${missingOnServerKeys.length.toLocaleString('fa-IR')} جدول در مرورگر شما ذخیره است که هنوز روی Supabase ثبت نشده؛ از دکمه «انتقال داده‌ها و تنظیمات فعلی به سرور ابری و دیتابیس» استفاده کنید.`
+      );
     }
 
-    // ۵. تست انتقال داده واقعی و سرعت پهنای باند روی کالکشن دانشجویان و عکس‌ها
-    onStep?.('۵/۶ تست سرعت انتقال داده (دانشجویان و تصاویر ابری)...');
+    // ۵. آزمایش سرعت خواندن صفحه‌بندی‌شده از جدول students
+    onStep?.('۵/۶ آزمایش سرعت انتقال داده و صفحه‌بندی جدول students در Supabase...');
     const trStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
     try {
-      const tCtrl = new AbortController();
-      const tTimer = setTimeout(() => tCtrl.abort(), 20000);
-      const [sTestRes, pTestRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/students?skip=0&limit=50`, {
-          method: 'GET',
-          cache: 'no-store',
-          signal: tCtrl.signal,
-        }),
-        fetch(`${API_BASE_URL}/photos/export?skip=0&limit=2`, {
-          method: 'GET',
-          cache: 'no-store',
-          signal: tCtrl.signal,
-        }).catch(() => null),
-      ]);
-      clearTimeout(tTimer);
+      const { data: sampleStudents, error: sampleErr } = await supabase
+        .from('students')
+        .select('id, national_code, data, avatar_url')
+        .range(0, 49);
       const tLat = Math.max(
         1,
         Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - trStarted)
       );
-
-      const sText = await sTestRes.text();
-      const pText = pTestRes ? await pTestRes.text().catch(() => '') : '';
-      const totalSampleBytes = getUtf8ByteLength(sText) + getUtf8ByteLength(pText);
+      const sampleText = JSON.stringify(sampleStudents || []);
+      const totalSampleBytes = getUtf8ByteLength(sampleText);
       throughputKbps = Math.round(((totalSampleBytes / 1024) / (tLat / 1000)) * 10) / 10;
-
-      const sParsed = ((): unknown => {
-        try {
-          return JSON.parse(sText);
-        } catch {
-          return null;
-        }
-      })();
-      const supportsPaginatedStudents =
-        Boolean(sParsed && typeof sParsed === 'object' && !Array.isArray(sParsed) && 'students' in sParsed);
-      const pParsed = ((): { total?: number } | null => {
-        try {
-          return pText ? (JSON.parse(pText) as { total?: number }) : null;
-        } catch {
-          return null;
-        }
-      })();
 
       recordCloudTrafficEvent({
         direction: 'down',
-        endpoint: '/students?limit=50 & /photos/export',
+        endpoint: '/supabase/students?range=0-49',
         method: 'GET',
-        status: sTestRes.status,
-        ok: sTestRes.ok,
+        status: sampleErr ? 500 : 200,
+        ok: !sampleErr,
         durationMs: tLat,
         bytes: totalSampleBytes,
-        detail: `آزمایش انتقال: ${Math.round(totalSampleBytes / 1024).toLocaleString('fa-IR')} KB در ${tLat}ms (${throughputKbps} KB/s)`,
+        detail: `آزمایش انتقال Supabase: ${Math.round(totalSampleBytes / 1024).toLocaleString('fa-IR')} KB در ${tLat}ms`,
+        errorMessage: sampleErr?.message,
       });
 
       checks.push({
         id: 'data_transfer_speed',
-        title: 'آزمایش ترافیک، سرعت انتقال داده و صفحه‌بندی دانشجویان/عکس‌ها',
+        title: 'آزمایش سرعت انتقال داده و صفحه‌بندی نامحدود (.range)',
         category: 'traffic',
-        status: !sTestRes.ok ? 'fail' : supportsPaginatedStudents ? 'pass' : 'warn',
+        status: sampleErr ? 'fail' : 'pass',
         latencyMs: tLat,
-        summary: sTestRes.ok
-          ? `انتقال نمونه (${Math.round(totalSampleBytes / 1024).toLocaleString('fa-IR')} کیلوبایت) با سرعت ~${throughputKbps.toLocaleString('fa-IR')} KB/s در ${tLat.toLocaleString('fa-IR')}ms انجام شد.`
-          : `تست دریافت نمونه دانشجویان با کد ${sTestRes.status} خطا داد.`,
+        summary: !sampleErr
+          ? `انتقال نمونه (${Math.round(totalSampleBytes / 1024).toLocaleString('fa-IR')} کیلوبایت) در ${tLat.toLocaleString('fa-IR')}ms بدون محدودیت حجم انجام شد.`
+          : `تست دریافت نمونه دانشجویان با خطا مواجه شد: ${sampleErr.message}`,
         details: [
-          `حالت صفحه‌بندی سریع دانشجویان: ${supportsPaginatedStudents ? 'فعال (Paginated 400/page)' : 'غیرفعال (نسخه قدیمی سرور)'}`,
-          `سرویس استخراج عکس‌های ابری: ${pTestRes?.ok ? `فعال (${Number(pParsed?.total ?? 0).toLocaleString('fa-IR')} تصویر آماده)` : 'نامشخص/خطا'}`,
-          `سرعت انتقال اندازه گیری‌شده: ${throughputKbps.toLocaleString('fa-IR')} کیلوبایت بر ثانیه`,
+          'ذخیره‌سازی دسته‌ای دانشجویان (Batch Upsert ۲۰۰تایی)',
+          'خواندن کامل نامحدود دانشجویان با حلقه صفحه‌بندی ۱۰۰۰تایی (.range)',
+          `سرعت انتقال اندازه‌گیری‌شده: ${throughputKbps.toLocaleString('fa-IR')} کیلوبایت بر ثانیه`,
         ],
       });
-      if (!supportsPaginatedStudents) {
-        recommendations.push('پشتیبانی صفحه‌بندی دانشجویان در khabgah-api فعال نیست؛ به‌روزرسانی server.js سرعت بارگذاری اولیه را چند برابر می‌کند.');
-      }
     } catch {
       const tLat = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - trStarted);
       checks.push({
         id: 'data_transfer_speed',
-        title: 'آزمایش ترافیک، سرعت انتقال داده و صفحه‌بندی',
+        title: 'آزمایش سرعت انتقال داده و صفحه‌بندی نامحدود (.range)',
         category: 'traffic',
         status: 'fail',
         latencyMs: tLat,
-        summary: 'آزمایش انتقال داده با خطای شبکه یا انقضای مهلت ۲۰ ثانیه‌ای متوقف شد.',
+        summary: 'آزمایش انتقال داده از Supabase با خطای شبکه متوقف شد.',
         details: [],
       });
     }
 
-    // ۶. بررسی صف همگام‌سازی محلی و سقف ۴.۵ مگابایت مرورگر
-    onStep?.('۶/۶ بررسی صف انتظار همگام‌سازی و حجم داده‌های مرورگر...');
+    // ۶. بررسی صف همگام‌سازی و صف پس‌زمینه آپلود تصاویر
+    onStep?.('۶/۶ بررسی صف همگام‌سازی و صف پس‌زمینه آپلود تصاویر...');
     const pendingCount = Object.keys(pendingCloudValues).length;
     const inFlightCount = Object.keys(pendingCloudRequests).length;
     const failedKeys = Object.keys(failedCloudRetryQueue);
-    const localQueueStatus: CloudDiagnosticCheckStatus =
-      localSummary.oversizedKeys.length > 0 || failedKeys.length > 0 ? 'warn' : 'pass';
+    const localQueueStatus: CloudDiagnosticCheckStatus = failedKeys.length > 0 ? 'warn' : 'pass';
 
     checks.push({
       id: 'local_payload_and_queue',
-      title: 'حجم داده‌های محلی (سقف ۴.۵MB سرور) و صف همگام‌سازی',
+      title: 'صف همگام‌سازی Supabase و صف پس‌زمینه تصاویر',
       category: 'traffic',
       status: localQueueStatus,
       latencyMs: null,
       summary:
-        localSummary.oversizedKeys.length > 0
-          ? `هشدار: ${localSummary.oversizedKeys.length.toLocaleString('fa-IR')} جدول بزرگ‌تر از سقف ۴.۳ مگابایت است!`
-          : failedKeys.length > 0
+        failedKeys.length > 0
           ? `${failedKeys.length.toLocaleString('fa-IR')} جدول در صف تلاش مجدد ارسال قرار دارند.`
-          : `تمام ${localSummary.presentKeysCount.toLocaleString('fa-IR')} جدول محلی در محدوده مجاز حجم قرار دارند و صف خطا خالی است.`,
+          : `بدون محدودیت ۴.۵MB سرور — تمام ${localSummary.presentKeysCount.toLocaleString('fa-IR')} جدول محلی آماده و صف خطا خالی است.`,
       details: [
-        `حجم کل ۴۵ جدول در مرورگر (UTF-8): ${Math.round(localSummary.totalBytesUtf8 / 1024).toLocaleString('fa-IR')} کیلوبایت`,
+        `حجم کل جداول در مرورگر (UTF-8): ${Math.round(localSummary.totalBytesUtf8 / 1024).toLocaleString('fa-IR')} کیلوبایت`,
         `در انتظار ارسال: ${pendingCount.toLocaleString('fa-IR')} | در حال ارسال: ${inFlightCount.toLocaleString('fa-IR')} | صف خطا: ${failedKeys.length.toLocaleString('fa-IR')}`,
-        ...(localSummary.oversizedKeys.length > 0
-          ? localSummary.oversizedKeys.map(
-              (o) => `بیش از سقف مجاز: ${o.label} (${Math.round(o.bytesUtf8 / 1024).toLocaleString('fa-IR')} KB)`
-            )
-          : []),
+        `صف پس‌زمینه تصاویر WebP: ${backgroundAvatarStats.queued.toLocaleString('fa-IR')} در صف | ${backgroundAvatarStats.completed.toLocaleString('fa-IR')} تکمیل‌شده`,
       ],
     });
-    if (localSummary.oversizedKeys.length > 0) {
-      recommendations.push(
-        `حجم جدول «${localSummary.oversizedKeys.map((o) => o.label).join('، ')}» از سقف ۴.۵ مگابایت Vercel عبور کرده است؛ فایل‌ها یا فونت‌های بسیار حجیم اضافی را کاهش دهید تا همگام‌سازی ابری کامل شود.`
-      );
-    }
     if (failedKeys.length > 0) {
       recommendations.push(
-        `در حال حاضر ${failedKeys.length.toLocaleString('fa-IR')} مورد در صف خطای ارسال قرار دارد؛ با کلیک روی «همگام‌سازی فوری به سرور» صف را تخلیه کنید.`
+        `در حال حاضر ${failedKeys.length.toLocaleString('fa-IR')} مورد در صف خطای ارسال قرار دارد؛ با کلیک روی «ارسال مجدد صف معوق» صف را تخلیه کنید.`
       );
     }
 
@@ -12316,7 +11774,7 @@ export const Storage = {
     const overallStatus: CloudDiagnosticCheckStatus = hasFail ? 'fail' : hasWarn ? 'warn' : 'pass';
 
     if (recommendations.length === 0) {
-      recommendations.push('تمام بخش‌های ارتباطی، پایگاه داده ابری، انتقال داده و صف‌های همگام‌سازی در وضعیت مطلوب قرار دارند.');
+      recommendations.push('اتصال به پایگاه داده Supabase، فضای ذخیره‌سازی avatars و تمام صف‌های همگام‌سازی در وضعیت کاملاً مطلوب قرار دارند.');
     }
 
     return {
@@ -12327,7 +11785,7 @@ export const Storage = {
       }),
       overallStatus,
       totalDurationMs,
-      apiBaseUrl: API_BASE_URL,
+      apiBaseUrl: SUPABASE_URL,
       serverHealthy,
       dbName,
       serverCounts,

@@ -285,6 +285,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 <img
                   src={student.photoUrl}
                   alt={student.fullName}
+                  loading="lazy"
+                  decoding="async"
                   className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl object-cover border-4 border-white/80 shadow-xl"
                 />
               ) : (

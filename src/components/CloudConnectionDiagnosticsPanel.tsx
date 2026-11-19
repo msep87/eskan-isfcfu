@@ -149,27 +149,27 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
       const summaryDetails: string[] = [
         `جداول همگام‌سازی‌شده: ${res.syncedCount.toLocaleString('fa-IR')} از ${res.totalCount.toLocaleString('fa-IR')} جدول سامانه`,
         `تنظیمات عمومی، لوگو، فونت‌ها و ظاهر سایت: ${res.settingsSynced ? 'منتقل و ثبت شد' : 'نیاز به بررسی'}`,
-        `هم‌ترازی کالکشن دانشجویان در MongoDB: ${
+        `هم‌ترازی جدول دانشجویان در Supabase: ${
           res.studentsMirroredCount > 0
             ? `${res.studentsMirroredCount.toLocaleString('fa-IR')} پرونده (${res.studentsMirrorOk ? 'کامل و موفق' : 'دارای خطا در بخشی از دسته‌ها'})`
             : 'بدون رکورد دانشجو'
         }`,
         `حجم کل منتقل‌شده: ${formatBytesFa(res.totalBytesSent)}${
-          res.latestRevision !== null ? ` | نسخه جدید سرور: #${String(res.latestRevision)}` : ''
+          res.latestRevision !== null ? ` | آخرین ثبت: ${String(res.latestRevision).slice(0, 19).replace('T', ' ')}` : ''
         }`,
       ];
 
       if (res.ok) {
         setActionMessage({
           ok: true,
-          text: `وضعیت فعلی تمام داده‌ها و تنظیمات سامانه با موفقیت به سرور ابری و پایگاه داده منتقل و ثبت شد؛ از این لحظه در تمام سیستم‌ها قابل مشاهده است.`,
+          text: `وضعیت فعلی تمام داده‌ها و تنظیمات سامانه با موفقیت به پایگاه داده ابری Supabase منتقل و ثبت شد؛ از این لحظه در تمام سیستم‌ها قابل مشاهده است.`,
           details: summaryDetails,
         });
       } else {
         const errParts: string[] = [];
         if (res.oversizedKeys.length > 0) {
           errParts.push(
-            `${res.oversizedKeys.length.toLocaleString('fa-IR')} جدول بزرگ‌تر از سقف ۴.۵MB`
+            `${res.oversizedKeys.length.toLocaleString('fa-IR')} جدول بیش از حد مجاز`
           );
         }
         const otherErrs = Math.max(0, res.failedKeys.length - res.oversizedKeys.length);
@@ -284,7 +284,7 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-              بررسی کامل ارتباط مرورگر با سرویس ابری و دیتابیس MongoDB Atlas، سرعت انتقال داده، وضعیت ۴۵ جدول همگام‌سازی و پایش ترافیک آنلاین.
+              بررسی کامل ارتباط مرورگر با پایگاه داده ابری Supabase (PostgreSQL) و فضای تصاویر avatars، سرعت انتقال داده، وضعیت جداول همگام‌سازی و پایش ترافیک آنلاین.
             </p>
           </div>
         </div>
@@ -344,7 +344,7 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
               انتقال وضعیت فعلی داده‌ها و تنظیمات به سرور ابری و دیتابیس
             </h4>
             <p className="text-xs text-indigo-800/85 dark:text-indigo-200/80 leading-relaxed">
-              با کلیک روی این دکمه، تمام داده‌ها و تنظیمات فعلی این سیستم (تنظیمات عمومی، لوگو و ظاهر سایت، تمامی کاربران کارکنان و سرپرستان، پرونده دانشجویان، سراها، اتاق‌ها، تخت‌ها و اطلاعیه‌ها) به‌صورت کامل به سرور ابری و پایگاه داده MongoDB منتقل و هم‌تراز می‌شوند تا در سایر سیستم‌ها نیز دقیقاً همین وضعیت نمایش داده شود.
+              با کلیک روی این دکمه، تمام داده‌ها و تنظیمات فعلی این سیستم (تنظیمات عمومی، لوگو و ظاهر سایت، تمامی کاربران کارکنان و سرپرستان، پرونده دانشجویان در دسته‌های ۲۰۰تایی، سراها، اتاق‌ها، تخت‌ها و اطلاعیه‌ها) به‌صورت کامل به پایگاه داده ابری Supabase منتقل و هم‌تراز می‌شوند تا در سایر سیستم‌ها نیز دقیقاً همین وضعیت نمایش داده شود.
             </p>
           </div>
         </div>
@@ -464,7 +464,7 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
 
         <div className="p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-1.5">
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400">
-            <span>دیتابیس MongoDB Atlas</span>
+            <span>دیتابیس Supabase (PostgreSQL)</span>
             <Database className="w-4 h-4 text-indigo-600" />
           </div>
           <div className="text-sm font-black text-slate-900 dark:text-white">
@@ -649,12 +649,12 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
             ))}
           </div>
 
-          {/* ممیزی حجم جداول نسبت به سقف ۴.۵ مگابایت Vercel */}
+          {/* ممیزی حجم جداول محلی در مقایسه با پایگاه داده ابری Supabase */}
           {localAudit.topKeys.length > 0 && (
             <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/80 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h4 className="font-extrabold text-xs text-slate-900 dark:text-white">
-                  پرحجم‌ترین جداول محلی در مقایسه با سقف مجاز ۴.۵ مگابایت هر درخواست در Vercel
+                  پرحجم‌ترین جداول سامانه (بدون محدودیت ۴.۵MB در Supabase)
                 </h4>
                 <span className="text-[11px] text-slate-500">
                   کل حجم محلی: {formatBytesFa(localAudit.totalBytesUtf8)}
@@ -667,28 +667,14 @@ export const CloudConnectionDiagnosticsPanel: React.FC<CloudConnectionDiagnostic
                       <span className="font-bold text-slate-700 dark:text-slate-200 truncate max-w-[65%]">
                         {item.label}
                       </span>
-                      <span
-                        className={`font-bold ${
-                          item.overLimit
-                            ? 'text-rose-600'
-                            : item.nearLimit
-                            ? 'text-amber-600'
-                            : 'text-slate-500 dark:text-slate-400'
-                        }`}
-                      >
-                        {formatBytesFa(item.bytesUtf8)} ({item.percentOfVercelLimit.toLocaleString('fa-IR')}٪ از سقف ۴.۵MB)
+                      <span className="font-bold text-slate-500 dark:text-slate-400">
+                        {formatBytesFa(item.bytesUtf8)}
                       </span>
                     </div>
                     <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${
-                          item.overLimit
-                            ? 'bg-rose-500'
-                            : item.nearLimit
-                            ? 'bg-amber-500'
-                            : 'bg-sky-500'
-                        }`}
-                        style={{ width: `${Math.min(100, Math.max(2, item.percentOfVercelLimit))}%` }}
+                        className="h-full rounded-full bg-sky-500"
+                        style={{ width: `${Math.min(100, Math.max(4, item.percentOfVercelLimit))}%` }}
                       />
                     </div>
                   </div>

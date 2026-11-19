@@ -2001,19 +2001,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             const failedCount = res.failedSyncKeys?.length || 0;
             const partialDetails: string[] = [];
             if (!res.cloudSynced) {
-              if (oversizedCount > 0) {
-                partialDetails.push(
-                  `${oversizedCount.toLocaleString('fa-IR')} مجموعه داده (از جمله تنظیمات/فایل‌های پیوست حجیم‌تر از سقف ۴.۵ مگابایت سرور ابری)`
-                );
-              }
               const otherFailed = Math.max(0, failedCount - oversizedCount);
-              if (otherFailed > 0 || oversizedCount === 0) {
-                partialDetails.push(
-                  otherFailed > 0
-                    ? `${otherFailed.toLocaleString('fa-IR')} جدول سامانه`
-                    : 'داده‌های سامانه'
-                );
-              }
+              partialDetails.push(
+                otherFailed > 0
+                  ? `${otherFailed.toLocaleString('fa-IR')} جدول سامانه`
+                  : 'داده‌های سامانه'
+              );
             }
             if (!res.studentsSynced) {
               partialDetails.push('فهرست دانشجویان');
@@ -2023,8 +2016,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 ? 'بازیابی کامل سامانه با موفقیت انجام شد'
                 : 'بازیابی نسخه پشتیبان JSON',
               message: fullySynced
-                ? `تمام اطلاعات، تنظیمات${res.restoredPhotosCount > 0 ? `، ${res.restoredPhotosCount.toLocaleString('fa-IR')} تصویر پروفایل (${res.uploadedPhotosToCloudCount.toLocaleString('fa-IR')} تصویر روی سرور ابری)` : ''}${res.restoredFilesCount > 0 ? ` و ${res.restoredFilesCount.toLocaleString('fa-IR')} فایل/فونت و رسانه` : ''} با موفقیت بازیابی و در سرور و دیتابیس ابری بازسازی شد.`
-                : `اطلاعات${res.restoredPhotosCount > 0 ? ` و ${res.restoredPhotosCount.toLocaleString('fa-IR')} تصویر (${res.uploadedPhotosToCloudCount.toLocaleString('fa-IR')} تصویر روی سرور ابری)` : ''} در مرورگر بازیابی شد، اما همگام‌سازی کامل با سرور ابری (${partialDetails.join(' و ')}) با خطا مواجه شد. لطفاً پس از اطمینان از به‌روزبودن سرویس khabgah-api و اتصال اینترنت دوباره بررسی فرمایید.`,
+                ? `تمام اطلاعات، تنظیمات${res.restoredPhotosCount > 0 ? `، ${res.restoredPhotosCount.toLocaleString('fa-IR')} تصویر پروفایل (${res.uploadedPhotosToCloudCount.toLocaleString('fa-IR')} تصویر در صف/فضای Supabase Storage)` : ''}${res.restoredFilesCount > 0 ? ` و ${res.restoredFilesCount.toLocaleString('fa-IR')} فایل/فونت و رسانه` : ''} با موفقیت بازیابی و در پایگاه داده ابری Supabase بازسازی شد.`
+                : `اطلاعات${res.restoredPhotosCount > 0 ? ` و ${res.restoredPhotosCount.toLocaleString('fa-IR')} تصویر` : ''} در مرورگر بازیابی شد، اما همگام‌سازی کامل با Supabase (${partialDetails.join(' و ')}) با خطا مواجه شد. لطفاً پس از اطمینان از اتصال اینترنت و دسترسی جداول Supabase دوباره بررسی فرمایید.`,
               tone: fullySynced ? 'success' : 'error',
             });
           } else {
@@ -3804,7 +3797,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <td className="py-3 px-3">
                             <div className="flex items-center gap-2">
                               {st.photoUrl ? (
-                                <img src={st.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
+                                <img src={st.photoUrl} alt={st.fullName} loading="lazy" decoding="async" className="w-8 h-8 rounded-full object-cover" />
                               ) : (
                                 <div
                                   className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs"

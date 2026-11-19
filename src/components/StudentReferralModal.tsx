@@ -385,6 +385,8 @@ export const StudentReferralModal: React.FC<StudentReferralModalProps> = ({
                 <img
                   src={student.photoUrl}
                   alt={student.fullName}
+                  loading="lazy"
+                  decoding="async"
                   className="w-11 h-11 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shrink-0"
                 />
               ) : (

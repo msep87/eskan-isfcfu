@@ -847,6 +847,8 @@ export const SupervisorRoomManager: React.FC<SupervisorRoomManagerProps> = ({
                               <img
                                 src={st.photoUrl}
                                 alt={st.fullName}
+                                loading="lazy"
+                                decoding="async"
                                 className={`w-10 h-10 rounded-xl object-cover shrink-0 transition ${
                                   isRepresentative
                                     ? 'ring-2 ring-purple-500 dark:ring-purple-400'

@@ -451,10 +451,16 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
         throw new Error(errMessage);
       }
 
-      const replyText =
+      const replyRaw =
         typeof data?.reply === 'string' && data.reply.trim()
-          ? data.reply.trim()
-          : 'پاسخی از سرویس هوشمند دریافت نشد. لطفاً سوال خود را مجدداً مطرح کنید.';
+          ? data.reply
+          : typeof data?.text === 'string' && data.text.trim()
+          ? data.text
+          : typeof data?.answer === 'string' && data.answer.trim()
+          ? data.answer
+          : '';
+      const replyText =
+        replyRaw.trim() || 'پاسخی از سرویس هوشمند دریافت نشد. لطفاً سوال خود را مجدداً مطرح کنید.';
 
       const rawSources: unknown[] = Array.isArray(data?.sources) ? data.sources : [];
       const cleanSources: GroundingSource[] = rawSources
@@ -482,11 +488,15 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (error: unknown) {
       const isTimeout = error instanceof Error && error.name === 'AbortError';
+      const rawErrMsg = error instanceof Error ? error.message : '';
+      const isNetworkOrCorsCrash =
+        /failed to fetch|networkerror|load failed|fetch/i.test(rawErrMsg);
+
       const fallbackMsg = isTimeout
         ? 'زمان پاسخ‌گویی سرور دستیار هوشمند به پایان رسید. لطفاً چند لحظه دیگر دوباره تلاش نمایید.'
-        : error instanceof Error && error.message
-        ? error.message
-        : 'امکان برقراری ارتباط با سرور دستیار هوشمند (khabgah-api) وجود ندارد. لطفاً مطمئن شوید مسیر /api/ai-chat در بک‌اند فعال شده است.';
+        : isNetworkOrCorsCrash || !rawErrMsg
+        ? 'امکان برقراری ارتباط با سرور دستیار هوشمند (khabgah-api.vercel.app) وجود ندارد. سرور بک‌اند در حال حاضر خطای راه‌اندازی (500 / FUNCTION_INVOCATION_FAILED) یا خطای شبکه/CORS دارد؛ لطفاً لاگ‌های Vercel و فایل server.js بک‌اند را بررسی و مجدداً دیپلوی نمایید.'
+        : rawErrMsg;
 
       setMessages((prev) => [
         ...prev,

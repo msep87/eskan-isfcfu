@@ -373,7 +373,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       if (!cloudRes.supported) {
         showToast(
           'error',
-          `عکس «${fullName}» فعلاً فقط در این مرورگر ثبت شد؛ برای نمایش در سیستم‌های دیگر، فایل جدید server.js را در بک‌اند khabgah-api قرار دهید.`
+          `عکس «${fullName}» فعلاً فقط در این مرورگر ثبت شد؛ دسترسی باکت avatars در Supabase Storage را بررسی نمایید.`
         );
       } else if (!cloudRes.ok || !syncRes.success) {
         showToast(
@@ -381,7 +381,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           cloudRes.errorMessage || `عکس «${fullName}» در مرورگر ثبت شد اما همگام‌سازی ابری با خطا مواجه گردید.`
         );
       } else {
-        showToast('success', `تصویر «${fullName}» با موفقیت در فضای ابری ذخیره و همگام‌سازی شد.`);
+        showToast('success', `تصویر «${fullName}» با فرمت سبک WebP در Supabase Storage ذخیره و همگام‌سازی شد.`);
       }
     } catch (err) {
       showToast('error', err instanceof Error ? err.message : 'خطا در پردازش تصویر.');
@@ -530,8 +530,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         setBatchPhotoStatus({
           type: syncRes.success ? 'success' : 'error',
           text: syncRes.success
-            ? `تعداد ${result.matchedCount} عکس با موفقیت در دیتابیس ابری (MongoDB) ذخیره شد و در همه سیستم‌ها قابل مشاهده است.`
-            : `عکس‌ها در سرور ذخیره شدند اما همگام‌سازی لیست با خطا مواجه شد.`,
+            ? `تعداد ${result.matchedCount} عکس با فرمت WebP در فضای ابری Supabase Storage ذخیره شد و در همه سیستم‌ها قابل مشاهده است.`
+            : `عکس‌ها در Supabase Storage ذخیره شدند اما همگام‌سازی لیست با خطا مواجه شد.`,
           unmatchedKeys: unmatchedKeys.slice(0, 12),
         });
       }
@@ -539,7 +539,6 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     }
 
     if (!cloudRes.supported) {
-      // سرور بک‌اند هنوز مسیر /api/photos/batch را ندارد: تلاش برای ذخیره موقت محلی با هشدار صریح
       const result =
         targetRole === 'student'
           ? Storage.batchAssignStudentPhotos(compressedMap)
@@ -550,13 +549,13 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       if (!result.saved) {
         setBatchPhotoStatus({
           type: 'error',
-          text: 'مسیر ذخیره ابری عکس‌ها (/api/photos/batch) در سرور khabgah-api فعال نیست و حافظه مرورگر نیز ظرفیت ذخیره مستقیم این تصاویر را ندارد. لطفاً فایل server.js بک‌اند را بروزرسانی کنید.',
+          text: 'دسترسی به باکت avatars در Supabase Storage برقرار نشد و حافظه مرورگر نیز ظرفیت ذخیره مستقیم این تصاویر را ندارد.',
           unmatchedKeys: unmatchedKeys.slice(0, 12),
         });
       } else {
         setBatchPhotoStatus({
           type: syncRes.success ? 'error' : 'error',
-          text: `هشدار: ${result.matchedCount} عکس فقط در مرورگر فعلی ثبت شد و برای مشاهده در سیستم‌های دیگر باید فایل جدید server.js (شامل /api/photos/batch) را در بک‌اند khabgah-api جایگزین کنید.`,
+          text: `هشدار: ${result.matchedCount} عکس فقط در مرورگر فعلی ثبت شد؛ لطفاً دسترسی باکت avatars را در Supabase بررسی کنید.`,
           unmatchedKeys: unmatchedKeys.slice(0, 12),
         });
       }
@@ -567,7 +566,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       type: 'error',
       text:
         cloudRes.errorMessage ||
-        'بارگذاری تصاویر در فضای ابری با خطا مواجه شد. لطفاً اتصال اینترنت و وضعیت سرور khabgah-api را بررسی کنید.',
+        'بارگذاری تصاویر در Supabase Storage با خطا مواجه شد. لطفاً اتصال اینترنت و دسترسی باکت avatars را بررسی کنید.',
       unmatchedKeys: unmatchedKeys.slice(0, 12),
     });
   };

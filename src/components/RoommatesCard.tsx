@@ -327,6 +327,8 @@ export const RoommatesCard: React.FC<RoommatesCardProps> = ({
                     <img
                       src={rm.photoUrl}
                       alt={rm.fullName}
+                      loading="lazy"
+                      decoding="async"
                       className="w-16 h-16 rounded-2xl object-cover border-2 border-slate-200 dark:border-slate-700 shadow-sm shrink-0"
                     />
                   ) : (

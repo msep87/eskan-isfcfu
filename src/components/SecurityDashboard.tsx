@@ -1410,6 +1410,8 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                   <img
                     src={dossierStudent.photoUrl}
                     alt={dossierStudent.fullName}
+                    loading="lazy"
+                    decoding="async"
                     className="w-14 h-14 rounded-2xl object-cover border-2 border-white/30 shrink-0"
                   />
                 ) : (
