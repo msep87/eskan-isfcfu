@@ -208,6 +208,20 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
     }
   }, [isOpen, storageTickKey]);
 
+  const isCommuter = getStudentResidenceType(student) === 'commuter';
+
+  const allowedMeals = useMemo<{ key: MealKey; label: string }[]>(
+    () =>
+      isCommuter
+        ? [{ key: 'lunch', label: 'ناهار' }]
+        : [
+            { key: 'breakfast', label: 'صبحانه' },
+            { key: 'lunch', label: 'ناهار' },
+            { key: 'dinner', label: 'شام' },
+          ],
+    [isCommuter]
+  );
+
   const persistTicks = (next: Record<string, boolean>) => {
     setMealTicks(next);
     try {
@@ -218,6 +232,7 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
   };
 
   const toggleMealTick = (day: number, meal: MealKey) => {
+    if (isCommuter && meal !== 'lunch') return;
     const key = `${day}_${meal}`;
     const next = { ...mealTicks, [key]: !mealTicks[key] };
     if (!next[key]) delete next[key];
@@ -255,13 +270,17 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
   }, [student.studentId, selectedYear, selectedMonth]);
 
   const qrMatrix = useMemo(() => {
-    const payload = `CFU-ISFAHAN|MEAL-CARD|COLINAN-EXEMPT|ID:${student.studentId}|NID:${student.nationalId}|Y:${selectedYear}|M:${selectedMonth}|CODE:${verificationCode}`;
+    const mealScope = isCommuter ? 'COMMUTER-LUNCH-ONLY' : 'DORM-3MEALS';
+    const payload = `CFU-ISFAHAN|MEAL-CARD|COLINAN-EXEMPT|${mealScope}|ID:${student.studentId}|NID:${student.nationalId}|Y:${selectedYear}|M:${selectedMonth}|CODE:${verificationCode}`;
     return buildDeterministicQrMatrix(payload);
-  }, [student.studentId, student.nationalId, selectedYear, selectedMonth, verificationCode]);
+  }, [isCommuter, student.studentId, student.nationalId, selectedYear, selectedMonth, verificationCode]);
 
   const tickedCount = useMemo(
-    () => Object.values(mealTicks).filter(Boolean).length,
-    [mealTicks]
+    () =>
+      Object.entries(mealTicks).filter(
+        ([key, val]) => Boolean(val) && (!isCommuter || key.endsWith('_lunch'))
+      ).length,
+    [mealTicks, isCommuter]
   );
 
   if (!isOpen) return null;
@@ -271,7 +290,7 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
       Storage.addActivityLog({
         category: 'student',
         action: 'صدور کارت تغذیه موقت یک‌ماهه (کالینان)',
-        details: `کارت تغذیه سلف ویژه استثناء اثر انگشت کالینان برای ${student.fullName} (${student.studentId}) جهت ماه ${monthInfo.name} ${toFaDigits(selectedYear)} با کد رهگیری ${verificationCode} صادر شد.`,
+        details: `کارت تغذیه سلف (${isCommuter ? 'ترددی - صرفاً ناهار' : 'خوابگاهی - ۳ وعده'}) ویژه استثناء اثر انگشت کالینان برای ${student.fullName} (${student.studentId}) جهت ماه ${monthInfo.name} ${toFaDigits(selectedYear)} با کد رهگیری ${verificationCode} صادر شد.`,
         targetName: `${student.fullName} (${student.studentId})`,
         severity: 'info',
       });
@@ -346,9 +365,20 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200 border border-rose-200 dark:border-rose-800">
                   اعتبار فقط ۱ ماه
                 </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-black border ${
+                    isCommuter
+                      ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200 border-sky-200 dark:border-sky-800'
+                      : 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-200 border-teal-200 dark:border-teal-800'
+                  }`}
+                >
+                  {isCommuter ? 'ترددی • صرفاً وعده ناهار' : 'خوابگاهی • ۳ وعده'}
+                </span>
               </h3>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                ویژه دانشجویان با عدم تشخیص اثر انگشت و مسدودیت کاربری در سامانه کالینان • دارای QR اختصاصی، محل مهر سرپرستی و جدول ۳ وعده روزانه
+                {isCommuter
+                  ? 'ویژه دانشجوی ترددی با عدم تشخیص اثر انگشت در سامانه کالینان • دارای QR اختصاصی، محل مهر سرپرستی و جدول صرفاً وعده ناهار (بدون صبحانه و شام)'
+                  : 'ویژه دانشجویان خوابگاهی با عدم تشخیص اثر انگشت و مسدودیت کاربری در سامانه کالینان • دارای QR اختصاصی، محل مهر سرپرستی و جدول ۳ وعده روزانه'}
               </p>
             </div>
           </div>
@@ -458,7 +488,9 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px]">
             <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-100/80 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 font-bold border border-amber-200 dark:border-amber-800">
-                تعداد روزهای پشت کارت: {toFaDigits(daysInMonth)} روز × ۳ وعده (صبحانه، ناهار، شام)
+                {isCommuter
+                  ? `تعداد روزهای پشت کارت: ${toFaDigits(daysInMonth)} روز × ۱ وعده (صرفاً ناهار — دانشجوی ترددی)`
+                  : `تعداد روزهای پشت کارت: ${toFaDigits(daysInMonth)} روز × ۳ وعده (صبحانه، ناهار، شام)`}
               </span>
               {tickedCount > 0 && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 font-bold">
@@ -536,7 +568,9 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
                         دانشگاه فرهنگیان استان اصفهان
                       </h4>
                       <p className="text-[10px] font-extrabold text-amber-800 truncate">
-                        کارت تغذیه موقت سلف • استثناء اثر انگشت کالینان
+                        {isCommuter
+                          ? 'کارت تغذیه موقت سلف (ترددی • فقط ناهار) • استثناء کالینان'
+                          : 'کارت تغذیه موقت سلف • استثناء اثر انگشت کالینان'}
                       </p>
                     </div>
                   </div>
@@ -599,11 +633,11 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
                     <div className="text-[10px] truncate">
                       <span className="text-slate-500 font-semibold">سرا و وضعیت سکونت: </span>
                       <span className="font-bold text-teal-800">
-                        {dorm && room
-                          ? `${getStudentResidenceType(student) === 'dormitory' ? 'خوابگاهی' : 'ترددی'} • ${dorm.name} • اتاق ${room.roomNumber}${bed ? ` (${bed.label})` : ''}`
-                          : getStudentResidenceType(student) === 'dormitory'
-                          ? 'خوابگاهی (فاقد اتاق)'
-                          : 'ترددی (غیرخوابگاهی)'}
+                        {isCommuter
+                          ? 'ترددی (غیرخوابگاهی • صرفاً وعده ناهار)'
+                          : dorm && room
+                          ? `خوابگاهی • ${dorm.name} • اتاق ${room.roomNumber}${bed ? ` (${bed.label})` : ''}`
+                          : 'خوابگاهی (فاقد اتاق)'}
                       </span>
                     </div>
 
@@ -658,7 +692,9 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
                       <span>اعتبار: ۱ تا {toFaDigits(daysInMonth)} {monthInfo.name} {toFaDigits(selectedYear)}</span>
                     </div>
                     <p className="text-[8.5px] text-slate-600">
-                      ارائه این کارت ممهور، جهت تحویل غذا در سلف برای دانشجوی فاقد اثر انگشت در کالینان صرفاً طی ماه درج‌شده معتبر است.
+                      {isCommuter
+                        ? 'ارائه این کارت ممهور، ویژه دانشجوی ترددی بوده و صرفاً جهت دریافت وعده ناهار (بدون صبحانه و شام) طی ماه درج‌شده معتبر است.'
+                        : 'ارائه این کارت ممهور، جهت تحویل غذا در سلف برای دانشجوی فاقد اثر انگشت در کالینان صرفاً طی ماه درج‌شده معتبر است.'}
                     </p>
                   </div>
 
@@ -680,7 +716,11 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
             <div className="flex flex-col items-center gap-1.5 w-full">
               <div className="dining-print-cut-label text-[11px] font-extrabold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-teal-500 print:hidden" />
-                <span>پشت کارت (جدول {toFaDigits(daysInMonth)} روز ماه و تیک دریافت سه وعده در سلف)</span>
+                <span>
+                  {isCommuter
+                    ? `پشت کارت (جدول ${toFaDigits(daysInMonth)} روز ماه و تیک دریافت وعده ناهار — دانشجوی ترددی)`
+                    : `پشت کارت (جدول ${toFaDigits(daysInMonth)} روز ماه و تیک دریافت سه وعده در سلف)`}
+                </span>
               </div>
 
               <div
@@ -691,7 +731,9 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
                 <div className="flex items-center justify-between gap-2 pb-1.5 border-b-2 border-slate-800">
                   <div className="min-w-0">
                     <h4 className="font-black text-[11px] text-slate-950 truncate">
-                      جدول دریافت سه وعده غذایی در سلف — {monthInfo.name} {toFaDigits(selectedYear)}
+                      {isCommuter
+                        ? `جدول دریافت وعده ناهار در سلف (دانشجوی ترددی) — ${monthInfo.name} ${toFaDigits(selectedYear)}`
+                        : `جدول دریافت سه وعده غذایی در سلف — ${monthInfo.name} ${toFaDigits(selectedYear)}`}
                     </h4>
                     <div className="text-[9.5px] font-bold text-slate-600 truncate">
                       {student.fullName} • ک.د: <span className="font-mono" dir="ltr">{student.studentId}</span>
@@ -705,7 +747,7 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
                   </span>
                 </div>
 
-                {/* شبکه سه‌ستونه روزهای ماه با سه وعده (صبحانه، ناهار، شام) در برابر هر روز */}
+                {/* شبکه سه‌ستونه روزهای ماه با وعده‌های مجاز (خوابگاهی: صبحانه، ناهار، شام | ترددی: صرفاً ناهار) */}
                 <div className="grid grid-cols-3 gap-1.5 my-1.5 flex-1 items-start">
                   {dayColumns.map((colDays, colIndex) => (
                     <table
@@ -714,52 +756,47 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
                     >
                       <thead>
                         <tr className="bg-amber-100 text-slate-900 text-[8.5px] font-black">
-                          <th className="border border-slate-400 py-0.5 px-0.5 w-[22px]">روز</th>
-                          <th className="border border-slate-400 py-0.5 px-0.5">صبحانه</th>
-                          <th className="border border-slate-400 py-0.5 px-0.5">ناهار</th>
-                          <th className="border border-slate-400 py-0.5 px-0.5">شام</th>
+                          <th className="border border-slate-400 py-0.5 px-0.5 w-[24px]">روز</th>
+                          {allowedMeals.map((meal) => (
+                            <th key={meal.key} className="border border-slate-400 py-0.5 px-0.5">
+                              {meal.label}
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {colDays.map((day) => {
-                          const meals: { key: MealKey; label: string }[] = [
-                            { key: 'breakfast', label: 'صبحانه' },
-                            { key: 'lunch', label: 'ناهار' },
-                            { key: 'dinner', label: 'شام' },
-                          ];
-                          return (
-                            <tr
-                              key={day}
-                              className={day % 2 === 0 ? 'bg-slate-50/90' : 'bg-white'}
-                            >
-                              <td className="border border-slate-300 py-[2px] px-0.5 text-[9px] font-black text-slate-800 tabular-nums">
-                                {toFaDigits(day)}
-                              </td>
-                              {meals.map((meal) => {
-                                const isChecked = Boolean(mealTicks[`${day}_${meal.key}`]);
-                                return (
-                                  <td
-                                    key={meal.key}
-                                    className="border border-slate-300 p-[1px] text-center align-middle"
+                        {colDays.map((day) => (
+                          <tr
+                            key={day}
+                            className={day % 2 === 0 ? 'bg-slate-50/90' : 'bg-white'}
+                          >
+                            <td className="border border-slate-300 py-[2px] px-0.5 text-[9px] font-black text-slate-800 tabular-nums">
+                              {toFaDigits(day)}
+                            </td>
+                            {allowedMeals.map((meal) => {
+                              const isChecked = Boolean(mealTicks[`${day}_${meal.key}`]);
+                              return (
+                                <td
+                                  key={meal.key}
+                                  className="border border-slate-300 p-[1px] text-center align-middle"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleMealTick(day, meal.key)}
+                                    title={`روز ${toFaDigits(day)} ${monthInfo.name} — ${meal.label}`}
+                                    className={`mx-auto w-[13px] h-[13px] rounded-[2px] border flex items-center justify-center transition cursor-pointer ${
+                                      isChecked
+                                        ? 'bg-emerald-600 border-emerald-700 text-white'
+                                        : 'bg-white border-slate-600 hover:border-amber-600'
+                                    }`}
                                   >
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleMealTick(day, meal.key)}
-                                      title={`روز ${toFaDigits(day)} ${monthInfo.name} — ${meal.label}`}
-                                      className={`mx-auto w-[13px] h-[13px] rounded-[2px] border flex items-center justify-center transition cursor-pointer ${
-                                        isChecked
-                                          ? 'bg-emerald-600 border-emerald-700 text-white'
-                                          : 'bg-white border-slate-600 hover:border-amber-600'
-                                      }`}
-                                    >
-                                      {isChecked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                                    </button>
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
+                                    {isChecked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                                  </button>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   ))}
@@ -768,7 +805,9 @@ export const DiningMealCardModal: React.FC<DiningMealCardModalProps> = ({
                 {/* پاورقی پشت کارت */}
                 <div className="pt-1 border-t border-slate-300 flex items-center justify-between gap-2 text-[8.5px] font-bold text-slate-700">
                   <span>
-                    هنگام تحویل هر وعده در سلف، مربع مربوط به همان روز تیک زده شود.
+                    {isCommuter
+                      ? 'ویژه دانشجوی ترددی: صرفاً وعده ناهار مجاز است (صبحانه و شام ندارد).'
+                      : 'هنگام تحویل هر وعده در سلف، مربع مربوط به همان روز تیک زده شود.'}
                   </span>
                   <span className="shrink-0 text-rose-700 font-black">
                     اعتبار: فقط {monthInfo.name} {toFaDigits(selectedYear)}
