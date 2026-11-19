@@ -107,6 +107,8 @@ export type MessageCategory =
   | 'cultural' // امور فرهنگی، فوق‌برنامه، تشکل‌ها و انجمن‌های دانشجویی
   | 'student_affairs' // امور دانشجویی، تربیت بدنی، شورای صنفی و شورای انضباطی
   | 'security' // امور حراست، انتظامات و گزارش‌های حفاظتی
+  | 'library' // امور کتابخانه، پژوهش و امانت کتب
+  | 'smart_campus' // امور هوشمندسازی، کارت هوشمند و سامانه‌ها
   | 'accommodation' // امور اسکان و انتخاب اتاق
   | 'maintenance' // خرابی تأسیسات و تعمیرات
   | 'services_cleaning' // خدمات، نظافت و بهداشت سرا
@@ -121,7 +123,7 @@ export type MessageCategory =
 export interface MessageReply {
   id: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus';
   content: string;
   date: string;
 }
@@ -130,8 +132,8 @@ export interface Message {
   id: string;
   senderId: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean';
-  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'all';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus';
+  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'all';
   receiverId?: string;
   receiverName?: string;
   targetScope?: 'single' | 'field' | 'entry_term';
@@ -298,6 +300,36 @@ export interface ViceDeanStaff {
   notes?: string;
 }
 
+export interface LibraryStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل مسئول کتابخانه و پژوهش
+  department?: string; // واحد کتابخانه و پژوهش
+  role: 'library';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
+export interface SmartCampusStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل کاربر هوشمندسازی
+  department?: string; // واحد هوشمندسازی و فناوری اطلاعات
+  role: 'smart_campus';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
 export type SecurityReportCategory =
   | 'disciplinary_incident'
   | 'curfew_entry_exit'
@@ -332,7 +364,9 @@ export type StaffReferralActorRole =
   | 'finance'
   | 'education'
   | 'cultural'
-  | 'maintenance';
+  | 'maintenance'
+  | 'library'
+  | 'smart_campus';
 
 export interface SecurityReport {
   id: string;
@@ -681,6 +715,8 @@ export type CurrentUser =
   | { role: 'student_affairs'; staff: StudentAffairsStaff }
   | { role: 'security'; staff: SecurityStaff }
   | { role: 'vice_dean'; staff: ViceDeanStaff }
+  | { role: 'library'; staff: LibraryStaff }
+  | { role: 'smart_campus'; staff: SmartCampusStaff }
   | null;
 
 export type DayOfWeek = 'saturday' | 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
@@ -785,7 +821,10 @@ export type ActivityLogCategory =
   | 'settings'
   | 'backup'
   | 'excel'
-  | 'counseling';
+  | 'counseling'
+  | 'library'
+  | 'smart_campus'
+  | 'graduation_clearance';
 
 export type GuestEligibilityType =
   | 'first_degree_relative'
@@ -854,7 +893,7 @@ export interface ActivityLog {
   timestamp: string; // ISO string برای مرتب‌سازی دقیق
   date: string; // تاریخ و ساعت شمسی خوانا
   actorName: string;
-  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'system';
+  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'system';
   actorUsername?: string;
   category: ActivityLogCategory;
   action: string;
@@ -880,8 +919,10 @@ export interface StudentEvaluation {
   summonsSchedule?: string; // زمان/موعد مراجعه فراخوانی
   title: string;
   description: string;
+  severity?: 'low' | 'medium' | 'high';
+  evaluatorId?: string;
   evaluatorName: string;
-  evaluatorRole: 'admin' | 'supervisor';
+  evaluatorRole: 'admin' | 'supervisor' | 'smart_campus' | 'library';
   date: string;
   resolved?: boolean;
   resolvedAt?: string;
@@ -1223,5 +1264,116 @@ export interface SportsRegistration {
   registeredAt: string;
   updatedAt?: string;
 }
+
+// -------------------------------------------------------------
+// کتابخانه و پژوهش: فهرست کتب، امانت و درخواست کتاب
+// -------------------------------------------------------------
+export interface LibraryBook {
+  id: string;
+  code: string; // کد کتاب / شماره راهنما مثلاً BK-101
+  title: string;
+  author: string;
+  isbn?: string;
+  category: string; // موضوع / دسته‌بندی
+  publisher?: string;
+  publishYear?: string;
+  totalCopies: number;
+  availableCopies: number;
+  shelfLocation?: string; // ردیف و قفسه
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type LibraryBookRequestStatus = 'pending' | 'approved' | 'rejected' | 'returned';
+
+export interface LibraryBookRequest {
+  id: string;
+  requestCode: string; // مثلاً LIB-101
+  bookId: string;
+  bookCode?: string;
+  bookTitle: string;
+  bookAuthor?: string;
+  studentId: string;
+  studentName: string;
+  studentFieldOfStudy?: string;
+  studentEntryTerm?: string;
+  studentPhone?: string;
+  requestedAt: string;
+  status: LibraryBookRequestStatus;
+  requestNote?: string;
+  approvedAt?: string;
+  dueDate?: string; // تاریخ موعد بازگشت (شمسی)
+  returnedAt?: string;
+  librarianId?: string;
+  librarianName?: string;
+  librarianNote?: string;
+  rejectionReason?: string;
+}
+
+// -------------------------------------------------------------
+// تسویه حساب الکترونیک فراغت از تحصیل دانشجویان
+// -------------------------------------------------------------
+export type ClearanceUnitRole =
+  | 'education'
+  | 'supervisor'
+  | 'finance'
+  | 'library'
+  | 'smart_campus'
+  | 'student_affairs'
+  | 'cultural'
+  | 'counselor'
+  | 'security'
+  | 'warehouse'
+  | 'maintenance'
+  | 'vice_dean';
+
+export type ClearanceUnitDecisionStatus = 'pending' | 'approved' | 'rejected';
+
+export interface ClearanceUnitApproval {
+  unitRole: ClearanceUnitRole;
+  unitLabel: string;
+  status: ClearanceUnitDecisionStatus;
+  reviewerId?: string;
+  reviewerName?: string;
+  reviewedAt?: string;
+  note?: string;
+  resubmittedAt?: string;
+}
+
+export type GraduationClearanceStatus =
+  | 'pending_education'
+  | 'rejected_education'
+  | 'in_clearance'
+  | 'completed';
+
+export interface GraduationClearanceRequest {
+  id: string;
+  trackingCode: string; // مثلاً CLR-101
+  studentId: string;
+  studentName: string;
+  studentNationalId?: string;
+  studentFatherName?: string;
+  studentFieldOfStudy: string;
+  studentEntryTerm: string;
+  studentPhone: string;
+  studentPhotoUrl?: string;
+  dormName?: string;
+  roomNumber?: string;
+  graduationAcademicYear: string;
+  graduationSemester: string;
+  studentNote?: string;
+  requestedAt: string;
+  updatedAt: string;
+  status: GraduationClearanceStatus;
+  educationGateStatus: ClearanceUnitDecisionStatus;
+  educationReviewerId?: string;
+  educationReviewerName?: string;
+  educationReviewedAt?: string;
+  educationNote?: string;
+  units: Record<ClearanceUnitRole, ClearanceUnitApproval>;
+  completedAt?: string;
+}
+
 
 

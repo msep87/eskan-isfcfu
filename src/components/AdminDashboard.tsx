@@ -34,6 +34,8 @@ import {
   AcademicStatusNotice,
   SecurityStaff,
   ViceDeanStaff,
+  LibraryStaff,
+  SmartCampusStaff,
   AboutCapabilityItem,
   AboutAttachmentFile,
   AboutContentSettings,
@@ -68,6 +70,7 @@ import { AdminUsersPanel, UserCategoryKey } from './AdminUsersPanel';
 import { AdminSurveyManager } from './AdminSurveyManager';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { CloudConnectionDiagnosticsPanel } from './CloudConnectionDiagnosticsPanel';
+import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { getStudentResidenceType } from '../utils/financeUtils';
 import { normSearchText } from '../utils/studentSearchSort';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
@@ -215,7 +218,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   focusAboutEditorTick = 0,
 }) => {
   // تب‌های اصلی داشبورد مدیر
-  const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'warehouse' | 'shifts' | 'counseling' | 'surveys' | 'activity_log' | 'settings'>('cartable');
+  const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'warehouse' | 'shifts' | 'counseling' | 'surveys' | 'clearance' | 'activity_log' | 'settings'>('cartable');
   const [usersCategory, setUsersCategory] = useState<UserCategoryKey>('students');
 
   // وضعیت مشاهده فقط-خواندنی انبار و کارپردازی برای مدیر کل
@@ -280,6 +283,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [studentAffairsStaffList, setStudentAffairsStaffList] = useState<StudentAffairsStaff[]>(Storage.getStudentAffairsStaff());
   const [securityStaffList, setSecurityStaffList] = useState<SecurityStaff[]>(Storage.getSecurityStaff());
   const [viceDeanStaffList, setViceDeanStaffList] = useState<ViceDeanStaff[]>(Storage.getViceDeanStaff());
+  const [libraryStaffList, setLibraryStaffList] = useState<LibraryStaff[]>(Storage.getLibraryStaff());
+  const [smartCampusStaffList, setSmartCampusStaffList] = useState<SmartCampusStaff[]>(Storage.getSmartCampusStaff());
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
   const [academicNotices, setAcademicNotices] = useState<AcademicStatusNotice[]>(Storage.getAcademicNotices());
   const [academicNoticeFilter, setAcademicNoticeFilter] = useState<'all' | 'pending' | 'reviewed' | 'action_taken'>('all');
@@ -295,6 +300,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStudentAffairsStaffList(Storage.getStudentAffairsStaff());
     setSecurityStaffList(Storage.getSecurityStaff());
     setViceDeanStaffList(Storage.getViceDeanStaff());
+    setLibraryStaffList(Storage.getLibraryStaff());
+    setSmartCampusStaffList(Storage.getSmartCampusStaff());
     setAcademicNotices(Storage.getAcademicNotices());
     onRefreshData();
   };
@@ -317,6 +324,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStudentAffairsStaffList(Storage.getStudentAffairsStaff());
     setSecurityStaffList(Storage.getSecurityStaff());
     setViceDeanStaffList(Storage.getViceDeanStaff());
+    setLibraryStaffList(Storage.getLibraryStaff());
+    setSmartCampusStaffList(Storage.getSmartCampusStaff());
     setAcademicNotices(Storage.getAcademicNotices());
   }, [cloudSyncTick]);
 
@@ -2301,7 +2310,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <Users className="w-4 h-4 text-teal-600" />
           <span>مدیریت کاربران سامانه</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
-            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length + educationStaffList.length + culturalStaffList.length + studentAffairsStaffList.length + securityStaffList.length + viceDeanStaffList.length}
+            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length + educationStaffList.length + culturalStaffList.length + studentAffairsStaffList.length + securityStaffList.length + viceDeanStaffList.length + libraryStaffList.length + smartCampusStaffList.length}
           </span>
         </button>
 
@@ -2421,6 +2430,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )}
         </button>
 
+        {/* ۷-ج. تب نظارت و پیگیری تسویه حساب فارغ‌التحصیلان */}
+        <button
+          onClick={() => setMainTab('clearance')}
+          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
+            mainTab === 'clearance'
+              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-md'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4 text-sky-600" />
+          <span>تسویه حساب فارغ‌التحصیلان</span>
+          {Storage.getGraduationClearances().filter((c) => c.status === 'pending_education' || c.status === 'in_clearance').length > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 font-extrabold">
+              {Storage.getGraduationClearances().filter((c) => c.status === 'pending_education' || c.status === 'in_clearance').length} در جریان
+            </span>
+          )}
+        </button>
+
         {/* ۸. تب گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران */}
         <button
           onClick={() => {
@@ -2477,6 +2504,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           studentAffairsStaff={studentAffairsStaffList}
           securityStaff={securityStaffList}
           viceDeanStaff={viceDeanStaffList}
+          libraryStaff={libraryStaffList}
+          smartCampusStaff={smartCampusStaffList}
           onRefreshData={handleUsersRefresh}
           onOpenExcelModal={onOpenExcelModal}
           onOpenReports={onOpenReports}
@@ -2494,8 +2523,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           studentSecondaryEditEnabled={Boolean(localSettings.studentSecondaryEditEnabled)}
           onToggleStudentSecondaryEdit={handleToggleStudentSecondaryEdit}
           actorId="admin"
-          actorName="مدیریت کل امور سراها"
+          actorName="مدیر کل سامانه"
           actorRole="admin"
+        />
+      )}
+
+      {/* بخش نظارت و مدیریت تسویه حساب فارغ‌التحصیلان */}
+      {mainTab === 'clearance' && (
+        <GraduationClearanceReviewPanel
+          unitRole="admin"
+          reviewerId="admin"
+          reviewerName="مدیر کل سامانه"
+          settings={localSettings}
+          onDataChange={onRefreshData}
         />
       )}
 
@@ -6690,6 +6730,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { key: 'student_affairs' as const, label: `امور دانشجویی (${studentAffairsStaffList.length})` },
                 { key: 'security' as const, label: `حراست (${securityStaffList.length})` },
                 { key: 'vice_dean' as const, label: `معاونت دانشجویی (${viceDeanStaffList.length})` },
+                { key: 'library' as const, label: `کتابخانه و پژوهش (${libraryStaffList.length})` },
+                { key: 'smart_campus' as const, label: `واحد هوشمندسازی (${smartCampusStaffList.length})` },
               ].map((item) => (
                 <button
                   key={item.key}
@@ -7469,9 +7511,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/15 text-[10px] font-bold border border-white/20">
                           {localSettings.universityName}
                         </div>
-                        <div className="text-base font-black">سامانه جامع سراهای دانشجویی</div>
+                        <div className="text-base font-black">سامانه جامع امور دانشجویی</div>
                         <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white text-teal-900 text-[10px] font-extrabold shadow">
-                          ورود به سامانه سراها
+                          ورود به سامانه جامع
                         </div>
                       </div>
                       <Building2 className="w-20 h-20 text-white/20 relative z-10 shrink-0" />

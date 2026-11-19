@@ -31,6 +31,8 @@ import { StudentProfileModal } from './StudentProfileModal';
 import { DormIdCardModal } from './DormIdCardModal';
 import { StudentGuestRequestPanel } from './StudentGuestRequestPanel';
 import { StudentSurveyPanel } from './StudentSurveyPanel';
+import { StudentLibraryPanel } from './StudentLibraryPanel';
+import { StudentGraduationClearancePanel } from './StudentGraduationClearancePanel';
 import { RichTextDisplay } from './RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
 import {
@@ -95,7 +97,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onOpenUserGuide,
 }) => {
   // تب‌های داشبورد
-  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections' | 'library' | 'clearance'>('overview');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isIdCardModalOpen, setIsIdCardModalOpen] = useState(false);
   const [previewAnnImage, setPreviewAnnImage] = useState<string | null>(null);
@@ -206,6 +208,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const openSportsCount = publishedSportsPrograms.filter(
     (p) => p.status === 'registration_open' || p.status === 'ongoing'
   ).length;
+
+  const myActiveLibraryLoansCount = Storage.getLibraryBookRequests().filter(
+    (r) => r.studentId === student.studentId && (r.status === 'approved' || r.status === 'pending')
+  ).length;
+
+  const myClearance = Storage.getGraduationClearances().find((c) => c.studentId === student.studentId);
 
   return (
     <div className="space-y-6">
@@ -604,6 +612,46 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('library')}
+          className={`flex-1 min-w-[190px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+            activeTab === 'library'
+              ? 'bg-amber-600 text-white shadow-amber-600/20'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <BookOpen className={`w-4 h-4 ${activeTab === 'library' ? 'text-white' : 'text-amber-600'}`} />
+          <span>کتابخانه و پژوهش</span>
+          {myActiveLibraryLoansCount > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300 font-black">
+              {myActiveLibraryLoansCount} فعال
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('clearance')}
+          className={`flex-1 min-w-[200px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+            activeTab === 'clearance'
+              ? 'bg-sky-700 text-white shadow-sky-700/20'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <GraduationCap className={`w-4 h-4 ${activeTab === 'clearance' ? 'text-white' : 'text-sky-600'}`} />
+          <span>تسویه حساب فراغت از تحصیل</span>
+          {myClearance && (
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+              myClearance.status === 'completed'
+                ? 'bg-emerald-500 text-white'
+                : myClearance.status === 'rejected_education'
+                ? 'bg-rose-500 text-white'
+                : 'bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300'
+            }`}>
+              {myClearance.status === 'completed' ? 'تکمیل (آماده چاپ)' : myClearance.status === 'rejected_education' ? 'نیازمند اصلاح' : 'در جریان'}
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setIsIdCardModalOpen(true)}
           className="py-3.5 px-5 rounded-2xl bg-gradient-to-r from-teal-700 to-cyan-700 hover:from-teal-800 hover:to-cyan-800 text-white font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-teal-700/20 hover:scale-105"
         >
@@ -903,8 +951,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                       </div>
                       <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white">{ev.title}</h4>
                       <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{ev.description}</p>
-                      <div className="text-[10px] text-slate-400">
-                        ثبت‌کننده: {ev.evaluatorName} • تاریخ: {ev.date}
+                      <div className="text-[10px] text-slate-400 flex flex-wrap items-center gap-1.5">
+                        <span>ثبت‌کننده: {ev.evaluatorName}</span>
+                        {ev.evaluatorRole === 'smart_campus' && (
+                          <span className="px-1.5 py-0.5 rounded bg-cyan-100 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 font-bold">
+                            واحد هوشمندسازی
+                          </span>
+                        )}
+                        {ev.evaluatorRole === 'library' && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-bold">
+                            کتابخانه و پژوهش
+                          </span>
+                        )}
+                        <span>• تاریخ: {ev.date}</span>
                       </div>
                     </div>
                   </div>
@@ -1898,6 +1957,22 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {/* تب کتابخانه و پژوهش دانشجو */}
+      {activeTab === 'library' && (
+        <StudentLibraryPanel student={student} onDataChange={onRefreshData} />
+      )}
+
+      {/* تب تسویه حساب الکترونیک فراغت از تحصیل */}
+      {activeTab === 'clearance' && (
+        <StudentGraduationClearancePanel
+          student={student}
+          dormName={studentDorm?.name || student.assignedDormName}
+          roomNumber={studentRoom?.roomNumber || student.assignedRoomNumber}
+          settings={settings}
+          onDataChange={onRefreshData}
+        />
       )}
 
       {/* مدال کارت شناسایی و مجوز اسکان سرا */}

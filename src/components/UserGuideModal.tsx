@@ -34,6 +34,7 @@ import {
   Award,
   ShieldAlert,
   Landmark,
+  Cpu,
 } from 'lucide-react';
 import {
   ROLE_GUIDES,
@@ -107,6 +108,10 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         return <Award className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />;
       case 'security':
         return <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400" />;
+      case 'library':
+        return <BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />;
+      case 'smart_campus':
+        return <Cpu className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />;
       case 'student':
         return <GraduationCap className="w-5 h-5 text-blue-600 dark:text-blue-400" />;
     }
@@ -137,7 +142,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                   </span>
                 </div>
                 <h3 className="font-black text-lg sm:text-xl text-white mt-0.5">
-                  راهنمای متنی و تصویری کاربری سامانه جامع سراها
+                  راهنمای متنی و تصویری کاربری سامانه جامع امور دانشجویی
                 </h3>
               </div>
             </div>
@@ -178,6 +183,8 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                 { id: 'warehouse', label: 'انبار و تجهیزات', role: 'warehouse' as UserRoleType },
                 { id: 'procurement', label: 'کارپرداز و خرید', role: 'procurement' as UserRoleType },
                 { id: 'finance', label: 'امور مالی', role: 'finance' as UserRoleType },
+                { id: 'library', label: 'کتابخانه و پژوهش', role: 'library' as UserRoleType },
+                { id: 'smart_campus', label: 'واحد هوشمندسازی', role: 'smart_campus' as UserRoleType },
                 { id: 'student', label: 'دانشجومعلم', role: 'student' as UserRoleType },
               ] as const
             ).map((tab) => {
@@ -410,7 +417,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <FarhangianEmblem size={24} customLogoUrl={customLogoUrl} />
-            <span>دانشگاه فرهنگیان • سامانه جامع سراهای دانشجویی (طراحی: دکتر محمد سپیانی)</span>
+            <span>دانشگاه فرهنگیان • سامانه جامع امور دانشجویی (طراحی: دکتر محمد سپیانی)</span>
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">

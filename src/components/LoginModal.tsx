@@ -37,6 +37,8 @@ interface LoginModalProps {
       | 'student_affairs'
       | 'security'
       | 'vice_dean'
+      | 'library'
+      | 'smart_campus'
       | 'student'
   ) => void;
 }
@@ -322,13 +324,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         Storage.addActivityLog({
           category: 'auth',
           action: 'ورود موفق مدیر کل سامانه',
-          details: 'مدیر کل سراهای دانشجویی (admin) با موفقیت وارد سامانه شد.',
+          details: 'مدیر کل سامانه جامع امور دانشجویی (admin) با موفقیت وارد سامانه شد.',
           targetName: 'admin',
-          actorName: 'مدیر کل سراهای دانشجویی',
+          actorName: 'مدیر کل سامانه جامع امور دانشجویی',
           actorRole: 'admin',
           actorUsername: 'admin',
         });
-        onLoginSuccess({ role: 'admin', name: 'مدیر کل سراهای دانشجویی', username: 'admin' });
+        onLoginSuccess({ role: 'admin', name: 'مدیر کل سامانه جامع امور دانشجویی', username: 'admin' });
         handleCloseModal();
       } else {
         Storage.addActivityLog({
@@ -362,7 +364,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <div className="inline-flex p-3 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 mb-3 shadow-inner">
             <Building2 className="w-8 h-8" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">ورود به سامانه سراهای دانشجویی</h2>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">ورود به سامانه جامع امور دانشجویی</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">دانشگاه فرهنگیان استان اصفهان</p>
         </div>
 
@@ -634,7 +636,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <div className="p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-900/50 flex items-start gap-2 text-[11px] text-indigo-900 dark:text-indigo-200 leading-relaxed">
                 <Info className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400 mt-0.5" />
                 <span>
-                  همکاران گرامی (معاونت دانشجویی، سرپرست سرا، حراست و انتظامات، تأسیسات، مشاور، انبار، کارپردازی، امور مالی، کارشناس آموزش، امور فرهنگی و امور دانشجویی) با وارد کردن نام کاربری و کلمه عبور خود، به‌صورت خودکار به پنل کاربری اختصاصی خود هدایت می‌شوند.
+                  همکاران گرامی (معاونت دانشجویی، سرپرست سرا، حراست و انتظامات، تأسیسات، مشاور، انبار، کارپردازی، امور مالی، کارشناس آموزش، امور فرهنگی، امور دانشجویی، کتابخانه و پژوهش و واحد هوشمندسازی) با وارد کردن نام کاربری و کلمه عبور خود، به‌صورت خودکار به پنل کاربری اختصاصی خود هدایت می‌شوند.
                 </span>
               </div>
             )}

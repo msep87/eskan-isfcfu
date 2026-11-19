@@ -28,6 +28,7 @@ import { RichTextDisplay } from './RichTextEditor';
 import { ImageLightboxModal, AnnouncementImageBox } from './ImageLightboxModal';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { StudentReferralModal } from './StudentReferralModal';
+import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -73,6 +74,7 @@ import {
   ArrowUp,
   ArrowDown,
   Send,
+  GraduationCap,
 } from 'lucide-react';
 
 interface SupervisorDashboardProps {
@@ -112,7 +114,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   onOpenUserGuide,
   embeddedMode = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'announcements' | 'students' | 'guest_requests' | 'maintenance' | 'warehouse' | 'shifts'>('manager');
+  const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'announcements' | 'students' | 'guest_requests' | 'maintenance' | 'warehouse' | 'shifts' | 'clearance'>('manager');
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
   const [isStudentEvalModalOpen, setIsStudentEvalModalOpen] = useState(false);
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
@@ -1047,6 +1049,23 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 font-extrabold">
             {Storage.getShiftReports().length}
           </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('clearance')}
+          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer flex items-center gap-2 ${
+            activeTab === 'clearance'
+              ? 'bg-sky-700 text-white shadow-md'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <GraduationCap className={`w-4 h-4 ${activeTab === 'clearance' ? 'text-white' : 'text-sky-600'}`} />
+          <span>تسویه حساب فارغ‌التحصیلان</span>
+          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.supervisor?.status || 'pending') === 'pending').length > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500 text-white font-black">
+              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.supervisor?.status || 'pending') === 'pending').length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -2657,6 +2676,17 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
             );
           })()}
         </div>
+      )}
+
+      {/* تب تسویه حساب فارغ‌التحصیلان */}
+      {activeTab === 'clearance' && (
+        <GraduationClearanceReviewPanel
+          unitRole="supervisor"
+          reviewerId={supervisor.id}
+          reviewerName={supervisor.fullName}
+          settings={settings}
+          onDataChange={onRefreshData}
+        />
       )}
 
       {/* مدال ثبت گزارش شیفت و دفتر وقایع روزانه */}

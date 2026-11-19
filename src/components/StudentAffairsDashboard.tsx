@@ -28,6 +28,7 @@ import {
 import { escapeHtml } from '../utils/sanitizeHtml';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { StudentReferralModal } from './StudentReferralModal';
+import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -61,6 +62,7 @@ import {
   Edit3,
   MapPin,
   Send,
+  GraduationCap,
 } from 'lucide-react';
 
 interface StudentAffairsDashboardProps {
@@ -183,7 +185,7 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
   onOpenUserGuide,
   embeddedMode = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'students' | 'sports' | 'elections' | 'disciplinary'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'sports' | 'elections' | 'disciplinary' | 'clearance'>('students');
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
 
@@ -987,6 +989,23 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
             </span>
           )}
         </button>
+
+        <button
+          onClick={() => setActiveTab('clearance')}
+          className={`flex-1 min-w-[180px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+            activeTab === 'clearance'
+              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4" />
+          <span>تسویه حساب فارغ‌التحصیلان</span>
+          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.student_affairs?.status || 'pending') === 'pending').length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
+              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.student_affairs?.status || 'pending') === 'pending').length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* تب ۱: دانشجویان خوابگاهی و ترددی + گزارش‌گیری */}
@@ -1461,6 +1480,10 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
                           ? 'امور فرهنگی'
                           : ref.referredByRole === 'maintenance'
                           ? 'تأسیسات'
+                          : (ref.referredByRole as string) === 'library'
+                          ? 'کتابخانه و پژوهش'
+                          : (ref.referredByRole as string) === 'smart_campus'
+                          ? 'واحد هوشمندسازی'
                           : 'سرپرست سرا'})
                       </span>
                       <span>تاریخ معرفی: {ref.referredAt}</span>
@@ -2565,6 +2588,17 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
           </div>
         </div>
       )}
+
+      {activeTab === 'clearance' && (
+        <GraduationClearanceReviewPanel
+          unitRole="student_affairs"
+          reviewerId={staff.id}
+          reviewerName={staff.fullName}
+          settings={Storage.getSettings()}
+          onDataChange={onRefreshData}
+        />
+      )}
+
       <SendSecurityReportModal
         isOpen={isSendSecurityModalOpen}
         onClose={() => setIsSendSecurityModalOpen(false)}

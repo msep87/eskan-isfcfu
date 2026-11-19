@@ -1137,6 +1137,8 @@ export async function exportActivityLogsToExcel(logs: ActivityLog[]) {
     cultural: 'امور فرهنگی',
     student_affairs: 'امور دانشجویی و تربیت بدنی',
     security: 'حراست و انتظامات',
+    library: 'کتابخانه و پژوهش',
+    smart_campus: 'واحد هوشمندسازی',
     system: 'سیستم',
   };
 

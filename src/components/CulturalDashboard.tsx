@@ -15,6 +15,7 @@ import {
   exportCulturalAssociationsToExcel,
 } from '../utils/excelUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
+import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import {
   Sparkles,
   Calendar,
@@ -36,6 +37,7 @@ import {
   BookOpen,
   X,
   Lock,
+  GraduationCap,
 } from 'lucide-react';
 
 interface CulturalDashboardProps {
@@ -79,7 +81,7 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
   onOpenUserGuide,
   embeddedMode = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'timetable' | 'associations' | 'reports' | 'messages'>('timetable');
+  const [activeTab, setActiveTab] = useState<'timetable' | 'associations' | 'reports' | 'messages' | 'clearance'>('timetable');
   const [programs, setPrograms] = useState<CulturalProgram[]>(() => Storage.getCulturalPrograms());
   const [associations, setAssociations] = useState<CulturalAssociation[]>(() =>
     Storage.getCulturalAssociations()
@@ -635,6 +637,23 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
           {unreadCulturalMessagesCount > 0 && (
             <span className="px-2 py-0.5 rounded-full bg-sky-600 text-white text-[10px] font-black">
               {unreadCulturalMessagesCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('clearance')}
+          className={`flex-1 min-w-[170px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+            activeTab === 'clearance'
+              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4" />
+          <span>تسویه حساب فارغ‌التحصیلان</span>
+          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.cultural?.status || 'pending') === 'pending').length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
+              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.cultural?.status || 'pending') === 'pending').length}
             </span>
           )}
         </button>
@@ -1518,6 +1537,16 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {activeTab === 'clearance' && (
+        <GraduationClearanceReviewPanel
+          unitRole="cultural"
+          reviewerId={staff.id}
+          reviewerName={staff.fullName}
+          settings={Storage.getSettings()}
+          onDataChange={onRefreshData}
+        />
       )}
     </div>
   );

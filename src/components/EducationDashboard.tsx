@@ -12,6 +12,7 @@ import {
   normalizePersianSearch,
 } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
+import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import {
   AlertTriangle,
   BookOpen,
@@ -51,7 +52,7 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'messages' | 'notices'>('messages');
+  const [activeTab, setActiveTab] = useState<'messages' | 'notices' | 'clearance'>('messages');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // پیام‌رسانی کارشناس آموزش (فقط پیام‌های مرتبط با کارشناس آموزش و غیرمحرمانه)
@@ -208,6 +209,11 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
 
   const pendingNoticesCount = useMemo(
     () => Storage.getAcademicNotices().filter((n) => n.status === 'pending').length,
+    [messages, students, cloudSyncTick]
+  );
+
+  const pendingClearanceGateCount = useMemo(
+    () => Storage.getGraduationClearances().filter((c) => c.status === 'pending_education').length,
     [messages, students, cloudSyncTick]
   );
 
@@ -501,6 +507,24 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
         >
           <FileWarning className="w-4 h-4 text-rose-600" />
           <span>اعلام مرخصی تحصیلی یا اخراج به مدیر</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('clearance')}
+          className={`flex-1 min-w-[220px] py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+            activeTab === 'clearance'
+              ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-md'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4 text-teal-600" />
+          <span>تسویه حساب فارغ‌التحصیلان (دروازه مرحله اول)</span>
+          {pendingClearanceGateCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black">
+              {pendingClearanceGateCount}
+            </span>
+          )}
         </button>
       </div>
 
@@ -1207,6 +1231,17 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {/* بخش ۳: دروازه اولیه و بررسی تسویه حساب فارغ‌التحصیلان */}
+      {activeTab === 'clearance' && (
+        <GraduationClearanceReviewPanel
+          unitRole="education"
+          reviewerId={staff.id}
+          reviewerName={staff.fullName}
+          settings={settings}
+          onDataChange={onRefreshData}
+        />
       )}
     </div>
   );

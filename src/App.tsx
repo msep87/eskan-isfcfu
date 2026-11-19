@@ -49,6 +49,8 @@ const CulturalDashboard = lazy(() => import('./components/CulturalDashboard').th
 const StudentAffairsDashboard = lazy(() => import('./components/StudentAffairsDashboard').then((m) => ({ default: m.StudentAffairsDashboard })));
 const SecurityDashboard = lazy(() => import('./components/SecurityDashboard').then((m) => ({ default: m.SecurityDashboard })));
 const ViceDeanDashboard = lazy(() => import('./components/ViceDeanDashboard').then((m) => ({ default: m.ViceDeanDashboard })));
+const LibraryDashboard = lazy(() => import('./components/LibraryDashboard').then((m) => ({ default: m.LibraryDashboard })));
+const SmartCampusDashboard = lazy(() => import('./components/SmartCampusDashboard').then((m) => ({ default: m.SmartCampusDashboard })));
 import { resolveFontCssFamily } from './utils/fonts';
 import {
   DEFAULT_HOME_NOTES_TITLE,
@@ -176,6 +178,16 @@ export default function App() {
       const refreshedVd = Storage.getViceDeanStaff().find((vd) => vd.id === user.staff.id);
       if (refreshedVd) {
         setCurrentUser({ role: 'vice_dean', staff: refreshedVd });
+      }
+    } else if (user && user.role === 'library') {
+      const refreshedLib = Storage.getLibraryStaff().find((lib) => lib.id === user.staff.id);
+      if (refreshedLib) {
+        setCurrentUser({ role: 'library', staff: refreshedLib });
+      }
+    } else if (user && user.role === 'smart_campus') {
+      const refreshedSmart = Storage.getSmartCampusStaff().find((sm) => sm.id === user.staff.id);
+      if (refreshedSmart) {
+        setCurrentUser({ role: 'smart_campus', staff: refreshedSmart });
       }
     } else if (user && user.role === 'counselor') {
       const refreshedCns = Storage.getCounselors().find((c) => c.id === user.counselor.id);
@@ -362,7 +374,9 @@ export default function App() {
             currentUser.role !== 'student' &&
             currentUser.role !== 'finance' &&
             currentUser.role !== 'education' &&
-            currentUser.role !== 'cultural'
+            currentUser.role !== 'cultural' &&
+            currentUser.role !== 'library' &&
+            currentUser.role !== 'smart_campus'
           ) {
             setIsReportsModalOpen(true);
           }
@@ -435,13 +449,13 @@ export default function App() {
                       <span>دانشگاه فرهنگیان استان اصفهان</span>
                     </div>
                     <div className="text-xs text-teal-200 font-semibold">
-                      اداره امور سراهای دانشجویی (خوابگاه‌ها) • سال تحصیلی {settings.currentAcademicYear}
+                      مدیریت یکپارچه سراهای دانشجویی، آموزش، مالی، کتابخانه، هوشمندسازی و امور دانشجویی • سال تحصیلی {settings.currentAcademicYear}
                     </div>
                   </div>
                 </div>
 
                 <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black leading-tight tracking-tight mb-6">
-                  سامانه جامع سراهای دانشجویی
+                  سامانه جامع امور دانشجویی
                 </h1>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -449,7 +463,7 @@ export default function App() {
                     onClick={() => setIsLoginModalOpen(true)}
                     className="px-7 py-3.5 bg-white text-teal-900 hover:bg-teal-50 rounded-2xl font-black text-sm shadow-xl transition flex items-center gap-2 cursor-pointer hover:scale-105"
                   >
-                    <span>ورود به سامانه سراها (دانشجو / سرپرست / مدیر)</span>
+                    <span>ورود به سامانه جامع امور دانشجویی (دانشجو / کارکنان / مدیر)</span>
                     <ArrowRight className="w-4 h-4 rotate-180" />
                   </button>
 
@@ -489,7 +503,7 @@ export default function App() {
                   </div>
                   <div>
                     <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white">
-                      اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی امور سراهای دانشجویی
+                      اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع امور دانشجویی و سراها
                     </h2>
                     <p className="text-xs text-slate-400 mt-0.5">
                       سال تحصیلی {settings.currentAcademicYear} • {settings.currentSemester}
@@ -836,6 +850,29 @@ export default function App() {
             onOpenUserGuide={(r) => handleOpenUserGuide(r || 'vice_dean')}
           />
         )}
+        {/* ۱۴. در صورتی که کاربر کتابخانه و پژوهش است (دسترسی محدود به اطلاعات دانشجو) */}
+        {currentUser?.role === 'library' && (
+          <LibraryDashboard
+            staff={currentUser.staff}
+            students={students}
+            messages={messages}
+            settings={settings}
+            onDataChange={refreshAllData}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+          />
+        )}
+
+        {/* ۱۵. در صورتی که کاربر واحد هوشمندسازی است (دسترسی محدود به اطلاعات دانشجو) */}
+        {currentUser?.role === 'smart_campus' && (
+          <SmartCampusDashboard
+            staff={currentUser.staff}
+            students={students}
+            messages={messages}
+            settings={settings}
+            onDataChange={refreshAllData}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+          />
+        )}
         </Suspense>
 
       </main>
@@ -849,10 +886,14 @@ export default function App() {
                 <FarhangianEmblem size={24} customLogoUrl={settings.customLogoUrl} />
               </div>
             )}
-            <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع سراهای دانشجویی</span>
+            <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع امور دانشجویی</span>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3 text-[11px]">
-            {currentUser && currentUser.role !== 'education' && currentUser.role !== 'cultural' && (
+            {currentUser &&
+              currentUser.role !== 'education' &&
+              currentUser.role !== 'cultural' &&
+              currentUser.role !== 'library' &&
+              currentUser.role !== 'smart_campus' && (
               <>
                 <button
                   type="button"
@@ -860,7 +901,7 @@ export default function App() {
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-l from-teal-700 to-cyan-700 hover:from-teal-800 hover:to-cyan-800 text-white font-extrabold text-xs shadow-xs transition cursor-pointer"
                 >
                   <MessageCircle className="w-4 h-4" />
-                  <span>دستیار هوشمند سرا (چت‌بات)</span>
+                  <span>دستیار هوشمند سامانه (چت‌بات)</span>
                 </button>
                 <span className="hidden sm:inline">•</span>
               </>
@@ -938,6 +979,8 @@ export default function App() {
           currentUser.role !== 'finance' &&
           currentUser.role !== 'education' &&
           currentUser.role !== 'cultural' &&
+          currentUser.role !== 'library' &&
+          currentUser.role !== 'smart_campus' &&
           isReportsModalOpen && (
             <ReportsView
               isOpen={isReportsModalOpen}
@@ -982,10 +1025,12 @@ export default function App() {
           />
         )}
 
-        {/* دستیار هوشمند خوابگاهی و آموزشی */}
+        {/* دستیار هوشمند سامانه جامع امور دانشجویی */}
         {currentUser &&
           currentUser.role !== 'education' &&
           currentUser.role !== 'cultural' &&
+          currentUser.role !== 'library' &&
+          currentUser.role !== 'smart_campus' &&
           isAiChatOpen && (
             <AiDormAssistant
               isOpen={isAiChatOpen}

@@ -44,6 +44,11 @@ import {
   SecurityStaff,
   SecurityReport,
   ViceDeanStaff,
+  LibraryStaff,
+  SmartCampusStaff,
+  LibraryBook,
+  LibraryBookRequest,
+  GraduationClearanceRequest,
 } from '../types';
 
 export const INITIAL_SETTINGS: AppSettings = {
@@ -53,7 +58,7 @@ export const INITIAL_SETTINGS: AppSettings = {
   currentAcademicYear: '۱۴۰۵-۱۴۰۶',
   currentSemester: 'نیمسال اول',
   universityName: 'دانشگاه فرهنگیان استان اصفهان',
-  announcementBanner: 'سامانه جامع سراهای دانشجویی - ورود به سامانه جهت انتخاب اتاق و خدمات اسکان',
+  announcementBanner: 'سامانه جامع امور دانشجویی - مدیریت سراها، آموزش، مالی، کتابخانه، هوشمندسازی و خدمات دانشجویی',
   fontFamily: 'vazir',
   fontSize: 'md',
   fontScale: 100,
@@ -194,3 +199,19 @@ export const INITIAL_SECURITY_REPORTS: SecurityReport[] = [];
 
 // معاونت دانشجویی (کاملاً خالی)
 export const INITIAL_VICE_DEAN_STAFF: ViceDeanStaff[] = [];
+
+// مسئولین کتابخانه و پژوهش (کاملاً خالی)
+export const INITIAL_LIBRARY_STAFF: LibraryStaff[] = [];
+
+// کاربران واحد هوشمندسازی (کاملاً خالی)
+export const INITIAL_SMART_CAMPUS_STAFF: SmartCampusStaff[] = [];
+
+// فهرست کتب موجود کتابخانه (کاملاً خالی)
+export const INITIAL_LIBRARY_BOOKS: LibraryBook[] = [];
+
+// درخواست‌ها و سوابق امانت کتاب (کاملاً خالی)
+export const INITIAL_LIBRARY_BOOK_REQUESTS: LibraryBookRequest[] = [];
+
+// پرونده‌های تسویه حساب الکترونیک فراغت از تحصیل (کاملاً خالی)
+export const INITIAL_GRADUATION_CLEARANCES: GraduationClearanceRequest[] = [];
+

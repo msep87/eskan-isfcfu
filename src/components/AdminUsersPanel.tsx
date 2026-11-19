@@ -15,6 +15,8 @@ import {
   StudentAffairsStaff,
   SecurityStaff,
   ViceDeanStaff,
+  LibraryStaff,
+  SmartCampusStaff,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
@@ -75,6 +77,8 @@ import {
   Home,
   Bus,
   Send,
+  BookOpen,
+  Cpu,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -89,7 +93,9 @@ export type UserCategoryKey =
   | 'cultural'
   | 'student_affairs'
   | 'security'
-  | 'vice_dean';
+  | 'vice_dean'
+  | 'library'
+  | 'smart_campus';
 
 interface AdminUsersPanelProps {
   activeCategory: UserCategoryKey;
@@ -109,6 +115,8 @@ interface AdminUsersPanelProps {
   studentAffairsStaff?: StudentAffairsStaff[];
   securityStaff?: SecurityStaff[];
   viceDeanStaff?: ViceDeanStaff[];
+  libraryStaff?: LibraryStaff[];
+  smartCampusStaff?: SmartCampusStaff[];
   onRefreshData: () => void;
   onOpenExcelModal: (tab: ExcelImportTab) => void;
   onOpenReports: () => void;
@@ -138,7 +146,9 @@ type StaffRole =
   | 'cultural'
   | 'student_affairs'
   | 'security'
-  | 'vice_dean';
+  | 'vice_dean'
+  | 'library'
+  | 'smart_campus';
 type StudentSortKey =
   | 'default'
   | 'lastName'
@@ -166,6 +176,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   studentAffairsStaff = [],
   securityStaff = [],
   viceDeanStaff = [],
+  libraryStaff = [],
+  smartCampusStaff = [],
   onRefreshData,
   onOpenExcelModal,
   onOpenReports,
@@ -365,6 +377,18 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           showToast('error', res.message);
           return;
         }
+      } else if (role === 'library') {
+        const res = Storage.updateLibraryStaff(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
+      } else if (role === 'smart_campus') {
+        const res = Storage.updateSmartCampusStaff(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
       }
 
       const syncRes = await Storage.waitForPendingCloudSync();
@@ -461,6 +485,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             ? securityStaff
             : targetRole === 'vice_dean'
             ? viceDeanStaff
+            : targetRole === 'library'
+            ? libraryStaff
+            : targetRole === 'smart_campus'
+            ? smartCampusStaff
             : counselors;
         const found = pool.find((u) => normKey(u.username) === nk || normKey(u.id) === nk);
         if (found) {
@@ -1028,6 +1056,38 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     });
   }, [viceDeanStaff, staffQuery, staffStatusFilter]);
 
+  const filteredLibrary = useMemo(() => {
+    const q = norm(staffQuery);
+    return libraryStaff.filter((lib) => {
+      const isActive = lib.status !== 'inactive' && lib.isActive !== false;
+      if (staffStatusFilter === 'active' && !isActive) return false;
+      if (staffStatusFilter === 'inactive' && isActive) return false;
+      if (q) {
+        const txt = `${norm(lib.fullName)} ${norm(lib.username)} ${norm(lib.mobile || lib.phone)} ${norm(
+          lib.department
+        )} ${norm(lib.notes)}`;
+        if (!txt.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [libraryStaff, staffQuery, staffStatusFilter]);
+
+  const filteredSmartCampus = useMemo(() => {
+    const q = norm(staffQuery);
+    return smartCampusStaff.filter((sm) => {
+      const isActive = sm.status !== 'inactive' && sm.isActive !== false;
+      if (staffStatusFilter === 'active' && !isActive) return false;
+      if (staffStatusFilter === 'inactive' && isActive) return false;
+      if (q) {
+        const txt = `${norm(sm.fullName)} ${norm(sm.username)} ${norm(sm.mobile || sm.phone)} ${norm(
+          sm.department
+        )} ${norm(sm.notes)}`;
+        if (!txt.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [smartCampusStaff, staffQuery, staffStatusFilter]);
+
   // باز کردن مدال افزودن کاربر پرسنل
   const openAddStaffModal = (role: StaffRole) => {
     setStaffModalRole(role);
@@ -1052,6 +1112,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         ? 'واحد حراست و انتظامات'
         : role === 'vice_dean'
         ? 'معاونت دانشجویی دانشگاه فرهنگیان'
+        : role === 'library'
+        ? 'واحد کتابخانه و پژوهش'
+        : role === 'smart_campus'
+        ? 'واحد هوشمندسازی و فناوری'
         : ''
     );
     setFormOfficeLocation(role === 'vice_dean' ? 'معاون دانشجویی' : '');
@@ -1084,6 +1148,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       | StudentAffairsStaff
       | SecurityStaff
       | ViceDeanStaff
+      | LibraryStaff
+      | SmartCampusStaff
   ) => {
     setStaffModalRole(role);
     setEditingStaffId(user.id);
@@ -1162,6 +1228,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormOfficeLocation(vd.title || 'معاون دانشجویی');
       setFormNotes(vd.notes || '');
       setFormActive(vd.status !== 'inactive' && vd.isActive !== false);
+    } else if (role === 'library') {
+      const lib = user as LibraryStaff;
+      setFormDepartment(lib.department || 'واحد کتابخانه و پژوهش');
+      setFormNotes(lib.notes || '');
+      setFormActive(lib.status !== 'inactive' && lib.isActive !== false);
+    } else if (role === 'smart_campus') {
+      const sm = user as SmartCampusStaff;
+      setFormDepartment(sm.department || 'واحد هوشمندسازی و فناوری');
+      setFormNotes(sm.notes || '');
+      setFormActive(sm.status !== 'inactive' && sm.isActive !== false);
     }
 
     setStaffModalOpen(true);
@@ -1655,6 +1731,84 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         }
         showToast('success', res.message);
       }
+    } else if (staffModalRole === 'library') {
+      if (editingStaffId) {
+        const res = Storage.updateLibraryStaff(editingStaffId, {
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'واحد کتابخانه و پژوهش',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      } else {
+        const res = Storage.addLibraryStaff({
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'واحد کتابخانه و پژوهش',
+          role: 'library',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      }
+    } else if (staffModalRole === 'smart_campus') {
+      if (editingStaffId) {
+        const res = Storage.updateSmartCampusStaff(editingStaffId, {
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'واحد هوشمندسازی و فناوری',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      } else {
+        const res = Storage.addSmartCampusStaff({
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'واحد هوشمندسازی و فناوری',
+          role: 'smart_campus',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      }
     }
 
     const syncRes = await Storage.waitForPendingCloudSync();
@@ -1749,6 +1903,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       baseMessage = Storage.deleteSecurityStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'vice_dean') {
       baseMessage = Storage.deleteViceDeanStaff(deleteTarget.id).message;
+    } else if (deleteTarget.role === 'library') {
+      baseMessage = Storage.deleteLibraryStaff(deleteTarget.id).message;
+    } else if (deleteTarget.role === 'smart_campus') {
+      baseMessage = Storage.deleteSmartCampusStaff(deleteTarget.id).message;
     }
     const syncRes = await Storage.waitForPendingCloudSync();
     setDeleteTarget(null);
@@ -1869,6 +2027,24 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       activeBg: 'bg-indigo-900 text-cyan-200 border-indigo-700 shadow-lg shadow-indigo-900/25',
       badgeBg: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-cyan-300',
     },
+    {
+      key: 'library' as const,
+      title: 'کتابخانه و پژوهش',
+      subtitle: 'مدیریت کتب (تکی و اکسل)، امانت کتاب، پیام به امانت‌گیرندگان و تسویه',
+      count: libraryStaff.length,
+      icon: BookOpen,
+      activeBg: 'bg-indigo-700 text-white border-indigo-700 shadow-lg shadow-indigo-700/25',
+      badgeBg: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300',
+    },
+    {
+      key: 'smart_campus' as const,
+      title: 'واحد هوشمندسازی',
+      subtitle: 'ارسال پیام و ثبت اخطار فردی/گروهی به دانشجویان و تایید تسویه حساب',
+      count: smartCampusStaff.length,
+      icon: Cpu,
+      activeBg: 'bg-cyan-700 text-white border-cyan-700 shadow-lg shadow-cyan-700/25',
+      badgeBg: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300',
+    },
   ];
 
   const roleLabels: Record<StaffRole, string> = {
@@ -1883,6 +2059,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     student_affairs: 'کارشناس امور دانشجویی و تربیت بدنی',
     security: 'کارشناس حراست و انتظامات',
     vice_dean: 'معاونت دانشجویی',
+    library: 'کتابخانه و پژوهش',
+    smart_campus: 'واحد هوشمندسازی',
   };
 
   return (
@@ -1918,7 +2096,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 culturalStaff.length +
                 studentAffairsStaff.length +
                 securityStaff.length +
-                viceDeanStaff.length}
+                viceDeanStaff.length +
+                libraryStaff.length +
+                smartCampusStaff.length}
             </span>
           </div>
         </div>
@@ -3006,6 +3186,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 {activeCategory === 'student_affairs' && <Award className="w-5 h-5 text-indigo-700" />}
                 {activeCategory === 'security' && <Shield className="w-5 h-5 text-amber-600" />}
                 {activeCategory === 'vice_dean' && <Landmark className="w-5 h-5 text-indigo-700" />}
+                {activeCategory === 'library' && <BookOpen className="w-5 h-5 text-indigo-600" />}
+                {activeCategory === 'smart_campus' && <Cpu className="w-5 h-5 text-cyan-600" />}
               </div>
               <div>
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
@@ -3020,6 +3202,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'student_affairs' && `مدیریت کاربران امور دانشجویی و تربیت بدنی (${filteredStudentAffairs.length} از ${studentAffairsStaff.length})`}
                   {activeCategory === 'security' && `مدیریت کارشناسان حراست و انتظامات (${filteredSecurity.length} از ${securityStaff.length})`}
                   {activeCategory === 'vice_dean' && `مدیریت کاربران معاونت دانشجویی (${filteredViceDean.length} از ${viceDeanStaff.length})`}
+                  {activeCategory === 'library' && `مدیریت کاربران کتابخانه و پژوهش (${filteredLibrary.length} از ${libraryStaff.length})`}
+                  {activeCategory === 'smart_campus' && `مدیریت کاربران واحد هوشمندسازی (${filteredSmartCampus.length} از ${smartCampusStaff.length})`}
                 </h3>
                 <p className="text-xs text-slate-400">
                   مشاهده، جستجوی پیشرفته، ویرایش مشخصات، تغییر یا ریست رمز عبور و ورود تکی یا گروهی
@@ -3052,6 +3236,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       ? 'security'
                       : activeCategory === 'vice_dean'
                       ? 'vice_dean'
+                      : activeCategory === 'library'
+                      ? 'library'
+                      : activeCategory === 'smart_campus'
+                      ? 'smart_campus'
                       : 'counselor'
                   )
                 }
@@ -3070,13 +3258,17 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'student_affairs' && 'افزودن کاربر امور دانشجویی جدید'}
                   {activeCategory === 'security' && 'افزودن کاربر حراست جدید'}
                   {activeCategory === 'vice_dean' && 'افزودن کاربر معاونت دانشجویی'}
+                  {activeCategory === 'library' && 'افزودن کاربر کتابخانه و پژوهش'}
+                  {activeCategory === 'smart_campus' && 'افزودن کاربر واحد هوشمندسازی'}
                 </span>
               </button>
 
               {activeCategory !== 'cultural' &&
                 activeCategory !== 'student_affairs' &&
                 activeCategory !== 'security' &&
-                activeCategory !== 'vice_dean' && (
+                activeCategory !== 'vice_dean' &&
+                activeCategory !== 'library' &&
+                activeCategory !== 'smart_campus' && (
                 <button
                   type="button"
                   onClick={() =>
@@ -3125,6 +3317,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     ? 'security'
                     : activeCategory === 'vice_dean'
                     ? 'vice_dean'
+                    : activeCategory === 'library'
+                    ? 'library'
+                    : activeCategory === 'smart_campus'
+                    ? 'smart_campus'
                     : 'counselor';
                 return (
                   <>
@@ -3191,7 +3387,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
               activeCategory !== 'education' &&
               activeCategory !== 'cultural' &&
               activeCategory !== 'student_affairs' &&
-              activeCategory !== 'vice_dean' && (
+              activeCategory !== 'vice_dean' &&
+              activeCategory !== 'library' &&
+              activeCategory !== 'smart_campus' && (
               <div className="flex items-center gap-1.5">
                 <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <select
@@ -3239,7 +3437,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     activeCategory !== 'education' &&
                     activeCategory !== 'cultural' &&
                     activeCategory !== 'student_affairs' &&
-                    activeCategory !== 'vice_dean' && (
+                    activeCategory !== 'vice_dean' &&
+                    activeCategory !== 'library' &&
+                    activeCategory !== 'smart_campus' && (
                     <th className="p-3">محدوده سرا / تخصص</th>
                   )}
                   {(activeCategory === 'warehouse' ||
@@ -3248,7 +3448,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     activeCategory === 'education' ||
                     activeCategory === 'cultural' ||
                     activeCategory === 'student_affairs' ||
-                    activeCategory === 'vice_dean') && (
+                    activeCategory === 'vice_dean' ||
+                    activeCategory === 'library' ||
+                    activeCategory === 'smart_campus') && (
                     <th className="p-3">بخش / سمت و توضیحات</th>
                   )}
                   {activeCategory !== 'supervisors' && <th className="p-3">وضعیت</th>}
@@ -4871,6 +5073,274 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       );
                     })
                   ))}
+
+                {activeCategory === 'library' &&
+                  (filteredLibrary.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-slate-400">
+                        هیچ کاربر کتابخانه و پژوهشی با مشخصات جستجوشده یافت نشد.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredLibrary.map((lib) => {
+                      const isActive = lib.status !== 'inactive' && lib.isActive !== false;
+                      const passKey = `lib_${lib.id}`;
+                      const isShown = revealedPasswords[passKey];
+                      return (
+                        <tr key={lib.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {lib.photoUrl ? (
+                                <img
+                                  src={lib.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-indigo-300 dark:border-indigo-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-indigo-700 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(lib.fullName || 'ک').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{lib.fullName}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
+                            {lib.username}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                {isShown ? lib.password : '••••••'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => toggleRevealPassword(passKey)}
+                                className="p-1 text-slate-400 hover:text-indigo-600 cursor-pointer"
+                              >
+                                {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono" dir="ltr">
+                            {lib.mobile || lib.phone || '-'}
+                          </td>
+                          <td className="p-3 space-y-1">
+                            <div className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                              {lib.department || 'واحد کتابخانه و پژوهش'}
+                            </div>
+                            {lib.notes && <div className="text-[11px] text-slate-500">{lib.notes}</div>}
+                          </td>
+                          <td className="p-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextStatus = isActive ? 'inactive' : 'active';
+                                Storage.updateLibraryStaff(lib.id, {
+                                  status: nextStatus,
+                                  isActive: nextStatus === 'active',
+                                });
+                                onRefreshData();
+                              }}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                                isActive
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                              }`}
+                            >
+                              {isActive ? 'فعال' : 'غیرفعال'}
+                            </button>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <label className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer">
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('library', lib.id, lib.fullName, e, lib.username)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => openEditStaffModal('library', lib)}
+                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPasswordError('');
+                                  setNewPasswordInput('');
+                                  setPasswordModalTarget({
+                                    role: 'library',
+                                    id: lib.id,
+                                    fullName: lib.fullName,
+                                    usernameOrCode: lib.username,
+                                    defaultResetValue: '123456',
+                                    defaultResetLabel: 'ریست فوری به 123456',
+                                  });
+                                }}
+                                className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({
+                                    role: 'library',
+                                    id: lib.id,
+                                    fullName: lib.fullName,
+                                  })
+                                }
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ))}
+
+                {activeCategory === 'smart_campus' &&
+                  (filteredSmartCampus.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-slate-400">
+                        هیچ کاربر واحد هوشمندسازی با مشخصات جستجوشده یافت نشد.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSmartCampus.map((sm) => {
+                      const isActive = sm.status !== 'inactive' && sm.isActive !== false;
+                      const passKey = `sm_${sm.id}`;
+                      const isShown = revealedPasswords[passKey];
+                      return (
+                        <tr key={sm.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {sm.photoUrl ? (
+                                <img
+                                  src={sm.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-cyan-300 dark:border-cyan-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-cyan-700 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(sm.fullName || 'ه').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{sm.fullName}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
+                            {sm.username}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                {isShown ? sm.password : '••••••'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => toggleRevealPassword(passKey)}
+                                className="p-1 text-slate-400 hover:text-cyan-600 cursor-pointer"
+                              >
+                                {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono" dir="ltr">
+                            {sm.mobile || sm.phone || '-'}
+                          </td>
+                          <td className="p-3 space-y-1">
+                            <div className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                              {sm.department || 'واحد هوشمندسازی و فناوری'}
+                            </div>
+                            {sm.notes && <div className="text-[11px] text-slate-500">{sm.notes}</div>}
+                          </td>
+                          <td className="p-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextStatus = isActive ? 'inactive' : 'active';
+                                Storage.updateSmartCampusStaff(sm.id, {
+                                  status: nextStatus,
+                                  isActive: nextStatus === 'active',
+                                });
+                                onRefreshData();
+                              }}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                                isActive
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                              }`}
+                            >
+                              {isActive ? 'فعال' : 'غیرفعال'}
+                            </button>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <label className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer">
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('smart_campus', sm.id, sm.fullName, e, sm.username)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => openEditStaffModal('smart_campus', sm)}
+                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPasswordError('');
+                                  setNewPasswordInput('');
+                                  setPasswordModalTarget({
+                                    role: 'smart_campus',
+                                    id: sm.id,
+                                    fullName: sm.fullName,
+                                    usernameOrCode: sm.username,
+                                    defaultResetValue: '123456',
+                                    defaultResetLabel: 'ریست فوری به 123456',
+                                  });
+                                }}
+                                className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({
+                                    role: 'smart_campus',
+                                    id: sm.id,
+                                    fullName: sm.fullName,
+                                  })
+                                }
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ))}
               </tbody>
             </table>
           </div>
@@ -5057,7 +5527,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   staffModalRole === 'cultural' ||
                   staffModalRole === 'student_affairs' ||
                   staffModalRole === 'security' ||
-                  staffModalRole === 'vice_dean') && (
+                  staffModalRole === 'vice_dean' ||
+                  staffModalRole === 'library' ||
+                  staffModalRole === 'smart_campus') && (
                   <div className="sm:col-span-2">
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       {staffModalRole === 'procurement'
@@ -5072,6 +5544,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                         ? 'بخش / واحد حراست و انتظامات'
                         : staffModalRole === 'vice_dean'
                         ? 'حوزه / معاونت دانشجویی'
+                        : staffModalRole === 'library'
+                        ? 'بخش / واحد کتابخانه و پژوهش'
+                        : staffModalRole === 'smart_campus'
+                        ? 'بخش / واحد هوشمندسازی و فناوری'
                         : 'بخش / واحد مالی'}
                     </label>
                     <input
@@ -5091,6 +5567,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'واحد حراست و انتظامات پردیس'
                           : staffModalRole === 'vice_dean'
                           ? 'معاونت دانشجویی دانشگاه فرهنگیان'
+                          : staffModalRole === 'library'
+                          ? 'واحد کتابخانه و پژوهش پردیس'
+                          : staffModalRole === 'smart_campus'
+                          ? 'واحد هوشمندسازی و فناوری اطلاعات'
                           : 'واحد امور مالی و حسابداری پردیس'
                       }
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
@@ -5122,6 +5602,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'کارشناس حراست و انتظامات / شیفت گشت و صیانت سراها...'
                           : staffModalRole === 'vice_dean'
                           ? 'معاونت دانشجویی — نظارت جامع بر سراها، امور دانشجویی و فرهنگی...'
+                          : staffModalRole === 'library'
+                          ? 'مسئول کتابخانه و پژوهش — امانت کتب و تسویه فارغ‌التحصیلان...'
+                          : staffModalRole === 'smart_campus'
+                          ? 'کارشناس واحد هوشمندسازی — کارت هوشمند، تردد و سامانه‌ها...'
                           : staffModalRole === 'maintenance'
                           ? 'سرپرست شیفت تأسیسات / تکنسین فنی...'
                           : staffModalRole === 'counselor'
@@ -5141,6 +5625,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 staffModalRole !== 'cultural' &&
                 staffModalRole !== 'student_affairs' &&
                 staffModalRole !== 'vice_dean' &&
+                staffModalRole !== 'library' &&
+                staffModalRole !== 'smart_campus' &&
                 dorms.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">

@@ -13,6 +13,7 @@ import {
   parseInventoryExcel,
   exportInventoryToExcel,
 } from '../utils/excelUtils';
+import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import {
   Package,
   Boxes,
@@ -42,6 +43,7 @@ import {
   History,
   AlertCircle,
   RotateCcw,
+  GraduationCap,
 } from 'lucide-react';
 
 interface WarehouseDashboardProps {
@@ -87,7 +89,7 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'requests' | 'procurement' | 'inventory' | 'transactions'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'procurement' | 'inventory' | 'transactions' | 'clearance'>('requests');
 
   // داده‌های زنده انبار و کارپردازی
   const inventoryItems = Storage.getInventoryItems();
@@ -1000,6 +1002,23 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
         >
           <History className="w-4 h-4" />
           <span>کاردکس ورودی و خروجی ({inventoryTransactions.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('clearance')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            activeTab === 'clearance'
+              ? 'bg-sky-700 text-white shadow-md shadow-sky-700/20'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4" />
+          <span>تسویه حساب فارغ‌التحصیلان</span>
+          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.warehouse?.status || 'pending') === 'pending').length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
+              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.warehouse?.status || 'pending') === 'pending').length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -3396,6 +3415,16 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {activeTab === 'clearance' && (
+        <GraduationClearanceReviewPanel
+          unitRole="warehouse"
+          reviewerId={staff.id}
+          reviewerName={staff.fullName}
+          settings={Storage.getSettings()}
+          onDataChange={onRefreshData}
+        />
       )}
     </div>
   );

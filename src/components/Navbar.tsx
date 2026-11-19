@@ -136,6 +136,20 @@ export const Navbar: React.FC<NavbarProps> = ({
         m.status !== 'answered'
       );
     }
+    if (currentUser?.role === 'library') {
+      return (
+        !m.isConfidential &&
+        (m.receiverType === 'library' || m.category === 'library' || m.senderRole === 'library') &&
+        m.status !== 'answered'
+      );
+    }
+    if (currentUser?.role === 'smart_campus') {
+      return (
+        !m.isConfidential &&
+        (m.receiverType === 'smart_campus' || m.category === 'smart_campus' || m.senderRole === 'smart_campus') &&
+        m.status !== 'answered'
+      );
+    }
     return m.status === 'pending';
   }).length;
 
@@ -161,14 +175,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white tracking-tight">
-                  سامانه جامع سراهای دانشجویی
+                  سامانه جامع امور دانشجویی
                 </span>
                 <span className="hidden sm:inline-block px-2 py-0.5 text-[11px] font-bold bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 rounded-full border border-teal-200 dark:border-teal-800">
                   دانشگاه فرهنگیان ({settings.currentAcademicYear || '۱۴۰۵-۱۴۰۶'})
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium">
-                مدیریت اسکان، انتخاب اتاق، شیفت‌بندی، انبار و خدمات سراها
+                مدیریت سراهای دانشجویی، آموزش، مالی، کتابخانه، هوشمندسازی و خدمات دانشجویی
               </p>
             </div>
           </div>
@@ -180,7 +194,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onOpenAbout}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 border border-teal-200 dark:border-teal-800 text-[11px] font-bold transition cursor-pointer shadow-xs"
-              title="درباره سامانه جامع سراهای دانشجویی و سازنده سایت دکتر محمد سپیانی"
+              title="درباره سامانه جامع امور دانشجویی و سازنده سایت دکتر محمد سپیانی"
             >
               <Info className="w-3.5 h-3.5" />
               <span>درباره ما</span>
@@ -201,7 +215,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               currentUser.role !== 'student' &&
               currentUser.role !== 'finance' &&
               currentUser.role !== 'education' &&
-              currentUser.role !== 'cultural' && (
+              currentUser.role !== 'cultural' &&
+              currentUser.role !== 'library' &&
+              currentUser.role !== 'smart_campus' && (
               <button
                 onClick={onOpenReports}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition cursor-pointer"
@@ -267,6 +283,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ? currentUser.staff.photoUrl
                       : currentUser.role === 'vice_dean'
                       ? currentUser.staff.photoUrl
+                      : currentUser.role === 'library'
+                      ? currentUser.staff.photoUrl
+                      : currentUser.role === 'smart_campus'
+                      ? currentUser.staff.photoUrl
                       : currentUser.role === 'counselor'
                       ? currentUser.counselor.photoUrl
                       : undefined;
@@ -293,7 +313,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                       {currentUser.role === 'student_affairs' && currentUser.staff.fullName}
                       {currentUser.role === 'security' && currentUser.staff.fullName}
                       {currentUser.role === 'vice_dean' && currentUser.staff.fullName}
-                      {currentUser.role === 'admin' && 'مدیر امور خوابگاه‌ها'}
+                      {currentUser.role === 'library' && currentUser.staff.fullName}
+                      {currentUser.role === 'smart_campus' && currentUser.staff.fullName}
+                      {currentUser.role === 'admin' && 'مدیر کل سامانه'}
                     </span>
                     {currentUser.role === 'counselor' && (
                       <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-bold">
@@ -345,6 +367,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                         معاونت دانشجویی
                       </span>
                     )}
+                    {currentUser.role === 'library' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 font-bold">
+                        کتابخانه و پژوهش
+                      </span>
+                    )}
+                    {currentUser.role === 'smart_campus' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300 font-bold">
+                        واحد هوشمندسازی
+                      </span>
+                    )}
                     {currentUser.role === 'student' && (
                       currentUser.student.isProfileCompleted ? (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
@@ -370,7 +402,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentUser.role === 'student_affairs' && (currentUser.staff.department || 'اداره امور دانشجویی، تربیت بدنی و رفاهی')}
                     {currentUser.role === 'security' && (currentUser.staff.department || 'واحد حراست و انتظامات')}
                     {currentUser.role === 'vice_dean' && (currentUser.staff.title || currentUser.staff.department || 'معاونت دانشجویی دانشگاه فرهنگیان')}
-                    {currentUser.role === 'admin' && 'مدیر کل سامانه'}
+                    {currentUser.role === 'library' && (currentUser.staff.department || 'واحد کتابخانه و پژوهش')}
+                    {currentUser.role === 'smart_campus' && (currentUser.staff.department || 'واحد هوشمندسازی و فناوری')}
+                    {currentUser.role === 'admin' && 'مدیر کل سامانه جامع امور دانشجویی'}
                   </div>
                 </div>
 

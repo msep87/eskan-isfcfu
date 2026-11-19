@@ -24,6 +24,7 @@ import { StudentAffairsDashboard } from './StudentAffairsDashboard';
 import { CulturalDashboard } from './CulturalDashboard';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { StudentReferralModal } from './StudentReferralModal';
+import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -58,6 +59,7 @@ import {
   AlertTriangle,
   ClipboardCheck,
   Send,
+  GraduationCap,
 } from 'lucide-react';
 
 interface ViceDeanDashboardProps {
@@ -85,7 +87,8 @@ type ViceDeanTab =
   | 'student_affairs'
   | 'cultural'
   | 'detailed_reports'
-  | 'messages_monitor';
+  | 'messages_monitor'
+  | 'clearance';
 
 type ReportSortKey =
   | 'fullName'
@@ -110,6 +113,8 @@ const ROLE_LABELS_FA: Record<string, string> = {
   student_affairs: 'امور دانشجویی و تربیت بدنی',
   security: 'حراست و انتظامات',
   vice_dean: 'معاونت دانشجویی',
+  library: 'کتابخانه و پژوهش',
+  smart_campus: 'واحد هوشمندسازی',
   all: 'همه واحدها',
 };
 
@@ -120,6 +125,8 @@ const MSG_CATEGORY_LABELS_FA: Record<string, string> = {
   student_affairs: 'امور دانشجویی و ورزشی',
   financial: 'امور مالی',
   counseling: 'مشاوره و روانشناسی',
+  library: 'کتابخانه و پژوهش',
+  smart_campus: 'واحد هوشمندسازی',
   accommodation: 'امور اسکان و اتاق',
   maintenance: 'تأسیسات و تعمیرات',
   services_cleaning: 'خدمات و نظافت',
@@ -921,6 +928,24 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
           <Eye className="w-4 h-4" />
           <span>پایش پیام‌های تمام حوزه‌ها ({crossDomainData.messages.length})</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('clearance')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
+            activeTab === 'clearance'
+              ? 'bg-sky-700 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4" />
+          <span>تسویه حساب فارغ‌التحصیلان</span>
+          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.vice_dean?.status || 'pending') === 'pending').length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
+              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.vice_dean?.status || 'pending') === 'pending').length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* تب ۱: تمامی امکانات سرپرستی */}
@@ -1702,6 +1727,17 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* تب ۶: تسویه حساب الکترونیک فارغ‌التحصیلان */}
+      {activeTab === 'clearance' && (
+        <GraduationClearanceReviewPanel
+          unitRole="vice_dean"
+          reviewerId={staff.id}
+          reviewerName={staff.fullName}
+          settings={settings}
+          onDataChange={onRefreshData}
+        />
       )}
 
       {/* مودال ارسال گزارش به حراست */}

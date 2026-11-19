@@ -8,6 +8,7 @@ import {
 } from '../types';
 import { Storage } from '../utils/storage';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
+import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import {
   Wrench,
   CheckCircle2,
@@ -36,6 +37,7 @@ import {
   CheckCheck,
   Package,
   BookOpen,
+  GraduationCap,
 } from 'lucide-react';
 
 interface MaintenanceDashboardProps {
@@ -59,6 +61,7 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
+  const [activeTab, setActiveTab] = useState<'tasks' | 'clearance'>('tasks');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [filterDorm, setFilterDorm] = useState<string>('all');
@@ -389,6 +392,50 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
         </div>
       </div>
 
+      {/* تب‌های تأسیسات و تسویه حساب فارغ‌التحصیلان */}
+      <div className="flex flex-wrap gap-2 bg-slate-200/70 dark:bg-slate-800/70 p-1.5 rounded-2xl">
+        <button
+          type="button"
+          onClick={() => setActiveTab('tasks')}
+          className={`flex-1 min-w-[200px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+            activeTab === 'tasks'
+              ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400'
+          }`}
+        >
+          <Wrench className="w-4 h-4" />
+          <span>مأموریت‌های فنی و تعمیرات ({myTasks.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('clearance')}
+          className={`flex-1 min-w-[200px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+            activeTab === 'clearance'
+              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4" />
+          <span>تسویه حساب فارغ‌التحصیلان</span>
+          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.maintenance?.status || 'pending') === 'pending').length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
+              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.maintenance?.status || 'pending') === 'pending').length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'clearance' ? (
+        <GraduationClearanceReviewPanel
+          unitRole="maintenance"
+          reviewerId={technician.id}
+          reviewerName={technician.fullName}
+          settings={Storage.getSettings()}
+          onDataChange={onRefreshData}
+        />
+      ) : (
+        <>
       {/* کارت‌های آماری */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -825,6 +872,8 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
             );
           })}
         </div>
+      )}
+        </>
       )}
 
       {/* مدال اعلام رفع عیب و پایان کار */}

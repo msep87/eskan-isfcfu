@@ -61,6 +61,13 @@ import {
   SecurityReportStatus,
   SecurityReportStudentSnapshot,
   ViceDeanStaff,
+  LibraryStaff,
+  SmartCampusStaff,
+  LibraryBook,
+  LibraryBookRequest,
+  ClearanceUnitRole,
+  ClearanceUnitApproval,
+  GraduationClearanceRequest,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -106,6 +113,11 @@ import {
   INITIAL_SECURITY_STAFF,
   INITIAL_SECURITY_REPORTS,
   INITIAL_VICE_DEAN_STAFF,
+  INITIAL_LIBRARY_STAFF,
+  INITIAL_SMART_CAMPUS_STAFF,
+  INITIAL_LIBRARY_BOOKS,
+  INITIAL_LIBRARY_BOOK_REQUESTS,
+  INITIAL_GRADUATION_CLEARANCES,
   generateInitialRoomsAndBeds,
 } from './sampleData';
 
@@ -148,7 +160,24 @@ export type AvatarUploadRole =
   | 'cultural'
   | 'student_affairs'
   | 'security'
-  | 'vice_dean';
+  | 'vice_dean'
+  | 'library'
+  | 'smart_campus';
+
+export const CLEARANCE_UNITS_META: Array<{ role: ClearanceUnitRole; label: string; description: string }> = [
+  { role: 'education', label: 'واحد آموزش', description: 'تایید گذراندن کلیه واحدهای درسی و پرونده آموزشی' },
+  { role: 'supervisor', label: 'امور سراهای دانشجویی', description: 'تحویل اتاق، تخت، کلید و اموال خوابگاه' },
+  { role: 'finance', label: 'امور مالی و حسابداری', description: 'تسویه بدهی، کسورات و صندوق رفاه دانشجویی' },
+  { role: 'library', label: 'کتابخانه و پژوهش', description: 'تحویل کتب امانی، جرایم و امور پژوهشی' },
+  { role: 'smart_campus', label: 'واحد هوشمندسازی', description: 'تحویل کارت هوشمند، تردد و حساب‌های کاربری' },
+  { role: 'student_affairs', label: 'امور دانشجویی و تربیت بدنی', description: 'امور رفاهی، تربیت بدنی و شورای انضباطی' },
+  { role: 'cultural', label: 'امور فرهنگی و اجتماعی', description: 'تسویه تشکل‌ها، کانون‌ها و اموال فرهنگی' },
+  { role: 'counselor', label: 'مرکز مشاوره و سلامت روان', description: 'بررسی پرونده‌های مشاوره و سلامت روان' },
+  { role: 'security', label: 'واحد حراست و انتظامات', description: 'استعلام و تسویه حفاظتی و انتظامات' },
+  { role: 'warehouse', label: 'انبار و اموال', description: 'تحویل تجهیزات و اقلام امانی انبار' },
+  { role: 'maintenance', label: 'واحد تأسیسات و فنی', description: 'بررسی نبود خسارت به تجهیزات و تأسیسات' },
+  { role: 'vice_dean', label: 'معاونت دانشجویی', description: 'تایید نهایی معاونت دانشجویی دانشگاه' },
+];
 
 const DISALLOWED_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -212,6 +241,11 @@ const STORAGE_KEYS = {
   SECURITY_STAFF: 'farhangian_dorm_security_staff_prod',
   SECURITY_REPORTS: 'farhangian_dorm_security_reports_prod',
   VICE_DEAN_STAFF: 'farhangian_dorm_vice_dean_staff_prod',
+  LIBRARY_STAFF: 'farhangian_dorm_library_staff_prod',
+  SMART_CAMPUS_STAFF: 'farhangian_dorm_smart_campus_staff_prod',
+  LIBRARY_BOOKS: 'farhangian_dorm_library_books_prod',
+  LIBRARY_BOOK_REQUESTS: 'farhangian_dorm_library_book_requests_prod',
+  GRADUATION_CLEARANCES: 'farhangian_dorm_graduation_clearances_prod',
 };
 
 export const SECURITY_REPORT_PRESETS: Array<{
@@ -451,6 +485,11 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.SECURITY_STAFF, INITIAL_SECURITY_STAFF);
   setIfMissing(STORAGE_KEYS.SECURITY_REPORTS, INITIAL_SECURITY_REPORTS);
   setIfMissing(STORAGE_KEYS.VICE_DEAN_STAFF, INITIAL_VICE_DEAN_STAFF);
+  setIfMissing(STORAGE_KEYS.LIBRARY_STAFF, INITIAL_LIBRARY_STAFF);
+  setIfMissing(STORAGE_KEYS.SMART_CAMPUS_STAFF, INITIAL_SMART_CAMPUS_STAFF);
+  setIfMissing(STORAGE_KEYS.LIBRARY_BOOKS, INITIAL_LIBRARY_BOOKS);
+  setIfMissing(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, INITIAL_LIBRARY_BOOK_REQUESTS);
+  setIfMissing(STORAGE_KEYS.GRADUATION_CLEARANCES, INITIAL_GRADUATION_CLEARANCES);
 
   try {
     if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
@@ -691,6 +730,8 @@ const STAFF_AUTH_KEYS: string[] = [
   STORAGE_KEYS.STUDENT_AFFAIRS_STAFF,
   STORAGE_KEYS.SECURITY_STAFF,
   STORAGE_KEYS.VICE_DEAN_STAFF,
+  STORAGE_KEYS.LIBRARY_STAFF,
+  STORAGE_KEYS.SMART_CAMPUS_STAFF,
 ];
 
 // کلیدهای بحرانی (ایجاد/ویرایش هر نوع کاربر و تنظیمات) که بلافاصله و بدون معطلی به سرور ابری ارسال می‌شوند
@@ -831,6 +872,11 @@ const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.STUDENT_AFFAIRS_STAFF]: 'کاربران امور دانشجویی و تربیت بدنی',
   [STORAGE_KEYS.SECURITY_STAFF]: 'کاربران حراست و انتظامات',
   [STORAGE_KEYS.VICE_DEAN_STAFF]: 'کاربران معاونت دانشجویی',
+  [STORAGE_KEYS.LIBRARY_STAFF]: 'کاربران کتابخانه و پژوهش',
+  [STORAGE_KEYS.SMART_CAMPUS_STAFF]: 'کاربران واحد هوشمندسازی',
+  [STORAGE_KEYS.LIBRARY_BOOKS]: 'فهرست کتب کتابخانه',
+  [STORAGE_KEYS.LIBRARY_BOOK_REQUESTS]: 'درخواست‌ها و امانات کتابخانه',
+  [STORAGE_KEYS.GRADUATION_CLEARANCES]: 'تسویه حساب الکترونیک فارغ‌التحصیلان',
   [STORAGE_KEYS.ANNOUNCEMENTS]: 'اطلاعیه‌ها و اخبار',
   [STORAGE_KEYS.MESSAGES]: 'پیام‌ها و مکاتبات',
   [STORAGE_KEYS.WARNINGS]: 'اخطارهای انضباطی و اتاق',
@@ -1047,6 +1093,8 @@ const STAFF_KEY_TO_AVATAR_ROLE: Record<string, AvatarUploadRole> = {
   [STORAGE_KEYS.STUDENT_AFFAIRS_STAFF]: 'student_affairs',
   [STORAGE_KEYS.SECURITY_STAFF]: 'security',
   [STORAGE_KEYS.VICE_DEAN_STAFF]: 'vice_dean',
+  [STORAGE_KEYS.LIBRARY_STAFF]: 'library',
+  [STORAGE_KEYS.SMART_CAMPUS_STAFF]: 'smart_campus',
 };
 
 function sanitizeStorageSegment(raw: string): string {
@@ -3388,7 +3436,7 @@ export const Storage = {
 
   // تطبیق و اتصال دسته‌جمعی عکس‌های پرسنل و کادر بر اساس نام/کد کاربری
   batchAssignStaffPhotos: (
-    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean',
+    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus',
     photoMap: Record<string, string>
   ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     let matchedCount = 0;
@@ -3615,6 +3663,44 @@ export const Storage = {
           if (ref) Storage.setCurrentUser({ role: 'vice_dean', staff: ref });
         }
       }
+    } else if (role === 'library') {
+      const list = Storage.getLibraryStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setLibraryStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'library') {
+          const ref = list.find((lb) => lb.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'library', staff: ref });
+        }
+      }
+    } else if (role === 'smart_campus') {
+      const list = Storage.getSmartCampusStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setSmartCampusStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'smart_campus') {
+          const ref = list.find((sc) => sc.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'smart_campus', staff: ref });
+        }
+      }
     }
 
     if (matchedCount > 0 && saved) {
@@ -3630,6 +3716,8 @@ export const Storage = {
         student_affairs: 'کارشناسان امور دانشجویی و تربیت بدنی',
         security: 'کارشناسان حراست و انتظامات',
         vice_dean: 'کاربران معاونت دانشجویی',
+        library: 'کاربران کتابخانه و پژوهش',
+        smart_campus: 'کاربران واحد هوشمندسازی',
       };
       Storage.addActivityLog({
         category: 'staff',
@@ -3711,7 +3799,7 @@ export const Storage = {
     messageId: string,
     reply: {
       senderName: string;
-      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean';
+      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus';
       content: string;
       date: string;
     }
@@ -4046,8 +4134,13 @@ export const Storage = {
     securityStaff: Storage.getSecurityStaff(),
     securityReports: Storage.getSecurityReports(),
     viceDeanStaff: Storage.getViceDeanStaff(),
+    libraryStaff: Storage.getLibraryStaff(),
+    smartCampusStaff: Storage.getSmartCampusStaff(),
+    libraryBooks: Storage.getLibraryBooks(),
+    libraryBookRequests: Storage.getLibraryBookRequests(),
+    graduationClearances: Storage.getGraduationClearances(),
     exportedAt: new Date().toISOString(),
-    appName: 'سامانه جامع سراهای دانشجویی دانشگاه فرهنگیان اصفهان',
+    appName: 'سامانه جامع امور دانشجویی دانشگاه فرهنگیان اصفهان',
   }),
 
   // پشتیبان‌گیری سریع از داده‌ها به صورت فایل JSON
@@ -4057,7 +4150,7 @@ export const Storage = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `پشتیبان_داده‌های_خوابگاه_فرهنگیان_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `پشتیبان_سامانه_جامع_امور_دانشجویی_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -4090,7 +4183,9 @@ export const Storage = {
       | 'cultural'
       | 'student_affairs'
       | 'security'
-      | 'vice_dean';
+      | 'vice_dean'
+      | 'library'
+      | 'smart_campus';
 
     interface ArchivedPhotoRecord {
       role: PhotoRole;
@@ -4191,6 +4286,8 @@ export const Storage = {
         'student_affairs',
         'security',
         'vice_dean',
+        'library',
+        'smart_campus',
       ]);
 
       // گام ۱: جمع‌آوری عکس‌های کاربران (لینک‌های عمومی Supabase Storage و تصاویر درون‌خطی) برای همه ۱۲ نقش کاربری
@@ -4229,6 +4326,8 @@ export const Storage = {
       registerUserPhotos('student_affairs', baseData.studentAffairsStaff);
       registerUserPhotos('security', baseData.securityStaff);
       registerUserPhotos('vice_dean', baseData.viceDeanStaff);
+      registerUserPhotos('library', baseData.libraryStaff);
+      registerUserPhotos('smart_campus', baseData.smartCampusStaff);
 
       if (missingPhotoFetchQueue.length > 0) {
         onProgress?.(`در حال دریافت و ضمیمه‌کردن ${missingPhotoFetchQueue.length.toLocaleString('fa-IR')} تصویر از Supabase Storage...`);
@@ -4312,7 +4411,9 @@ export const Storage = {
         baseData.culturalStaff.length +
         baseData.studentAffairsStaff.length +
         baseData.securityStaff.length +
-        baseData.viceDeanStaff.length;
+        baseData.viceDeanStaff.length +
+        baseData.libraryStaff.length +
+        baseData.smartCampusStaff.length;
 
       const fontsCount = Array.isArray(st.customFonts) ? st.customFonts.length : 0;
       const attachmentsCount = Array.isArray(st.aboutContent?.attachments)
@@ -4449,6 +4550,11 @@ export const Storage = {
     if (Array.isArray(data.securityStaff)) writeCollection(STORAGE_KEYS.SECURITY_STAFF, data.securityStaff);
     if (Array.isArray(data.securityReports)) writeCollection(STORAGE_KEYS.SECURITY_REPORTS, data.securityReports);
     if (Array.isArray(data.viceDeanStaff)) writeCollection(STORAGE_KEYS.VICE_DEAN_STAFF, data.viceDeanStaff);
+    if (Array.isArray(data.libraryStaff)) writeCollection(STORAGE_KEYS.LIBRARY_STAFF, data.libraryStaff);
+    if (Array.isArray(data.smartCampusStaff)) writeCollection(STORAGE_KEYS.SMART_CAMPUS_STAFF, data.smartCampusStaff);
+    if (Array.isArray(data.libraryBooks)) writeCollection(STORAGE_KEYS.LIBRARY_BOOKS, data.libraryBooks);
+    if (Array.isArray(data.libraryBookRequests)) writeCollection(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, data.libraryBookRequests);
+    if (Array.isArray(data.graduationClearances)) writeCollection(STORAGE_KEYS.GRADUATION_CLEARANCES, data.graduationClearances);
   },
 
   // بازیابی نسخه پشتیبان همگام (سازگاری با فراخوانی‌های قدیمی)
@@ -4511,7 +4617,9 @@ export const Storage = {
       | 'cultural'
       | 'student_affairs'
       | 'security'
-      | 'vice_dean';
+      | 'vice_dean'
+      | 'library'
+      | 'smart_campus';
 
     try {
       onProgress?.('در حال خواندن و اعتبارسنجی ساختار فایل پشتیبان...');
@@ -4654,6 +4762,8 @@ export const Storage = {
         'student_affairs',
         'security',
         'vice_dean',
+        'library',
+        'smart_campus',
       ]);
 
       if (Array.isArray(data.cloudPhotos)) {
@@ -4682,6 +4792,8 @@ export const Storage = {
         { role: 'student_affairs', prop: 'studentAffairsStaff' },
         { role: 'security', prop: 'securityStaff' },
         { role: 'vice_dean', prop: 'viceDeanStaff' },
+        { role: 'library', prop: 'libraryStaff' },
+        { role: 'smart_campus', prop: 'smartCampusStaff' },
       ];
 
       for (const { role, prop } of roleArrayPairs) {
@@ -4715,6 +4827,8 @@ export const Storage = {
         student_affairs: STORAGE_KEYS.STUDENT_AFFAIRS_STAFF,
         security: STORAGE_KEYS.SECURITY_STAFF,
         vice_dean: STORAGE_KEYS.VICE_DEAN_STAFF,
+        library: STORAGE_KEYS.LIBRARY_STAFF,
+        smart_campus: STORAGE_KEYS.SMART_CAMPUS_STAFF,
       };
 
       const useBackgroundPhotoQueue = restoredPhotosCount > 45;
@@ -5075,7 +5189,7 @@ export const Storage = {
 
   // تغییر کلمه عبور برای تمام نقش‌ها
   changePassword: (
-    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean',
+    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus',
     userId: string,
     currentPasswordInput: string,
     newPasswordInput: string
@@ -5329,6 +5443,42 @@ export const Storage = {
         targetName: staff.fullName,
       });
       return { success: true, message: 'کلمه عبور معاونت دانشجویی با موفقیت تغییر یافت.' };
+    }
+
+    if (role === 'library') {
+      const staffList = Storage.getLibraryStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) return { success: false, message: 'کاربر کتابخانه یافت نشد.' };
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی کتابخانه اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setLibraryStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور کتابخانه و پژوهش',
+        details: `کلمه عبور مسئول کتابخانه ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور کتابخانه با موفقیت تغییر یافت.' };
+    }
+
+    if (role === 'smart_campus') {
+      const staffList = Storage.getSmartCampusStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) return { success: false, message: 'کاربر واحد هوشمندسازی یافت نشد.' };
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی واحد هوشمندسازی اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setSmartCampusStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور واحد هوشمندسازی',
+        details: `کلمه عبور کاربر هوشمندسازی ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور واحد هوشمندسازی با موفقیت تغییر یافت.' };
     }
 
     if (role === 'student') {
@@ -5637,7 +5787,7 @@ export const Storage = {
 
   // تغییر یا ریست مستقیم رمز عبور کاربران توسط مدیر کل (بدون نیاز به رمز قبلی)
   adminResetUserPassword: (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus',
     idOrStudentId: string,
     newPasswordInput: string
   ): { success: boolean; message: string } => {
@@ -5889,6 +6039,44 @@ export const Storage = {
       return {
         success: true,
         message: `رمز عبور معاونت دانشجویی «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'library') {
+      const list = Storage.getLibraryStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر کتابخانه یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setLibraryStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز کتابخانه توسط مدیر',
+        details: `کلمه عبور مسئول کتابخانه ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور کتابخانه «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'smart_campus') {
+      const list = Storage.getSmartCampusStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر هوشمندسازی یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setSmartCampusStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز هوشمندسازی توسط مدیر',
+        details: `کلمه عبور کاربر هوشمندسازی ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور واحد هوشمندسازی «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
       };
     }
 
@@ -7618,6 +7806,14 @@ export const Storage = {
       } else if (currentUser.role === 'vice_dean') {
         actorName = currentUser.staff.fullName;
         actorRole = 'vice_dean';
+        actorUsername = currentUser.staff.username;
+      } else if (currentUser.role === 'library') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'library';
+        actorUsername = currentUser.staff.username;
+      } else if (currentUser.role === 'smart_campus') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'smart_campus';
         actorUsername = currentUser.staff.username;
       }
     }
@@ -9471,7 +9667,9 @@ export const Storage = {
       | 'finance'
       | 'education'
       | 'cultural'
-      | 'maintenance';
+      | 'maintenance'
+      | 'library'
+      | 'smart_campus';
     notifyStudentInbox?: boolean;
   }): { success: boolean; message: string; referrals?: DisciplinaryReferral[] } => {
     if (!payload.students || payload.students.length === 0) {
@@ -10741,7 +10939,9 @@ export const Storage = {
         | 'cultural'
         | 'student_affairs'
         | 'security'
-        | 'vice_dean';
+        | 'vice_dean'
+        | 'library'
+        | 'smart_campus';
       roleLabel: string;
       fullName: string;
       username: string;
@@ -10849,6 +11049,24 @@ export const Storage = {
         password: vd.password,
         isInactive: vd.status === 'inactive' || vd.isActive === false,
         user: { role: 'vice_dean' as const, staff: vd },
+      })),
+      ...Storage.getLibraryStaff().map((lb) => ({
+        role: 'library' as const,
+        roleLabel: 'کتابخانه و پژوهش',
+        fullName: lb.fullName,
+        username: lb.username,
+        password: lb.password,
+        isInactive: lb.status === 'inactive' || lb.isActive === false,
+        user: { role: 'library' as const, staff: lb },
+      })),
+      ...Storage.getSmartCampusStaff().map((sc) => ({
+        role: 'smart_campus' as const,
+        roleLabel: 'واحد هوشمندسازی',
+        fullName: sc.fullName,
+        username: sc.username,
+        password: sc.password,
+        isInactive: sc.status === 'inactive' || sc.isActive === false,
+        user: { role: 'smart_campus' as const, staff: sc },
       })),
     ];
 
@@ -11033,7 +11251,9 @@ export const Storage = {
       | 'finance'
       | 'education'
       | 'cultural'
-      | 'maintenance';
+      | 'maintenance'
+      | 'library'
+      | 'smart_campus';
   }): { success: boolean; message: string; report?: SecurityReport } => {
     if (!payload.students || payload.students.length === 0) {
       return { success: false, message: 'لطفاً حداقل یک دانشجو برای ارسال گزارش به حراست انتخاب نمایید.' };
@@ -11107,7 +11327,9 @@ export const Storage = {
       | 'finance'
       | 'education'
       | 'cultural'
-      | 'maintenance',
+      | 'maintenance'
+      | 'library'
+      | 'smart_campus',
       string
     > = {
       supervisor: 'سرپرست سرا',
@@ -11120,6 +11342,8 @@ export const Storage = {
       finance: 'امور مالی و حسابداری',
       education: 'امور آموزش',
       cultural: 'امور فرهنگی',
+      library: 'کتابخانه و پژوهش',
+      smart_campus: 'واحد هوشمندسازی',
     };
 
     Storage.addActivityLog({
@@ -11275,6 +11499,952 @@ export const Storage = {
       });
     }
     return { success: true, message: 'کاربر معاونت دانشجویی با موفقیت حذف گردید.' };
+  },
+
+  // -------------------------------------------------------------
+  // متدهای مدیریت کاربران کتابخانه و پژوهش، کتب و امانات
+  // -------------------------------------------------------------
+  getLibraryStaff: (): LibraryStaff[] =>
+    get<LibraryStaff[]>(STORAGE_KEYS.LIBRARY_STAFF, INITIAL_LIBRARY_STAFF),
+
+  setLibraryStaff: (staff: LibraryStaff[]): boolean =>
+    set(STORAGE_KEYS.LIBRARY_STAFF, staff),
+
+  addLibraryStaff: (
+    staffData: Omit<LibraryStaff, 'id'>
+  ): { success: boolean; message: string; staff?: LibraryStaff } => {
+    const list = Storage.getLibraryStaff();
+    const cleanUsername = normalizeAsciiDigits(staffData.username).toLowerCase();
+    if (!cleanUsername) {
+      return { success: false, message: 'نام کاربری مسئول کتابخانه نمی‌تواند خالی باشد.' };
+    }
+    if (list.some((s) => normalizeAsciiDigits(s.username).toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کاربر کتابخانه دیگری ثبت شده است.' };
+    }
+    const newStaff: LibraryStaff = {
+      ...staffData,
+      id: makeUniqueId('lib'),
+      username: cleanUsername,
+      role: 'library',
+      department: staffData.department?.trim() || 'واحد کتابخانه و پژوهش',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setLibraryStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کاربر کتابخانه و پژوهش',
+      details: `کاربر کتابخانه «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کاربر کتابخانه «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateLibraryStaff: (
+    id: string,
+    updates: Partial<LibraryStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getLibraryStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر کتابخانه یافت نشد.' };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizeAsciiDigits(normalizedUpdates.username).toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((s) => s.id !== id && normalizeAsciiDigits(s.username).toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر کتابخانه دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
+    Storage.setLibraryStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'library' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'library', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کاربر کتابخانه با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteLibraryStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getLibraryStaff();
+    const target = list.find((s) => s.id === id);
+    Storage.setLibraryStaff(list.filter((s) => s.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کاربر کتابخانه و پژوهش',
+        details: `حساب کاربری کتابخانه «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کاربر کتابخانه با موفقیت حذف گردید.' };
+  },
+
+  // کتب موجود کتابخانه
+  getLibraryBooks: (): LibraryBook[] =>
+    get<LibraryBook[]>(STORAGE_KEYS.LIBRARY_BOOKS, INITIAL_LIBRARY_BOOKS),
+
+  setLibraryBooks: (books: LibraryBook[]): boolean =>
+    set(STORAGE_KEYS.LIBRARY_BOOKS, books),
+
+  addLibraryBook: (
+    bookData: Omit<LibraryBook, 'id' | 'createdAt' | 'code'> & { code?: string }
+  ): { success: boolean; message: string; book?: LibraryBook } => {
+    if (!bookData.title.trim()) {
+      return { success: false, message: 'عنوان کتاب الزامی است.' };
+    }
+    const list = Storage.getLibraryBooks();
+    const total = Math.max(1, Math.floor(Number(bookData.totalCopies) || 1));
+    const avail = Math.min(total, Math.max(0, Math.floor(Number(bookData.availableCopies ?? total))));
+    const nowStr = new Date().toLocaleDateString('fa-IR');
+    const newBook: LibraryBook = {
+      id: makeUniqueId('book'),
+      code: (bookData.code || '').trim() || `BK-${101 + list.length}`,
+      title: bookData.title.trim(),
+      author: (bookData.author || '').trim() || 'نامشخص',
+      isbn: (bookData.isbn || '').trim() || undefined,
+      category: (bookData.category || '').trim() || 'عمومی',
+      publisher: (bookData.publisher || '').trim() || undefined,
+      publishYear: (bookData.publishYear || '').trim() || undefined,
+      totalCopies: total,
+      availableCopies: avail,
+      shelfLocation: (bookData.shelfLocation || '').trim() || undefined,
+      notes: (bookData.notes || '').trim() || undefined,
+      createdAt: nowStr,
+    };
+    list.unshift(newBook);
+    Storage.setLibraryBooks(list);
+    Storage.addActivityLog({
+      category: 'library',
+      action: 'ثبت کتاب جدید در کتابخانه',
+      details: `کتاب «${newBook.title}» (${newBook.code}) با ${newBook.totalCopies} نسخه در فهرست کتابخانه ثبت شد.`,
+      targetName: newBook.title,
+    });
+    return { success: true, message: `کتاب «${newBook.title}» با موفقیت ثبت شد.`, book: newBook };
+  },
+
+  updateLibraryBook: (
+    id: string,
+    updates: Partial<LibraryBook>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getLibraryBooks();
+    const idx = list.findIndex((b) => b.id === id);
+    if (idx === -1) return { success: false, message: 'کتاب مورد نظر یافت نشد.' };
+    const nextTotal =
+      updates.totalCopies !== undefined
+        ? Math.max(1, Math.floor(Number(updates.totalCopies) || 1))
+        : list[idx].totalCopies;
+    const nextAvail =
+      updates.availableCopies !== undefined
+        ? Math.min(nextTotal, Math.max(0, Math.floor(Number(updates.availableCopies) || 0)))
+        : Math.min(nextTotal, list[idx].availableCopies);
+    list[idx] = {
+      ...list[idx],
+      ...updates,
+      totalCopies: nextTotal,
+      availableCopies: nextAvail,
+      updatedAt: new Date().toLocaleDateString('fa-IR'),
+    };
+    Storage.setLibraryBooks(list);
+    return { success: true, message: 'اطلاعات کتاب با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteLibraryBook: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getLibraryBooks();
+    const target = list.find((b) => b.id === id);
+    Storage.setLibraryBooks(list.filter((b) => b.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'library',
+        action: 'حذف کتاب از فهرست کتابخانه',
+        details: `کتاب «${target.title}» (${target.code}) از فهرست حذف شد.`,
+        targetName: target.title,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کتاب با موفقیت حذف شد.' };
+  },
+
+  bulkImportLibraryBooks: (
+    rows: Array<{
+      code?: string;
+      title: string;
+      author?: string;
+      isbn?: string;
+      category?: string;
+      publisher?: string;
+      publishYear?: string;
+      totalCopies?: number;
+      shelfLocation?: string;
+      notes?: string;
+    }>
+  ): { success: boolean; addedCount: number; updatedCount: number; message: string } => {
+    const list = Storage.getLibraryBooks();
+    const nowStr = new Date().toLocaleDateString('fa-IR');
+    let addedCount = 0;
+    let updatedCount = 0;
+
+    for (const row of rows) {
+      const title = String(row.title || '').trim();
+      if (!title) continue;
+      const code = String(row.code || '').trim();
+      const isbn = String(row.isbn || '').trim();
+      const totalCopies = Math.max(1, Math.floor(Number(row.totalCopies) || 1));
+
+      const existingIdx = list.findIndex(
+        (b) =>
+          (code && normalizeLookupKey(b.code) === normalizeLookupKey(code)) ||
+          (isbn && b.isbn && normalizeLookupKey(b.isbn) === normalizeLookupKey(isbn)) ||
+          (normalizePersianSearch(b.title) === normalizePersianSearch(title) &&
+            normalizePersianSearch(b.author) === normalizePersianSearch(String(row.author || 'نامشخص')))
+      );
+
+      if (existingIdx !== -1) {
+        const cur = list[existingIdx];
+        const borrowedCount = Math.max(0, cur.totalCopies - cur.availableCopies);
+        const nextTotal = Math.max(borrowedCount, totalCopies);
+        list[existingIdx] = {
+          ...cur,
+          author: String(row.author || '').trim() || cur.author,
+          isbn: isbn || cur.isbn,
+          category: String(row.category || '').trim() || cur.category,
+          publisher: String(row.publisher || '').trim() || cur.publisher,
+          publishYear: String(row.publishYear || '').trim() || cur.publishYear,
+          shelfLocation: String(row.shelfLocation || '').trim() || cur.shelfLocation,
+          notes: String(row.notes || '').trim() || cur.notes,
+          totalCopies: nextTotal,
+          availableCopies: Math.max(0, nextTotal - borrowedCount),
+          updatedAt: nowStr,
+        };
+        updatedCount++;
+      } else {
+        list.unshift({
+          id: makeUniqueId('book'),
+          code: code || `BK-${101 + list.length}`,
+          title,
+          author: String(row.author || '').trim() || 'نامشخص',
+          isbn: isbn || undefined,
+          category: String(row.category || '').trim() || 'عمومی',
+          publisher: String(row.publisher || '').trim() || undefined,
+          publishYear: String(row.publishYear || '').trim() || undefined,
+          totalCopies,
+          availableCopies: totalCopies,
+          shelfLocation: String(row.shelfLocation || '').trim() || undefined,
+          notes: String(row.notes || '').trim() || undefined,
+          createdAt: nowStr,
+        });
+        addedCount++;
+      }
+    }
+
+    Storage.setLibraryBooks(list);
+    if (addedCount > 0 || updatedCount > 0) {
+      Storage.addActivityLog({
+        category: 'library',
+        action: 'ورود اکسل فهرست کتب کتابخانه',
+        details: `${addedCount} کتاب جدید افزوده شد و ${updatedCount} کتاب بروزرسانی گردید.`,
+        targetName: `${addedCount + updatedCount} عنوان کتاب`,
+      });
+    }
+    return {
+      success: true,
+      addedCount,
+      updatedCount,
+      message: `${addedCount} کتاب جدید ثبت و ${updatedCount} کتاب بروزرسانی شد.`,
+    };
+  },
+
+  // درخواست‌ها و امانات کتابخانه
+  getLibraryBookRequests: (): LibraryBookRequest[] =>
+    get<LibraryBookRequest[]>(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, INITIAL_LIBRARY_BOOK_REQUESTS),
+
+  setLibraryBookRequests: (items: LibraryBookRequest[]): boolean =>
+    set(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, items),
+
+  createLibraryBookRequest: (payload: {
+    bookId: string;
+    student: Pick<Student, 'studentId' | 'fullName' | 'fieldOfStudy' | 'entryTerm' | 'mobile' | 'phone'>;
+    requestNote?: string;
+  }): { success: boolean; message: string; request?: LibraryBookRequest } => {
+    const books = Storage.getLibraryBooks();
+    const book = books.find((b) => b.id === payload.bookId);
+    if (!book) return { success: false, message: 'کتاب انتخاب‌شده یافت نشد.' };
+    if (book.availableCopies <= 0) {
+      return { success: false, message: 'در حال حاضر نسخه آزادی از این کتاب موجود نیست.' };
+    }
+    const reqs = Storage.getLibraryBookRequests();
+    const alreadyOpen = reqs.find(
+      (r) =>
+        r.studentId === payload.student.studentId &&
+        r.bookId === book.id &&
+        (r.status === 'pending' || r.status === 'approved')
+    );
+    if (alreadyOpen) {
+      return {
+        success: false,
+        message: 'شما هم‌اکنون درخواست فعال یا امانت جاری برای این کتاب دارید.',
+      };
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const newReq: LibraryBookRequest = {
+      id: makeUniqueId('libreq'),
+      requestCode: `LIB-${101 + reqs.length}`,
+      bookId: book.id,
+      bookCode: book.code,
+      bookTitle: book.title,
+      bookAuthor: book.author,
+      studentId: payload.student.studentId,
+      studentName: payload.student.fullName,
+      studentFieldOfStudy: payload.student.fieldOfStudy,
+      studentEntryTerm: payload.student.entryTerm,
+      studentPhone: payload.student.mobile || payload.student.phone || '',
+      requestedAt: nowStr,
+      status: 'pending',
+      requestNote: (payload.requestNote || '').trim() || undefined,
+    };
+    reqs.unshift(newReq);
+    Storage.setLibraryBookRequests(reqs);
+    Storage.addActivityLog({
+      category: 'library',
+      action: 'ثبت درخواست امانت کتاب',
+      details: `دانشجو ${payload.student.fullName} درخواست امانت کتاب «${book.title}» (${newReq.requestCode}) را ثبت کرد.`,
+      targetName: newReq.requestCode,
+    });
+    return {
+      success: true,
+      message: `درخواست امانت کتاب «${book.title}» با کد ${newReq.requestCode} ثبت شد و به مسئول کتابخانه ارسال گردید.`,
+      request: newReq,
+    };
+  },
+
+  approveLibraryBookRequest: (
+    requestId: string,
+    options: { librarianId: string; librarianName: string; dueDate?: string; librarianNote?: string }
+  ): { success: boolean; message: string } => {
+    const reqs = Storage.getLibraryBookRequests();
+    const idx = reqs.findIndex((r) => r.id === requestId);
+    if (idx === -1) return { success: false, message: 'درخواست مورد نظر یافت نشد.' };
+    if (reqs[idx].status !== 'pending') {
+      return { success: false, message: 'این درخواست قبلاً تعیین تکلیف شده است.' };
+    }
+    const books = Storage.getLibraryBooks();
+    const bIdx = books.findIndex((b) => b.id === reqs[idx].bookId);
+    if (bIdx !== -1) {
+      if (books[bIdx].availableCopies <= 0) {
+        return { success: false, message: 'موجودی آزاد این کتاب به اتمام رسیده است.' };
+      }
+      books[bIdx] = { ...books[bIdx], availableCopies: Math.max(0, books[bIdx].availableCopies - 1) };
+      Storage.setLibraryBooks(books);
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const defaultDue = new Date(Date.now() + 14 * 24 * 3600 * 1000).toLocaleDateString('fa-IR');
+
+    reqs[idx] = {
+      ...reqs[idx],
+      status: 'approved',
+      approvedAt: nowStr,
+      dueDate: (options.dueDate || '').trim() || defaultDue,
+      librarianId: options.librarianId,
+      librarianName: options.librarianName,
+      librarianNote: (options.librarianNote || '').trim() || undefined,
+    };
+    Storage.setLibraryBookRequests(reqs);
+
+    Storage.addMessage({
+      senderId: options.librarianId,
+      senderName: `${options.librarianName} (کتابخانه و پژوهش)`,
+      senderRole: 'library',
+      receiverType: 'student',
+      receiverId: reqs[idx].studentId,
+      receiverName: reqs[idx].studentName,
+      targetScope: 'single',
+      category: 'library',
+      subject: `تایید درخواست امانت کتاب: ${reqs[idx].bookTitle}`,
+      content: `درخواست امانت کتاب «${reqs[idx].bookTitle}» (${reqs[idx].requestCode}) تایید شد.\nموعد بازگشت: ${reqs[idx].dueDate}${options.librarianNote ? `\nتوضیحات کتابخانه: ${options.librarianNote}` : ''}`,
+      date: nowStr,
+    });
+
+    return { success: true, message: `امانت کتاب «${reqs[idx].bookTitle}» تایید شد.` };
+  },
+
+  rejectLibraryBookRequest: (
+    requestId: string,
+    options: { librarianId: string; librarianName: string; rejectionReason: string }
+  ): { success: boolean; message: string } => {
+    const reqs = Storage.getLibraryBookRequests();
+    const idx = reqs.findIndex((r) => r.id === requestId);
+    if (idx === -1) return { success: false, message: 'درخواست مورد نظر یافت نشد.' };
+    const reason = options.rejectionReason.trim() || 'عدم امکان تحویل در زمان فعلی';
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    reqs[idx] = {
+      ...reqs[idx],
+      status: 'rejected',
+      librarianId: options.librarianId,
+      librarianName: options.librarianName,
+      rejectionReason: reason,
+    };
+    Storage.setLibraryBookRequests(reqs);
+
+    Storage.addMessage({
+      senderId: options.librarianId,
+      senderName: `${options.librarianName} (کتابخانه و پژوهش)`,
+      senderRole: 'library',
+      receiverType: 'student',
+      receiverId: reqs[idx].studentId,
+      receiverName: reqs[idx].studentName,
+      targetScope: 'single',
+      category: 'library',
+      subject: `نتیجه درخواست کتاب: ${reqs[idx].bookTitle}`,
+      content: `درخواست کتاب «${reqs[idx].bookTitle}» (${reqs[idx].requestCode}) تایید نشد.\nتوضیحات مسئول کتابخانه: ${reason}`,
+      date: nowStr,
+    });
+
+    return { success: true, message: 'درخواست رد شد و به دانشجو اطلاع‌رسانی گردید.' };
+  },
+
+  returnLibraryBook: (
+    requestId: string,
+    options: { librarianName: string; librarianNote?: string }
+  ): { success: boolean; message: string } => {
+    const reqs = Storage.getLibraryBookRequests();
+    const idx = reqs.findIndex((r) => r.id === requestId);
+    if (idx === -1) return { success: false, message: 'سابقه امانت یافت نشد.' };
+    if (reqs[idx].status !== 'approved') {
+      return { success: false, message: 'این کتاب در وضعیت امانت جاری نیست.' };
+    }
+    const books = Storage.getLibraryBooks();
+    const bIdx = books.findIndex((b) => b.id === reqs[idx].bookId);
+    if (bIdx !== -1) {
+      books[bIdx] = {
+        ...books[bIdx],
+        availableCopies: Math.min(books[bIdx].totalCopies, books[bIdx].availableCopies + 1),
+      };
+      Storage.setLibraryBooks(books);
+    }
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    reqs[idx] = {
+      ...reqs[idx],
+      status: 'returned',
+      returnedAt: nowStr,
+      librarianNote: (options.librarianNote || '').trim() || reqs[idx].librarianNote,
+    };
+    Storage.setLibraryBookRequests(reqs);
+    Storage.addActivityLog({
+      category: 'library',
+      action: 'ثبت عودت کتاب امانی',
+      details: `کتاب «${reqs[idx].bookTitle}» توسط دانشجو ${reqs[idx].studentName} به کتابخانه بازگردانده شد (${options.librarianName}).`,
+      targetName: reqs[idx].requestCode,
+    });
+    return { success: true, message: `عودت کتاب «${reqs[idx].bookTitle}» با موفقیت ثبت شد.` };
+  },
+
+  createDirectLibraryLoan: (payload: {
+    bookId: string;
+    student: Pick<Student, 'studentId' | 'fullName' | 'fieldOfStudy' | 'entryTerm' | 'mobile' | 'phone'>;
+    dueDate?: string;
+    librarianId: string;
+    librarianName: string;
+    librarianNote?: string;
+  }): { success: boolean; message: string; request?: LibraryBookRequest } => {
+    const books = Storage.getLibraryBooks();
+    const bIdx = books.findIndex((b) => b.id === payload.bookId);
+    if (bIdx === -1) return { success: false, message: 'کتاب انتخاب‌شده یافت نشد.' };
+    if (books[bIdx].availableCopies <= 0) {
+      return { success: false, message: 'نسخه آزادی از این کتاب موجود نیست.' };
+    }
+    books[bIdx] = { ...books[bIdx], availableCopies: Math.max(0, books[bIdx].availableCopies - 1) };
+    Storage.setLibraryBooks(books);
+
+    const reqs = Storage.getLibraryBookRequests();
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const defaultDue = new Date(Date.now() + 14 * 24 * 3600 * 1000).toLocaleDateString('fa-IR');
+
+    const newReq: LibraryBookRequest = {
+      id: makeUniqueId('libreq'),
+      requestCode: `LIB-${101 + reqs.length}`,
+      bookId: books[bIdx].id,
+      bookCode: books[bIdx].code,
+      bookTitle: books[bIdx].title,
+      bookAuthor: books[bIdx].author,
+      studentId: payload.student.studentId,
+      studentName: payload.student.fullName,
+      studentFieldOfStudy: payload.student.fieldOfStudy,
+      studentEntryTerm: payload.student.entryTerm,
+      studentPhone: payload.student.mobile || payload.student.phone || '',
+      requestedAt: nowStr,
+      approvedAt: nowStr,
+      dueDate: (payload.dueDate || '').trim() || defaultDue,
+      status: 'approved',
+      librarianId: payload.librarianId,
+      librarianName: payload.librarianName,
+      librarianNote: (payload.librarianNote || '').trim() || undefined,
+    };
+    reqs.unshift(newReq);
+    Storage.setLibraryBookRequests(reqs);
+
+    Storage.addActivityLog({
+      category: 'library',
+      action: 'ثبت مستقیم امانت کتاب',
+      details: `کتاب «${books[bIdx].title}» به نام دانشجو ${payload.student.fullName} (${payload.student.studentId}) ثبت امانت شد.`,
+      targetName: newReq.requestCode,
+    });
+
+    return {
+      success: true,
+      message: `امانت کتاب «${books[bIdx].title}» برای «${payload.student.fullName}» ثبت شد.`,
+      request: newReq,
+    };
+  },
+
+  // -------------------------------------------------------------
+  // متدهای مدیریت کاربران واحد هوشمندسازی
+  // -------------------------------------------------------------
+  getSmartCampusStaff: (): SmartCampusStaff[] =>
+    get<SmartCampusStaff[]>(STORAGE_KEYS.SMART_CAMPUS_STAFF, INITIAL_SMART_CAMPUS_STAFF),
+
+  setSmartCampusStaff: (staff: SmartCampusStaff[]): boolean =>
+    set(STORAGE_KEYS.SMART_CAMPUS_STAFF, staff),
+
+  addSmartCampusStaff: (
+    staffData: Omit<SmartCampusStaff, 'id'>
+  ): { success: boolean; message: string; staff?: SmartCampusStaff } => {
+    const list = Storage.getSmartCampusStaff();
+    const cleanUsername = normalizeAsciiDigits(staffData.username).toLowerCase();
+    if (!cleanUsername) {
+      return { success: false, message: 'نام کاربری واحد هوشمندسازی نمی‌تواند خالی باشد.' };
+    }
+    if (list.some((s) => normalizeAsciiDigits(s.username).toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کاربر هوشمندسازی دیگری ثبت شده است.' };
+    }
+    const newStaff: SmartCampusStaff = {
+      ...staffData,
+      id: makeUniqueId('smart'),
+      username: cleanUsername,
+      role: 'smart_campus',
+      department: staffData.department?.trim() || 'واحد هوشمندسازی و فناوری اطلاعات',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setSmartCampusStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کاربر واحد هوشمندسازی',
+      details: `کاربر واحد هوشمندسازی «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کاربر واحد هوشمندسازی «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateSmartCampusStaff: (
+    id: string,
+    updates: Partial<SmartCampusStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getSmartCampusStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر واحد هوشمندسازی یافت نشد.' };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizeAsciiDigits(normalizedUpdates.username).toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((s) => s.id !== id && normalizeAsciiDigits(s.username).toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر هوشمندسازی دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
+    Storage.setSmartCampusStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'smart_campus' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'smart_campus', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کاربر واحد هوشمندسازی با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteSmartCampusStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getSmartCampusStaff();
+    const target = list.find((s) => s.id === id);
+    Storage.setSmartCampusStaff(list.filter((s) => s.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کاربر واحد هوشمندسازی',
+        details: `حساب کاربری واحد هوشمندسازی «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کاربر واحد هوشمندسازی با موفقیت حذف گردید.' };
+  },
+
+  // -------------------------------------------------------------
+  // متدهای گردش کار تسویه حساب الکترونیک فراغت از تحصیل
+  // -------------------------------------------------------------
+  getGraduationClearances: (): GraduationClearanceRequest[] =>
+    get<GraduationClearanceRequest[]>(STORAGE_KEYS.GRADUATION_CLEARANCES, INITIAL_GRADUATION_CLEARANCES),
+
+  setGraduationClearances: (items: GraduationClearanceRequest[]): boolean =>
+    set(STORAGE_KEYS.GRADUATION_CLEARANCES, items),
+
+  submitGraduationClearance: (payload: {
+    student: Student;
+    graduationAcademicYear: string;
+    graduationSemester: string;
+    studentPhone?: string;
+    studentNote?: string;
+    dormName?: string;
+    roomNumber?: string;
+  }): { success: boolean; message: string; request?: GraduationClearanceRequest } => {
+    const list = Storage.getGraduationClearances();
+    const existing = list.find((r) => r.studentId === payload.student.studentId);
+    if (existing && existing.status !== 'rejected_education') {
+      return {
+        success: false,
+        message: 'شما قبلاً درخواست تسویه حساب فراغت از تحصیل ثبت کرده‌اید و پرونده شما در حال گردش است.',
+      };
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const initialUnits = {} as Record<ClearanceUnitRole, ClearanceUnitApproval>;
+    CLEARANCE_UNITS_META.forEach((u) => {
+      initialUnits[u.role] = {
+        unitRole: u.role,
+        unitLabel: u.label,
+        status: 'pending',
+      };
+    });
+
+    if (existing && existing.status === 'rejected_education') {
+      const updatedReq: GraduationClearanceRequest = {
+        ...existing,
+        studentPhone: (payload.studentPhone || '').trim() || payload.student.mobile || payload.student.phone || '',
+        studentPhotoUrl: payload.student.photoUrl || existing.studentPhotoUrl,
+        graduationAcademicYear: payload.graduationAcademicYear.trim(),
+        graduationSemester: payload.graduationSemester.trim(),
+        studentNote: (payload.studentNote || '').trim() || undefined,
+        status: 'pending_education',
+        educationGateStatus: 'pending',
+        updatedAt: nowStr,
+      };
+      const next = list.map((r) => (r.id === existing.id ? updatedReq : r));
+      Storage.setGraduationClearances(next);
+      Storage.addActivityLog({
+        category: 'graduation_clearance',
+        action: 'ارسال مجدد درخواست تسویه حساب به کارشناس آموزش',
+        details: `دانشجو ${payload.student.fullName} (${payload.student.studentId}) درخواست تسویه حساب ${updatedReq.trackingCode} را مجدداً به واحد آموزش ارسال کرد.`,
+        targetName: updatedReq.trackingCode,
+      });
+      return {
+        success: true,
+        message: `درخواست تسویه حساب شما (${updatedReq.trackingCode}) مجدداً برای کارشناس آموزش ارسال شد.`,
+        request: updatedReq,
+      };
+    }
+
+    const newReq: GraduationClearanceRequest = {
+      id: makeUniqueId('clr'),
+      trackingCode: `CLR-${101 + list.length}`,
+      studentId: payload.student.studentId,
+      studentName: payload.student.fullName,
+      studentNationalId: payload.student.nationalId,
+      studentFatherName: payload.student.fatherName,
+      studentFieldOfStudy: payload.student.fieldOfStudy,
+      studentEntryTerm: payload.student.entryTerm,
+      studentPhone: (payload.studentPhone || '').trim() || payload.student.mobile || payload.student.phone || '',
+      studentPhotoUrl: payload.student.photoUrl,
+      dormName: payload.dormName || payload.student.assignedDormName,
+      roomNumber: payload.roomNumber || payload.student.assignedRoomNumber,
+      graduationAcademicYear: payload.graduationAcademicYear.trim(),
+      graduationSemester: payload.graduationSemester.trim(),
+      studentNote: (payload.studentNote || '').trim() || undefined,
+      requestedAt: nowStr,
+      updatedAt: nowStr,
+      status: 'pending_education',
+      educationGateStatus: 'pending',
+      units: initialUnits,
+    };
+
+    list.unshift(newReq);
+    Storage.setGraduationClearances(list);
+    Storage.addActivityLog({
+      category: 'graduation_clearance',
+      action: 'ثبت درخواست تسویه حساب الکترونیک فراغت از تحصیل',
+      details: `دانشجو ${payload.student.fullName} (${payload.student.studentId}) درخواست تسویه حساب ${newReq.trackingCode} را جهت بررسی واحدهای درسی به کارشناس آموزش ارسال کرد.`,
+      targetName: newReq.trackingCode,
+    });
+    return {
+      success: true,
+      message: `درخواست تسویه حساب شما با کد رهگیری «${newReq.trackingCode}» ثبت شد و ابتدا جهت تایید گذراندن کلیه واحدها به کارشناس آموزش ارسال گردید.`,
+      request: newReq,
+    };
+  },
+
+  reviewGraduationClearanceEducationGate: (
+    clearanceId: string,
+    payload: {
+      decision: 'approved' | 'rejected';
+      reviewerId: string;
+      reviewerName: string;
+      note?: string;
+    }
+  ): { success: boolean; message: string } => {
+    const list = Storage.getGraduationClearances();
+    const idx = list.findIndex((r) => r.id === clearanceId);
+    if (idx === -1) return { success: false, message: 'پرونده تسویه حساب یافت نشد.' };
+
+    const note = (payload.note || '').trim();
+    if (payload.decision === 'rejected' && !note) {
+      return { success: false, message: 'لطفاً علت رد درخواست را در بخش توضیحات ذکر نمایید.' };
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const cur = list[idx];
+    const nextUnits: Record<ClearanceUnitRole, ClearanceUnitApproval> = { ...cur.units };
+    CLEARANCE_UNITS_META.forEach((u) => {
+      if (!nextUnits[u.role]) {
+        nextUnits[u.role] = { unitRole: u.role, unitLabel: u.label, status: 'pending' };
+      }
+    });
+
+    if (payload.decision === 'approved') {
+      nextUnits.education = {
+        unitRole: 'education',
+        unitLabel: 'واحد آموزش',
+        status: 'approved',
+        reviewerId: payload.reviewerId,
+        reviewerName: payload.reviewerName,
+        reviewedAt: nowStr,
+        note: note || 'گذراندن کلیه واحدهای درسی تایید و پرونده جهت تسویه به تمامی واحدهای سامانه ارسال گردید.',
+      };
+      list[idx] = {
+        ...cur,
+        status: 'in_clearance',
+        educationGateStatus: 'approved',
+        educationReviewerId: payload.reviewerId,
+        educationReviewerName: payload.reviewerName,
+        educationReviewedAt: nowStr,
+        educationNote: note || 'گذراندن کلیه واحدها تایید شد.',
+        units: nextUnits,
+        updatedAt: nowStr,
+      };
+    } else {
+      nextUnits.education = {
+        unitRole: 'education',
+        unitLabel: 'واحد آموزش',
+        status: 'rejected',
+        reviewerId: payload.reviewerId,
+        reviewerName: payload.reviewerName,
+        reviewedAt: nowStr,
+        note,
+      };
+      list[idx] = {
+        ...cur,
+        status: 'rejected_education',
+        educationGateStatus: 'rejected',
+        educationReviewerId: payload.reviewerId,
+        educationReviewerName: payload.reviewerName,
+        educationReviewedAt: nowStr,
+        educationNote: note,
+        units: nextUnits,
+        updatedAt: nowStr,
+      };
+    }
+
+    Storage.setGraduationClearances(list);
+    Storage.addActivityLog({
+      category: 'graduation_clearance',
+      action:
+        payload.decision === 'approved'
+          ? 'تایید واحد آموزش و ارسال فرم تسویه به کلیه واحدها'
+          : 'رد اولیه درخواست تسویه حساب توسط کارشناس آموزش',
+      details: `پرونده ${cur.trackingCode} (${cur.studentName}) توسط ${payload.reviewerName} بررسی شد.`,
+      targetName: cur.trackingCode,
+      severity: payload.decision === 'rejected' ? 'warning' : 'info',
+    });
+
+    Storage.addMessage({
+      senderId: payload.reviewerId,
+      senderName: `${payload.reviewerName} (واحد آموزش)`,
+      senderRole: 'education',
+      receiverType: 'student',
+      receiverId: cur.studentId,
+      receiverName: cur.studentName,
+      targetScope: 'single',
+      category: 'education',
+      subject:
+        payload.decision === 'approved'
+          ? `تایید آموزشی تسویه حساب فراغت از تحصیل (${cur.trackingCode})`
+          : `نقص پرونده آموزشی تسویه حساب (${cur.trackingCode})`,
+      content:
+        payload.decision === 'approved'
+          ? `گذراندن کلیه واحدهای درسی شما تایید شد و فرم تسویه حساب عکس‌دار شما به کلیه واحدهای سامانه ارسال گردید. می‌توانید گردش کار آن را در بخش تسویه حساب الکترونیک پیگیری نمایید.${note ? `\nتوضیحات آموزش: ${note}` : ''}`
+          : `درخواست تسویه حساب فراغت از تحصیل شما توسط واحد آموزش تایید نشد.\nعلت / توضیحات: ${note}`,
+      date: nowStr,
+    });
+
+    return {
+      success: true,
+      message:
+        payload.decision === 'approved'
+          ? `تایید آموزشی ثبت شد و فرم تسویه «${cur.studentName}» برای تمامی واحدهای سامانه ارسال گردید.`
+          : `درخواست تسویه حساب «${cur.studentName}» با ذکر توضیحات رد شد.`,
+    };
+  },
+
+  reviewGraduationClearanceUnit: (
+    clearanceId: string,
+    payload: {
+      unitRole: ClearanceUnitRole;
+      decision: 'approved' | 'rejected';
+      reviewerId: string;
+      reviewerName: string;
+      note?: string;
+    }
+  ): { success: boolean; message: string; isNowCompleted?: boolean } => {
+    const list = Storage.getGraduationClearances();
+    const idx = list.findIndex((r) => r.id === clearanceId);
+    if (idx === -1) return { success: false, message: 'پرونده تسویه حساب یافت نشد.' };
+
+    const cur = list[idx];
+    if (cur.status !== 'in_clearance' && cur.status !== 'completed') {
+      return {
+        success: false,
+        message: 'این پرونده هنوز توسط کارشناس آموزش تایید و به واحدها ارجاع نشده است.',
+      };
+    }
+
+    const note = (payload.note || '').trim();
+    if (payload.decision === 'rejected' && !note) {
+      return { success: false, message: 'در صورت رد تسویه، ذکر توضیحات و علت نقص الزامی است.' };
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const unitMeta = CLEARANCE_UNITS_META.find((u) => u.role === payload.unitRole);
+    const nextUnits: Record<ClearanceUnitRole, ClearanceUnitApproval> = { ...cur.units };
+    CLEARANCE_UNITS_META.forEach((u) => {
+      if (!nextUnits[u.role]) {
+        nextUnits[u.role] = { unitRole: u.role, unitLabel: u.label, status: 'pending' };
+      }
+    });
+
+    nextUnits[payload.unitRole] = {
+      unitRole: payload.unitRole,
+      unitLabel: unitMeta?.label || payload.unitRole,
+      status: payload.decision,
+      reviewerId: payload.reviewerId,
+      reviewerName: payload.reviewerName,
+      reviewedAt: nowStr,
+      note: note || (payload.decision === 'approved' ? 'بلامانع و تسویه کامل تایید گردید.' : ''),
+    };
+
+    const allApproved = CLEARANCE_UNITS_META.every((u) => nextUnits[u.role]?.status === 'approved');
+
+    list[idx] = {
+      ...cur,
+      units: nextUnits,
+      status: allApproved ? 'completed' : 'in_clearance',
+      completedAt: allApproved ? nowStr : undefined,
+      updatedAt: nowStr,
+    };
+
+    Storage.setGraduationClearances(list);
+    Storage.addActivityLog({
+      category: 'graduation_clearance',
+      action:
+        payload.decision === 'approved'
+          ? `تایید تسویه حساب توسط ${unitMeta?.label || payload.unitRole}`
+          : `رد تسویه حساب توسط ${unitMeta?.label || payload.unitRole}`,
+      details: `پرونده ${cur.trackingCode} (${cur.studentName}) توسط ${payload.reviewerName} ${payload.decision === 'approved' ? 'تایید' : 'رد'} شد.${note ? ` (${note})` : ''}`,
+      targetName: cur.trackingCode,
+      severity: payload.decision === 'rejected' ? 'warning' : 'info',
+    });
+
+    return {
+      success: true,
+      isNowCompleted: allApproved,
+      message: allApproved
+        ? `تایید ${unitMeta?.label} ثبت شد. تمامی واحدها تسویه «${cur.studentName}» را تایید کردند و فرم آماده چاپ است.`
+        : payload.decision === 'approved'
+        ? `تسویه حساب «${cur.studentName}» توسط ${unitMeta?.label} تایید شد.`
+        : `تسویه حساب «${cur.studentName}» توسط ${unitMeta?.label} با ذکر توضیحات رد شد.`,
+    };
+  },
+
+  resubmitGraduationClearanceUnit: (
+    clearanceId: string,
+    unitRole: ClearanceUnitRole,
+    studentNote?: string
+  ): { success: boolean; message: string } => {
+    const list = Storage.getGraduationClearances();
+    const idx = list.findIndex((r) => r.id === clearanceId);
+    if (idx === -1) return { success: false, message: 'پرونده تسویه حساب یافت نشد.' };
+    const cur = list[idx];
+    const targetUnit = cur.units[unitRole];
+    if (!targetUnit || targetUnit.status !== 'rejected') {
+      return { success: false, message: 'این واحد در وضعیت رد شده قرار ندارد.' };
+    }
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const nextUnits = { ...cur.units };
+    nextUnits[unitRole] = {
+      ...targetUnit,
+      status: 'pending',
+      resubmittedAt: nowStr,
+      note: (studentNote || '').trim()
+        ? `اعلام رفع نقص دانشجو: ${(studentNote || '').trim()}`
+        : 'اعلام رفع نقص و درخواست بررسی مجدد توسط دانشجو',
+    };
+    list[idx] = {
+      ...cur,
+      units: nextUnits,
+      status: 'in_clearance',
+      updatedAt: nowStr,
+    };
+    Storage.setGraduationClearances(list);
+    return {
+      success: true,
+      message: `درخواست بررسی مجدد به «${targetUnit.unitLabel}» ارسال شد.`,
+    };
   },
 
   // -------------------------------------------------------------

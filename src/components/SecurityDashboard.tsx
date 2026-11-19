@@ -23,6 +23,7 @@ import {
   Info,
   BookOpen,
   Send,
+  GraduationCap,
 } from 'lucide-react';
 import {
   Bed,
@@ -42,6 +43,7 @@ import { toEnglishDigits } from '../utils/excelUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
 import { isStudentDormResident } from '../utils/financeUtils';
 import { StudentReferralModal } from './StudentReferralModal';
+import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -111,6 +113,8 @@ const REPORTER_ROLE_LABELS: Record<SecurityReport['reportedByRole'], string> = {
   finance: 'امور مالی و حسابداری',
   education: 'امور آموزش',
   cultural: 'امور فرهنگی',
+  library: 'کتابخانه و پژوهش',
+  smart_campus: 'واحد هوشمندسازی',
 };
 
 const EVAL_TYPE_LABELS: Record<StudentEvaluation['type'], { label: string; cls: string }> = {
@@ -180,7 +184,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
   onRefreshData,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'reports' | 'student_records' | 'students'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'student_records' | 'students' | 'clearance'>('reports');
 
   // داده‌های زنده
   const securityReports = Storage.getSecurityReports();
@@ -710,6 +714,24 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
         >
           <Users className="w-4 h-4" />
           <span>مشاهده اطلاعات و پرونده دانشجویان ({students.length.toLocaleString('fa-IR')})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('clearance')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer whitespace-nowrap ${
+            activeTab === 'clearance'
+              ? 'bg-sky-700 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4" />
+          <span>تسویه حساب فارغ‌التحصیلان</span>
+          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.security?.status || 'pending') === 'pending').length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
+              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.security?.status || 'pending') === 'pending').length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -1587,6 +1609,17 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {activeTab === 'clearance' && (
+        <GraduationClearanceReviewPanel
+          unitRole="security"
+          reviewerId={securityStaff.id}
+          reviewerName={securityStaff.fullName}
+          settings={Storage.getSettings()}
+          onDataChange={onRefreshData}
+        />
+      )}
+
       <StudentReferralModal
         isOpen={Boolean(referralTargetStudent)}
         onClose={() => setReferralTargetStudent(null)}

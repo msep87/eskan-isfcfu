@@ -12,6 +12,7 @@ import {
   exportCounselorReportsToExcel,
 } from '../utils/excelUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
+import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import {
   HeartHandshake,
   Calendar,
@@ -37,6 +38,7 @@ import {
   X,
   Flame,
   ArrowRight,
+  GraduationCap,
 } from 'lucide-react';
 
 interface CounselorDashboardProps {
@@ -82,7 +84,7 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'requests' | 'shifts' | 'new_report' | 'reports_history'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'shifts' | 'new_report' | 'reports_history' | 'clearance'>('requests');
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // فیلتر درخواست‌های مشاوره
@@ -457,6 +459,23 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
         >
           <BookOpen className="w-4 h-4" />
           <span>دفترچه گزارش‌های ثبت‌شده ({myReports.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('clearance')}
+          className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'clearance'
+              ? 'bg-sky-700 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4" />
+          <span>تسویه حساب فارغ‌التحصیلان</span>
+          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.counselor?.status || 'pending') === 'pending').length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
+              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.counselor?.status || 'pending') === 'pending').length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -1033,6 +1052,16 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {activeTab === 'clearance' && (
+        <GraduationClearanceReviewPanel
+          unitRole="counselor"
+          reviewerId={counselor.id}
+          reviewerName={counselor.fullName}
+          settings={Storage.getSettings()}
+          onDataChange={onRefreshData}
+        />
       )}
     </div>
   );
