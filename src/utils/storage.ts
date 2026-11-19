@@ -114,11 +114,11 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL =
   (typeof import.meta !== 'undefined' &&
     (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SUPABASE_URL?.trim()) ||
-  'https://hopcocvqknqtqcucyudv.supabase.co';
+  'https://psbojmuzoekqdvpsugdc.supabase.co';
 const SUPABASE_ANON_KEY =
   (typeof import.meta !== 'undefined' &&
     (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SUPABASE_ANON_KEY?.trim()) ||
-  'sb_publishable_IirbONfF8nYyeuKYNFRCFA_eTAT8lWb';
+  'sb_publishable_BMYJ-KKPSy3eBJsGcc9MPA_k0Onu5oJ';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
