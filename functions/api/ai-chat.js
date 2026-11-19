@@ -210,7 +210,10 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
       ? [configuredModel, ...liveModels.filter((m) => m !== configuredModel)]
       : liveModels;
 
+    const RATE_LIMIT_REPLY =
+      'ترافیک پرسش‌های دستیار هوشمند در این لحظه بالاست؛ لطفاً ۱۰ ثانیه صبر کرده و دوباره ارسال کنید';
     const attemptErrors = [];
+    let rateLimitHits = 0;
 
     for (const model of candidateModels) {
       const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
@@ -240,6 +243,30 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
         );
       }
 
+      if (response.status === 429) {
+        rateLimitHits += 1;
+        // در صورت شلوغی و محدودیت نرخ درخواست (HTTP 429)، بیش از ۲ تلاش انجام نمی‌دهیم تا فشار روی Groq تشدید نشود
+        if (rateLimitHits >= 2 || candidateModels.length === 1) {
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              code: 'RATE_LIMITED',
+              retryAfterSeconds: 10,
+              reply: RATE_LIMIT_REPLY,
+            }),
+            {
+              status: 429,
+              headers: {
+                ...JSON_HEADERS,
+                'Retry-After': '10',
+              },
+            }
+          );
+        }
+        attemptErrors.push(`${model}: HTTP 429`);
+        continue;
+      }
+
       if (response.ok) {
         const rawContent = data?.choices?.[0]?.message?.content;
         const reply = cleanReplyText(rawContent);
@@ -261,6 +288,26 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
       }
 
       const errMsg = data?.error?.message || `HTTP ${response.status}`;
+      if (/rate.?limit|too many requests|429/i.test(errMsg)) {
+        rateLimitHits += 1;
+        if (rateLimitHits >= 2) {
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              code: 'RATE_LIMITED',
+              retryAfterSeconds: 10,
+              reply: RATE_LIMIT_REPLY,
+            }),
+            {
+              status: 429,
+              headers: {
+                ...JSON_HEADERS,
+                'Retry-After': '10',
+              },
+            }
+          );
+        }
+      }
       attemptErrors.push(`${model}: ${errMsg}`);
 
       // اگر مدل منقضی شده یا وجود نداشت، کش مدل‌ها را برای درخواست بعدی تازه کن
@@ -268,6 +315,24 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
         cachedModels = null;
         cachedModelsAt = 0;
       }
+    }
+
+    if (rateLimitHits > 0) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          code: 'RATE_LIMITED',
+          retryAfterSeconds: 10,
+          reply: RATE_LIMIT_REPLY,
+        }),
+        {
+          status: 429,
+          headers: {
+            ...JSON_HEADERS,
+            'Retry-After': '10',
+          },
+        }
+      );
     }
 
     const summaryError =

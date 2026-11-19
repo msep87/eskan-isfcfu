@@ -741,6 +741,171 @@ const IMMEDIATE_CLOUD_KEYS = new Set<string>([
   STORAGE_KEYS.SETTINGS,
 ]);
 
+// کلیدهای عمومی قابل کش در sessionStorage به مدت ۵ دقیقه (جلوگیری از فراخوانی تکراری Supabase در هر رفرش)
+const PUBLIC_CACHE_TTL_MS = 5 * 60 * 1000;
+const PUBLIC_CACHE_META_SESSION_KEY = 'farhangian_public_cache_meta_v1';
+const PUBLIC_CACHE_VAL_SESSION_PREFIX = 'farhangian_public_cache_val_v1_';
+const PUBLIC_CACHEABLE_KEYS: string[] = [
+  STORAGE_KEYS.SETTINGS,
+  STORAGE_KEYS.ANNOUNCEMENTS,
+  STORAGE_KEYS.DORMITORIES,
+  STORAGE_KEYS.LIBRARY_BOOKS,
+];
+const PUBLIC_CACHEABLE_KEY_SET = new Set<string>(PUBLIC_CACHEABLE_KEYS);
+
+// کلیدهای عملیاتی مورد نیاز کارتابل دانشجو (بدون کلیدهای پرسنلی و گزارش‌های داخلی مدیریت)
+const STUDENT_OPERATIONAL_KEYS: string[] = [
+  STORAGE_KEYS.ROOMS,
+  STORAGE_KEYS.BEDS,
+  STORAGE_KEYS.WARNINGS,
+  STORAGE_KEYS.MESSAGES,
+  STORAGE_KEYS.STUDENT_EVALUATIONS,
+  STORAGE_KEYS.STUDENT_FINANCES,
+  STORAGE_KEYS.GUEST_REQUESTS,
+  STORAGE_KEYS.SURVEYS,
+  STORAGE_KEYS.SURVEY_RESPONSES,
+  STORAGE_KEYS.CULTURAL_PROGRAMS,
+  STORAGE_KEYS.CULTURAL_ASSOCIATIONS,
+  STORAGE_KEYS.ASSOCIATION_MEMBERSHIPS,
+  STORAGE_KEYS.GUILD_ELECTIONS,
+  STORAGE_KEYS.GUILD_ELECTION_VOTES,
+  STORAGE_KEYS.SPORTS_PROGRAMS,
+  STORAGE_KEYS.SPORTS_REGISTRATIONS,
+  STORAGE_KEYS.LIBRARY_BOOK_REQUESTS,
+  STORAGE_KEYS.GRADUATION_CLEARANCES,
+  STORAGE_KEYS.SHIFT_SCHEDULES,
+  STORAGE_KEYS.COUNSELOR_SHIFTS,
+  STORAGE_KEYS.COUNSELORS,
+];
+
+// کلیدهای app_storage که هرگز نباید رشته تصویری Base64 (data:image) در آن‌ها ذخیره شود
+const MEDIA_ALLOWED_APP_STORAGE_KEYS = new Set<string>([
+  STORAGE_KEYS.SETTINGS,
+  STORAGE_KEYS.ANNOUNCEMENTS,
+]);
+
+interface PublicSessionCacheMeta {
+  cachedAt: number;
+  keys: string[];
+}
+
+function readPublicSessionCacheMeta(): PublicSessionCacheMeta | null {
+  if (typeof sessionStorage === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(PUBLIC_CACHE_META_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PublicSessionCacheMeta>;
+    if (
+      typeof parsed?.cachedAt === 'number' &&
+      Number.isFinite(parsed.cachedAt) &&
+      Array.isArray(parsed.keys)
+    ) {
+      return { cachedAt: parsed.cachedAt, keys: parsed.keys.map(String) };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function isPublicSessionCacheFresh(): boolean {
+  const meta = readPublicSessionCacheMeta();
+  if (!meta) return false;
+  if (Date.now() - meta.cachedAt >= PUBLIC_CACHE_TTL_MS) return false;
+  // اطمینان از اینکه داده‌های کش‌شده واقعاً در sessionStorage یا localStorage موجود هستند
+  for (const key of PUBLIC_CACHEABLE_KEYS) {
+    let hasKey = parsedCache.has(key);
+    if (!hasKey && typeof sessionStorage !== 'undefined') {
+      try {
+        hasKey = sessionStorage.getItem(PUBLIC_CACHE_VAL_SESSION_PREFIX + key) !== null;
+      } catch {
+        hasKey = false;
+      }
+    }
+    if (!hasKey && typeof localStorage !== 'undefined') {
+      try {
+        hasKey = localStorage.getItem(key) !== null;
+      } catch {
+        hasKey = false;
+      }
+    }
+    if (!hasKey) return false;
+  }
+  return true;
+}
+
+function hydratePublicKeysFromSessionCache(): boolean {
+  if (typeof sessionStorage === 'undefined') return false;
+  let hydratedAny = false;
+  for (const key of PUBLIC_CACHEABLE_KEYS) {
+    if (
+      pendingCloudRequests[key] ||
+      key in pendingCloudValues ||
+      key in failedCloudRetryQueue ||
+      persistedDirtyKeys.has(key)
+    ) {
+      continue;
+    }
+    try {
+      const raw = sessionStorage.getItem(PUBLIC_CACHE_VAL_SESSION_PREFIX + key);
+      if (!raw) continue;
+      if (lastAppliedSerializedByKey.get(key) === raw && parsedCache.has(key)) continue;
+      const parsed = sanitizePlainValue(JSON.parse(raw));
+      safeLocalStorageSet(key, raw, parsed);
+      hydratedAny = true;
+    } catch {
+      // نادیده گرفتن ورودی معیوب کش
+    }
+  }
+  return hydratedAny;
+}
+
+function writePublicKeysToSessionCache(
+  entries: Array<{ key: string; serialized: string }>
+): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    for (const entry of entries) {
+      if (!PUBLIC_CACHEABLE_KEY_SET.has(entry.key)) continue;
+      try {
+        sessionStorage.setItem(PUBLIC_CACHE_VAL_SESSION_PREFIX + entry.key, entry.serialized);
+      } catch {
+        // در صورت حجم بالای تصویر بنر/اطلاعیه، صرفاً از تکرار در sessionStorage صرف‌نظر می‌شود
+        // و متادیتای زمان انقضای ۵ دقیقه‌ای همچنان با پشتوانه localStorage معتبر می‌ماند
+        try {
+          sessionStorage.removeItem(PUBLIC_CACHE_VAL_SESSION_PREFIX + entry.key);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    const meta: PublicSessionCacheMeta = {
+      cachedAt: Date.now(),
+      keys: [...PUBLIC_CACHEABLE_KEYS],
+    };
+    sessionStorage.setItem(PUBLIC_CACHE_META_SESSION_KEY, JSON.stringify(meta));
+  } catch {
+    // نادیده گرفتن محدودیت sessionStorage
+  }
+}
+
+function invalidatePublicSessionCache(specificKey?: string): void {
+  if (specificKey && !PUBLIC_CACHEABLE_KEY_SET.has(specificKey)) return;
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.removeItem(PUBLIC_CACHE_META_SESSION_KEY);
+    if (specificKey) {
+      sessionStorage.removeItem(PUBLIC_CACHE_VAL_SESSION_PREFIX + specificKey);
+    } else {
+      for (const k of PUBLIC_CACHEABLE_KEYS) {
+        sessionStorage.removeItem(PUBLIC_CACHE_VAL_SESSION_PREFIX + k);
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 // موج اول سریع (کارکنان + سراها + اتاق‌ها + اخطارها و پیام‌ها)
 const FAST_BOOTSTRAP_KEYS: string[] = [
   ...STAFF_AUTH_KEYS,
@@ -1524,6 +1689,35 @@ function mapSupabaseRowToStudent(row: Record<string, unknown>): Student {
   );
 }
 
+function stripBase64ImageStringsDeep<T>(value: T, depth = 0): T {
+  if (depth > 25 || value === null || value === undefined) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('data:image')) {
+      return '' as unknown as T;
+    }
+    if (trimmed.includes('data:image/')) {
+      return trimmed.replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, '') as unknown as T;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripBase64ImageStringsDeep(item, depth + 1)) as unknown as T;
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof v === 'string' && v.trim().startsWith('data:image')) {
+        // حذف کامل رشته‌های data:image از کلیدهای عملیاتی app_storage (کتابخانه، هوشمندسازی، تسویه حساب، پیام‌ها و...)
+        continue;
+      }
+      out[k] = stripBase64ImageStringsDeep(v, depth + 1);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 function sanitizeValueForAppStorage(key: string, value: unknown): unknown {
   const staffRole = STAFF_KEY_TO_AVATAR_ROLE[key];
   if (staffRole && Array.isArray(value)) {
@@ -1544,7 +1738,10 @@ function sanitizeValueForAppStorage(key: string, value: unknown): unknown {
     if (bgTasks.length > 0) {
       enqueueBackgroundAvatarTasks(bgTasks);
     }
-    return cleaned;
+    return stripBase64ImageStringsDeep(cleaned);
+  }
+  if (!MEDIA_ALLOWED_APP_STORAGE_KEYS.has(key)) {
+    return stripBase64ImageStringsDeep(value);
   }
   return value;
 }
@@ -2360,9 +2557,47 @@ function get<T>(key: string, defaultValue: T): T {
   }
 }
 
+// ذخیره صرفاً محلی لیست دانشجویان (برای ویرایش‌های تک‌ردیفی که از طریق mirrorSingleStudentToCloud همگام می‌شوند)
+function saveStudentsLocalOnly(students: Student[]): boolean {
+  try {
+    const serialized = JSON.stringify(students);
+    keyWriteTimestamps[STORAGE_KEYS.STUDENTS] = Date.now();
+    return safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serialized, students);
+  } catch (e) {
+    console.error('Error writing local students cache:', e);
+    return false;
+  }
+}
+
+// درج یا بروزرسانی یک ردیف دانشجو در حافظه محلی (در نشست دانشجو فقط همان دانشجو نگه داشته می‌شود)
+function upsertLocalSingleStudent(student: Student, replaceWithSingleOnly = false): void {
+  const normalized = normalizeStudentRecord(student as unknown as Record<string, unknown>);
+  if (replaceWithSingleOnly) {
+    saveStudentsLocalOnly([normalized]);
+    return;
+  }
+  const currentList = getCurrentLocalCollection<Student[]>(STORAGE_KEYS.STUDENTS);
+  if (!Array.isArray(currentList) || currentList.length === 0) {
+    saveStudentsLocalOnly([normalized]);
+    return;
+  }
+  const idx = currentList.findIndex(
+    (s) => normalizeAsciiDigits(s.studentId) === normalizeAsciiDigits(normalized.studentId)
+  );
+  if (idx !== -1) {
+    currentList[idx] = normalized;
+  } else {
+    currentList.unshift(normalized);
+  }
+  saveStudentsLocalOnly(currentList);
+}
+
 // تابع کمکی برای نوشتن در localStorage و ارسال غیرهمگام تجمیع‌شده به سرور ابری
 function set<T>(key: string, value: T): boolean {
   try {
+    if (PUBLIC_CACHEABLE_KEY_SET.has(key)) {
+      invalidatePublicSessionCache(key);
+    }
     const serialized = JSON.stringify(value);
     const written = safeLocalStorageSet(key, serialized, value);
     pushKeyToCloud(key, value);
@@ -3098,7 +3333,7 @@ export const Storage = {
     student.residenceType = 'dormitory';
 
     Storage.setBeds(beds);
-    Storage.setStudents(students);
+    saveStudentsLocalOnly(students);
     void mirrorSingleStudentToCloud(student);
 
     Storage.addActivityLog({
@@ -3141,7 +3376,7 @@ export const Storage = {
 
     const room = rooms.find((r) => r.id === student.assignedRoomId);
 
-    Storage.setStudents(students);
+    saveStudentsLocalOnly(students);
     Storage.setBeds(beds);
     void mirrorSingleStudentToCloud(student);
     Storage.addActivityLog({
@@ -3285,7 +3520,7 @@ export const Storage = {
       replies: [],
     });
 
-    Storage.setStudents(students);
+    saveStudentsLocalOnly(students);
     Storage.setBeds(beds);
     Storage.setMessages(messages);
     void mirrorSingleStudentToCloud(student);
@@ -3328,7 +3563,7 @@ export const Storage = {
     }
 
     Storage.setBeds(beds);
-    Storage.setStudents(students);
+    saveStudentsLocalOnly(students);
     if (student) {
       void mirrorSingleStudentToCloud(student);
     }
@@ -3826,7 +4061,7 @@ export const Storage = {
       return { success: false, message: 'دانشجویی با این شماره دانشجویی قبلاً ثبت شده است.' };
     }
     students.unshift(newStudent);
-    Storage.setStudents(students);
+    saveStudentsLocalOnly(students);
     void mirrorSingleStudentToCloud(newStudent);
     return { success: true, message: 'دانشجو با موفقیت ثبت و به سامانه اضافه گردید.' };
   },
@@ -3836,7 +4071,7 @@ export const Storage = {
     const target = Storage.getStudents().find((s) => s.studentId === studentId);
     Storage.releaseBed(studentId);
     const students = Storage.getStudents().filter((s) => s.studentId !== studentId);
-    Storage.setStudents(students);
+    saveStudentsLocalOnly(students);
     void deleteStudentFromSupabase(studentId);
     Storage.addActivityLog({
       category: 'student',
@@ -3876,7 +4111,7 @@ export const Storage = {
       studentId: nextStudentId,
     };
     students[index] = updatedStudent;
-    Storage.setStudents(students);
+    saveStudentsLocalOnly(students);
     void mirrorSingleStudentToCloud(updatedStudent);
     if (isStudentIdChanged) {
       void deleteStudentFromSupabase(studentId);
@@ -4070,7 +4305,7 @@ export const Storage = {
     }
 
     students[index] = { ...students[index], ...updatedData, isProfileCompleted: true };
-    Storage.setStudents(students);
+    saveStudentsLocalOnly(students);
     void mirrorSingleStudentToCloud(students[index]);
     Storage.addActivityLog({
       category: 'student',
@@ -5500,7 +5735,7 @@ export const Storage = {
         updatedStudent.password = cleanNewPass;
       }
       students[idx] = updatedStudent;
-      Storage.setStudents(students);
+      saveStudentsLocalOnly(students);
       void mirrorSingleStudentToCloud(updatedStudent);
       const currentUser = Storage.getCurrentUser();
       if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === updatedStudent.studentId) {
@@ -5760,7 +5995,7 @@ export const Storage = {
     const updatedStudent: Student = { ...student };
     delete updatedStudent.password;
     students[idx] = updatedStudent;
-    Storage.setStudents(students);
+    saveStudentsLocalOnly(students);
     void mirrorSingleStudentToCloud(updatedStudent);
 
     const currentUser = Storage.getCurrentUser();
@@ -5814,7 +6049,7 @@ export const Storage = {
         updatedStudent.password = cleanPass;
       }
       students[idx] = updatedStudent;
-      Storage.setStudents(students);
+      saveStudentsLocalOnly(students);
       void mirrorSingleStudentToCloud(updatedStudent);
       const currentUser = Storage.getCurrentUser();
       if (currentUser && currentUser.role === 'student' && currentUser.student.studentId === updatedStudent.studentId) {
@@ -7928,7 +8163,10 @@ export const Storage = {
         (data.type === 'evaluation' && typeof data.score === 'number') ||
         (data.type === 'negative_score' && typeof data.negativePoints === 'number' && data.negativePoints > 0)
       ) {
-        Storage.setStudents(students);
+        saveStudentsLocalOnly(students);
+        if (targetStudents.length > 0) {
+          void upsertStudentRowsToSupabase(targetStudents);
+        }
         const currentUser = Storage.getCurrentUser();
         if (currentUser && currentUser.role === 'student') {
           const updatedSelf = students.find((s) => s.studentId === currentUser.student.studentId);
@@ -10179,6 +10417,183 @@ export const Storage = {
     }
   },
 
+  // دریافت دقیق و سبک فقط یک دانشجو از Supabase با فیلتر id (کد دانشجویی) یا national_code (بدون دانلود کل جدول students)
+  fetchSingleStudentFromDB: async (params: {
+    studentId?: string;
+    nationalCode?: string;
+  }): Promise<{ ok: boolean; student: Student | null; networkError?: boolean }> => {
+    const cleanStudentId = normalizeAsciiDigits(params.studentId || '');
+    const cleanNationalCode = normalizeAsciiDigits(params.nationalCode || '');
+    if (!cleanStudentId && !cleanNationalCode) {
+      return { ok: true, student: null };
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return { ok: false, student: null, networkError: true };
+    }
+
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    try {
+      let matchedRow: Record<string, unknown> | null = null;
+
+      // ۱. جستجوی مستقیم و ایندکس‌شده بر اساس کد دانشجویی (ستون id)
+      if (cleanStudentId) {
+        const { data, error } = await supabase
+          .from('students')
+          .select('id, national_code, data, avatar_url, updated_at')
+          .eq('id', cleanStudentId)
+          .maybeSingle();
+
+        if (error) {
+          const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+          recordCloudTrafficEvent({
+            direction: 'down',
+            endpoint: `/supabase/students?id=${cleanStudentId}`,
+            method: 'GET',
+            status: 500,
+            ok: false,
+            durationMs: dur,
+            bytes: 0,
+            detail: 'خطا در استعلام تک‌ردیفی دانشجو از Supabase',
+            errorMessage: error.message,
+          });
+          return { ok: false, student: null, networkError: true };
+        }
+        if (data && typeof data === 'object') {
+          matchedRow = data as Record<string, unknown>;
+        }
+      }
+
+      // ۲. در صورت نیافتن با کد دانشجویی (یا ورود با کد ملی)، فیلتر دقیق با ستون national_code
+      if (!matchedRow && cleanNationalCode) {
+        const { data, error } = await supabase
+          .from('students')
+          .select('id, national_code, data, avatar_url, updated_at')
+          .eq('national_code', cleanNationalCode)
+          .limit(5);
+
+        if (error) {
+          const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+          recordCloudTrafficEvent({
+            direction: 'down',
+            endpoint: '/supabase/students?national_code=***',
+            method: 'GET',
+            status: 500,
+            ok: false,
+            durationMs: dur,
+            bytes: 0,
+            detail: 'خطا در استعلام تک‌ردیفی دانشجو با کد ملی از Supabase',
+            errorMessage: error.message,
+          });
+          return { ok: false, student: null, networkError: true };
+        }
+
+        if (Array.isArray(data) && data.length > 0) {
+          const found = cleanStudentId
+            ? data.find(
+                (r) =>
+                  normalizeAsciiDigits(
+                    String((r as Record<string, unknown>)?.id || '')
+                  ) === cleanStudentId
+              )
+            : data[0];
+          if (found && typeof found === 'object') {
+            matchedRow = found as Record<string, unknown>;
+          }
+        }
+      }
+
+      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+      const mapped = matchedRow ? mapSupabaseRowToStudent(matchedRow) : null;
+      const rxBytes = mapped ? getUtf8ByteLength(JSON.stringify(matchedRow)) : 0;
+
+      recordCloudTrafficEvent({
+        direction: 'down',
+        endpoint: '/supabase/students (single)',
+        method: 'GET',
+        status: 200,
+        ok: true,
+        durationMs: dur,
+        bytes: rxBytes,
+        detail: mapped
+          ? `دریافت تک‌ردیفی پرونده دانشجو (${mapped.studentId}) بدون دانلود کل جدول`
+          : 'استعلام تک‌ردیفی دانشجو (رکوردی یافت نشد)',
+      });
+
+      return { ok: true, student: mapped };
+    } catch (err) {
+      const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+      recordCloudTrafficEvent({
+        direction: 'down',
+        endpoint: '/supabase/students (single)',
+        method: 'GET',
+        status: null,
+        ok: false,
+        durationMs: dur,
+        bytes: 0,
+        detail: 'وقفه شبکه در استعلام تک‌ردیفی دانشجو',
+        errorMessage: err instanceof Error ? err.message : 'Network error',
+      });
+      return { ok: false, student: null, networkError: true };
+    }
+  },
+
+  // احراز هویت بهینه دانشجو: فقط ردیف خود دانشجو را از Supabase می‌خواند و هرگز کل جدول students را دانلود نمی‌کند
+  authenticateStudentFromCloud: async (
+    rawStudentId: string,
+    rawPasswordOrNationalId: string
+  ): Promise<{ matched: boolean; student?: Student }> => {
+    const cleanId = normalizeAsciiDigits(rawStudentId);
+    const cleanPass = normalizeAsciiDigits(rawPasswordOrNationalId);
+    if (!cleanId || !cleanPass) {
+      return { matched: false };
+    }
+
+    const matchesPassword = (s: Student): boolean => {
+      if (normalizeAsciiDigits(s.studentId) !== cleanId) return false;
+      const effectivePass = normalizeAsciiDigits(String(s.password || s.nationalId || ''));
+      return Boolean(effectivePass) && effectivePass === cleanPass;
+    };
+
+    // گام ۱: استعلام تک‌ردیفی مستقیم از Supabase (بسیار کم‌حجم؛ زیر ۱ کیلوبایت)
+    const remoteRes = await Storage.fetchSingleStudentFromDB({
+      studentId: cleanId,
+      nationalCode: cleanPass,
+    });
+
+    if (remoteRes.ok && remoteRes.student) {
+      if (matchesPassword(remoteRes.student)) {
+        // در نشست دانشجو فقط پرونده خود همان دانشجو در حافظه محلی نگهداری می‌شود
+        upsertLocalSingleStudent(remoteRes.student, true);
+        notifyCloudDataChanged();
+        return { matched: true, student: remoteRes.student };
+      }
+      // دانشجو در دیتابیس ابری وجود دارد اما رمز عبور/کد ملی مطابقت نداشت
+      return { matched: false };
+    }
+
+    // گام ۲: فقط در حالت آفلاین یا داده‌های نمونه محلی (بدون دانلود کل جدول)، بررسی حافظه محلی
+    const localStudent = Storage.getStudents().find(matchesPassword);
+    if (localStudent) {
+      upsertLocalSingleStudent(localStudent, true);
+      return { matched: true, student: localStudent };
+    }
+
+    return { matched: false };
+  },
+
+  invalidatePublicCache: (): void => {
+    invalidatePublicSessionCache();
+  },
+
+  getPublicCacheStatus: (): { isFresh: boolean; cachedAt: number | null; ttlMs: number } => {
+    const meta = readPublicSessionCacheMeta();
+    return {
+      isFresh: isPublicSessionCacheFresh(),
+      cachedAt: meta?.cachedAt ?? null,
+      ttlMs: PUBLIC_CACHE_TTL_MS,
+    };
+  },
+
   addStudentToDB: async (
     newStudent: Student
   ): Promise<{ success: boolean; student?: Student; message: string }> => {
@@ -10589,7 +11004,10 @@ export const Storage = {
   },
 
   // همگام‌سازی فوری و هدفمند پیش از ورود کاربر در دستگاه‌های تازه از Supabase
-  ensureCloudDataForAuth: async (scope: 'student' | 'staff' | 'admin'): Promise<boolean> => {
+  ensureCloudDataForAuth: async (
+    scope: 'student' | 'staff' | 'admin',
+    options?: { studentId?: string; nationalCode?: string }
+  ): Promise<boolean> => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return false;
     }
@@ -10657,22 +11075,28 @@ export const Storage = {
       return fetchKeysFromSupabase([STORAGE_KEYS.SETTINGS]);
     }
 
-    const fetchedStudents = await Storage.fetchStudentsFromDB();
-    if (Array.isArray(fetchedStudents) && fetchedStudents.length > 0) {
-      const serialized = JSON.stringify(fetchedStudents);
-      if (lastAppliedSerializedByKey.get(STORAGE_KEYS.STUDENTS) !== serialized) {
-        safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serialized, fetchedStudents);
+    // برای دانشجو هرگز کل جدول students دانلود نمی‌شود؛ فقط ردیف همان دانشجو با فیلتر دقیق خوانده می‌شود
+    if (options?.studentId || options?.nationalCode) {
+      const singleRes = await Storage.fetchSingleStudentFromDB(options);
+      if (singleRes.ok && singleRes.student) {
+        upsertLocalSingleStudent(singleRes.student, true);
         notifyCloudDataChanged();
+        return true;
       }
-      return true;
     }
     return false;
   },
 
-  syncFromCloud: async (options?: { force?: boolean }): Promise<boolean> => {
+  syncFromCloud: async (options?: {
+    force?: boolean;
+    roleScope?: 'guest' | 'student' | 'staff';
+  }): Promise<boolean> => {
     const force = Boolean(options?.force);
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return false;
+    }
+    if (force) {
+      invalidatePublicSessionCache();
     }
     if (activeSyncPromise && !force) {
       return activeSyncPromise;
@@ -10692,6 +11116,11 @@ export const Storage = {
 
     flushFailedRetryQueue();
 
+    const currentUser = Storage.getCurrentUser();
+    const effectiveScope: 'guest' | 'student' | 'staff' =
+      options?.roleScope ||
+      (!currentUser ? 'guest' : currentUser.role === 'student' ? 'student' : 'staff');
+
     activeSyncPromise = (async () => {
       try {
         let hasRemoteChanges = false;
@@ -10710,56 +11139,132 @@ export const Storage = {
           }
         };
 
-        // گام ۱: دریافت کامل جدول app_storage از Supabase با صفحه‌بندی .range()
+        // بررسی کش ۵ دقیقه‌ای sessionStorage برای داده‌های عمومی (اطلاعیه‌ها، سراها، تنظیمات، کتاب‌های کتابخانه)
+        const publicCacheFresh = !force && isPublicSessionCacheFresh();
+        if (publicCacheFresh) {
+          const hydratedFromSession = hydratePublicKeysFromSessionCache();
+          if (hydratedFromSession) {
+            hasRemoteChanges = true;
+            notifyCloudDataChanged();
+          }
+        }
+
+        // در صفحه اصلی (مهمان) اگر کش ۵ دقیقه‌ای عمومی معتبر باشد، هیچ فراخوانی به Supabase انجام نمی‌شود
+        if (effectiveScope === 'guest' && publicCacheFresh) {
+          return hasRemoteChanges;
+        }
+
+        // تعیین دقیق کلیدهای app_storage مورد نیاز بر اساس نقش کاربر و وضعیت کش عمومی
+        let kvKeysToFetch: string[] | null = null;
+        if (effectiveScope === 'guest') {
+          kvKeysToFetch = [...PUBLIC_CACHEABLE_KEYS];
+        } else if (effectiveScope === 'student') {
+          kvKeysToFetch = publicCacheFresh
+            ? [...STUDENT_OPERATIONAL_KEYS]
+            : [...PUBLIC_CACHEABLE_KEYS, ...STUDENT_OPERATIONAL_KEYS];
+        } else {
+          // مدیر و کارشناسان: اگر کش عمومی ۵ دقیقه‌ای معتبر باشد، فقط جداول غیرعمومی را تازه کن
+          kvKeysToFetch = publicCacheFresh
+            ? SYNCABLE_KEYS.filter(
+                (k) => k !== STORAGE_KEYS.STUDENTS && !PUBLIC_CACHEABLE_KEY_SET.has(k)
+              )
+            : null; // null = دریافت کامل app_storage
+        }
+
+        const shouldUpdatePublicCache = !publicCacheFresh;
+
+        // گام ۱: دریافت هدفمند جدول app_storage از Supabase
         const kvStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
         try {
           const allKvRows: Array<{ key: string; value: unknown; updated_at?: string | null }> = [];
-          let from = 0;
-          let hasMoreKv = true;
-          while (hasMoreKv) {
-            const { data, error } = await supabase
-              .from('app_storage')
-              .select('key, value, updated_at')
-              .range(from, from + 999);
-            if (error) {
-              hadFetchError = true;
-              const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
-              recordCloudTrafficEvent({
-                direction: 'down',
-                endpoint: '/supabase/app_storage',
-                method: 'GET',
-                status: 500,
-                ok: false,
-                durationMs: dur,
-                bytes: 0,
-                detail: 'خطا در دریافت جداول app_storage از Supabase',
-                errorMessage: error.message,
-              });
-              break;
+          if (kvKeysToFetch !== null) {
+            if (kvKeysToFetch.length > 0) {
+              const { data, error } = await supabase
+                .from('app_storage')
+                .select('key, value, updated_at')
+                .in('key', kvKeysToFetch);
+              if (error) {
+                hadFetchError = true;
+                const dur =
+                  (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
+                recordCloudTrafficEvent({
+                  direction: 'down',
+                  endpoint: `/supabase/app_storage (${effectiveScope})`,
+                  method: 'GET',
+                  status: 500,
+                  ok: false,
+                  durationMs: dur,
+                  bytes: 0,
+                  detail: `خطا در دریافت جداول app_storage (${effectiveScope})`,
+                  errorMessage: error.message,
+                });
+              } else if (Array.isArray(data)) {
+                for (const r of data) {
+                  allKvRows.push(r as { key: string; value: unknown; updated_at?: string | null });
+                }
+              }
             }
-            const pageRows = Array.isArray(data) ? data : [];
-            for (const r of pageRows) {
-              allKvRows.push(r as { key: string; value: unknown; updated_at?: string | null });
+          } else {
+            let from = 0;
+            let hasMoreKv = true;
+            while (hasMoreKv) {
+              const { data, error } = await supabase
+                .from('app_storage')
+                .select('key, value, updated_at')
+                .range(from, from + 999);
+              if (error) {
+                hadFetchError = true;
+                const dur =
+                  (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
+                recordCloudTrafficEvent({
+                  direction: 'down',
+                  endpoint: '/supabase/app_storage',
+                  method: 'GET',
+                  status: 500,
+                  ok: false,
+                  durationMs: dur,
+                  bytes: 0,
+                  detail: 'خطا در دریافت جداول app_storage از Supabase',
+                  errorMessage: error.message,
+                });
+                break;
+              }
+              const pageRows = Array.isArray(data) ? data : [];
+              for (const r of pageRows) {
+                allKvRows.push(r as { key: string; value: unknown; updated_at?: string | null });
+              }
+              hasMoreKv = pageRows.length === 1000;
+              from += 1000;
             }
-            hasMoreKv = pageRows.length === 1000;
-            from += 1000;
           }
 
           if (!hadFetchError) {
-            const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
+            const dur =
+              (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
             const rxBytes = getUtf8ByteLength(JSON.stringify(allKvRows));
             recordCloudTrafficEvent({
               direction: 'down',
-              endpoint: '/supabase/app_storage',
+              endpoint:
+                effectiveScope === 'staff'
+                  ? '/supabase/app_storage'
+                  : `/supabase/app_storage (${effectiveScope})`,
               method: 'GET',
               status: 200,
               ok: true,
               durationMs: dur,
               bytes: rxBytes,
-              detail: `دریافت ${allKvRows.length.toLocaleString('fa-IR')} جدول تنظیمات و عملیاتی از Supabase`,
+              detail: `دریافت ${allKvRows.length.toLocaleString('fa-IR')} جدول (${
+                effectiveScope === 'guest'
+                  ? 'عمومی صفحه اصلی'
+                  : effectiveScope === 'student'
+                  ? 'عملیاتی دانشجو'
+                  : 'پنل مدیریت'
+              }) از Supabase`,
             });
 
             let batchChanged = false;
+            const publicCacheEntries: Array<{ key: string; serialized: string }> = [];
+
             for (const row of allKvRows) {
               const key = String(row.key || '');
               if (!SYNCABLE_KEYS.includes(key) || key === STORAGE_KEYS.STUDENTS) continue;
@@ -10780,6 +11285,10 @@ export const Storage = {
               if (!force && Date.now() - lastLocalWrite < 10000) continue;
 
               const serialized = JSON.stringify(val);
+              if (PUBLIC_CACHEABLE_KEY_SET.has(key)) {
+                publicCacheEntries.push({ key, serialized });
+              }
+
               let currentLs: string | null = null;
               try {
                 currentLs = localStorage.getItem(key);
@@ -10810,13 +11319,19 @@ export const Storage = {
               }
             }
 
+            // ذخیره داده‌های عمومی در کش ۵ دقیقه‌ای sessionStorage
+            if (shouldUpdatePublicCache && publicCacheEntries.length > 0) {
+              writePublicKeysToSessionCache(publicCacheEntries);
+            }
+
             if (batchChanged) {
               notifyCloudDataChanged();
             }
           }
         } catch (err) {
           hadFetchError = true;
-          const dur = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
+          const dur =
+            (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
           recordCloudTrafficEvent({
             direction: 'down',
             endpoint: '/supabase/app_storage',
@@ -10830,16 +11345,36 @@ export const Storage = {
           });
         }
 
-        // گام ۲: دریافت کامل جدول students با حلقه صفحه‌بندی .range() (پشتیبانی از بیش از ۱۰٬۰۰۰ دانشجو)
+        // گام ۲: جداسازی کامل بارگذاری جدول students بر اساس نقش کاربر
         const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
         const canApplyRemoteStudents =
           !pendingCloudRequests[STORAGE_KEYS.STUDENTS] &&
           !(STORAGE_KEYS.STUDENTS in pendingCloudValues) &&
           !(STORAGE_KEYS.STUDENTS in failedCloudRetryQueue) &&
           !persistedDirtyKeys.has(STORAGE_KEYS.STUDENTS) &&
+          activeStudentMirrorPromises.size === 0 &&
           (force || Date.now() - lastStudentWrite >= 10000);
 
-        if (canApplyRemoteStudents) {
+        if (effectiveScope === 'student' && currentUser?.role === 'student' && canApplyRemoteStudents) {
+          // برای دانشجو: فقط و فقط ردیف خود همین دانشجو با فیلتر دقیق از Supabase دریافت می‌شود (هرگز کل جدول دانلود نمی‌شود)
+          const singleRes = await Storage.fetchSingleStudentFromDB({
+            studentId: currentUser.student.studentId,
+            nationalCode: currentUser.student.nationalId,
+          });
+          if (!singleRes.ok) {
+            hadFetchError = true;
+          } else if (singleRes.student) {
+            const singleArray = [singleRes.student];
+            const serializedSingle = JSON.stringify(singleArray);
+            const changed = lastAppliedSerializedByKey.get(STORAGE_KEYS.STUDENTS) !== serializedSingle;
+            if (changed) {
+              safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedSingle, singleArray);
+              hasRemoteChanges = true;
+              notifyCloudDataChanged();
+            }
+          }
+        } else if (effectiveScope === 'staff' && canApplyRemoteStudents) {
+          // بارگذاری کامل جدول students منحصراً در پنل مدیر و کارشناسان انجام می‌شود
           const fetchedStudents = await Storage.fetchStudentsFromDB();
           if (fetchedStudents === null) {
             hadFetchError = true;
@@ -10871,6 +11406,7 @@ export const Storage = {
             bumpNewest(nowTs);
           }
         }
+        // در حالت مهمان (صفحه اصلی): جدول students اصلاً فراخوانی نمی‌شود
 
         if (!hadFetchError) {
           if (newestUpdatedAt) {
@@ -12145,11 +12681,20 @@ export const Storage = {
       };
     });
 
+    const safeStudentPhotoUrl =
+      payload.student.photoUrl && !isBase64ImageDataUrl(payload.student.photoUrl)
+        ? payload.student.photoUrl
+        : undefined;
+    const safeExistingPhotoUrl =
+      existing?.studentPhotoUrl && !isBase64ImageDataUrl(existing.studentPhotoUrl)
+        ? existing.studentPhotoUrl
+        : undefined;
+
     if (existing && existing.status === 'rejected_education') {
       const updatedReq: GraduationClearanceRequest = {
         ...existing,
         studentPhone: (payload.studentPhone || '').trim() || payload.student.mobile || payload.student.phone || '',
-        studentPhotoUrl: payload.student.photoUrl || existing.studentPhotoUrl,
+        studentPhotoUrl: safeStudentPhotoUrl || safeExistingPhotoUrl,
         graduationAcademicYear: payload.graduationAcademicYear.trim(),
         graduationSemester: payload.graduationSemester.trim(),
         studentNote: (payload.studentNote || '').trim() || undefined,
@@ -12182,7 +12727,7 @@ export const Storage = {
       studentFieldOfStudy: payload.student.fieldOfStudy,
       studentEntryTerm: payload.student.entryTerm,
       studentPhone: (payload.studentPhone || '').trim() || payload.student.mobile || payload.student.phone || '',
-      studentPhotoUrl: payload.student.photoUrl,
+      studentPhotoUrl: safeStudentPhotoUrl,
       dormName: payload.dormName || payload.student.assignedDormName,
       roomNumber: payload.roomNumber || payload.student.assignedRoomNumber,
       graduationAcademicYear: payload.graduationAcademicYear.trim(),

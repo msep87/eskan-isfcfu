@@ -23,6 +23,8 @@ import {
 import { Storage } from '../utils/storage';
 
 const AI_CHAT_ENDPOINT = '/api/ai-chat';
+const AI_RATE_LIMIT_MESSAGE =
+  'ترافیک پرسش‌های دستیار هوشمند در این لحظه بالاست؛ لطفاً ۱۰ ثانیه صبر کرده و دوباره ارسال کنید';
 
 interface GroundingSource {
   title: string;
@@ -95,6 +97,7 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inFlightRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -394,7 +397,8 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
 
   const sendMessage = async (textToSend?: string) => {
     const trimmed = (textToSend ?? input).trim();
-    if (!trimmed || isLoading) return;
+    if (!trimmed || isLoading || inFlightRef.current) return;
+    inFlightRef.current = true;
 
     const nowTime = new Date().toLocaleTimeString('fa-IR', {
       hour: '2-digit',
@@ -438,6 +442,10 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
 
       window.clearTimeout(timeoutId);
 
+      if (response.status === 429) {
+        throw new Error(AI_RATE_LIMIT_MESSAGE);
+      }
+
       const contentType = response.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
         throw new Error(
@@ -448,6 +456,9 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
       const data = await response.json().catch(() => ({} as Record<string, unknown>));
 
       if (!response.ok) {
+        if (data?.code === 'RATE_LIMITED') {
+          throw new Error(AI_RATE_LIMIT_MESSAGE);
+        }
         const errMessage =
           typeof data?.reply === 'string' && data.reply.trim()
             ? data.reply
@@ -456,6 +467,9 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
             : typeof data?.message === 'string'
             ? data.message
             : 'در حال حاضر ارتباط با سرویس دستیار هوشمند با خطا مواجه شد.';
+        if (/429|rate.?limit|too many requests/i.test(errMessage)) {
+          throw new Error(AI_RATE_LIMIT_MESSAGE);
+        }
         throw new Error(errMessage);
       }
 
@@ -500,8 +514,11 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
       const isNetworkOrCorsCrash =
         /failed to fetch|networkerror|load failed|fetch/i.test(rawErrMsg);
 
+      const isRateLimit = /429|rate.?limit|too many requests/i.test(rawErrMsg);
       const fallbackMsg = isTimeout
         ? 'زمان پاسخ‌گویی سرور دستیار هوشمند به پایان رسید. لطفاً چند لحظه دیگر دوباره تلاش نمایید.'
+        : isRateLimit
+        ? AI_RATE_LIMIT_MESSAGE
         : isNetworkOrCorsCrash || !rawErrMsg
         ? 'امکان برقراری ارتباط با سرویس دستیار هوشمند (/api/ai-chat) وجود ندارد. لطفاً اتصال اینترنت و تنظیم متغیر محیطی GROQ_API_KEY در Cloudflare Pages را بررسی نمایید.'
         : rawErrMsg;
@@ -520,11 +537,13 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
         },
       ]);
     } finally {
+      inFlightRef.current = false;
       setIsLoading(false);
     }
   };
 
   const handleResetChat = () => {
+    if (isLoading || inFlightRef.current) return;
     setMessages([
       {
         ...INITIAL_ASSISTANT_MESSAGE,
@@ -541,6 +560,7 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      if (isLoading || inFlightRef.current) return;
       void sendMessage();
     }
   };
@@ -576,8 +596,9 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
               <button
                 type="button"
                 onClick={handleResetChat}
+                disabled={isLoading}
                 title="شروع گفتگوی جدید"
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed text-white transition cursor-pointer"
               >
                 <RotateCcw className="w-4 h-4" />
               </button>
@@ -716,11 +737,21 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
               <button
                 type="submit"
                 disabled={!input.trim() || isLoading}
+                aria-busy={isLoading}
                 aria-label="ارسال پیام"
                 className="h-[42px] px-4 rounded-2xl bg-teal-700 hover:bg-teal-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer disabled:cursor-not-allowed shrink-0"
               >
-                <Send className="w-4 h-4 rotate-180" />
-                <span className="hidden sm:inline">ارسال</span>
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span className="hidden sm:inline">در حال پاسخ...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4 rotate-180" />
+                    <span className="hidden sm:inline">ارسال</span>
+                  </>
+                )}
               </button>
             </div>
         </form>

@@ -12,6 +12,7 @@ import {
   School,
   Info,
   BookOpen,
+  RefreshCw,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -28,6 +29,8 @@ interface NavbarProps {
   onOpenLogin: () => void;
   onOpenAbout: () => void;
   onOpenUserGuide: () => void;
+  onRefreshCloud?: () => void;
+  isRefreshingCloud?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -44,6 +47,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenLogin,
   onOpenAbout,
   onOpenUserGuide,
+  onRefreshCloud,
+  isRefreshingCloud = false,
 }) => {
   // تعداد پیام‌های خوانده‌نشده
   const pendingMessagesCount = messages.filter((m) => {
@@ -199,6 +204,20 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Info className="w-3.5 h-3.5" />
               <span>درباره ما</span>
             </button>
+
+            {/* دکمه بروزرسانی فوری اطلاعات (تازه‌سازی کش ۵ دقیقه‌ای و دریافت آخرین تغییرات) */}
+            {onRefreshCloud && (
+              <button
+                type="button"
+                onClick={onRefreshCloud}
+                disabled={isRefreshingCloud}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold transition cursor-pointer disabled:opacity-60 shadow-xs"
+                title="تازه‌سازی فوری کش و دریافت آخرین اطلاعات سامانه"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
+                <span className="hidden md:inline">بروزرسانی اطلاعات</span>
+              </button>
+            )}
 
             {/* دکمه راهنمای متنی و تصویری کاربری (PDF) */}
             <button

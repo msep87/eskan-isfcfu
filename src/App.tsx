@@ -100,6 +100,7 @@ export default function App() {
   const [warehouseRequests, setWarehouseRequests] = useState<WarehouseRequest[]>(Storage.getWarehouseRequests());
 
   const [cloudSyncTick, setCloudSyncTick] = useState<number>(0);
+  const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false);
   const lastSyncCheckRef = useRef<number>(0);
 
   // بروزرسانی داده‌ها از storage
@@ -224,7 +225,7 @@ export default function App() {
       if (typeof document !== 'undefined' && document.hidden) return;
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
       const now = Date.now();
-      if (now - lastSyncCheckRef.current < 12000) return;
+      if (now - lastSyncCheckRef.current < 20000) return;
       lastSyncCheckRef.current = now;
       const ok = await Storage.syncFromCloud();
       if (ok && isMounted) {
@@ -233,7 +234,7 @@ export default function App() {
     };
 
     window.addEventListener('focus', handleBackgroundSync);
-    const intervalId = window.setInterval(handleBackgroundSync, 30000);
+    const intervalId = window.setInterval(handleBackgroundSync, 60000);
 
     return () => {
       isMounted = false;
@@ -242,6 +243,20 @@ export default function App() {
       window.clearInterval(intervalId);
     };
   }, [refreshAllData]);
+
+  // بروزرسانی دستی اطلاعات (باطل‌سازی فوری کش ۵ دقیقه‌ای sessionStorage و دریافت تازه از Supabase)
+  const handleManualCloudRefresh = useCallback(async () => {
+    if (isManualRefreshing) return;
+    setIsManualRefreshing(true);
+    try {
+      Storage.invalidatePublicCache();
+      lastSyncCheckRef.current = Date.now();
+      await Storage.syncFromCloud({ force: true });
+      refreshAllData();
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  }, [isManualRefreshing, refreshAllData]);
 
   // تزریق پویای فونت‌های بارگذاری شده (TTF / WOFF) به سند
   useEffect(() => {
@@ -313,6 +328,17 @@ export default function App() {
     setCurrentUser(user);
     Storage.setCurrentUser(user);
     refreshAllData();
+    // پس از ورود: برای مدیر و کارشناسان، لیست کامل دانشجویان و تمام جداول از Supabase دریافت می‌شود؛
+    // برای دانشجو فقط داده‌های عملیاتی + ردیف همان دانشجو (با حفظ کش ۵ دقیقه‌ای داده‌های عمومی)
+    lastSyncCheckRef.current = Date.now();
+    void Storage.syncFromCloud({
+      force: user.role !== 'student',
+      roleScope: user.role === 'student' ? 'student' : 'staff',
+    }).then((changed) => {
+      if (changed) {
+        refreshAllData();
+      }
+    });
   };
 
   const handleLogout = () => {
@@ -388,6 +414,8 @@ export default function App() {
         onOpenLogin={() => setIsLoginModalOpen(true)}
         onOpenAbout={() => setIsAboutModalOpen(true)}
         onOpenUserGuide={() => handleOpenUserGuide()}
+        onRefreshCloud={() => void handleManualCloudRefresh()}
+        isRefreshingCloud={isManualRefreshing}
       />
 
       {/* بنر اطلاعیه سراسری در بالای صفحه */}

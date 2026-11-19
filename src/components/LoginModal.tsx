@@ -112,16 +112,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setRecoveryStudentId(prefillId);
 
     if (prefillId) {
-      let res = Storage.getStudentRecoveryQuestions(prefillId);
-      if (!res.success) {
-        setIsAuthenticating(true);
-        const synced = await Storage.ensureCloudDataForAuth('student');
-        setIsAuthenticating(false);
-        if (synced) {
-          onRefreshData?.();
-          res = Storage.getStudentRecoveryQuestions(prefillId);
-        }
+      const cleanPrefillId = toEnglishDigits(prefillId);
+      setIsAuthenticating(true);
+      const synced = await Storage.ensureCloudDataForAuth('student', { studentId: cleanPrefillId });
+      setIsAuthenticating(false);
+      if (synced) {
+        onRefreshData?.();
       }
+      const res = Storage.getStudentRecoveryQuestions(cleanPrefillId);
       if (res.success && res.studentId && res.fatherOptions && res.birthDateOptions) {
         setRecoveryData({
           studentId: res.studentId,
@@ -148,16 +146,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setErrorMsg('');
     setRecoverySuccessMsg('');
 
-    let res = Storage.getStudentRecoveryQuestions(recoveryStudentId);
-    if (!res.success && recoveryStudentId.trim()) {
+    const cleanRecoverySid = toEnglishDigits(recoveryStudentId.trim());
+    if (cleanRecoverySid) {
       setIsAuthenticating(true);
-      const synced = await Storage.ensureCloudDataForAuth('student');
+      const synced = await Storage.ensureCloudDataForAuth('student', { studentId: cleanRecoverySid });
       setIsAuthenticating(false);
       if (synced) {
         onRefreshData?.();
-        res = Storage.getStudentRecoveryQuestions(recoveryStudentId);
       }
     }
+    const res = Storage.getStudentRecoveryQuestions(cleanRecoverySid || recoveryStudentId);
     if (!res.success || !res.studentId || !res.fatherOptions || !res.birthDateOptions) {
       setErrorMsg(res.message);
       return;
@@ -223,27 +221,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     const cleanId = toEnglishDigits(studentId.trim());
     const cleanNat = toEnglishDigits(nationalId.trim());
 
-    const findMatchingStudent = () =>
-      Storage.getStudents().find((s) => {
-        if (!s.studentId || toEnglishDigits(String(s.studentId).trim()) !== cleanId) {
-          return false;
-        }
-        const effectivePass = toEnglishDigits(String(s.password || s.nationalId || '').trim());
-        return Boolean(effectivePass) && effectivePass === cleanNat;
-      });
+    // احراز هویت بهینه تک‌ردیفی از Supabase (بدون دانلود کل جدول students)
+    setIsAuthenticating(true);
+    const authRes = await Storage.authenticateStudentFromCloud(cleanId, cleanNat);
+    setIsAuthenticating(false);
 
-    let student = findMatchingStudent();
-
-    // در دستگاه یا گوشی تازه که هنوز لیست دانشجویان از سرور ابری دانلود نشده، همگام‌سازی فوری انجام می‌شود
-    if (!student) {
-      setIsAuthenticating(true);
-      const synced = await Storage.ensureCloudDataForAuth('student');
-      setIsAuthenticating(false);
-      if (synced) {
-        onRefreshData?.();
-        student = findMatchingStudent();
-      }
+    if (authRes.matched) {
+      onRefreshData?.();
     }
+    const student = authRes.matched ? authRes.student : undefined;
 
     if (student) {
       Storage.addActivityLog({
