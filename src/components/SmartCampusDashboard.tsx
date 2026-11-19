@@ -310,7 +310,7 @@ export const SmartCampusDashboard: React.FC<SmartCampusDashboardProps> = ({
             </div>
             <div>
               <span className="inline-block px-2.5 py-0.5 rounded-lg bg-white/15 text-[11px] font-bold text-cyan-100 mb-1">
-                کارتابل واحد هوشمندسازی و فناوری • سامانه جامع امور دانشجویی
+                کارتابل واحد هوشمندسازی و فناوری • سامانه جامع خدمات دانشجویی
               </span>
               <h1 className="text-xl sm:text-2xl font-black tracking-tight">
                 خوش آمدید، {staff.fullName}

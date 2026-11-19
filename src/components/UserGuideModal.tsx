@@ -142,7 +142,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                   </span>
                 </div>
                 <h3 className="font-black text-lg sm:text-xl text-white mt-0.5">
-                  راهنمای متنی و تصویری کاربری سامانه جامع امور دانشجویی
+                  راهنمای متنی و تصویری کاربری سامانه جامع خدمات دانشجویی
                 </h3>
               </div>
             </div>
@@ -417,7 +417,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <FarhangianEmblem size={24} customLogoUrl={customLogoUrl} />
-            <span>دانشگاه فرهنگیان • سامانه جامع امور دانشجویی (طراحی: دکتر محمد سپیانی)</span>
+            <span>دانشگاه فرهنگیان • سامانه جامع خدمات دانشجویی (طراحی: دکتر محمد سپیانی)</span>
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">

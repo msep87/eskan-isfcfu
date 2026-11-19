@@ -1201,7 +1201,7 @@ export function generatePrintableRoleGuideHtml(role: UserRoleType): void {
   </div>
 
   <div class="author-box">
-    <strong>سامانه جامع امور دانشجویی دانشگاه فرهنگیان:</strong>
+    <strong>سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان:</strong>
     طراحی و تحلیل تخصصی توسط <strong>دکتر محمد سپیانی</strong> (Email: m.sepiani@cfu.ac.ir).
     این دفترچه راهنمای عملیاتی و مصور منطبق با منوها و قابلیت‌های فعلی سامانه برای کاربران محترم تهیه شده است.
   </div>
@@ -1255,7 +1255,7 @@ export function generatePrintableRoleGuideHtml(role: UserRoleType): void {
     .join('')}
 
   <div class="footer">
-    سامانه جامع امور دانشجویی دانشگاه فرهنگیان • طراح: دکتر محمد سپیانی (m.sepiani@cfu.ac.ir) • تمامی حقوق محفوظ است.
+    سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان • طراح: دکتر محمد سپیانی (m.sepiani@cfu.ac.ir) • تمامی حقوق محفوظ است.
   </div>
 
 </body>

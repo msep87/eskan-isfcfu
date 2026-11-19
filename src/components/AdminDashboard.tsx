@@ -7511,7 +7511,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/15 text-[10px] font-bold border border-white/20">
                           {localSettings.universityName}
                         </div>
-                        <div className="text-base font-black">سامانه جامع امور دانشجویی</div>
+                        <div className="text-base font-black">سامانه جامع خدمات دانشجویی</div>
                         <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white text-teal-900 text-[10px] font-extrabold shadow">
                           ورود به سامانه جامع
                         </div>

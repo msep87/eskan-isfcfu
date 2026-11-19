@@ -455,7 +455,7 @@ export default function App() {
                 </div>
 
                 <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black leading-tight tracking-tight mb-6">
-                  سامانه جامع امور دانشجویی
+                  سامانه جامع خدمات دانشجویی
                 </h1>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -463,7 +463,7 @@ export default function App() {
                     onClick={() => setIsLoginModalOpen(true)}
                     className="px-7 py-3.5 bg-white text-teal-900 hover:bg-teal-50 rounded-2xl font-black text-sm shadow-xl transition flex items-center gap-2 cursor-pointer hover:scale-105"
                   >
-                    <span>ورود به سامانه جامع امور دانشجویی (دانشجو / کارکنان / مدیر)</span>
+                    <span>ورود به سامانه جامع خدمات دانشجویی (دانشجو / کارکنان / مدیر)</span>
                     <ArrowRight className="w-4 h-4 rotate-180" />
                   </button>
 
@@ -503,7 +503,7 @@ export default function App() {
                   </div>
                   <div>
                     <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white">
-                      اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع امور دانشجویی و سراها
+                      اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشجویی و سراها
                     </h2>
                     <p className="text-xs text-slate-400 mt-0.5">
                       سال تحصیلی {settings.currentAcademicYear} • {settings.currentSemester}
@@ -886,7 +886,7 @@ export default function App() {
                 <FarhangianEmblem size={24} customLogoUrl={settings.customLogoUrl} />
               </div>
             )}
-            <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع امور دانشجویی</span>
+            <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع خدمات دانشجویی</span>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3 text-[11px]">
             {currentUser &&
@@ -1025,7 +1025,7 @@ export default function App() {
           />
         )}
 
-        {/* دستیار هوشمند سامانه جامع امور دانشجویی */}
+        {/* دستیار هوشمند سامانه جامع خدمات دانشجویی */}
         {currentUser &&
           currentUser.role !== 'education' &&
           currentUser.role !== 'cultural' &&

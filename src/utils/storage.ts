@@ -4140,7 +4140,7 @@ export const Storage = {
     libraryBookRequests: Storage.getLibraryBookRequests(),
     graduationClearances: Storage.getGraduationClearances(),
     exportedAt: new Date().toISOString(),
-    appName: 'سامانه جامع امور دانشجویی دانشگاه فرهنگیان اصفهان',
+    appName: 'سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان اصفهان',
   }),
 
   // پشتیبان‌گیری سریع از داده‌ها به صورت فایل JSON

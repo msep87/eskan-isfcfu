@@ -324,13 +324,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         Storage.addActivityLog({
           category: 'auth',
           action: 'ورود موفق مدیر کل سامانه',
-          details: 'مدیر کل سامانه جامع امور دانشجویی (admin) با موفقیت وارد سامانه شد.',
+          details: 'مدیر کل سامانه جامع خدمات دانشجویی (admin) با موفقیت وارد سامانه شد.',
           targetName: 'admin',
-          actorName: 'مدیر کل سامانه جامع امور دانشجویی',
+          actorName: 'مدیر کل سامانه جامع خدمات دانشجویی',
           actorRole: 'admin',
           actorUsername: 'admin',
         });
-        onLoginSuccess({ role: 'admin', name: 'مدیر کل سامانه جامع امور دانشجویی', username: 'admin' });
+        onLoginSuccess({ role: 'admin', name: 'مدیر کل سامانه جامع خدمات دانشجویی', username: 'admin' });
         handleCloseModal();
       } else {
         Storage.addActivityLog({
@@ -364,7 +364,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <div className="inline-flex p-3 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 mb-3 shadow-inner">
             <Building2 className="w-8 h-8" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">ورود به سامانه جامع امور دانشجویی</h2>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">ورود به سامانه جامع خدمات دانشجویی</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">دانشگاه فرهنگیان استان اصفهان</p>
         </div>
 

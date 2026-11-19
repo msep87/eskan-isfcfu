@@ -175,7 +175,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white tracking-tight">
-                  سامانه جامع امور دانشجویی
+                  سامانه جامع خدمات دانشجویی
                 </span>
                 <span className="hidden sm:inline-block px-2 py-0.5 text-[11px] font-bold bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 rounded-full border border-teal-200 dark:border-teal-800">
                   دانشگاه فرهنگیان ({settings.currentAcademicYear || '۱۴۰۵-۱۴۰۶'})
@@ -194,7 +194,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onOpenAbout}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 border border-teal-200 dark:border-teal-800 text-[11px] font-bold transition cursor-pointer shadow-xs"
-              title="درباره سامانه جامع امور دانشجویی و سازنده سایت دکتر محمد سپیانی"
+              title="درباره سامانه جامع خدمات دانشجویی و سازنده سایت دکتر محمد سپیانی"
             >
               <Info className="w-3.5 h-3.5" />
               <span>درباره ما</span>
@@ -404,7 +404,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentUser.role === 'vice_dean' && (currentUser.staff.title || currentUser.staff.department || 'معاونت دانشجویی دانشگاه فرهنگیان')}
                     {currentUser.role === 'library' && (currentUser.staff.department || 'واحد کتابخانه و پژوهش')}
                     {currentUser.role === 'smart_campus' && (currentUser.staff.department || 'واحد هوشمندسازی و فناوری')}
-                    {currentUser.role === 'admin' && 'مدیر کل سامانه جامع امور دانشجویی'}
+                    {currentUser.role === 'admin' && 'مدیر کل سامانه جامع خدمات دانشجویی'}
                   </div>
                 </div>
 

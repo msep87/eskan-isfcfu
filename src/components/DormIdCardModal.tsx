@@ -173,7 +173,7 @@ export const DormIdCardModal: React.FC<DormIdCardModalProps> = ({
                     دانشگاه فرهنگیان استان اصفهان
                   </h4>
                   <span className="text-[9px] text-teal-300/90 font-medium">
-                    سامانه جامع امور دانشجویی • کارت اسکان سرای دانشجویی
+                    سامانه جامع خدمات دانشجویی • کارت اسکان سرای دانشجویی
                   </span>
                 </div>
               </div>
