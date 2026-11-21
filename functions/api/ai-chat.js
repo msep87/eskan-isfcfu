@@ -13,20 +13,17 @@ const JSON_HEADERS = {
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 
 const PREFERRED_MODELS = [
-  'openai/gpt-oss-120b',
-  'llama-3.3-70b-versatile',
-  'qwen/qwen3-32b',
   'llama-3.1-8b-instant',
-  'openai/gpt-oss-20b',
-  'meta-llama/llama-4-scout-17b-16e-instruct',
-  'meta-llama/llama-4-maverick-17b-128e-instruct',
+  'llama-3.3-70b-versatile',
+  'gemma2-9b-it',
+  'mixtral-8x7b-32768',
 ];
 
 const FALLBACK_MODELS = [
-  'openai/gpt-oss-120b',
-  'openai/gpt-oss-20b',
   'llama-3.1-8b-instant',
-  'qwen/qwen3-32b',
+  'llama-3.3-70b-versatile',
+  'gemma2-9b-it',
+  'mixtral-8x7b-32768',
 ];
 
 const NON_CHAT_MODEL_KEYWORDS = [
@@ -39,6 +36,8 @@ const NON_CHAT_MODEL_KEYWORDS = [
   'embed',
   'moderation',
   'transcri',
+  'gpt-oss',
+  'preview',
 ];
 
 // کش کوتاه‌مدت در حافظه Worker برای جلوگیری از فراخوانی تکراری /models در هر پیام
@@ -269,31 +268,43 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
       );
     }
 
-    const configuredModel = (context?.env?.GROQ_MODEL || '').trim();
+    const rawConfiguredModel = (context?.env?.GROQ_MODEL || '').trim();
+    const configuredModel = rawConfiguredModel && isChatModelId(rawConfiguredModel) ? rawConfiguredModel : '';
     const liveModels = await getCandidateModels(apiKey, false);
-    const candidateModels = configuredModel
-      ? [configuredModel, ...liveModels.filter((m) => m !== configuredModel)]
-      : liveModels;
+    const candidateModels = (
+      configuredModel
+        ? [configuredModel, ...liveModels.filter((m) => m !== configuredModel)]
+        : liveModels
+    ).filter(isChatModelId);
+    const finalCandidateModels = candidateModels.length > 0 ? candidateModels : FALLBACK_MODELS;
 
     const RATE_LIMIT_REPLY =
       'ترافیک پرسش‌های دستیار هوشمند در این لحظه بالاست؛ لطفاً ۱۰ ثانیه صبر کرده و دوباره ارسال کنید';
     const attemptErrors = [];
     let rateLimitHits = 0;
 
-    for (const model of candidateModels) {
-      const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: chatMessages,
-          temperature: 0.5,
-          max_tokens: 1024,
-        }),
-      });
+    for (const model of finalCandidateModels) {
+      let response;
+      try {
+        response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: chatMessages,
+            temperature: 0.5,
+            max_tokens: 1024,
+          }),
+        });
+      } catch (fetchErr) {
+        attemptErrors.push(
+          `${model}: ${fetchErr instanceof Error ? fetchErr.message : 'خطای ارتباط شبکه'}`
+        );
+        continue;
+      }
 
       const data = await response.json().catch(() => ({}));
 
@@ -308,10 +319,18 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
         );
       }
 
+      if (response.status === 403 || response.status === 404) {
+        const errMsg = data?.error?.message || `HTTP ${response.status}`;
+        attemptErrors.push(`${model}: ${errMsg}`);
+        cachedModels = null;
+        cachedModelsAt = 0;
+        continue;
+      }
+
       if (response.status === 429) {
         rateLimitHits += 1;
         // در صورت شلوغی و محدودیت نرخ درخواست (HTTP 429)، بیش از ۲ تلاش انجام نمی‌دهیم تا فشار روی Groq تشدید نشود
-        if (rateLimitHits >= 2 || candidateModels.length === 1) {
+        if (rateLimitHits >= 2 || finalCandidateModels.length === 1) {
           return new Response(
             JSON.stringify({
               ok: false,
@@ -375,10 +394,11 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
       }
       attemptErrors.push(`${model}: ${errMsg}`);
 
-      // اگر مدل منقضی شده یا وجود نداشت، کش مدل‌ها را برای درخواست بعدی تازه کن
-      if (response.status === 404 || /does not exist|decommissioned/i.test(errMsg)) {
+      // اگر مدل مسدود، منقضی شده یا وجود نداشت، کش مدل‌ها را برای درخواست بعدی تازه کن و سراغ مدل بعدی برو
+      if (/forbidden|does not exist|decommissioned|not allowed/i.test(errMsg)) {
         cachedModels = null;
         cachedModelsAt = 0;
+        continue;
       }
     }
 
