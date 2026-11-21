@@ -116,7 +116,8 @@ export default defineConfig(({mode}) => {
           theme_color: '#0d9488',
           background_color: '#f8fafc',
           display: 'standalone',
-          orientation: 'portrait-primary',
+          display_override: ['standalone', 'minimal-ui'],
+          orientation: 'any',
           start_url: '/',
           scope: '/',
           icons: [

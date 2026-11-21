@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { CurrentUser, AppSettings, RoomWarning, Message } from '../types';
 import { doesStudentMatchMessage } from '../utils/storage';
 import { FarhangianEmblem } from './FarhangianEmblem';
@@ -14,6 +14,8 @@ import {
   Info,
   BookOpen,
   RefreshCw,
+  Menu,
+  X,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -51,6 +53,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   onRefreshCloud,
   isRefreshingCloud = false,
 }) => {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const canViewReports =
+    Boolean(currentUser) &&
+    currentUser?.role !== 'student' &&
+    currentUser?.role !== 'finance' &&
+    currentUser?.role !== 'education' &&
+    currentUser?.role !== 'cultural' &&
+    currentUser?.role !== 'library' &&
+    currentUser?.role !== 'smart_campus';
+
   // تعداد پیام‌های خوانده‌نشده
   const pendingMessagesCount = messages.filter((m) => {
     if (currentUser?.role === 'student') {
@@ -160,41 +173,111 @@ export const Navbar: React.FC<NavbarProps> = ({
   }).length;
 
   return (
-    <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 shadow-xs">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 sm:h-20">
+    <header className="sticky top-0 z-40 pt-[env(safe-area-inset-top)] bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 shadow-xs w-full max-w-full">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between gap-2 h-14 sm:h-20">
           
           {/* لوگو و نام دانشگاه فرهنگیان اصفهان */}
           <div
-            onClick={onNavigateHome}
-            className="flex items-center gap-3 cursor-pointer group"
+            onClick={() => {
+              setIsMobileMenuOpen(false);
+              onNavigateHome();
+            }}
+            className="flex items-center gap-2 sm:gap-3 cursor-pointer group min-w-0 flex-1"
           >
             {settings.customLogoUrl ? (
               <div className="bg-white p-1 rounded-xl shadow-xs border border-slate-200/80 shrink-0">
-                <FarhangianEmblem size={38} customLogoUrl={settings.customLogoUrl} className="group-hover:scale-105 transition" />
+                <FarhangianEmblem size={34} customLogoUrl={settings.customLogoUrl} className="group-hover:scale-105 transition" />
               </div>
             ) : (
               <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 shrink-0">
                 <School className="w-5 h-5" />
               </div>
             )}
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white tracking-tight">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-extrabold text-xs sm:text-base text-slate-900 dark:text-white tracking-tight truncate">
                   سامانه جامع خدمات دانشجویی
                 </span>
-                <span className="hidden sm:inline-block px-2 py-0.5 text-[11px] font-bold bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 rounded-full border border-teal-200 dark:border-teal-800">
+                <span className="hidden lg:inline-block shrink-0 px-2 py-0.5 text-[11px] font-bold bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 rounded-full border border-teal-200 dark:border-teal-800">
                   دانشگاه فرهنگیان ({settings.currentAcademicYear || '۱۴۰۵-۱۴۰۶'})
                 </span>
               </div>
-              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium">
+              <p className="hidden md:block text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
                 پیشخوان جامع خدمات دانشجویی — آموزش، سراهای دانشجویی، مالی، فرهنگی، ورزشی، کتابخانه، مشاوره و هوشمندسازی
+              </p>
+              <p className="md:hidden text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
+                دانشگاه فرهنگیان اصفهان ({settings.currentAcademicYear || '۱۴۰۵-۱۴۰۶'})
               </p>
             </div>
           </div>
 
-          {/* ابزارها و اکشن‌های نوار بالا */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* ابزارهای فشرده موبایل و اپلیکیشن (بدون سرریز افقی) */}
+          <div className="flex md:hidden items-center gap-1 shrink-0">
+            {onRefreshCloud && (
+              <button
+                type="button"
+                onClick={onRefreshCloud}
+                disabled={isRefreshingCloud}
+                className="p-2 rounded-xl text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/80 dark:border-emerald-800 transition cursor-pointer disabled:opacity-60"
+                title="بروزرسانی اطلاعات"
+                aria-label="بروزرسانی اطلاعات"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
+              </button>
+            )}
+
+            {currentUser && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenMessages();
+                }}
+                className="relative p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                title="صندوق پیام‌ها"
+                aria-label="صندوق پیام‌ها"
+              >
+                <MessageSquare className="w-4 h-4" />
+                {pendingMessagesCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-teal-600 text-white text-[10px] font-bold flex items-center justify-center shadow-xs">
+                    {pendingMessagesCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {!currentUser && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenLogin();
+                }}
+                className="flex items-center gap-1 px-2.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold shadow-xs transition cursor-pointer"
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>ورود</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+              aria-expanded={isMobileMenuOpen}
+              aria-label={isMobileMenuOpen ? 'بستن منو' : 'باز کردن منو'}
+              className={`p-2 rounded-xl border transition cursor-pointer ${
+                isMobileMenuOpen
+                  ? 'bg-teal-600 text-white border-teal-600'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              {isMobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            </button>
+          </div>
+
+          {/* ابزارها و اکشن‌های نوار بالا (دسکتاپ و تبلت) */}
+          <div className="hidden md:flex items-center gap-1.5 sm:gap-2 shrink-0">
 
             {/* دکمه نصب نسخه اپلیکیشن موبایل (PWA) */}
             <PWAInstallButton variant="navbar" />
@@ -462,6 +545,125 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
         </div>
+
+        {/* منوی کشویی استاندارد موبایل و نسخه اپلیکیشن */}
+        {isMobileMenuOpen && (
+          <div className="md:hidden pb-3 pt-2 border-t border-slate-200/80 dark:border-slate-800 space-y-2.5">
+            {currentUser && (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/70 dark:border-slate-700/70">
+                <div className="min-w-0">
+                  <div className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                    {currentUser.role === 'student' && currentUser.student.fullName}
+                    {currentUser.role === 'supervisor' && currentUser.supervisor.fullName}
+                    {currentUser.role === 'counselor' && currentUser.counselor.fullName}
+                    {currentUser.role === 'maintenance' && currentUser.technician.fullName}
+                    {currentUser.role === 'warehouse' && currentUser.staff.fullName}
+                    {currentUser.role === 'procurement' && currentUser.staff.fullName}
+                    {currentUser.role === 'finance' && currentUser.staff.fullName}
+                    {currentUser.role === 'education' && currentUser.staff.fullName}
+                    {currentUser.role === 'cultural' && currentUser.staff.fullName}
+                    {currentUser.role === 'student_affairs' && currentUser.staff.fullName}
+                    {currentUser.role === 'security' && currentUser.staff.fullName}
+                    {currentUser.role === 'vice_dean' && currentUser.staff.fullName}
+                    {currentUser.role === 'library' && currentUser.staff.fullName}
+                    {currentUser.role === 'smart_campus' && currentUser.staff.fullName}
+                    {currentUser.role === 'admin' && 'مدیر کل سامانه'}
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                    {currentUser.role === 'student'
+                      ? `کد دانشجویی: ${currentUser.student.studentId}`
+                      : currentUser.role === 'admin'
+                      ? 'مدیر کل سامانه جامع خدمات دانشجویی'
+                      : 'کاربر کادر سامانه'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    onLogout();
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-bold shrink-0 cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>خروج</span>
+                </button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="col-span-2 flex items-center justify-start">
+                <PWAInstallButton variant="navbar" />
+              </div>
+
+              {canViewReports && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    onOpenReports();
+                  }}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 text-xs font-bold cursor-pointer"
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  <span>گزارش‌ها و آمار</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenUserGuide();
+                }}
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold cursor-pointer"
+              >
+                <BookOpen className="w-4 h-4" />
+                <span>راهنمای کاربری</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenAbout();
+                }}
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
+              >
+                <Info className="w-4 h-4 text-teal-600" />
+                <span>درباره ما</span>
+              </button>
+
+              {currentUser && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    onOpenChangePassword();
+                  }}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-teal-700 dark:text-teal-300 border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
+                >
+                  <KeyRound className="w-4 h-4" />
+                  <span>تغییر رمز عبور</span>
+                </button>
+              )}
+
+              {currentUser?.role === 'admin' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    onOpenAppearance();
+                  }}
+                  className="col-span-2 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-xs font-bold cursor-pointer"
+                >
+                  <Palette className="w-4 h-4" />
+                  <span>شخصی‌سازی ظاهر و فونت</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </header>
   );

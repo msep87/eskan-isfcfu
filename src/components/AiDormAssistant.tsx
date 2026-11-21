@@ -98,6 +98,8 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const inFlightRef = useRef<boolean>(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (isOpen) {
@@ -107,20 +109,54 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
+    const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 640;
+    const prevOverflow = document.body.style.overflow;
+    if (isMobileViewport) {
+      document.body.style.overflow = 'hidden';
+    }
+
+    // پشتیبانی از دکمه بازگشت (Back) گوشی و مرورگر موبایل برای بستن دستیار هوشمند
+    let pushedHistory = false;
+    try {
+      window.history.pushState({ aiDormAssistantOpen: true }, '');
+      pushedHistory = true;
+    } catch {
+      pushedHistory = false;
+    }
+
+    const handlePopState = () => {
+      pushedHistory = false;
+      onCloseRef.current();
+    };
+
     const timer = window.setTimeout(() => {
-      inputRef.current?.focus();
+      if (!isMobileViewport) {
+        inputRef.current?.focus();
+      }
     }, 120);
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener('keydown', handleEscape);
+    window.addEventListener('popstate', handlePopState);
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener('keydown', handleEscape);
+      window.removeEventListener('popstate', handlePopState);
+      if (isMobileViewport) {
+        document.body.style.overflow = prevOverflow;
+      }
+      if (pushedHistory && window.history.state?.aiDormAssistantOpen) {
+        try {
+          window.history.back();
+        } catch {
+          // ignore
+        }
+      }
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   // ساخت کانتکست عمومی کاملاً امن (بدون ارسال هیچ اطلاعات محرمانه یا هویتی سایر کاربران)
   const publicContext = useMemo(() => {
@@ -612,17 +648,17 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
       role="dialog"
       aria-modal="true"
       aria-label="دستیار هوشمند خوابگاهی و آموزشی"
-      className="fixed inset-0 sm:inset-auto sm:bottom-5 sm:left-5 z-50 w-full h-[100dvh] sm:w-[420px] sm:h-[600px] sm:max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-none sm:rounded-3xl shadow-2xl border-0 sm:border sm:border-slate-200 dark:sm:border-slate-700/80 overflow-hidden chat-slide-up"
+      className="fixed inset-0 sm:inset-auto sm:bottom-5 sm:left-5 z-[120] w-full max-w-[100vw] h-[100dvh] max-h-[100dvh] sm:w-[420px] sm:h-[600px] sm:max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-none sm:rounded-3xl shadow-2xl border-0 sm:border sm:border-slate-200 dark:sm:border-slate-700/80 overflow-hidden sm:chat-slide-up"
     >
-        {/* هدر چت‌بات */}
-        <div className="bg-gradient-to-l from-teal-800 via-teal-700 to-cyan-700 text-white px-4 py-3.5 flex items-center justify-between gap-3 shrink-0">
-            <div className="flex items-center gap-2.5 min-w-0">
+        {/* هدر چت‌بات با فاصله امن بالا (Safe-Area) برای گوشی و نسخه اپلیکیشن */}
+        <div className="bg-gradient-to-l from-teal-800 via-teal-700 to-cyan-700 text-white px-3.5 sm:px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-3 sm:py-3.5 flex items-center justify-between gap-2.5 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <div className="w-9 h-9 rounded-xl bg-white/15 border border-white/20 flex items-center justify-center shrink-0">
                 <Sparkles className="w-5 h-5 text-amber-300" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-extrabold truncate">
-                  دستیار هوشمند خوابگاهی و آموزشی
+                <h3 className="text-xs sm:text-sm font-extrabold truncate">
+                  دستیار هوشمند سامانه
                 </h3>
                 <p className="text-[11px] text-teal-100 truncate flex items-center gap-1">
                   <Globe className="w-3 h-3 shrink-0" />
@@ -637,17 +673,20 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
                 onClick={handleResetChat}
                 disabled={isLoading}
                 title="شروع گفتگوی جدید"
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed text-white transition cursor-pointer"
+                aria-label="شروع گفتگوی جدید"
+                className="p-2 min-h-[38px] min-w-[38px] rounded-xl bg-white/15 hover:bg-white/25 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center transition cursor-pointer"
               >
                 <RotateCcw className="w-4 h-4" />
               </button>
               <button
                 type="button"
                 onClick={onClose}
-                title="بستن دستیار"
-                className="p-2 rounded-xl bg-white/10 hover:bg-rose-500/80 text-white transition cursor-pointer"
+                title="بستن دستیار هوشمند"
+                aria-label="بستن دستیار هوشمند"
+                className="px-2.5 sm:px-3 py-2 min-h-[38px] rounded-xl bg-rose-500/90 hover:bg-rose-600 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4 shrink-0" />
+                <span>بستن</span>
               </button>
             </div>
           </div>
@@ -754,13 +793,13 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
             <div ref={messagesEndRef} />
           </div>
 
-          {/* فرم ارسال پیام */}
+          {/* فرم ارسال پیام با فاصله امن پایین (Safe-Area) */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
               void sendMessage();
             }}
-            className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shrink-0"
+            className="p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shrink-0"
           >
             <div className="flex items-end gap-2">
               <textarea

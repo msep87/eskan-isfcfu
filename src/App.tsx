@@ -571,7 +571,7 @@ export default function App() {
   return (
     <div
       style={mergedRootStyle}
-      className={`min-h-screen flex flex-col transition-colors duration-200 ${
+      className={`min-h-[100dvh] w-full max-w-full overflow-x-clip flex flex-col transition-colors duration-200 ${
         settings.darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'
       } ${fontClass} ${fontSizeClass} ${wallpaperClass}`}
     >
@@ -647,7 +647,7 @@ export default function App() {
       )}
 
       {/* بدنه اصلی */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <main className="flex-1 w-full min-w-0 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
 
         {/* ۱. صفحه فرود برای مراجعین قبل از ورود به سامانه (بدون نمایش آمار به عموم) */}
         {!currentUser && (() => {
@@ -1129,7 +1129,7 @@ export default function App() {
       </main>
 
       {/* فوتر سایت */}
-      <footer className="mt-auto py-6 border-t border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm text-center text-xs text-slate-500 dark:text-slate-400">
+      <footer className="mt-auto py-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] border-t border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm text-center text-xs text-slate-500 dark:text-slate-400">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             {settings.customLogoUrl && (
