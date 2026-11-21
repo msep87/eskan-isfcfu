@@ -2,6 +2,7 @@ import React from 'react';
 import { CurrentUser, AppSettings, RoomWarning, Message } from '../types';
 import { doesStudentMatchMessage } from '../utils/storage';
 import { FarhangianEmblem } from './FarhangianEmblem';
+import { PWAInstallButton } from './PWAInstallButton';
 import {
   User,
   LogOut,
@@ -194,6 +195,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* ابزارها و اکشن‌های نوار بالا */}
           <div className="flex items-center gap-1.5 sm:gap-2">
+
+            {/* دکمه نصب نسخه اپلیکیشن موبایل (PWA) */}
+            <PWAInstallButton variant="navbar" />
 
             {/* دکمه خیلی کوچک درباره ما */}
             <button

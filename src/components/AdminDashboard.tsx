@@ -72,6 +72,7 @@ import { AdminSurveyManager } from './AdminSurveyManager';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { CloudConnectionDiagnosticsPanel } from './CloudConnectionDiagnosticsPanel';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { AdminStudentPortalsEditor } from './AdminStudentPortalsEditor';
 import { getStudentResidenceType } from '../utils/financeUtils';
 import { normSearchText } from '../utils/studentSearchSort';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
@@ -158,6 +159,7 @@ import {
   Home,
   Bus,
   Server,
+  Globe,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -639,6 +641,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'cloud'
     | 'backup'
     | 'home_notes'
+    | 'student_portals'
     | 'about'
     | 'quick_users';
   const [openSettingsSection, setOpenSettingsSection] = useState<AdminSettingsSectionKey | null>(null);
@@ -6974,6 +6977,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     icon: Info,
                   },
                   {
+                    key: 'student_portals' as const,
+                    title: 'سامانه‌های دانشجویان',
+                    desc: 'ایجاد، ویرایش، ترتیب‌بندی و حذف لینک‌های تب «سامانه‌ها»',
+                    icon: Globe,
+                  },
+                  {
                     key: 'about' as const,
                     title: 'محتوا و فایل‌های «درباره ما»',
                     desc: 'متن‌ها، طراح، ۱۳ نقش و فایل‌های پیوست',
@@ -7041,6 +7050,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
           </div>
+
+          {/* مدیریت سامانه‌ها و درگاه‌های بیرونی در کارتابل دانشجویان */}
+          {openSettingsSection === 'student_portals' && (
+            <div className="animate-in fade-in duration-150">
+              <AdminStudentPortalsEditor
+                settings={localSettings}
+                onUpdateSettings={(updated) => {
+                  setLocalSettings(updated);
+                  onUpdateSettings(updated);
+                }}
+              />
+            </div>
+          )}
 
           {/* ۱. دسترسی سریع به مدیریت کاربران */}
           {openSettingsSection === 'quick_users' && (

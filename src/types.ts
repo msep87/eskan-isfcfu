@@ -653,6 +653,44 @@ export interface AboutContentSettings {
   updatedAt?: string;
 }
 
+export type StudentPortalIconKey =
+  | 'graduation'
+  | 'dining'
+  | 'megaphone'
+  | 'cpu'
+  | 'landmark'
+  | 'globe'
+  | 'book'
+  | 'wallet'
+  | 'building'
+  | 'shield'
+  | 'calendar'
+  | 'link';
+
+export type StudentPortalColorKey =
+  | 'teal'
+  | 'amber'
+  | 'sky'
+  | 'indigo'
+  | 'emerald'
+  | 'cyan'
+  | 'violet'
+  | 'rose';
+
+export interface StudentPortalLink {
+  id: string;
+  title: string;
+  category: string;
+  description: string;
+  url: string;
+  displayUrl?: string;
+  ctaLabel?: string;
+  iconKey?: StudentPortalIconKey;
+  colorKey?: StudentPortalColorKey;
+  isActive?: boolean;
+  order?: number;
+}
+
 export interface AppSettings {
   selectionActive: boolean; // فعال بودن امکان انتخاب اتاق
   selectionStartDate: string; // تاریخ و ساعت شروع
@@ -679,6 +717,7 @@ export interface AppSettings {
   homeNotes?: HomeNoteItem[]; // کارت‌های بخش نکات مهم صفحه اول
   studentSecondaryEditEnabled?: boolean; // اجازه ویرایش ثانویه اطلاعات و عکس توسط دانشجو پس از تکمیل اولیه پرونده
   aboutContent?: AboutContentSettings; // محتوا و فایل‌های قابل ویرایش بخش درباره ما توسط مدیر
+  studentPortals?: StudentPortalLink[]; // فهرست سامانه‌ها و درگاه‌های بیرونی قابل مدیریت توسط مدیر برای کارتابل دانشجو
 }
 
 export interface CounselorStaff {

@@ -21,6 +21,8 @@ import {
 } from './types';
 import { Storage, initializeStorageIfNeeded } from './utils/storage';
 import { Navbar } from './components/Navbar';
+import { PWAInstallButton } from './components/PWAInstallButton';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import type { ExcelImportTab } from './components/ExcelImportModal';
 import { RichTextDisplay } from './components/RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './components/ImageLightboxModal';
@@ -721,6 +723,8 @@ export default function App() {
                     <span>راهنمای متنی و تصویری کاربری (PDF)</span>
                   </button>
 
+                  <PWAInstallButton variant="hero" />
+
                   {/* وضعیت زمانی انتخاب واحد */}
                   <div className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-teal-900/60 border border-white/15 text-xs text-teal-100 backdrop-blur-md">
                     <Clock className="w-4 h-4 text-amber-300 shrink-0" />
@@ -1292,6 +1296,8 @@ export default function App() {
             />
           )}
       </Suspense>
+
+      <OfflineIndicator />
 
       {/* مدال بزرگ‌نمایی و نمایش در ابعاد واقعی تصویر اطلاعیه */}
       <ImageLightboxModal
