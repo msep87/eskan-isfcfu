@@ -116,6 +116,91 @@ function cleanReplyText(rawContent) {
     .trim();
 }
 
+const GEMINI_MODELS = [
+  'gemini-4-hydrogen',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash',
+];
+
+async function callGeminiChat(geminiKey, systemInstruction, history, message) {
+  const geminiContents = [];
+  if (Array.isArray(history)) {
+    for (const item of history.slice(-6)) {
+      if (!item || typeof item !== 'object') continue;
+      const text = String(item.text || item.content || '').trim().substring(0, 600);
+      if (!text) continue;
+      const role = item.role === 'model' || item.role === 'assistant' ? 'model' : 'user';
+      geminiContents.push({ role, parts: [{ text }] });
+    }
+  }
+  geminiContents.push({
+    role: 'user',
+    parts: [{ text: String(message || 'سلام').substring(0, 1000) }],
+  });
+
+  const errors = [];
+  let lastStatus = 502;
+
+  for (const model of GEMINI_MODELS) {
+    let geminiRes;
+    try {
+      const generationConfig = model.startsWith('gemini-4')
+        ? { maxOutputTokens: 1024 }
+        : { temperature: 0.5, maxOutputTokens: 1024 };
+
+      geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': geminiKey,
+            'User-Agent': 'aistudio-build',
+          },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            contents: geminiContents,
+            generationConfig,
+          }),
+        }
+      );
+    } catch (fetchErr) {
+      errors.push(
+        `${model}: ${fetchErr instanceof Error ? fetchErr.message : 'خطای ارتباط شبکه'}`
+      );
+      continue;
+    }
+
+    lastStatus = geminiRes.status || 502;
+    const geminiData = await geminiRes.json().catch(() => ({}));
+
+    if (geminiRes.ok) {
+      const parts = geminiData?.candidates?.[0]?.content?.parts || [];
+      const reply = cleanReplyText(
+        parts.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('\n')
+      );
+      if (reply) {
+        return { ok: true, reply, modelUsed: model };
+      }
+      errors.push(`${model}: پاسخ خالی`);
+      continue;
+    }
+
+    const errMsg = geminiData?.error?.message || `HTTP ${geminiRes.status}`;
+    errors.push(`${model}: ${errMsg}`);
+
+    if (geminiRes.status === 400 && /API key not valid|API_KEY_INVALID/i.test(errMsg)) {
+      break;
+    }
+  }
+
+  return {
+    ok: false,
+    status: lastStatus >= 400 ? lastStatus : 502,
+    error: errors.slice(0, 2).join(' | ') || 'پاسخی از سرویس Gemini دریافت نشد.',
+  };
+}
+
 export async function onRequestOptions() {
   return new Response(null, {
     status: 204,
@@ -143,6 +228,9 @@ export async function onRequestGet(context) {
       hasGroqKey,
       hasGeminiKey,
       ...(activeModels ? { activeModels } : {}),
+      ...(hasGeminiKey && url.searchParams.get('models') === '1'
+        ? { geminiModels: GEMINI_MODELS }
+        : {}),
     }),
     {
       status: 200,
@@ -169,7 +257,8 @@ export async function onRequestPost(context) {
       return new Response(
         JSON.stringify({
           ok: false,
-          reply: 'کلید GROQ_API_KEY در تنظیمات محیطی سرور (Cloudflare Pages) یافت نشد.',
+          reply:
+            'کلید GROQ_API_KEY یا GEMINI_API_KEY در تنظیمات محیطی سرور (Cloudflare Pages) یافت نشد.',
         }),
         { status: 500, headers: JSON_HEADERS }
       );
@@ -208,63 +297,31 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
       content: String(message || 'سلام').substring(0, 1000),
     });
 
-    // اگر کلید GROQ_API_KEY تنظیم نشده ولی GEMINI_API_KEY در محیط سرور موجود باشد، از Gemini REST API استفاده می‌شود
+    // اگر کلید GROQ_API_KEY تنظیم نشده ولی GEMINI_API_KEY در محیط سرور موجود باشد، مستقیم از Gemini استفاده می‌شود
     if (!apiKey && geminiKey) {
-      const geminiContents = [];
-      if (Array.isArray(history)) {
-        for (const item of history.slice(-6)) {
-          if (!item || typeof item !== 'object') continue;
-          const text = String(item.text || item.content || '').trim().substring(0, 600);
-          if (!text) continue;
-          const role = item.role === 'model' || item.role === 'assistant' ? 'model' : 'user';
-          geminiContents.push({ role, parts: [{ text }] });
-        }
-      }
-      geminiContents.push({
-        role: 'user',
-        parts: [{ text: String(message || 'سلام').substring(0, 1000) }],
-      });
-
-      const geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemInstruction }] },
-            contents: geminiContents,
-            generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
+      const geminiResult = await callGeminiChat(geminiKey, systemInstruction, history, message);
+      if (geminiResult.ok) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            success: true,
+            reply: geminiResult.reply,
+            text: geminiResult.reply,
+            answer: geminiResult.reply,
+            modelUsed: geminiResult.modelUsed,
+            providerUsed: 'gemini',
           }),
-        }
-      );
-      const geminiData = await geminiRes.json().catch(() => ({}));
-      if (geminiRes.ok) {
-        const parts = geminiData?.candidates?.[0]?.content?.parts || [];
-        const reply = cleanReplyText(
-          parts.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('\n')
+          { status: 200, headers: JSON_HEADERS }
         );
-        if (reply) {
-          return new Response(
-            JSON.stringify({
-              ok: true,
-              success: true,
-              reply,
-              text: reply,
-              answer: reply,
-              modelUsed: 'gemini-2.5-flash',
-            }),
-            { status: 200, headers: JSON_HEADERS }
-          );
-        }
       }
       return new Response(
         JSON.stringify({
           ok: false,
           reply:
-            geminiData?.error?.message ||
-            'پاسخی از سرویس هوش مصنوعی دریافت نشد. لطفاً کلید GROQ_API_KEY را در تنظیمات سرور بررسی کنید.',
+            geminiResult.error ||
+            'پاسخی از سرویس هوش مصنوعی دریافت نشد. لطفاً کلید GEMINI_API_KEY را در تنظیمات سرور بررسی کنید.',
         }),
-        { status: geminiRes.status >= 400 ? geminiRes.status : 502, headers: JSON_HEADERS }
+        { status: geminiResult.status, headers: JSON_HEADERS }
       );
     }
 
@@ -282,6 +339,7 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
       'ترافیک پرسش‌های دستیار هوشمند در این لحظه بالاست؛ لطفاً ۱۰ ثانیه صبر کرده و دوباره ارسال کنید';
     const attemptErrors = [];
     let rateLimitHits = 0;
+    let groqUnauthorized = false;
 
     for (const model of finalCandidateModels) {
       let response;
@@ -309,14 +367,9 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
       const data = await response.json().catch(() => ({}));
 
       if (response.status === 401) {
-        return new Response(
-          JSON.stringify({
-            ok: false,
-            reply:
-              'کلید GROQ_API_KEY نامعتبر است یا منقضی شده است. لطفاً کلید جدیدی در تنظیمات Cloudflare Pages ثبت کنید.',
-          }),
-          { status: 401, headers: JSON_HEADERS }
-        );
+        groqUnauthorized = true;
+        attemptErrors.push(`${model}: HTTP 401`);
+        break;
       }
 
       if (response.status === 403 || response.status === 404) {
@@ -329,25 +382,10 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
 
       if (response.status === 429) {
         rateLimitHits += 1;
-        // در صورت شلوغی و محدودیت نرخ درخواست (HTTP 429)، بیش از ۲ تلاش انجام نمی‌دهیم تا فشار روی Groq تشدید نشود
-        if (rateLimitHits >= 2 || finalCandidateModels.length === 1) {
-          return new Response(
-            JSON.stringify({
-              ok: false,
-              code: 'RATE_LIMITED',
-              retryAfterSeconds: 10,
-              reply: RATE_LIMIT_REPLY,
-            }),
-            {
-              status: 429,
-              headers: {
-                ...JSON_HEADERS,
-                'Retry-After': '10',
-              },
-            }
-          );
-        }
         attemptErrors.push(`${model}: HTTP 429`);
+        if (rateLimitHits >= 2 || finalCandidateModels.length === 1) {
+          break;
+        }
         continue;
       }
 
@@ -363,6 +401,7 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
               text: reply,
               answer: reply,
               modelUsed: model,
+              providerUsed: 'groq',
             }),
             { status: 200, headers: JSON_HEADERS }
           );
@@ -374,23 +413,11 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
       const errMsg = data?.error?.message || `HTTP ${response.status}`;
       if (/rate.?limit|too many requests|429/i.test(errMsg)) {
         rateLimitHits += 1;
+        attemptErrors.push(`${model}: ${errMsg}`);
         if (rateLimitHits >= 2) {
-          return new Response(
-            JSON.stringify({
-              ok: false,
-              code: 'RATE_LIMITED',
-              retryAfterSeconds: 10,
-              reply: RATE_LIMIT_REPLY,
-            }),
-            {
-              status: 429,
-              headers: {
-                ...JSON_HEADERS,
-                'Retry-After': '10',
-              },
-            }
-          );
+          break;
         }
+        continue;
       }
       attemptErrors.push(`${model}: ${errMsg}`);
 
@@ -400,6 +427,38 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
         cachedModelsAt = 0;
         continue;
       }
+    }
+
+    // اگر سرویس Groq به هر دلیلی (خطای کلید، محدودیت نرخ، مسدودی یا خطای شبکه) پاسخ نداد و GEMINI_API_KEY موجود بود، به صورت خودکار به Gemini سوییچ می‌شود
+    if (geminiKey) {
+      const geminiResult = await callGeminiChat(geminiKey, systemInstruction, history, message);
+      if (geminiResult.ok) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            success: true,
+            reply: geminiResult.reply,
+            text: geminiResult.reply,
+            answer: geminiResult.reply,
+            modelUsed: geminiResult.modelUsed,
+            providerUsed: 'gemini',
+            fallbackFrom: 'groq',
+          }),
+          { status: 200, headers: JSON_HEADERS }
+        );
+      }
+      attemptErrors.push(`gemini: ${geminiResult.error}`);
+    }
+
+    if (groqUnauthorized && !geminiKey) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          reply:
+            'کلید GROQ_API_KEY نامعتبر است یا منقضی شده است. لطفاً کلید جدیدی در تنظیمات Cloudflare Pages ثبت کنید.',
+        }),
+        { status: 401, headers: JSON_HEADERS }
+      );
     }
 
     if (rateLimitHits > 0) {
@@ -421,7 +480,7 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
     }
 
     const summaryError =
-      attemptErrors.length > 0 ? attemptErrors.slice(0, 2).join(' | ') : 'خطا در ارتباط با Groq';
+      attemptErrors.length > 0 ? attemptErrors.slice(0, 2).join(' | ') : 'خطا در ارتباط با سرویس هوش مصنوعی';
 
     return new Response(
       JSON.stringify({ ok: false, reply: `خطای سرویس هوش مصنوعی: ${summaryError}` }),

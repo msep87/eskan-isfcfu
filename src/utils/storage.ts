@@ -2624,12 +2624,25 @@ function normalizeStudentRecord(raw: Record<string, unknown>): Student {
   void updatedAt;
   const r = rest as Partial<Student>;
   const assignmentStatus = r.assignmentStatus || 'none';
+  const hasDorm = Boolean(
+    (r.assignedBedId && assignmentStatus !== 'none') ||
+      r.assignedRoomId ||
+      r.assignedDormId ||
+      assignmentStatus === 'confirmed' ||
+      assignmentStatus === 'temporary'
+  );
   const resolvedResidenceType: Student['residenceType'] =
     r.residenceType === 'dormitory' || r.residenceType === 'commuter'
       ? r.residenceType
-      : r.assignedBedId && assignmentStatus !== 'none'
+      : hasDorm
       ? 'dormitory'
       : undefined;
+  const resolvedAdmissionStatus: Student['admissionStatus'] =
+    r.admissionStatus === 'admitted' || r.admissionStatus === 'not_admitted'
+      ? r.admissionStatus
+      : hasDorm || Boolean(r.isProfileCompleted)
+      ? 'admitted'
+      : 'not_admitted';
 
   return {
     ...r,
@@ -2654,6 +2667,7 @@ function normalizeStudentRecord(raw: Record<string, unknown>): Student {
     isProfileCompleted: Boolean(r.isProfileCompleted),
     assignmentStatus,
     residenceType: resolvedResidenceType,
+    admissionStatus: resolvedAdmissionStatus,
   };
 }
 
@@ -3502,6 +3516,7 @@ export const Storage = {
     student.assignedBedId = targetBed.id;
     student.assignmentStatus = finalStatus;
     student.residenceType = 'dormitory';
+    student.admissionStatus = 'admitted';
 
     Storage.setBeds(beds);
     saveStudentsLocalOnly(students);
@@ -3540,6 +3555,7 @@ export const Storage = {
     }
 
     student.assignmentStatus = 'confirmed';
+    student.admissionStatus = 'admitted';
     const bed = beds.find((b) => b.id === student.assignedBedId);
     if (bed) {
       bed.assignmentStatus = 'confirmed';
@@ -4495,7 +4511,12 @@ export const Storage = {
       };
     }
 
-    students[index] = { ...students[index], ...updatedData, isProfileCompleted: true };
+    students[index] = {
+      ...students[index],
+      ...updatedData,
+      isProfileCompleted: true,
+      admissionStatus: 'admitted',
+    };
     saveStudentsLocalOnly(students);
     void mirrorSingleStudentToCloud(students[index]);
     Storage.addActivityLog({
@@ -10859,6 +10880,7 @@ export const Storage = {
     preparedStudent = {
       ...preparedStudent,
       residenceType: preparedStudent.residenceType || newStudent.residenceType,
+      admissionStatus: newStudent.admissionStatus || preparedStudent.admissionStatus,
     };
 
     if (isBase64ImageDataUrl(preparedStudent.photoUrl)) {

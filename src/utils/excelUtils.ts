@@ -48,6 +48,8 @@ import {
   normalizePersianText,
   parseResidenceTypeValue,
   getStudentResidenceType,
+  parseAdmissionStatusValue,
+  getStudentAdmissionLabel,
 } from './financeUtils';
 import {
   ECONOMIC_STATUS_LABELS,
@@ -204,6 +206,18 @@ const KNOWN_STUDENT_FIELD_MAP: Record<string, keyof Student> = {
   'residence_type': 'residenceType',
   'residencetype': 'residenceType',
   'residence': 'residenceType',
+
+  // ستون نوع / وضعیت پذیرش (پذیرش شده / پذیرش نشده):
+  'نوع پذیرش': 'admissionStatus',
+  'وضعیت پذیرش': 'admissionStatus',
+  'پذیرش': 'admissionStatus',
+  'پذیرش شده/نشده': 'admissionStatus',
+  'پذیرش شده / نشده': 'admissionStatus',
+  'وضعیت پذیرش (پذیرش شده/پذیرش نشده)': 'admissionStatus',
+  'نوع پذیرش (پذیرش شده/پذیرش نشده)': 'admissionStatus',
+  'admission_status': 'admissionStatus',
+  'admissionstatus': 'admissionStatus',
+  'admission': 'admissionStatus',
 };
 
 // خواندن اکسل دانشجویان
@@ -309,15 +323,17 @@ export async function parseStudentExcel(file: File): Promise<{
           const cleanRoom = toEnglishDigits(String(studentObj.assignedRoomNumber || '')).trim();
           const cleanBedRaw = toEnglishDigits(String(studentObj.assignedBedNumber || '')).trim();
           const parsedResidence = parseResidenceTypeValue(studentObj.residenceType);
+          const parsedAdmission = parseAdmissionStatusValue(studentObj.admissionStatus);
 
           if (cleanRoom && cleanBedRaw) {
-            // اگر ستون‌های اسکان پر بود یعنی قبلاً توسط مدیر ساماندهی شده است (دانشجوی دارای اتاق پیش‌فرض خوابگاهی است)
+            // اگر ستون‌های اسکان پر بود یعنی قبلاً توسط مدیر ساماندهی شده است (دانشجوی دارای خوابگاه پیش‌فرض خوابگاهی و پذیرش شده است)
             const bedNum = parseInt(cleanBedRaw, 10);
             studentObj.assignmentStatus = 'confirmed';
             studentObj.assignedDormName = cleanDorm;
             studentObj.assignedRoomNumber = cleanRoom;
             studentObj.assignedBedNumber = isNaN(bedNum) ? cleanBedRaw : bedNum;
             studentObj.residenceType = parsedResidence || 'dormitory';
+            studentObj.admissionStatus = parsedAdmission || 'admitted';
           } else {
             // اگر ستون‌های اتاق خالی بود
             studentObj.assignmentStatus = 'none';
@@ -325,6 +341,7 @@ export async function parseStudentExcel(file: File): Promise<{
             studentObj.assignedRoomNumber = undefined;
             studentObj.assignedBedNumber = undefined;
             studentObj.residenceType = parsedResidence;
+            studentObj.admissionStatus = parsedAdmission;
           }
 
           students.push(studentObj as Student);
@@ -491,7 +508,8 @@ export async function downloadStudentTemplate() {
       'سرای سال قبل': 'سرای شهید باهنر',
       'اتاق سال قبل': '۱۰۴',
       'امتیاز سال قبل': '95',
-      // ستون نوع سکونت (خوابگاهی / ترددی) و ستون‌های تخصیص اتاق (پر شده: تخصیص قطعی توسط مدیر | فرد=پایین، زوج=بالا)
+      // ستون نوع پذیرش (پذیرش شده / پذیرش نشده)، نوع سکونت (خوابگاهی / ترددی) و ستون‌های تخصیص اتاق (پر شده: تخصیص قطعی توسط مدیر | فرد=پایین، زوج=بالا)
+      'نوع پذیرش': 'پذیرش شده',
       'نوع سکونت': 'خوابگاهی',
       'نام سرا': 'سرای شهید باهنر - بلوک سینا',
       'شماره اتاق': '۱۰۱',
@@ -520,7 +538,8 @@ export async function downloadStudentTemplate() {
       'سرای سال قبل': 'عدم سکونت (ورودی جدید)',
       'اتاق سال قبل': '-',
       'امتیاز سال قبل': '100',
-      // دانشجوی خوابگاهی فاقد اتاق: خود دانشجو در سامانه اتاق انتخاب می‌کند
+      // دانشجوی جدیدالورود فاقد اتاق: ابتدا پذیرش نشده تا زمان ورود اول و تکمیل اطلاعات
+      'نوع پذیرش': 'پذیرش نشده',
       'نوع سکونت': 'خوابگاهی',
       'نام سرا': '',
       'شماره اتاق': '',
@@ -549,6 +568,7 @@ export async function downloadStudentTemplate() {
       'اتاق سال قبل': '۲۰۲',
       'امتیاز سال قبل': '90',
       // ستون‌های تخصیص اتاق: تخت زوج = طبقه بالا
+      'نوع پذیرش': 'پذیرش شده',
       'نوع سکونت': 'خوابگاهی',
       'نام سرا': 'سرای شهید باهنر - بلوک سینا',
       'شماره اتاق': '۱۰۱',
@@ -577,6 +597,7 @@ export async function downloadStudentTemplate() {
       'اتاق سال قبل': '۱۰۱',
       'امتیاز سال قبل': '94',
       // ستون‌های تخصیص اتاق: تخت فرد = طبقه پایین
+      'نوع پذیرش': 'پذیرش شده',
       'نوع سکونت': 'خوابگاهی',
       'نام سرا': 'سرای شهید باهنر - بلوک سینا',
       'شماره اتاق': '۱۰۱',
@@ -604,7 +625,8 @@ export async function downloadStudentTemplate() {
       'سرای سال قبل': 'عدم سکونت',
       'اتاق سال قبل': '-',
       'امتیاز سال قبل': '100',
-      // دانشجوی ترددی (غیرخوابگاهی)
+      // دانشجوی ترددی (غیرخوابگاهی) جدیدالورود
+      'نوع پذیرش': 'پذیرش نشده',
       'نوع سکونت': 'ترددی',
       'نام سرا': '',
       'شماره اتاق': '',
@@ -723,6 +745,7 @@ export async function exportStudentsToExcel(students: Student[], dormsMap: Map<s
       'شماره ضروری': s.emergencyPhone,
       'شماره والدین': s.parentPhone,
       'نشانی دقیق': s.postalAddress || '',
+      'وضعیت پذیرش': getStudentAdmissionLabel(s),
       'نوع سکونت': resType === 'dormitory' ? 'خوابگاهی (درخواست خوابگاه)' : 'ترددی (عدم نیاز به خوابگاه)',
       'علت ترددی': resType === 'commuter' ? formatCommuterReasons(s.commuterEligibilityReasons) || '-' : '-',
       'توضیحات وضعیت سکونت':
@@ -787,6 +810,7 @@ export async function exportStudentCapabilitiesReportToExcel(
       'ترم ورود': s.entryTerm,
       'شماره همراه': s.mobile,
       'استان / شهر': `${s.province || ''} - ${s.city || ''}`,
+      'وضعیت پذیرش': getStudentAdmissionLabel(s),
       'وضعیت سکونت': resType === 'dormitory' ? 'خوابگاهی' : 'ترددی (غیرخوابگاهی)',
       'علت ترددی': resType === 'commuter' ? formatCommuterReasons(s.commuterEligibilityReasons) || '-' : '-',
       'توضیحات سکونت': resType === 'commuter' ? s.commuterRequestNotes || '' : s.dormitoryRequestNotes || '',

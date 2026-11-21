@@ -1,5 +1,7 @@
 export type StudentResidenceType = 'dormitory' | 'commuter';
 
+export type StudentAdmissionStatus = 'admitted' | 'not_admitted';
+
 export type CommuterEligibilityReason =
   | 'isfahan_suburbs_30km'
   | 'married'
@@ -30,6 +32,7 @@ export interface Student {
   avatarColor?: string;
   isProfileCompleted: boolean;
   residenceType?: StudentResidenceType; // برچسب وضعیت سکونت: خوابگاهی یا ترددی (دانشجوی دارای اتاق پیش‌فرض خوابگاهی است)
+  admissionStatus?: StudentAdmissionStatus; // برچسب وضعیت پذیرش: پذیرش شده یا پذیرش نشده (دانشجوی دارای خوابگاه پیش‌فرض پذیرش شده است و جدیدالورودها تا زمان تکمیل اطلاعات پذیرش نشده هستند)
   dormitoryRequestStatus?: 'requested' | 'not_needed_commuter'; // انتخاب دانشجو در بدو ورود: درخواست خوابگاه یا عدم نیاز (ترددی)
   commuterEligibilityReasons?: CommuterEligibilityReason[]; // علل قانونی ترددی بودن (اصفهان تا ۳۰ کیلومتر، متأهل، سرپرست خانوار، موارد خاص)
   commuterRequestNotes?: string; // توضیحات دانشجو برای ترددی بودن / عدم نیاز به خوابگاه

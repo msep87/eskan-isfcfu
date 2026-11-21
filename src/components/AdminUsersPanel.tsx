@@ -22,7 +22,7 @@ import {
 } from '../types';
 import { Storage, compressAvatarImageFile, normalizeAssignedFieldsList } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
-import { getStudentResidenceType } from '../utils/financeUtils';
+import { getStudentResidenceType, getStudentAdmissionStatus } from '../utils/financeUtils';
 import { compareStudents } from '../utils/studentSearchSort';
 import { ExcelImportTab } from './ExcelImportModal';
 import { StudentRoomProfileModal } from './StudentRoomProfileModal';
@@ -220,6 +220,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const [stRoomFilter, setStRoomFilter] = useState('');
   const [stAssignFilter, setStAssignFilter] = useState<'all' | 'confirmed' | 'temporary' | 'none'>('all');
   const [stResidenceFilter, setStResidenceFilter] = useState<'all' | 'dormitory' | 'commuter'>('all');
+  const [stAdmissionFilter, setStAdmissionFilter] = useState<'all' | 'admitted' | 'not_admitted'>('all');
   const [stProfileFilter, setStProfileFilter] = useState<'all' | 'completed' | 'incomplete'>('all');
   const [stLocationFilter, setStLocationFilter] = useState('');
 
@@ -730,6 +731,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         if (getStudentResidenceType(st) !== stResidenceFilter) return false;
       }
 
+      if (stAdmissionFilter !== 'all') {
+        if (getStudentAdmissionStatus(st) !== stAdmissionFilter) return false;
+      }
+
       if (stProfileFilter === 'completed' && !st.isProfileCompleted) return false;
       if (stProfileFilter === 'incomplete' && st.isProfileCompleted) return false;
 
@@ -751,6 +756,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     deferredStRoomFilter,
     stAssignFilter,
     stResidenceFilter,
+    stAdmissionFilter,
     stProfileFilter,
     deferredStLocationFilter,
   ]);
@@ -765,6 +771,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     return { dormitory, commuter };
   }, [students]);
 
+  const admissionStats = useMemo(() => {
+    let admitted = 0;
+    let notAdmitted = 0;
+    students.forEach((st) => {
+      if (getStudentAdmissionStatus(st) === 'admitted') admitted += 1;
+      else notAdmitted += 1;
+    });
+    return { admitted, notAdmitted };
+  }, [students]);
+
   const handleQuickToggleResidenceType = (st: Student) => {
     const current = getStudentResidenceType(st);
     const next = current === 'dormitory' ? 'commuter' : 'dormitory';
@@ -773,6 +789,22 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFeedback({
         type: 'success',
         message: `برچسب دانشجو «${st.fullName}» به «${next === 'dormitory' ? 'خوابگاهی' : 'ترددی'}» تغییر یافت.`,
+      });
+      onRefreshData();
+      setTimeout(() => setFeedback(null), 3000);
+    } else {
+      setFeedback({ type: 'error', message: res.message });
+    }
+  };
+
+  const handleQuickToggleAdmissionStatus = (st: Student) => {
+    const current = getStudentAdmissionStatus(st);
+    const next = current === 'admitted' ? 'not_admitted' : 'admitted';
+    const res = Storage.updateStudentAdmin(st.studentId, { admissionStatus: next });
+    if (res.success) {
+      setFeedback({
+        type: 'success',
+        message: `وضعیت پذیرش دانشجو «${st.fullName}» به «${next === 'admitted' ? 'پذیرش شده' : 'پذیرش نشده'}» تغییر یافت.`,
       });
       onRefreshData();
       setTimeout(() => setFeedback(null), 3000);
@@ -799,6 +831,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     deferredStRoomFilter,
     stAssignFilter,
     stResidenceFilter,
+    stAdmissionFilter,
     stProfileFilter,
     deferredStLocationFilter,
     stSortBy,
@@ -869,6 +902,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     Boolean(stRoomFilter.trim()) ||
     stAssignFilter !== 'all' ||
     stResidenceFilter !== 'all' ||
+    stAdmissionFilter !== 'all' ||
     stProfileFilter !== 'all' ||
     Boolean(stLocationFilter.trim()) ||
     stSortBy !== 'default';
@@ -881,6 +915,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     setStRoomFilter('');
     setStAssignFilter('all');
     setStResidenceFilter('all');
+    setStAdmissionFilter('all');
     setStProfileFilter('all');
     setStLocationFilter('');
     setStSortBy('default');
@@ -2385,9 +2420,39 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     <Bus className="w-3 h-3" />
                     <span>ترددی: {residenceStats.commuter.toLocaleString('fa-IR')}</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStAdmissionFilter((prev) => (prev === 'admitted' ? 'all' : 'admitted'))
+                    }
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${
+                      stAdmissionFilter === 'admitted'
+                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
+                    }`}
+                    title="فیلتر سریع دانشجویان پذیرش شده"
+                  >
+                    <UserCheck className="w-3 h-3" />
+                    <span>پذیرش شده: {admissionStats.admitted.toLocaleString('fa-IR')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStAdmissionFilter((prev) => (prev === 'not_admitted' ? 'all' : 'not_admitted'))
+                    }
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${
+                      stAdmissionFilter === 'not_admitted'
+                        ? 'bg-rose-600 text-white border-rose-600'
+                        : 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800 hover:bg-rose-100'
+                    }`}
+                    title="فیلتر سریع دانشجویان پذیرش نشده"
+                  >
+                    <AlertTriangle className="w-3 h-3" />
+                    <span>پذیرش نشده: {admissionStats.notAdmitted.toLocaleString('fa-IR')}</span>
+                  </button>
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  جستجوی پیشرفته بر اساس نام، کد دانشجویی، کد ملی، رشته، ورودی، سرا، اتاق، نوع سکونت (خوابگاهی/ترددی) و محل سکونت
+                  جستجوی پیشرفته بر اساس نام، کد دانشجویی، کد ملی، رشته، ورودی، سرا، اتاق، وضعیت پذیرش، نوع سکونت و محل سکونت
                 </p>
               </div>
             </div>
@@ -2622,6 +2687,21 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     <option value="all">همه دانشجویان (خوابگاهی و ترددی)</option>
                     <option value="dormitory">فقط دانشجویان خوابگاهی ({residenceStats.dormitory})</option>
                     <option value="commuter">فقط دانشجویان ترددی ({residenceStats.commuter})</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    وضعیت پذیرش (پذیرش شده / نشده):
+                  </label>
+                  <select
+                    value={stAdmissionFilter}
+                    onChange={(e) => setStAdmissionFilter(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-bold"
+                  >
+                    <option value="all">همه وضعیت‌های پذیرش</option>
+                    <option value="admitted">پذیرش شده ({admissionStats.admitted})</option>
+                    <option value="not_admitted">پذیرش نشده ({admissionStats.notAdmitted})</option>
                   </select>
                 </div>
 
@@ -2993,17 +3073,42 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           <div className="text-[10px] text-slate-400">ورودی {st.entryTerm || '-'}</div>
                         </td>
                         <td className="p-3">
-                          {st.isProfileCompleted ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                              <CheckCircle className="w-3 h-3 text-emerald-600" />
-                              تکمیل شده
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
-                              <AlertTriangle className="w-3 h-3 text-rose-600" />
-                              پرونده ناقص
-                            </span>
-                          )}
+                          {(() => {
+                            const admStatus = getStudentAdmissionStatus(st);
+                            const isAdmitted = admStatus === 'admitted';
+                            return (
+                              <div className="flex flex-col items-start gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickToggleAdmissionStatus(st)}
+                                  title="کلیک برای تغییر برچسب بین پذیرش شده و پذیرش نشده"
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border transition cursor-pointer ${
+                                    isAdmitted
+                                      ? 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100'
+                                      : 'bg-rose-50 dark:bg-rose-950/70 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-700 hover:bg-rose-100'
+                                  }`}
+                                >
+                                  {isAdmitted ? (
+                                    <UserCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                  ) : (
+                                    <AlertTriangle className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+                                  )}
+                                  <span>{isAdmitted ? 'پذیرش شده' : 'پذیرش نشده'}</span>
+                                </button>
+                                {st.isProfileCompleted ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                    <CheckCircle className="w-3 h-3 text-emerald-600" />
+                                    پروفایل تکمیل
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100/80 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                                    <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                    اطلاعات ناقص
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="p-3">
                           {(() => {

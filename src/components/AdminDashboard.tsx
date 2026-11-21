@@ -24,6 +24,7 @@ import {
   Bed,
   Student,
   StudentResidenceType,
+  StudentAdmissionStatus,
   CommuterEligibilityReason,
   Supervisor,
   Announcement,
@@ -94,7 +95,7 @@ import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { CloudConnectionDiagnosticsPanel } from './CloudConnectionDiagnosticsPanel';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { AdminStudentPortalsEditor } from './AdminStudentPortalsEditor';
-import { getStudentResidenceType } from '../utils/financeUtils';
+import { getStudentResidenceType, getStudentAdmissionStatus } from '../utils/financeUtils';
 import {
   ARTISTIC_SKILL_OPTIONS,
   COMMUTER_ELIGIBILITY_OPTIONS,
@@ -853,6 +854,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [stFormPreviousRoom, setStFormPreviousRoom] = useState('');
   const [stFormPreviousScore, setStFormPreviousScore] = useState('100');
   const [stFormResidenceType, setStFormResidenceType] = useState<StudentResidenceType>('dormitory');
+  const [stFormAdmissionStatus, setStFormAdmissionStatus] = useState<StudentAdmissionStatus>('not_admitted');
   const [stFormCommuterReasons, setStFormCommuterReasons] = useState<CommuterEligibilityReason[]>([]);
   const [stFormCommuterNotes, setStFormCommuterNotes] = useState('');
   const [stFormDormNotes, setStFormDormNotes] = useState('');
@@ -913,6 +915,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormPreviousRoom('');
     setStFormPreviousScore('100');
     setStFormResidenceType('dormitory');
+    setStFormAdmissionStatus('not_admitted');
     setStFormCommuterReasons([]);
     setStFormCommuterNotes('');
     setStFormDormNotes('');
@@ -975,6 +978,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormPreviousRoom(st.previousRoom || '');
     setStFormPreviousScore(String(st.previousScore ?? 100));
     setStFormResidenceType(getStudentResidenceType(st));
+    setStFormAdmissionStatus(getStudentAdmissionStatus(st));
     setStFormCommuterReasons([...(st.commuterEligibilityReasons || [])]);
     setStFormCommuterNotes(st.commuterRequestNotes || '');
     setStFormDormNotes(st.dormitoryRequestNotes || '');
@@ -1199,6 +1203,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         previousRoom: stFormPreviousRoom.trim(),
         previousScore: normalizedScore,
         residenceType: stFormResidenceType,
+        admissionStatus: stFormAdmissionStatus,
         ...structuredFields,
         assignmentStatus: editingStudent.assignedBedId ? stFormAssignmentStatus : editingStudent.assignmentStatus,
         customFields: mergedCustomFields,
@@ -1239,6 +1244,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         previousRoom: stFormPreviousRoom.trim(),
         previousScore: normalizedScore,
         residenceType: stFormResidenceType,
+        admissionStatus: stFormAdmissionStatus,
         ...structuredFields,
         customFields: mergedCustomFields,
         photoUrl: resolvedPhotoUrl,
@@ -10170,6 +10176,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <span>تخصیص / تغییر اتاق و تخت</span>
                     </button>
                   )}
+                </div>
+
+                {/* برچسب وضعیت پذیرش دانشجو: پذیرش شده یا پذیرش نشده */}
+                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-1">
+                    <label className="font-extrabold text-slate-800 dark:text-slate-100 text-xs">
+                      وضعیت پذیرش دانشجو (پذیرش شده / پذیرش نشده) *
+                    </label>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                      دانشجویان جدیدالورود تا تکمیل اطلاعات «پذیرش نشده» و دانشجویان دارای خوابگاه پیش‌فرض «پذیرش شده» هستند
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStFormAdmissionStatus('admitted')}
+                      className={`p-2.5 rounded-xl border text-right transition cursor-pointer flex items-center gap-2.5 ${
+                        stFormAdmissionStatus === 'admitted'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-900 dark:text-emerald-100 ring-1 ring-emerald-500/40'
+                          : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-emerald-300'
+                      }`}
+                    >
+                      <div
+                        className={`p-1.5 rounded-lg shrink-0 ${
+                          stFormAdmissionStatus === 'admitted'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-white dark:bg-slate-900 text-slate-400 border border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        <UserCheck className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-extrabold text-xs">پذیرش شده</div>
+                        <div className="text-[10px] opacity-75">ورود و تکمیل اطلاعات یا دارای خوابگاه</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setStFormAdmissionStatus('not_admitted')}
+                      className={`p-2.5 rounded-xl border text-right transition cursor-pointer flex items-center gap-2.5 ${
+                        stFormAdmissionStatus === 'not_admitted'
+                          ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-500 text-rose-900 dark:text-rose-100 ring-1 ring-rose-500/40'
+                          : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-rose-300'
+                      }`}
+                    >
+                      <div
+                        className={`p-1.5 rounded-lg shrink-0 ${
+                          stFormAdmissionStatus === 'not_admitted'
+                            ? 'bg-rose-600 text-white'
+                            : 'bg-white dark:bg-slate-900 text-slate-400 border border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        <AlertTriangle className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-extrabold text-xs">پذیرش نشده</div>
+                        <div className="text-[10px] opacity-75">جدیدالورود در انتظار ورود اول و تکمیل پرونده</div>
+                      </div>
+                    </button>
+                  </div>
                 </div>
 
                 {/* برچسب نوع سکونت دانشجو: خوابگاهی یا ترددی */}

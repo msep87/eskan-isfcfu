@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CurrentUser, AppSettings, RoomWarning, Message } from '../types';
 import { Storage, doesStudentMatchMessage, doesEducationStaffMatchMessage } from '../utils/storage';
+import { getStudentAdmissionStatus } from '../utils/financeUtils';
 import { FarhangianEmblem } from './FarhangianEmblem';
 import { PWAInstallButton } from './PWAInstallButton';
 import {
@@ -504,15 +505,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </span>
                     )}
                     {currentUser.role === 'student' && (
-                      currentUser.student.isProfileCompleted ? (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
-                          پرونده تکمیل
-                        </span>
-                      ) : (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-bold animate-pulse">
-                          پرونده ناقص
-                        </span>
-                      )
+                      <>
+                        {getStudentAdmissionStatus(currentUser.student) === 'admitted' ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 font-bold">
+                            پذیرش شده
+                          </span>
+                        ) : (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-bold">
+                            پذیرش نشده
+                          </span>
+                        )}
+                        {currentUser.student.isProfileCompleted ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
+                            پرونده تکمیل
+                          </span>
+                        ) : (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold animate-pulse">
+                            پرونده ناقص
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                   <div className="text-[10px] text-slate-400">

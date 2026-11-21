@@ -24,6 +24,7 @@ import {
   FINANCIAL_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
   getStudentResidenceType,
+  getStudentAdmissionStatus,
 } from '../utils/financeUtils';
 import { RoommatesCard } from './RoommatesCard';
 import { VisualBedPicker } from './VisualBedPicker';
@@ -356,6 +357,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   }`}
                 >
                   {isStudentDormResident ? 'دانشجوی خوابگاهی' : 'دانشجوی ترددی (غیرخوابگاهی)'}
+                </span>
+                <span
+                  className={`text-[11px] px-2.5 py-0.5 rounded-full font-extrabold border ${
+                    getStudentAdmissionStatus(student) === 'admitted'
+                      ? 'bg-sky-500/30 border-sky-200/60 text-white'
+                      : 'bg-rose-500/35 border-rose-200/60 text-rose-100'
+                  }`}
+                >
+                  {getStudentAdmissionStatus(student) === 'admitted' ? 'پذیرش شده' : 'پذیرش نشده'}
                 </span>
               </div>
 

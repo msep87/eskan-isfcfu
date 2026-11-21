@@ -1,4 +1,10 @@
-import { Student, StudentFinancialRecord, StudentFinancialStatus, StudentResidenceType } from '../types';
+import {
+  Student,
+  StudentAdmissionStatus,
+  StudentFinancialRecord,
+  StudentFinancialStatus,
+  StudentResidenceType,
+} from '../types';
 import { toEnglishDigits } from './excelUtils';
 
 export type ProvinceOrigin = 'in_province' | 'out_of_province' | 'unknown';
@@ -96,6 +102,113 @@ export function getStudentResidenceLabel(
 
 export function isStudentDormResident(student: Student): boolean {
   return getStudentResidenceType(student) === 'dormitory';
+}
+
+export function parseAdmissionStatusValue(
+  raw?: string | number | boolean | null
+): StudentAdmissionStatus | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw === 'boolean') return raw ? 'admitted' : 'not_admitted';
+  const norm = normalizePersianText(String(raw));
+  if (!norm || norm === '-' || norm === 'نامشخص') return undefined;
+
+  if (
+    norm.includes('نشده') ||
+    norm.includes('عدم پذیرش') ||
+    norm.includes('عدمپذیرش') ||
+    norm.includes('جدیدالورود') ||
+    norm.includes('تکمیل نشده') ||
+    norm.includes('not_admitted') ||
+    norm.includes('not admitted') ||
+    norm.includes('unadmitted') ||
+    norm === 'pending' ||
+    norm === 'no' ||
+    norm === 'false' ||
+    norm === '0' ||
+    norm === 'خیر' ||
+    norm === 'نه'
+  ) {
+    return 'not_admitted';
+  }
+
+  if (
+    norm.includes('پذیرش') ||
+    norm.includes('پذیرفته') ||
+    norm.includes('تایید شده') ||
+    norm.includes('تأیید شده') ||
+    norm.includes('admitted') ||
+    norm.includes('accepted') ||
+    norm === 'yes' ||
+    norm === 'true' ||
+    norm === '1' ||
+    norm === 'بله' ||
+    norm === 'آری'
+  ) {
+    return 'admitted';
+  }
+
+  return undefined;
+}
+
+export function hasStudentDormitory(
+  student: Pick<
+    Student,
+    | 'assignedBedId'
+    | 'assignedRoomId'
+    | 'assignedDormId'
+    | 'assignedDormName'
+    | 'assignedRoomNumber'
+    | 'assignmentStatus'
+  >
+): boolean {
+  if (student.assignmentStatus === 'confirmed' || student.assignmentStatus === 'temporary') {
+    return true;
+  }
+  return Boolean(
+    student.assignedBedId ||
+      student.assignedRoomId ||
+      student.assignedDormId ||
+      (student.assignedDormName && String(student.assignedDormName).trim()) ||
+      (student.assignedRoomNumber && String(student.assignedRoomNumber).trim())
+  );
+}
+
+export function getStudentAdmissionStatus(
+  student: Pick<
+    Student,
+    | 'admissionStatus'
+    | 'isProfileCompleted'
+    | 'assignedBedId'
+    | 'assignedRoomId'
+    | 'assignedDormId'
+    | 'assignedDormName'
+    | 'assignedRoomNumber'
+    | 'assignmentStatus'
+  >
+): StudentAdmissionStatus {
+  if (student.admissionStatus === 'admitted' || student.admissionStatus === 'not_admitted') {
+    return student.admissionStatus;
+  }
+  if (hasStudentDormitory(student) || student.isProfileCompleted) {
+    return 'admitted';
+  }
+  return 'not_admitted';
+}
+
+export function getStudentAdmissionLabel(
+  student: Pick<
+    Student,
+    | 'admissionStatus'
+    | 'isProfileCompleted'
+    | 'assignedBedId'
+    | 'assignedRoomId'
+    | 'assignedDormId'
+    | 'assignedDormName'
+    | 'assignedRoomNumber'
+    | 'assignmentStatus'
+  >
+): string {
+  return getStudentAdmissionStatus(student) === 'admitted' ? 'پذیرش شده' : 'پذیرش نشده';
 }
 
 export function computeStudentFinancialInfo(

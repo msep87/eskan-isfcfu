@@ -13,6 +13,8 @@ import {
   computeStudentFinancialInfo,
   FINANCIAL_STATUS_LABELS,
   getStudentResidenceType,
+  getStudentAdmissionStatus,
+  getStudentAdmissionLabel,
 } from '../utils/financeUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
 import {
@@ -123,6 +125,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   // فیلترهای گزارش‌ساز جامع و سفارشی دانشجویان (همه فیلدها + انتخاب ستون چاپ و اکسل)
   const [capResidenceFilter, setCapResidenceFilter] = useState<'all' | 'dormitory' | 'commuter'>('all');
+  const [capAdmissionFilter, setCapAdmissionFilter] = useState<'all' | 'admitted' | 'not_admitted'>('all');
   const [capCommuterReasonFilter, setCapCommuterReasonFilter] = useState<string>('all');
   const [capDormFilter, setCapDormFilter] = useState<string>('all');
   const [capAssignmentFilter, setCapAssignmentFilter] = useState<'all' | 'confirmed' | 'temporary' | 'unassigned'>('all');
@@ -329,6 +332,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       { key: 'birthDate', label: 'تاریخ تولد', group: 'هویتی' },
       { key: 'fieldOfStudy', label: 'رشته تحصیلی', group: 'تحصیلی' },
       { key: 'entryTerm', label: 'ترم ورود', group: 'تحصیلی' },
+      { key: 'admissionStatus', label: 'وضعیت پذیرش (پذیرش شده/نشده)', group: 'تحصیلی' },
       { key: 'profileCompleted', label: 'وضعیت تکمیل پرونده', group: 'تحصیلی' },
       { key: 'mobile', label: 'شماره همراه', group: 'تماس و نشانی' },
       { key: 'parentPhone', label: 'تلفن والدین', group: 'تماس و نشانی' },
@@ -388,6 +392,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         return s.fieldOfStudy || '-';
       case 'entryTerm':
         return s.entryTerm || '-';
+      case 'admissionStatus':
+        return getStudentAdmissionLabel(s);
       case 'profileCompleted':
         return s.isProfileCompleted ? 'تکمیل‌شده' : 'ناقص';
       case 'mobile':
@@ -473,6 +479,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     return students.filter((s) => {
       const resType = getStudentResidenceType(s);
       if (capResidenceFilter !== 'all' && resType !== capResidenceFilter) return false;
+      if (capAdmissionFilter !== 'all' && getStudentAdmissionStatus(s) !== capAdmissionFilter) return false;
       if (
         capCommuterReasonFilter !== 'all' &&
         !(s.commuterEligibilityReasons || []).includes(capCommuterReasonFilter as any)
@@ -587,6 +594,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   }, [
     students,
     capResidenceFilter,
+    capAdmissionFilter,
     capCommuterReasonFilter,
     capDormFilter,
     capAssignmentFilter,
@@ -647,6 +655,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   const handleResetAllCustomFilters = () => {
     setCapResidenceFilter('all');
+    setCapAdmissionFilter('all');
     setCapCommuterReasonFilter('all');
     setCapDormFilter('all');
     setCapAssignmentFilter('all');
@@ -695,6 +704,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const activeFilterChips: string[] = [];
     if (capResidenceFilter !== 'all') {
       activeFilterChips.push(`نوع سکونت: ${capResidenceFilter === 'dormitory' ? 'خوابگاهی' : 'ترددی'}`);
+    }
+    if (capAdmissionFilter !== 'all') {
+      activeFilterChips.push(`وضعیت پذیرش: ${capAdmissionFilter === 'admitted' ? 'پذیرش شده' : 'پذیرش نشده'}`);
     }
     if (capDormFilter !== 'all') {
       activeFilterChips.push(`سرا: ${capDormFilter === '__none__' ? 'فاقد سرا' : dormsMap.get(capDormFilter) || capDormFilter}`);
@@ -2317,6 +2329,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <option value="all">نوع سکونت: همه (خوابگاهی + ترددی)</option>
                     <option value="dormitory">فقط دانشجویان خوابگاهی</option>
                     <option value="commuter">فقط دانشجویان ترددی (غیرخوابگاهی)</option>
+                  </select>
+
+                  <select
+                    value={capAdmissionFilter}
+                    onChange={(e) => setCapAdmissionFilter(e.target.value as 'all' | 'admitted' | 'not_admitted')}
+                    className="px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">وضعیت پذیرش: همه (پذیرش شده + نشده)</option>
+                    <option value="admitted">فقط پذیرش شده</option>
+                    <option value="not_admitted">فقط پذیرش نشده</option>
                   </select>
 
                   <select

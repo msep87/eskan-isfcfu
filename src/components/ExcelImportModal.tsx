@@ -24,6 +24,7 @@ import { Storage } from '../utils/storage';
 import {
   Student,
   StudentResidenceType,
+  StudentAdmissionStatus,
   Dormitory,
   Room,
   Bed,
@@ -93,6 +94,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
   const [replaceMode, setReplaceMode] = useState(false);
   const [defaultUnassignedResidence, setDefaultUnassignedResidence] =
     useState<StudentResidenceType>('commuter');
+  const [defaultUnassignedAdmission, setDefaultUnassignedAdmission] =
+    useState<StudentAdmissionStatus>('not_admitted');
 
   // پیش‌نمایش سراها
   const [previewDormsData, setPreviewDormsData] = useState<{
@@ -470,14 +473,16 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
           st.assignedRoomId = room.id;
           st.assignedBedId = targetBed.id;
           st.assignmentStatus = 'confirmed';
-          // دانشجوی دارای اتاق به‌صورت پیش‌فرض خوابگاهی است
+          // دانشجوی دارای اتاق به‌صورت پیش‌فرض خوابگاهی و پذیرش شده است (حتی اگر اطلاعاتش ناقص باشد)
           st.residenceType = st.residenceType || 'dormitory';
+          st.admissionStatus = st.admissionStatus || 'admitted';
         } else {
           st.assignedDormId = undefined;
           st.assignedRoomId = undefined;
           st.assignedBedId = undefined;
           st.assignmentStatus = 'none';
           st.residenceType = st.residenceType || defaultUnassignedResidence;
+          st.admissionStatus = st.admissionStatus || defaultUnassignedAdmission;
 
           beds.forEach((b) => {
             if (b.studentId === st.studentId) {
@@ -1180,6 +1185,42 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                   </div>
                 </div>
 
+                {/* تنظیم پیش‌فرض نوع پذیرش برای ردیف‌های فاقد خوابگاه و بدون مقدار در ستون نوع پذیرش */}
+                <div className="p-3 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/70 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">
+                      وضعیت پذیرش پیش‌فرض دانشجویان فاقد خوابگاه (در صورت خالی بودن ستون «نوع پذیرش» در اکسل):
+                    </span>
+                    <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      دانشجویان دارای خوابگاه حتی با اطلاعات ناقص به صورت خودکار «پذیرش شده» ثبت می‌شوند.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setDefaultUnassignedAdmission('not_admitted')}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                        defaultUnassignedAdmission === 'not_admitted'
+                          ? 'bg-rose-600 text-white border-rose-600'
+                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'
+                      }`}
+                    >
+                      پذیرش نشده (جدیدالورود - پیش‌فرض)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDefaultUnassignedAdmission('admitted')}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                        defaultUnassignedAdmission === 'admitted'
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'
+                      }`}
+                    >
+                      پذیرش شده
+                    </button>
+                  </div>
+                </div>
+
                 <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-56">
                   <table className="w-full text-right text-xs">
                     <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold sticky top-0">
@@ -1190,6 +1231,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                         <th className="p-2.5">ورودی</th>
                         <th className="p-2.5">شهر</th>
                         <th className="p-2.5">همراه</th>
+                        <th className="p-2.5 text-indigo-700 dark:text-indigo-300 font-black">وضعیت پذیرش (کلیک)</th>
                         <th className="p-2.5 text-teal-700 dark:text-teal-300 font-black">نوع سکونت (کلیک برای تغییر)</th>
                         <th className="p-2.5 text-indigo-700 dark:text-indigo-400 font-black">تخصیص اسکان در اکسل</th>
                         {detectedCustomCols.map((c) => (
@@ -1199,11 +1241,11 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                       {previewStudents.slice(0, 12).map((st, i) => {
+                        const hasExcelDorm = Boolean(st.assignedRoomNumber && st.assignedBedNumber);
                         const effectiveRes: StudentResidenceType =
-                          st.residenceType ||
-                          (st.assignedRoomNumber && st.assignedBedNumber
-                            ? 'dormitory'
-                            : defaultUnassignedResidence);
+                          st.residenceType || (hasExcelDorm ? 'dormitory' : defaultUnassignedResidence);
+                        const effectiveAdm: StudentAdmissionStatus =
+                          st.admissionStatus || (hasExcelDorm ? 'admitted' : defaultUnassignedAdmission);
                         return (
                           <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                             <td className="p-2.5 font-bold">{st.studentId}</td>
@@ -1212,6 +1254,30 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                             <td className="p-2.5">{st.entryTerm}</td>
                             <td className="p-2.5">{st.city}</td>
                             <td className="p-2.5" dir="ltr">{st.mobile}</td>
+                            <td className="p-2.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextAdm: StudentAdmissionStatus =
+                                    effectiveAdm === 'admitted' ? 'not_admitted' : 'admitted';
+                                  setPreviewStudents((prev) =>
+                                    prev
+                                      ? prev.map((rowItem, idx) =>
+                                          idx === i ? { ...rowItem, admissionStatus: nextAdm } : rowItem
+                                        )
+                                      : prev
+                                  );
+                                }}
+                                title="کلیک برای تغییر بین پذیرش شده و پذیرش نشده"
+                                className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border transition cursor-pointer ${
+                                  effectiveAdm === 'admitted'
+                                    ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700'
+                                    : 'bg-rose-50 dark:bg-rose-950/60 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-700'
+                                }`}
+                              >
+                                {effectiveAdm === 'admitted' ? 'پذیرش شده' : 'پذیرش نشده'}
+                              </button>
+                            </td>
                             <td className="p-2.5">
                               <button
                                 type="button"
