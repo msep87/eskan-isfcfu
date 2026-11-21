@@ -3,12 +3,28 @@ import { PersianDatePicker } from './PersianDatePicker';
 import { PersianTimePicker } from './PersianTimePicker';
 import { PersianDateTimePicker } from './PersianDateTimePicker';
 import {
+  PERSIAN_MONTH_NAMES,
+  getTodayJalali,
+  getJalaliMonthDays,
+  getJalaliMonthStartWeekday,
+  formatJalaliDate,
+  parseJalaliDate,
+  getJalaliDayOfWeekKey,
+  getJalaliWeekdayLabelFromDate,
+  addDaysToJalaliDate,
+  getJalaliMonthKey,
+  formatDigits,
+  calculateShiftDurationHours,
+  toEnglishDigits as toEnDigitsCal,
+} from '../utils/jalaliCalendar';
+import {
   AppSettings,
   Dormitory,
   Room,
   Bed,
   Student,
   StudentResidenceType,
+  CommuterEligibilityReason,
   Supervisor,
   Announcement,
   RoomWarning,
@@ -77,6 +93,22 @@ import { CloudConnectionDiagnosticsPanel } from './CloudConnectionDiagnosticsPan
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { AdminStudentPortalsEditor } from './AdminStudentPortalsEditor';
 import { getStudentResidenceType } from '../utils/financeUtils';
+import {
+  ARTISTIC_SKILL_OPTIONS,
+  COMMUTER_ELIGIBILITY_OPTIONS,
+  CULTURAL_ACTIVITY_OPTIONS,
+  ECONOMIC_STATUS_LABELS,
+  HOUSING_STATUS_LABELS,
+  MENTAL_HEALTH_STATUS_LABELS,
+  MENTAL_HEALTH_TOPIC_OPTIONS,
+  PHYSICAL_CONDITION_OPTIONS,
+  PHYSICAL_HEALTH_STATUS_LABELS,
+  SPORTS_ACTIVITY_OPTIONS,
+  TECHNICAL_SKILL_OPTIONS,
+  formatCommuterReasons,
+  formatParentOccupation,
+  joinSkillList,
+} from '../utils/studentProfileOptions';
 import { normSearchText } from '../utils/studentSearchSort';
 import { plainTextToHtml, sanitizeRichHtml } from '../utils/sanitizeHtml';
 import { STANDARD_FONTS, readMultipleFontFiles } from '../utils/fonts';
@@ -95,6 +127,10 @@ import {
   Settings,
   Calendar,
   Clock,
+  ChevronLeft,
+  ChevronRight,
+  LayoutGrid,
+  List,
   FileSpreadsheet,
   Users,
   Building2,
@@ -274,12 +310,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newCnsShiftRoom, setNewCnsShiftRoom] = useState('اتاق مشاوره');
   const [newCnsShiftNotes, setNewCnsShiftNotes] = useState('');
 
-  // داده‌های شیفت‌بندی و گزارشات شیفت سرپرستان
+  // داده‌های شیفت‌بندی ماهانه و گزارشات شیفت سرپرستان
+  const todayJalali = getTodayJalali();
   const [shiftSchedules, setShiftSchedules] = useState<SupervisorShiftSchedule[]>(Storage.getShiftSchedules());
   const [shiftReports, setShiftReports] = useState<ShiftLogReport[]>(Storage.getShiftReports());
   const [shiftSearch, setShiftSearch] = useState('');
   const [shiftDormFilter, setShiftDormFilter] = useState('all');
-  const [shiftDayFilter, setShiftDayFilter] = useState('all');
+  const [shiftViewMode, setShiftViewMode] = useState<'calendar' | 'table'>('calendar');
+  const [shiftViewYear, setShiftViewYear] = useState<number>(todayJalali.jy);
+  const [shiftViewMonth, setShiftViewMonth] = useState<number>(todayJalali.jm);
+  const [shiftShowAllMonths, setShiftShowAllMonths] = useState<boolean>(false);
   const [shiftFeedback, setShiftFeedback] = useState<string | null>(null);
 
   // فهرست پرسنل انبار، کارپردازی، امور مالی، کارشناسان آموزش، امور فرهنگی و امور دانشجویی
@@ -337,65 +377,90 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setAcademicNotices(Storage.getAcademicNotices());
   }, [cloudSyncTick]);
 
-  // فرم ثبت و ویرایش دستی نوبت کاری سرپرستان توسط مدیر
+  const todayFaDate = formatJalaliDate(todayJalali.jy, todayJalali.jm, todayJalali.jd, 'fa');
+
+  // فرم ثبت و ویرایش دستی نوبت کاری ماهانه سرپرستان توسط مدیر
   const [isAddShiftModalOpen, setIsAddShiftModalOpen] = useState(false);
   const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
   const [newShiftSupId, setNewShiftSupId] = useState(supervisors[0]?.id || '');
   const [newShiftDormId, setNewShiftDormId] = useState(dorms[0]?.id || 'all');
-  const [newShiftDay, setNewShiftDay] = useState<DayOfWeek | 'all'>('saturday');
-  const [newShiftType, setNewShiftType] = useState<ShiftLogReport['shiftType']>('evening');
-  const [newShiftStartTime, setNewShiftStartTime] = useState('۱۵:۰۰');
-  const [newShiftEndTime, setNewShiftEndTime] = useState('۲۳:۰۰');
+  const [newShiftDate, setNewShiftDate] = useState<string>(todayFaDate);
+  const [newShiftType, setNewShiftType] = useState<ShiftLogReport['shiftType']>('full_day');
+  const [newShiftStartTime, setNewShiftStartTime] = useState('۰۷:۰۰');
+  const [newShiftEndTime, setNewShiftEndTime] = useState('۰۷:۰۰');
+  const [newShiftEndsNextDay, setNewShiftEndsNextDay] = useState<boolean>(true);
   const [newShiftNotes, setNewShiftNotes] = useState('');
-  const [newShiftIsEveryDay, setNewShiftIsEveryDay] = useState(false);
 
-  // فرم ثبت سریع تک‌به‌تک نوبت کاری مستقیماً در بالای جدول نوبت‌ها
+  // فرم ثبت سریع تک‌به‌تک نوبت کاری ماهانه مستقیماً در بالای برنامه
   const [quickShiftSupId, setQuickShiftSupId] = useState(supervisors[0]?.id || '');
   const [quickShiftDormId, setQuickShiftDormId] = useState(dorms[0]?.id || 'all');
-  const [quickShiftDay, setQuickShiftDay] = useState<DayOfWeek | 'all'>('saturday');
-  const [quickShiftType, setQuickShiftType] = useState<ShiftLogReport['shiftType']>('evening');
-  const [quickShiftStartTime, setQuickShiftStartTime] = useState('۱۵:۰۰');
-  const [quickShiftEndTime, setQuickShiftEndTime] = useState('۲۳:۰۰');
+  const [quickShiftDate, setQuickShiftDate] = useState<string>(todayFaDate);
+  const [quickShiftType, setQuickShiftType] = useState<ShiftLogReport['shiftType']>('full_day');
+  const [quickShiftStartTime, setQuickShiftStartTime] = useState('۰۷:۰۰');
+  const [quickShiftEndTime, setQuickShiftEndTime] = useState('۰۷:۰۰');
+  const [quickShiftEndsNextDay, setQuickShiftEndsNextDay] = useState<boolean>(true);
   const [quickShiftNotes, setQuickShiftNotes] = useState('');
 
-  const normalizeShiftDay = (rawDay: string): DayOfWeek | 'all' => {
-    const map: Record<string, DayOfWeek | 'all'> = {
-      saturday: 'saturday',
-      sat: 'saturday',
-      sunday: 'sunday',
-      sun: 'sunday',
-      monday: 'monday',
-      mon: 'monday',
-      tuesday: 'tuesday',
-      tue: 'tuesday',
-      wednesday: 'wednesday',
-      wed: 'wednesday',
-      thursday: 'thursday',
-      thu: 'thursday',
-      friday: 'friday',
-      fri: 'friday',
-      all: 'all',
+  const getDefaultShiftHours = (
+    type: ShiftLogReport['shiftType']
+  ): { start: string; end: string; endsNextDay: boolean } => {
+    if (type === 'full_day') return { start: '۰۷:۰۰', end: '۰۷:۰۰', endsNextDay: true };
+    if (type === 'morning') return { start: '۰۷:۰۰', end: '۱۵:۰۰', endsNextDay: false };
+    if (type === 'evening') return { start: '۱۵:۰۰', end: '۲۳:۰۰', endsNextDay: false };
+    return { start: '۲۲:۰۰', end: '۰۷:۰۰', endsNextDay: true };
+  };
+
+  const buildMonthlyShiftPayload = (params: {
+    supId: string;
+    dormId: string;
+    dateStr: string;
+    shiftType: ShiftLogReport['shiftType'];
+    startTime: string;
+    endTime: string;
+    endsNextDay: boolean;
+    notes: string;
+  }): Omit<SupervisorShiftSchedule, 'id'> | null => {
+    const sup = supervisors.find((s) => s.id === params.supId);
+    if (!sup) return null;
+    const dorm = params.dormId === 'all' ? null : dorms.find((d) => d.id === params.dormId);
+    const parsed = parseJalaliDate(params.dateStr);
+    const formattedDate = parsed
+      ? formatJalaliDate(parsed.jy, parsed.jm, parsed.jd, 'fa')
+      : params.dateStr.trim() || todayFaDate;
+    const derivedDay: DayOfWeek | 'all' = parsed
+      ? getJalaliDayOfWeekKey(parsed.jy, parsed.jm, parsed.jd)
+      : 'all';
+    const monthKey = getJalaliMonthKey(formattedDate);
+
+    return {
+      supervisorId: sup.id,
+      supervisorName: sup.fullName,
+      dormId: dorm ? dorm.id : 'all',
+      dormName: dorm ? dorm.name : 'کلیه سراهای دانشجویی پردیس',
+      shiftDate: formattedDate,
+      monthKey: monthKey || undefined,
+      dayOfWeek: derivedDay,
+      shiftType: params.shiftType,
+      startTime: params.startTime.trim(),
+      endTime: params.endTime.trim(),
+      endsNextDay: params.endsNextDay,
+      notes: params.notes.trim(),
+      isEveryDay: false,
     };
-    return map[String(rawDay || '').toLowerCase()] || 'all';
   };
 
-  const getDefaultShiftHours = (type: ShiftLogReport['shiftType']): { start: string; end: string } => {
-    if (type === 'morning') return { start: '۰۷:۳۰', end: '۱۵:۳۰' };
-    if (type === 'evening') return { start: '۱۵:۰۰', end: '۲۳:۰۰' };
-    if (type === 'night') return { start: '۲۲:۰۰', end: '۰۷:۳۰' };
-    return { start: '۰۸:۰۰', end: '۲۰:۰۰' };
-  };
-
-  const openCreateShiftModal = () => {
+  const openCreateShiftModal = (presetDate?: string) => {
     setEditingShiftId(null);
     setNewShiftSupId(supervisors[0]?.id || '');
     setNewShiftDormId(dorms[0]?.id || 'all');
-    setNewShiftDay('saturday');
-    setNewShiftType('evening');
-    setNewShiftStartTime('۱۵:۰۰');
-    setNewShiftEndTime('۲۳:۰۰');
+    setNewShiftDate(
+      presetDate || formatJalaliDate(shiftViewYear, shiftViewMonth, 1, 'fa')
+    );
+    setNewShiftType('full_day');
+    setNewShiftStartTime('۰۷:۰۰');
+    setNewShiftEndTime('۰۷:۰۰');
+    setNewShiftEndsNextDay(true);
     setNewShiftNotes('');
-    setNewShiftIsEveryDay(false);
     setIsAddShiftModalOpen(true);
   };
 
@@ -410,7 +475,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         : dorms.some((d) => d.id === sched.dormId)
         ? sched.dormId
         : dorms.find((d) => d.name === sched.dormName)?.id || 'all';
-    const normalizedDay = normalizeShiftDay(sched.dayOfWeek);
     const normalizedType: ShiftLogReport['shiftType'] =
       sched.shiftType === 'morning' ||
       sched.shiftType === 'evening' ||
@@ -423,12 +487,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditingShiftId(sched.id);
     setNewShiftSupId(matchedSup?.id || '');
     setNewShiftDormId(matchedDormId);
-    setNewShiftDay(normalizedDay);
+    setNewShiftDate(sched.shiftDate || todayFaDate);
     setNewShiftType(normalizedType);
     setNewShiftStartTime(sched.startTime || fallbackHours.start);
     setNewShiftEndTime(sched.endTime || fallbackHours.end);
+    setNewShiftEndsNextDay(
+      sched.endsNextDay !== undefined ? Boolean(sched.endsNextDay) : fallbackHours.endsNextDay
+    );
     setNewShiftNotes(sched.notes || '');
-    setNewShiftIsEveryDay(normalizedDay === 'all' || Boolean(sched.isEveryDay));
     setIsAddShiftModalOpen(true);
   };
 
@@ -688,6 +754,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [stFormPreviousRoom, setStFormPreviousRoom] = useState('');
   const [stFormPreviousScore, setStFormPreviousScore] = useState('100');
   const [stFormResidenceType, setStFormResidenceType] = useState<StudentResidenceType>('dormitory');
+  const [stFormCommuterReasons, setStFormCommuterReasons] = useState<CommuterEligibilityReason[]>([]);
+  const [stFormCommuterNotes, setStFormCommuterNotes] = useState('');
+  const [stFormDormNotes, setStFormDormNotes] = useState('');
+  const [stFormMaritalStatus, setStFormMaritalStatus] = useState<'single' | 'married'>('single');
+  const [stFormHeadOfHousehold, setStFormHeadOfHousehold] = useState(false);
+  const [stFormFatherAlive, setStFormFatherAlive] = useState(true);
+  const [stFormFatherOcc, setStFormFatherOcc] = useState('');
+  const [stFormMotherAlive, setStFormMotherAlive] = useState(true);
+  const [stFormMotherOcc, setStFormMotherOcc] = useState('');
+  const [stFormFamilyMembers, setStFormFamilyMembers] = useState('');
+  const [stFormHousingStatus, setStFormHousingStatus] = useState<NonNullable<Student['housingStatus']>>('owned');
+  const [stFormEconomicStatus, setStFormEconomicStatus] = useState<NonNullable<Student['economicStatus']>>('moderate');
+  const [stFormLivingNotes, setStFormLivingNotes] = useState('');
+  const [stFormArtistic, setStFormArtistic] = useState<string[]>([]);
+  const [stFormArtisticOther, setStFormArtisticOther] = useState('');
+  const [stFormCultural, setStFormCultural] = useState<string[]>([]);
+  const [stFormCulturalOther, setStFormCulturalOther] = useState('');
+  const [stFormSports, setStFormSports] = useState<string[]>([]);
+  const [stFormSportsOther, setStFormSportsOther] = useState('');
+  const [stFormTechnical, setStFormTechnical] = useState<string[]>([]);
+  const [stFormTechnicalOther, setStFormTechnicalOther] = useState('');
+  const [stFormPhysicalStatus, setStFormPhysicalStatus] = useState<NonNullable<Student['physicalHealthStatus']>>('healthy');
+  const [stFormPhysicalConditions, setStFormPhysicalConditions] = useState<string[]>([]);
+  const [stFormAllergies, setStFormAllergies] = useState('');
+  const [stFormMedications, setStFormMedications] = useState('');
+  const [stFormMentalStatus, setStFormMentalStatus] = useState<NonNullable<Student['mentalHealthStatus']>>('good');
+  const [stFormMentalTopics, setStFormMentalTopics] = useState<string[]>([]);
+  const [stFormWantsCounseling, setStFormWantsCounseling] = useState(false);
+  const [stFormMentalNotes, setStFormMentalNotes] = useState('');
   const [stFormAssignmentStatus, setStFormAssignmentStatus] = useState<'none' | 'temporary' | 'confirmed'>('none');
   const [stFormBloodGroup, setStFormBloodGroup] = useState('O+');
   const [stFormSpecialCondition, setStFormSpecialCondition] = useState('ندارد');
@@ -719,6 +814,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormPreviousRoom('');
     setStFormPreviousScore('100');
     setStFormResidenceType('dormitory');
+    setStFormCommuterReasons([]);
+    setStFormCommuterNotes('');
+    setStFormDormNotes('');
+    setStFormMaritalStatus('single');
+    setStFormHeadOfHousehold(false);
+    setStFormFatherAlive(true);
+    setStFormFatherOcc('');
+    setStFormMotherAlive(true);
+    setStFormMotherOcc('');
+    setStFormFamilyMembers('');
+    setStFormHousingStatus('owned');
+    setStFormEconomicStatus('moderate');
+    setStFormLivingNotes('');
+    setStFormArtistic([]);
+    setStFormArtisticOther('');
+    setStFormCultural([]);
+    setStFormCulturalOther('');
+    setStFormSports([]);
+    setStFormSportsOther('');
+    setStFormTechnical([]);
+    setStFormTechnicalOther('');
+    setStFormPhysicalStatus('healthy');
+    setStFormPhysicalConditions([]);
+    setStFormAllergies('');
+    setStFormMedications('');
+    setStFormMentalStatus('good');
+    setStFormMentalTopics([]);
+    setStFormWantsCounseling(false);
+    setStFormMentalNotes('');
     setStFormAssignmentStatus('none');
     setStFormBloodGroup('O+');
     setStFormSpecialCondition('ندارد');
@@ -752,13 +876,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormPreviousRoom(st.previousRoom || '');
     setStFormPreviousScore(String(st.previousScore ?? 100));
     setStFormResidenceType(getStudentResidenceType(st));
+    setStFormCommuterReasons([...(st.commuterEligibilityReasons || [])]);
+    setStFormCommuterNotes(st.commuterRequestNotes || '');
+    setStFormDormNotes(st.dormitoryRequestNotes || '');
+    setStFormMaritalStatus(st.maritalStatus || 'single');
+    setStFormHeadOfHousehold(Boolean(st.isHeadOfHousehold));
+    setStFormFatherAlive(st.fatherAlive !== undefined ? st.fatherAlive : true);
+    setStFormFatherOcc(st.fatherOccupation || '');
+    setStFormMotherAlive(st.motherAlive !== undefined ? st.motherAlive : true);
+    setStFormMotherOcc(st.motherOccupation || '');
+    setStFormFamilyMembers(st.familyMembersCount || '');
+    setStFormHousingStatus(st.housingStatus || 'owned');
+    setStFormEconomicStatus(st.economicStatus || 'moderate');
+    setStFormLivingNotes(st.livingSituationNotes || '');
+    setStFormArtistic([...(st.artisticSkills || [])]);
+    setStFormArtisticOther(st.artisticOther || '');
+    setStFormCultural([...(st.culturalActivities || [])]);
+    setStFormCulturalOther(st.culturalOther || '');
+    setStFormSports([...(st.sportsActivities || [])]);
+    setStFormSportsOther(st.sportsOther || '');
+    setStFormTechnical([...(st.technicalSkills || [])]);
+    setStFormTechnicalOther(st.technicalOther || '');
+    setStFormPhysicalStatus(st.physicalHealthStatus || 'healthy');
+    setStFormPhysicalConditions([...(st.physicalConditions || [])]);
+    setStFormAllergies(st.foodOrDrugAllergies || '');
+    setStFormMedications(st.regularMedications || '');
+    setStFormMentalStatus(st.mentalHealthStatus || 'good');
+    setStFormMentalTopics([...(st.mentalHealthTopics || [])]);
+    setStFormWantsCounseling(Boolean(st.wantsCounselingContact));
+    setStFormMentalNotes(st.mentalHealthNotes || '');
     setStFormAssignmentStatus(st.assignmentStatus || (st.assignedBedId ? 'temporary' : 'none'));
     const rawCustom = st.customFields || {};
-    setStFormBloodGroup(String(rawCustom['گروه خونی'] || 'ثبت نشده'));
-    setStFormSpecialCondition(String(rawCustom['بیماری خاص'] || 'ندارد'));
+    setStFormBloodGroup(st.bloodType || String(rawCustom['گروه خونی'] || 'ثبت نشده'));
+    setStFormSpecialCondition(st.medicalDetails || String(rawCustom['بیماری خاص'] || 'ندارد'));
     const otherCustom: Record<string, string> = {};
+    const skipKeys = new Set([
+      'گروه خونی',
+      'بیماری خاص',
+      'وضعیت سکونت',
+      'علت ترددی',
+      'شغل پدر',
+      'شغل مادر',
+      'رشته‌های هنری',
+      'فعالیت‌های فرهنگی',
+      'رشته‌های ورزشی',
+      'مهارت‌های علمی و فنی',
+      'وضعیت سلامت جسمی',
+      'وضعیت سلامت روان',
+    ]);
     Object.entries(rawCustom).forEach(([k, v]) => {
-      if (k !== 'گروه خونی' && k !== 'بیماری خاص') {
+      if (!skipKeys.has(k)) {
         otherCustom[k] = String(v ?? '');
       }
     });
@@ -836,10 +1003,72 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     }
 
+    const artisticSummary = joinSkillList(stFormArtistic, stFormArtisticOther);
+    const culturalSummary = joinSkillList(stFormCultural, stFormCulturalOther);
+    const sportsSummary = joinSkillList(stFormSports, stFormSportsOther);
+    const technicalSummary = joinSkillList(stFormTechnical, stFormTechnicalOther);
+    const specialHealthSummary = [
+      ...stFormPhysicalConditions,
+      stFormSpecialCondition.trim() !== 'ندارد' ? stFormSpecialCondition.trim() : '',
+    ]
+      .filter(Boolean)
+      .join('، ');
+
     const mergedCustomFields: Record<string, string | number | boolean> = {
       ...stFormCustomFields,
       'گروه خونی': stFormBloodGroup || 'ثبت نشده',
-      'بیماری خاص': stFormSpecialCondition.trim() || 'ندارد',
+      'بیماری خاص': specialHealthSummary || 'ندارد',
+      'وضعیت سکونت':
+        stFormResidenceType === 'commuter'
+          ? 'ترددی (عدم نیاز به خوابگاه)'
+          : 'متقاضی خوابگاه (خوابگاهی)',
+      'شغل پدر': formatParentOccupation(stFormFatherAlive, stFormFatherOcc),
+      'شغل مادر': formatParentOccupation(stFormMotherAlive, stFormMotherOcc),
+      'وضعیت سلامت جسمی': PHYSICAL_HEALTH_STATUS_LABELS[stFormPhysicalStatus],
+      'وضعیت سلامت روان': MENTAL_HEALTH_STATUS_LABELS[stFormMentalStatus],
+    };
+    if (stFormResidenceType === 'commuter' && stFormCommuterReasons.length > 0) {
+      mergedCustomFields['علت ترددی'] = formatCommuterReasons(stFormCommuterReasons);
+    }
+    if (artisticSummary) mergedCustomFields['رشته‌های هنری'] = artisticSummary;
+    if (culturalSummary) mergedCustomFields['فعالیت‌های فرهنگی'] = culturalSummary;
+    if (sportsSummary) mergedCustomFields['رشته‌های ورزشی'] = sportsSummary;
+    if (technicalSummary) mergedCustomFields['مهارت‌های علمی و فنی'] = technicalSummary;
+
+    const structuredFields: Partial<Student> = {
+      dormitoryRequestStatus:
+        stFormResidenceType === 'commuter' ? 'not_needed_commuter' : 'requested',
+      commuterEligibilityReasons: stFormCommuterReasons,
+      commuterRequestNotes: stFormCommuterNotes.trim(),
+      dormitoryRequestNotes: stFormDormNotes.trim(),
+      maritalStatus: stFormMaritalStatus,
+      isHeadOfHousehold: stFormHeadOfHousehold,
+      fatherAlive: stFormFatherAlive,
+      fatherOccupation: stFormFatherAlive ? stFormFatherOcc.trim() : '',
+      motherAlive: stFormMotherAlive,
+      motherOccupation: stFormMotherAlive ? stFormMotherOcc.trim() : '',
+      familyMembersCount: stFormFamilyMembers.trim(),
+      housingStatus: stFormHousingStatus,
+      economicStatus: stFormEconomicStatus,
+      livingSituationNotes: stFormLivingNotes.trim(),
+      artisticSkills: stFormArtistic,
+      artisticOther: stFormArtisticOther.trim(),
+      culturalActivities: stFormCultural,
+      culturalOther: stFormCulturalOther.trim(),
+      sportsActivities: stFormSports,
+      sportsOther: stFormSportsOther.trim(),
+      technicalSkills: stFormTechnical,
+      technicalOther: stFormTechnicalOther.trim(),
+      bloodType: stFormBloodGroup || 'ثبت نشده',
+      physicalHealthStatus: stFormPhysicalStatus,
+      physicalConditions: stFormPhysicalConditions,
+      foodOrDrugAllergies: stFormAllergies.trim(),
+      regularMedications: stFormMedications.trim(),
+      medicalDetails: stFormSpecialCondition.trim() === 'ندارد' ? '' : stFormSpecialCondition.trim(),
+      mentalHealthStatus: stFormMentalStatus,
+      mentalHealthTopics: stFormMentalTopics,
+      wantsCounselingContact: stFormWantsCounseling,
+      mentalHealthNotes: stFormMentalNotes.trim(),
     };
 
     const parsedScoreNum = Number(toEnglishDigits(stFormPreviousScore.trim()));
@@ -871,6 +1100,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         previousRoom: stFormPreviousRoom.trim(),
         previousScore: normalizedScore,
         residenceType: stFormResidenceType,
+        ...structuredFields,
         assignmentStatus: editingStudent.assignedBedId ? stFormAssignmentStatus : editingStudent.assignmentStatus,
         customFields: mergedCustomFields,
         photoUrl: resolvedPhotoUrl,
@@ -910,6 +1140,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         previousRoom: stFormPreviousRoom.trim(),
         previousScore: normalizedScore,
         residenceType: stFormResidenceType,
+        ...structuredFields,
         customFields: mergedCustomFields,
         photoUrl: resolvedPhotoUrl,
         isProfileCompleted: stFormProfileCompleted,
@@ -1311,7 +1542,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         title: newAnnTitle.trim(),
         content: newAnnContent.trim(),
         contentHtml: sanitizedHtml,
-        author: 'مدیریت کل امور سراهای دانشجویی',
+        author: 'مدیریت کل سامانه جامع خدمات دانشجویی',
         priority: newAnnPriority,
         date: new Date().toLocaleDateString('fa-IR'),
         targetDormId: newAnnTargetDormId,
@@ -2186,7 +2417,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       category: adminNewMaintCategory,
       source: 'supervisor_direct',
       createdById: 'admin',
-      createdByName: 'مدیریت کل سراها',
+      createdByName: 'مدیریت کل سامانه',
       createdByRole: 'admin',
       assignedToStaffId: staffObj?.id,
       assignedToStaffName: staffObj?.fullName,
@@ -2239,7 +2470,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         onClose={() => setIsAdminWarningModalOpen(false)}
         dorms={dorms}
         rooms={rooms}
-        supervisorName="مدیریت کل امور سراها"
+        supervisorName="مدیریت کل سامانه جامع خدمات دانشجویی"
         onWarningAdded={onRefreshData}
       />
 
@@ -2254,7 +2485,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         dorms={dorms}
         rooms={rooms}
         initialStudent={evalTargetStudent}
-        evaluatorName="مدیریت کل امور سراها"
+        evaluatorName="مدیریت کل سامانه جامع خدمات دانشجویی"
         evaluatorRole="admin"
         onSaved={() => {
           setStudentEvaluations(Storage.getStudentEvaluations());
@@ -2271,11 +2502,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <span className="p-2 rounded-xl bg-purple-500/20 text-purple-300">
                 <Shield className="w-5 h-5" />
               </span>
-              <span className="text-xs font-bold text-purple-300">پنل مدیریت کل امور سراهای دانشگاه فرهنگیان</span>
+              <span className="text-xs font-bold text-purple-300">
+                پنل مدیریت کل سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان
+              </span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-black">مدیریت کل سیستم و کارتابل جامع سراها</h1>
+            <h1 className="text-xl sm:text-2xl font-black">
+              مدیریت کل پیشخوان جامع خدمات دانشجویی
+            </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-1">
-              کارتابل کامل سرپرستی، انتشار اطلاعیه‌ها در صفحه اول، تأیید درخواست‌ها، تعریف سرپرستان چندسرا و تنظیمات
+              مدیریت یکپارچه امور دانشجویی، آموزش، سراهای دانشجویی، مالی، فرهنگی، ورزشی، مشاوره، کتابخانه، هوشمندسازی و تنظیمات کل سامانه
             </p>
           </div>
 
@@ -2806,7 +3041,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               settings={settings}
               onDataChanged={onRefreshData}
               supervisorDormId={selectedCartableDormId}
-              actorName="مدیریت کل امور سراها"
+              actorName="مدیریت کل سامانه جامع خدمات دانشجویی"
               actorRole="admin"
               actorId="admin"
               onEditStudent={handleOpenEditStudent}
@@ -2827,7 +3062,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               settings={settings}
               onBedSelected={onRefreshData}
               isSupervisorMode={true}
-              actorName="مدیریت کل امور سراها"
+              actorName="مدیریت کل سامانه جامع خدمات دانشجویی"
               actorRole="admin"
               actorId="admin"
             />
@@ -3561,7 +3796,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
               <div>
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                  ثبت و انتشار اطلاعیه رسمی سراهای دانشجویی
+                  ثبت و انتشار اطلاعیه رسمی سامانه جامع خدمات دانشجویی
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   امکان تنظیم انتشار در صفحه اول سایت جهت مشاهده عمومی و مراجعین قبل از ورود، یا اختصاصی دانشجویان سراها
@@ -4690,14 +4925,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <Calendar className="w-4 h-4" />
                   </span>
                   <span className="text-xs font-bold text-teal-300">
-                    ساماندهی نوبت‌های کاری و حضور سرپرستان سراها
+                    ساماندهی ماهانه نوبت‌های کاری و حضور سرپرستان سراها
                   </span>
                 </div>
                 <h2 className="text-lg sm:text-xl font-black">
-                  شیفت‌بندی کادر سرپرستی، دفتر وقایع و حضور و غیاب سراها
+                  شیفت‌بندی ماهانه کادر سرپرستی و دفتر وقایع سراها
                 </h2>
                 <p className="text-xs text-teal-200/80 mt-1">
-                  تعیین برنامه حضور هفتگی یا ماهانه، بارگذاری مستقیم فایل اکسل، و پایش گزارش‌های تحویل شیفت سرپرستی
+                  برنامه‌ریزی ماهانه با تاریخ شمسی (شامل شیفت ۲۴ ساعته کامل از ۷ صبح تا ۷ صبح فردا)، بارگذاری اکسل و پایش گزارش‌های تحویل شیفت
                 </p>
               </div>
 
@@ -4755,11 +4990,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {/* دکمه افزودن دستی شیفت جدید */}
                 <button
                   type="button"
-                  onClick={openCreateShiftModal}
+                  onClick={() => openCreateShiftModal()}
                   className="px-4 py-2.5 bg-teal-500 hover:bg-teal-400 text-slate-900 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-lg shadow-teal-500/30 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>ثبت شیفت دستی جدید</span>
+                  <span>ثبت شیفت ماهانه جدید</span>
                 </button>
               </div>
             </div>
@@ -4793,72 +5028,170 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* تب‌ها و فیلترهای بخش شیفت‌بندی */}
+          {/* بخش اول: تقویم و جدول ماهانه شیفت‌بندی سرپرستان */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
-                <Clock className="w-5 h-5 text-teal-600" />
-                <h3 className="font-black text-sm sm:text-base text-slate-900 dark:text-white">
-                  جدول نوبت‌های کاری ثبت‌شده سرپرستان ({shiftSchedules.length} نوبت)
-                </h3>
+                <Calendar className="w-5 h-5 text-teal-600" />
+                <div>
+                  <h3 className="font-black text-sm sm:text-base text-slate-900 dark:text-white">
+                    برنامه شیفت‌بندی ماهانه سرپرستان — {PERSIAN_MONTH_NAMES[shiftViewMonth - 1]} {formatDigits(shiftViewYear, 'fa')}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    کل نوبت‌های ثبت‌شده در سامانه: {formatDigits(shiftSchedules.length, 'fa')} نوبت (پشتیبانی از شیفت ۲۴ ساعته کامل تا روز بعد)
+                  </p>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={openCreateShiftModal}
-                  className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>افزودن نوبت جدید</span>
-                </button>
-                {/* دکمه خروجی اکسل گزارشات دفتر وقایع */}
+                {/* انتخابگر ماه و سال شمسی */}
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShiftShowAllMonths(false);
+                      if (shiftViewMonth === 1) {
+                        setShiftViewYear((y) => y - 1);
+                        setShiftViewMonth(12);
+                      } else {
+                        setShiftViewMonth((m) => m - 1);
+                      }
+                    }}
+                    title="ماه قبل"
+                    className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                  <select
+                    value={shiftViewMonth}
+                    onChange={(e) => {
+                      setShiftShowAllMonths(false);
+                      setShiftViewMonth(Number(e.target.value));
+                    }}
+                    className="bg-transparent text-xs font-extrabold text-slate-800 dark:text-slate-100 px-1.5 py-1 focus:outline-none cursor-pointer"
+                  >
+                    {PERSIAN_MONTH_NAMES.map((mName, idx) => (
+                      <option key={mName} value={idx + 1} className="bg-white dark:bg-slate-900">
+                        {mName}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={shiftViewYear}
+                    onChange={(e) => {
+                      setShiftShowAllMonths(false);
+                      setShiftViewYear(Number(e.target.value));
+                    }}
+                    className="bg-transparent text-xs font-extrabold text-slate-800 dark:text-slate-100 px-1.5 py-1 focus:outline-none cursor-pointer"
+                  >
+                    {Array.from({ length: 10 }, (_, idx) => todayJalali.jy - 2 + idx).map((yr) => (
+                      <option key={yr} value={yr} className="bg-white dark:bg-slate-900">
+                        {formatDigits(yr, 'fa')}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShiftShowAllMonths(false);
+                      if (shiftViewMonth === 12) {
+                        setShiftViewYear((y) => y + 1);
+                        setShiftViewMonth(1);
+                      } else {
+                        setShiftViewMonth((m) => m + 1);
+                      }
+                    }}
+                    title="ماه بعد"
+                    className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* تغییر نما بین تقویم ماهانه و جدول ماهانه */}
+                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShiftViewMode('calendar');
+                      setShiftShowAllMonths(false);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition cursor-pointer ${
+                      shiftViewMode === 'calendar'
+                        ? 'bg-teal-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                    }`}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>تقویم ماهانه</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShiftViewMode('table')}
+                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition cursor-pointer ${
+                      shiftViewMode === 'table'
+                        ? 'bg-teal-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                    }`}
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span>نمای جدولی</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => exportShiftReportsToExcel(shiftReports)}
-                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5 text-teal-600" />
-                  <span>خروجی اکسل دفتر وقایع شیفت‌ها</span>
+                  <span>خروجی دفتر وقایع</span>
                 </button>
               </div>
             </div>
 
-            {/* فرم ثبت سریع دستی و تک‌به‌تک نوبت کاری سرپرستان */}
+            {/* فرم ثبت سریع دستی و تک‌به‌تک نوبت کاری ماهانه */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                const sup = supervisors.find((s) => s.id === quickShiftSupId);
-                if (!sup) {
+                const payload = buildMonthlyShiftPayload({
+                  supId: quickShiftSupId,
+                  dormId: quickShiftDormId,
+                  dateStr: quickShiftDate,
+                  shiftType: quickShiftType,
+                  startTime: quickShiftStartTime,
+                  endTime: quickShiftEndTime,
+                  endsNextDay: quickShiftEndsNextDay,
+                  notes: quickShiftNotes,
+                });
+                if (!payload) {
                   setShiftFeedback('لطفاً ابتدا حداقل یک سرپرست سرا در بخش مدیریت کاربران ثبت نمایید.');
                   return;
                 }
-                const dorm = quickShiftDormId === 'all' ? null : dorms.find((d) => d.id === quickShiftDormId);
-                Storage.addShiftSchedule({
-                  supervisorId: sup.id,
-                  supervisorName: sup.fullName,
-                  dormId: dorm ? dorm.id : 'all',
-                  dormName: dorm ? dorm.name : 'کلیه سراهای دانشجویی پردیس',
-                  dayOfWeek: quickShiftDay,
-                  shiftType: quickShiftType,
-                  startTime: quickShiftStartTime.trim(),
-                  endTime: quickShiftEndTime.trim(),
-                  notes: quickShiftNotes.trim(),
-                  isEveryDay: quickShiftDay === 'all',
-                });
+                Storage.addShiftSchedule(payload);
                 setShiftSchedules(Storage.getShiftSchedules());
+                // همگام‌سازی ماه نمایش با تاریخ ثبت‌شده و آماده کردن روز بعد برای ثبت سریع متوالی
+                const parsedAdded = parseJalaliDate(payload.shiftDate || '');
+                if (parsedAdded) {
+                  setShiftViewYear(parsedAdded.jy);
+                  setShiftViewMonth(parsedAdded.jm);
+                  const nextDayStr = addDaysToJalaliDate(payload.shiftDate || '', 1, 'fa');
+                  if (nextDayStr) setQuickShiftDate(nextDayStr);
+                }
                 setQuickShiftNotes('');
-                setShiftFeedback(`نوبت کاری جدید برای «${sup.fullName}» با موفقیت به جدول اضافه شد.`);
+                setShiftFeedback(
+                  `شیفت تاریخ ${payload.shiftDate} برای «${payload.supervisorName}» با موفقیت ثبت شد.`
+                );
               }}
               className="p-4 rounded-2xl bg-teal-50/70 dark:bg-teal-950/25 border border-teal-200/80 dark:border-teal-800/60 space-y-3"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs font-black text-teal-900 dark:text-teal-200">
                   <Plus className="w-4 h-4 text-teal-600" />
-                  <span>ثبت سریع و تک‌به‌تک نوبت کاری جدید در جدول</span>
+                  <span>ثبت سریع نوبت کاری ماهانه (تک‌به‌تک با تاریخ شمسی)</span>
                 </div>
-                <span className="text-[11px] text-teal-700/80 dark:text-teal-300/80 font-medium">
-                  هر ردیف (دستی یا واردشده از اکسل) از ستون عملیات قابل ویرایش و اصلاح است
+                <span className="text-[11px] text-teal-700/85 dark:text-teal-300/85 font-semibold">
+                  مثال شیفت ۲۴ ساعته: ۰۷:۰۰ تا ۰۷:۰۰ روز بعد • پس از ثبت، تاریخ به‌صورت خودکار به روز بعد می‌رود
                 </span>
               </div>
 
@@ -4897,25 +5230,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">روز هفته *</label>
-                  <select
-                    value={quickShiftDay}
-                    onChange={(e) => setQuickShiftDay(e.target.value as DayOfWeek | 'all')}
-                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                  >
-                    <option value="all">همه روزها (حضور روزانه)</option>
-                    <option value="saturday">شنبه</option>
-                    <option value="sunday">یکشنبه</option>
-                    <option value="monday">دوشنبه</option>
-                    <option value="tuesday">سه‌شنبه</option>
-                    <option value="wednesday">چهارشنبه</option>
-                    <option value="thursday">پنجشنبه</option>
-                    <option value="friday">جمعه</option>
-                  </select>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                    تاریخ شروع شیفت (شمسی) *
+                  </label>
+                  <PersianDatePicker
+                    value={quickShiftDate}
+                    onChange={setQuickShiftDate}
+                    digits="fa"
+                    required
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">نوبت شیفت *</label>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">نوع شیفت *</label>
                   <select
                     value={quickShiftType}
                     onChange={(e) => {
@@ -4924,13 +5252,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       const defHours = getDefaultShiftHours(val);
                       setQuickShiftStartTime(defHours.start);
                       setQuickShiftEndTime(defHours.end);
+                      setQuickShiftEndsNextDay(defHours.endsNextDay);
                     }}
                     className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
                   >
+                    <option value="full_day">شیفت ۲۴ ساعته کامل (تا روز بعد)</option>
                     <option value="morning">شیفت صبح</option>
                     <option value="evening">شیفت عصر</option>
-                    <option value="night">شیفت شب</option>
-                    <option value="full_day">تمام‌وقت / روزانه</option>
+                    <option value="night">شیفت شب (تا صبح فردا)</option>
                   </select>
                 </div>
               </div>
@@ -4940,40 +5269,69 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">ساعت شروع</label>
                   <PersianTimePicker
                     value={quickShiftStartTime}
-                    onChange={setQuickShiftStartTime}
-                    placeholder="۱۵:۰۰"
+                    onChange={(val) => {
+                      setQuickShiftStartTime(val);
+                      if (quickShiftType === 'full_day') {
+                        setQuickShiftEndTime(val);
+                        setQuickShiftEndsNextDay(true);
+                      }
+                    }}
+                    placeholder="۰۷:۰۰"
                     digits="fa"
                     className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">ساعت پایان</label>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                    ساعت پایان {quickShiftEndsNextDay ? '(فردا)' : ''}
+                  </label>
                   <PersianTimePicker
                     value={quickShiftEndTime}
                     onChange={setQuickShiftEndTime}
-                    placeholder="۲۳:۰۰"
+                    placeholder="۰۷:۰۰"
                     digits="fa"
                     className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
-                <div className="sm:col-span-5">
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">توضیحات و دستورکار</label>
+                <div className="sm:col-span-3 flex items-center">
+                  <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-teal-200 dark:border-teal-800 bg-white dark:bg-slate-900 cursor-pointer w-full">
+                    <input
+                      type="checkbox"
+                      checked={quickShiftEndsNextDay}
+                      onChange={(e) => setQuickShiftEndsNextDay(e.target.checked)}
+                      className="rounded text-teal-600 focus:ring-teal-500"
+                    />
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200 leading-tight">
+                      پایان در روز بعد
+                      {(() => {
+                        const dur = calculateShiftDurationHours(
+                          quickShiftStartTime,
+                          quickShiftEndTime,
+                          quickShiftEndsNextDay
+                        );
+                        return dur ? ` (${formatDigits(dur, 'fa')} ساعت)` : '';
+                      })()}
+                    </span>
+                  </label>
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">توضیحات</label>
                   <input
                     type="text"
                     value={quickShiftNotes}
                     onChange={(e) => setQuickShiftNotes(e.target.value)}
-                    placeholder="نظارت بر سالن مطالعه، گشت شبانه، هماهنگی..."
+                    placeholder="دستورکار یا تحویل شیفت..."
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
-                <div className="sm:col-span-3">
+                <div className="sm:col-span-2">
                   <button
                     type="submit"
                     disabled={supervisors.length === 0}
                     className="w-full py-2 px-3 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-extrabold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
-                    <span>افزودن به جدول</span>
+                    <span>ثبت شیفت</span>
                   </button>
                 </div>
               </div>
@@ -4982,13 +5340,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {/* فیلترها و جستجو */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="text-[11px] font-bold text-slate-500 block mb-1">جستجوی سرپرست یا دستورکار</label>
+                <label className="text-[11px] font-bold text-slate-500 block mb-1">جستجوی سرپرست، تاریخ یا دستورکار</label>
                 <div className="relative">
                   <input
                     type="text"
                     value={shiftSearch}
                     onChange={(e) => setShiftSearch(e.target.value)}
-                    placeholder="نام سرپرست، توضیحات..."
+                    placeholder="نام سرپرست، تاریخ شمسی، توضیحات..."
                     className="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
@@ -5009,169 +5367,390 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 block mb-1">فیلتر روز هفته</label>
-                <select
-                  value={shiftDayFilter}
-                  onChange={(e) => setShiftDayFilter(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (shiftViewMode === 'calendar') {
+                      setShiftViewMode('table');
+                      setShiftShowAllMonths(true);
+                    } else {
+                      setShiftShowAllMonths((v) => !v);
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-xs font-bold rounded-xl border transition cursor-pointer ${
+                    shiftShowAllMonths && shiftViewMode === 'table'
+                      ? 'bg-teal-600 text-white border-teal-600'
+                      : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                  }`}
                 >
-                  <option value="all">همه روزهای هفته</option>
-                  <option value="saturday">شنبه</option>
-                  <option value="sunday">یکشنبه</option>
-                  <option value="monday">دوشنبه</option>
-                  <option value="tuesday">سه‌شنبه</option>
-                  <option value="wednesday">چهارشنبه</option>
-                  <option value="thursday">پنجشنبه</option>
-                  <option value="friday">جمعه</option>
-                </select>
+                  {shiftShowAllMonths && shiftViewMode === 'table'
+                    ? 'در حال نمایش همه ماه‌ها (کلیک برای فیلتر ماه جاری)'
+                    : 'نمایش لیست کل ماه‌های ثبت‌شده'}
+                </button>
               </div>
             </div>
 
-            {/* جدول نوبت‌های شیفت */}
-            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
-              <table className="w-full text-right text-xs">
-                <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 font-bold">
-                  <tr>
-                    <th className="p-3">سرپرست سرا</th>
-                    <th className="p-3">سرای مربوطه</th>
-                    <th className="p-3">روز هفته</th>
-                    <th className="p-3">نوبت شیفت</th>
-                    <th className="p-3">ساعات حضور</th>
-                    <th className="p-3">توضیحات و دستورکار</th>
-                    <th className="p-3 text-center">عملیات</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
-                  {(() => {
-                    const filteredShiftRows = shiftSchedules.filter((s) => {
-                      if (shiftDormFilter !== 'all' && s.dormId !== shiftDormFilter && s.dormId !== 'all') return false;
-                      const normDay = normalizeShiftDay(s.dayOfWeek);
-                      if (shiftDayFilter !== 'all' && normDay !== shiftDayFilter && normDay !== 'all') return false;
-                      if (shiftSearch.trim()) {
-                        const q = shiftSearch.toLowerCase();
-                        return (
-                          s.supervisorName.toLowerCase().includes(q) ||
-                          (s.dormName && s.dormName.toLowerCase().includes(q)) ||
-                          (s.notes && s.notes.toLowerCase().includes(q))
-                        );
-                      }
-                      return true;
-                    });
+            {(() => {
+              const activeMonthKey = `${String(shiftViewYear).padStart(4, '0')}/${String(shiftViewMonth).padStart(2, '0')}`;
+              const shiftLabels: Record<string, { label: string; shortLabel: string; color: string }> = {
+                full_day: {
+                  label: 'شیفت ۲۴ ساعته کامل',
+                  shortLabel: '۲۴ ساعته',
+                  color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-300/70 dark:border-teal-800',
+                },
+                morning: {
+                  label: 'شیفت صبح',
+                  shortLabel: 'صبح',
+                  color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-300/70 dark:border-amber-800',
+                },
+                evening: {
+                  label: 'شیفت عصر',
+                  shortLabel: 'عصر',
+                  color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-300/70 dark:border-indigo-800',
+                },
+                night: {
+                  label: 'شیفت شب',
+                  shortLabel: 'شب',
+                  color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border-purple-300/70 dark:border-purple-800',
+                },
+              };
 
-                    if (filteredShiftRows.length === 0) {
-                      return (
+              const baseFiltered = shiftSchedules.filter((s) => {
+                if (shiftDormFilter !== 'all' && s.dormId !== shiftDormFilter && s.dormId !== 'all') return false;
+                if (shiftSearch.trim()) {
+                  const q = shiftSearch.toLowerCase();
+                  const qEn = toEnDigitsCal(q);
+                  const dateEn = toEnDigitsCal(s.shiftDate || '');
+                  const match =
+                    s.supervisorName.toLowerCase().includes(q) ||
+                    (s.dormName && s.dormName.toLowerCase().includes(q)) ||
+                    (s.notes && s.notes.toLowerCase().includes(q)) ||
+                    (s.shiftDate && (s.shiftDate.includes(q) || dateEn.includes(qEn)));
+                  if (!match) return false;
+                }
+                return true;
+              });
+
+              const monthFiltered = baseFiltered
+                .filter((s) => {
+                  if (shiftViewMode === 'table' && shiftShowAllMonths) return true;
+                  const mk = s.monthKey || getJalaliMonthKey(s.shiftDate);
+                  if (!mk) return shiftViewMode === 'table'; // رکوردهای قدیمی بدون تاریخ در جدول قابل مشاهده و ویرایش باشند
+                  return mk === activeMonthKey;
+                })
+                .sort((a, b) => toEnDigitsCal(a.shiftDate || '9999/99/99').localeCompare(toEnDigitsCal(b.shiftDate || '9999/99/99')));
+
+              if (shiftViewMode === 'calendar') {
+                const daysCount = getJalaliMonthDays(shiftViewYear, shiftViewMonth);
+                const startWd = getJalaliMonthStartWeekday(shiftViewYear, shiftViewMonth);
+                const cells: Array<number | null> = [];
+                for (let i = 0; i < startWd; i += 1) cells.push(null);
+                for (let d = 1; d <= daysCount; d += 1) cells.push(d);
+
+                const shiftsByDayNum = new Map<number, SupervisorShiftSchedule[]>();
+                monthFiltered.forEach((s) => {
+                  const p = parseJalaliDate(s.shiftDate || '');
+                  if (p && p.jy === shiftViewYear && p.jm === shiftViewMonth) {
+                    const list = shiftsByDayNum.get(p.jd) || [];
+                    list.push(s);
+                    shiftsByDayNum.set(p.jd, list);
+                  }
+                });
+
+                const legacyNoDateCount = baseFiltered.filter((s) => !parseJalaliDate(s.shiftDate || '')).length;
+
+                return (
+                  <div className="space-y-3">
+                    {legacyNoDateCount > 0 && (
+                      <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
+                        <span>
+                          تعداد {formatDigits(legacyNoDateCount, 'fa')} نوبت قدیمی بدون تاریخ شمسی وجود دارد. برای اختصاص تاریخ ماهانه به آن‌ها، به «نمای جدولی» بروید و ویرایش کنید.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShiftViewMode('table');
+                            setShiftShowAllMonths(true);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold text-[11px] cursor-pointer"
+                        >
+                          مشاهده در جدول
+                        </button>
+                      </div>
+                    )}
+
+                    {/* شبکه تقویم ماهانه شمسی */}
+                    <div className="overflow-x-auto">
+                      <div className="min-w-[680px]">
+                        <div className="grid grid-cols-7 gap-1.5 mb-1.5 text-center">
+                          {['شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه'].map((wName, i) => (
+                            <div
+                              key={wName}
+                              className={`py-2 rounded-xl text-xs font-extrabold ${
+                                i === 6
+                                  ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              {wName}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="grid grid-cols-7 gap-1.5">
+                          {cells.map((dayNum, idx) => {
+                            if (dayNum === null) {
+                              return (
+                                <div
+                                  key={`empty-${idx}`}
+                                  className="min-h-[104px] rounded-2xl bg-slate-50/40 dark:bg-slate-800/20 border border-dashed border-slate-200/60 dark:border-slate-800/60"
+                                />
+                              );
+                            }
+
+                            const cellDateFa = formatJalaliDate(shiftViewYear, shiftViewMonth, dayNum, 'fa');
+                            const isTodayCell =
+                              shiftViewYear === todayJalali.jy &&
+                              shiftViewMonth === todayJalali.jm &&
+                              dayNum === todayJalali.jd;
+                            const isFriday = idx % 7 === 6;
+                            const dayShifts = shiftsByDayNum.get(dayNum) || [];
+
+                            return (
+                              <div
+                                key={dayNum}
+                                className={`min-h-[108px] rounded-2xl border p-2 flex flex-col gap-1.5 transition ${
+                                  isTodayCell
+                                    ? 'border-teal-500 bg-teal-50/40 dark:bg-teal-950/30 ring-1 ring-teal-500/30'
+                                    : isFriday
+                                    ? 'border-rose-200/70 dark:border-rose-900/50 bg-rose-50/25 dark:bg-rose-950/15'
+                                    : 'border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/80'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span
+                                    className={`text-xs font-black px-1.5 py-0.5 rounded-lg ${
+                                      isTodayCell
+                                        ? 'bg-teal-600 text-white'
+                                        : isFriday
+                                        ? 'text-rose-600 dark:text-rose-400'
+                                        : 'text-slate-700 dark:text-slate-200'
+                                    }`}
+                                  >
+                                    {formatDigits(dayNum, 'fa')}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => openCreateShiftModal(cellDateFa)}
+                                    title={`ثبت شیفت برای ${cellDateFa}`}
+                                    className="w-5 h-5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-teal-600 hover:text-white text-slate-500 flex items-center justify-center transition cursor-pointer"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                  </button>
+                                </div>
+
+                                <div className="space-y-1 flex-1">
+                                  {dayShifts.map((sh) => {
+                                    const sInfo = shiftLabels[sh.shiftType] || shiftLabels.full_day;
+                                    const isNextDay = Boolean(
+                                      sh.endsNextDay || sh.shiftType === 'full_day' || sh.shiftType === 'night'
+                                    );
+                                    return (
+                                      <button
+                                        key={sh.id}
+                                        type="button"
+                                        onClick={() => openEditShiftModal(sh)}
+                                        title={`${sh.supervisorName} — ${sh.dormName} — ${sh.startTime || ''} الی ${sh.endTime || ''}${isNextDay ? ' (روز بعد)' : ''} (کلیک برای ویرایش)`}
+                                        className={`w-full text-right p-1.5 rounded-xl border text-[10px] leading-tight transition hover:brightness-95 cursor-pointer ${sInfo.color}`}
+                                      >
+                                        <div className="font-extrabold truncate">{sh.supervisorName}</div>
+                                        <div className="flex items-center justify-between gap-1 mt-0.5 opacity-90">
+                                          <span className="font-bold">{sInfo.shortLabel}</span>
+                                          <span className="font-mono" dir="ltr">
+                                            {sh.startTime || '۰۷:۰۰'}-{sh.endTime || '۰۷:۰۰'}
+                                            {isNextDay ? '⁺¹' : ''}
+                                          </span>
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400 pt-1">
+                      <span>برای ثبت شیفت در هر روز روی «+» همان روز، و برای ویرایش روی کارت شیفت کلیک کنید.</span>
+                      <span>علامت «⁺¹» نشان‌دهنده ادامه شیفت تا صبح روز بعد (مانند شیفت ۲۴ ساعته ۰۷:۰۰ تا ۰۷:۰۰ فردا) است.</span>
+                    </div>
+                  </div>
+                );
+              }
+
+              // نمای جدولی ماهانه
+              return (
+                <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 font-bold">
+                      <tr>
+                        <th className="p-3">تاریخ شمسی و روز</th>
+                        <th className="p-3">سرپرست سرا</th>
+                        <th className="p-3">سرای مربوطه</th>
+                        <th className="p-3">نوع شیفت</th>
+                        <th className="p-3">ساعات حضور (شروع تا پایان)</th>
+                        <th className="p-3">توضیحات و دستورکار</th>
+                        <th className="p-3 text-center">عملیات</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+                      {monthFiltered.length === 0 ? (
                         <tr>
                           <td colSpan={7} className="p-8 text-center text-slate-400">
-                            هیچ نوبت کاری مطابق فیلتر انتخابی ثبت نشده است. می‌توانید از فرم بالا به صورت دستی نوبت ثبت کنید یا فایل اکسل بارگذاری نمایید.
+                            هیچ نوبت کاری برای {shiftShowAllMonths ? 'این فیلتر' : `${PERSIAN_MONTH_NAMES[shiftViewMonth - 1]} ${formatDigits(shiftViewYear, 'fa')}`} ثبت نشده است. می‌توانید از فرم بالا به صورت دستی ثبت کنید یا فایل اکسل بارگذاری نمایید.
                           </td>
                         </tr>
-                      );
-                    }
+                      ) : (
+                        monthFiltered.map((s) => {
+                          const sInfo = shiftLabels[s.shiftType] || {
+                            label: s.shiftType,
+                            shortLabel: s.shiftType,
+                            color: 'bg-slate-100 text-slate-700',
+                          };
+                          const weekdayLabel = s.shiftDate ? getJalaliWeekdayLabelFromDate(s.shiftDate) : '';
+                          const isNextDay = Boolean(
+                            s.endsNextDay || s.shiftType === 'full_day' || s.shiftType === 'night'
+                          );
+                          const nextDateLabel =
+                            s.shiftDate && isNextDay ? addDaysToJalaliDate(s.shiftDate, 1, 'fa') : '';
+                          const durationHrs = calculateShiftDurationHours(s.startTime, s.endTime, isNextDay);
 
-                    const dayLabels: Record<string, string> = {
-                      saturday: 'شنبه',
-                      sunday: 'یکشنبه',
-                      monday: 'دوشنبه',
-                      tuesday: 'سه‌شنبه',
-                      wednesday: 'چهارشنبه',
-                      thursday: 'پنجشنبه',
-                      friday: 'جمعه',
-                      sat: 'شنبه',
-                      sun: 'یکشنبه',
-                      mon: 'دوشنبه',
-                      tue: 'سه‌شنبه',
-                      wed: 'چهارشنبه',
-                      thu: 'پنجشنبه',
-                      fri: 'جمعه',
-                      all: 'همه روزها (حضور روزانه)',
-                    };
-                    const shiftLabels: Record<string, { label: string; color: string }> = {
-                      morning: { label: 'شیفت صبح', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' },
-                      evening: { label: 'شیفت عصر', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300' },
-                      night: { label: 'شیفت شب', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300' },
-                      full_day: { label: 'تمام‌وقت / روزانه', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300' },
-                    };
+                          return (
+                            <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                              <td className="p-3 whitespace-nowrap">
+                                {s.shiftDate ? (
+                                  <div className="space-y-0.5">
+                                    <div className="font-mono font-extrabold text-slate-900 dark:text-white">
+                                      {s.shiftDate}{' '}
+                                      {weekdayLabel && (
+                                        <span className="font-sans text-[11px] font-bold text-teal-700 dark:text-teal-300">
+                                          ({weekdayLabel})
+                                        </span>
+                                      )}
+                                    </div>
+                                    {nextDateLabel && (
+                                      <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                                        تا روز بعد: <span className="font-mono">{nextDateLabel}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 text-[11px] font-bold">
+                                    بدون تاریخ (نیاز به ویرایش)
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 font-bold text-slate-900 dark:text-white">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-7 h-7 rounded-full bg-teal-500/20 text-teal-700 dark:text-teal-300 flex items-center justify-center font-bold text-[11px] shrink-0">
+                                    {s.supervisorName.slice(0, 1)}
+                                  </div>
+                                  <span>{s.supervisorName}</span>
+                                </div>
+                              </td>
+                              <td className="p-3 font-medium text-slate-600 dark:text-slate-300">
+                                {s.dormName}
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${sInfo.color}`}>
+                                  {sInfo.label}
+                                </span>
+                              </td>
+                              <td className="p-3 text-[11px] text-slate-600 dark:text-slate-300">
+                                <div className="font-mono font-bold">
+                                  {s.startTime && s.endTime
+                                    ? `${s.startTime} الی ${s.endTime}${isNextDay ? ' (فردا)' : ''}`
+                                    : '۲۴ ساعته کامل'}
+                                </div>
+                                {durationHrs !== null && (
+                                  <div className="text-[10px] text-teal-600 dark:text-teal-400 font-bold mt-0.5">
+                                    مدت: {formatDigits(durationHrs, 'fa')} ساعت
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-3 text-slate-500 dark:text-slate-400 max-w-xs truncate" title={s.notes || ''}>
+                                {s.notes || '-'}
+                              </td>
+                              <td className="p-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditShiftModal(s)}
+                                    className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                                    title="ویرایش و اصلاح این نوبت کاری"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAdminConfirmDialog({
+                                        title: 'حذف برنامه شیفت',
+                                        message: `آیا از حذف شیفت ${s.supervisorName}${s.shiftDate ? ` در تاریخ ${s.shiftDate}` : ''} مطمئن هستید؟`,
+                                        confirmLabel: 'تأیید و حذف شیفت',
+                                        onConfirm: () => {
+                                          Storage.deleteShiftSchedule(s.id);
+                                          setShiftSchedules(Storage.getShiftSchedules());
+                                          setShiftFeedback('شیفت مورد نظر با موفقیت حذف گردید.');
+                                        },
+                                      });
+                                    }}
+                                    className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                                    title="حذف این شیفت"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
 
-                    return filteredShiftRows.map((s) => {
-                      const sInfo = shiftLabels[s.shiftType] || { label: s.shiftType, color: 'bg-slate-100 text-slate-700' };
-
-                      return (
-                        <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
-                          <td className="p-3 font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full bg-teal-500/20 text-teal-700 dark:text-teal-300 flex items-center justify-center font-bold text-[11px] shrink-0">
-                              {s.supervisorName.slice(0, 1)}
-                            </div>
-                            <span>{s.supervisorName}</span>
-                          </td>
-                          <td className="p-3 font-medium text-slate-600 dark:text-slate-300">
-                            {s.dormName}
-                          </td>
-                          <td className="p-3">
-                            <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${s.isEveryDay ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
-                              {dayLabels[s.dayOfWeek] || s.dayOfWeek}
-                            </span>
-                          </td>
-                          <td className="p-3">
-                            <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${sInfo.color}`}>
-                              {sInfo.label}
-                            </span>
-                          </td>
-                          <td className="p-3 font-mono text-[11px] dir-ltr text-slate-500 dark:text-slate-400">
-                            {s.startTime && s.endTime ? `${s.startTime} الی ${s.endTime}` : 'تمام وقت'}
-                          </td>
-                          <td className="p-3 text-slate-500 dark:text-slate-400 max-w-xs truncate" title={s.notes || ''}>
-                            {s.notes || '-'}
-                          </td>
-                          <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => openEditShiftModal(s)}
-                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
-                                title="ویرایش و اصلاح این نوبت کاری"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setAdminConfirmDialog({
-                                    title: 'حذف برنامه شیفت',
-                                    message: `آیا از حذف شیفت ${s.supervisorName} مطمئن هستید؟`,
-                                    confirmLabel: 'تأیید و حذف شیفت',
-                                    onConfirm: () => {
-                                      Storage.deleteShiftSchedule(s.id);
-                                      setShiftSchedules(Storage.getShiftSchedules());
-                                      setShiftFeedback('شیفت مورد نظر با موفقیت حذف گردید.');
-                                    },
-                                  });
-                                }}
-                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
-                                title="حذف این شیفت"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })()}
-                </tbody>
-              </table>
-            </div>
-
-            {/* بخش نمایش سرپرستان با حضور پیش‌فرض روزانه */}
+            {/* بخش نمایش سرپرستان بدون نوبت ثبت‌شده در ماه جاری */}
             <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
               <h4 className="font-extrabold text-xs text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-1.5">
                 <CheckCircle className="w-4 h-4 text-emerald-600" />
-                <span>کادر سرپرستی دارای وضعیت خودکار «حضور روزانه پیوسته در سرا» (بدون ثبت شیفت خاص):</span>
+                <span>کادر سرپرستی بدون شیفت ثبت‌شده در {PERSIAN_MONTH_NAMES[shiftViewMonth - 1]} {formatDigits(shiftViewYear, 'fa')}:</span>
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {supervisors
-                  .filter((sup) => !shiftSchedules.some((s) => s.supervisorId === sup.id && !s.isEveryDay))
-                  .map((sup) => (
+                {(() => {
+                  const activeMonthKey = `${String(shiftViewYear).padStart(4, '0')}/${String(shiftViewMonth).padStart(2, '0')}`;
+                  const unscheduled = supervisors.filter(
+                    (sup) =>
+                      !shiftSchedules.some(
+                        (s) =>
+                          s.supervisorId === sup.id &&
+                          !s.isEveryDay &&
+                          (s.monthKey === activeMonthKey || getJalaliMonthKey(s.shiftDate) === activeMonthKey)
+                      )
+                  );
+                  if (unscheduled.length === 0) {
+                    return (
+                      <div className="sm:col-span-3 text-xs text-emerald-700 dark:text-emerald-300 font-bold">
+                        برای تمامی سرپرستان در این ماه حداقل یک نوبت شیفت ثبت شده است.
+                      </div>
+                    );
+                  }
+                  return unscheduled.map((sup) => (
                     <div
                       key={sup.id}
                       className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 flex items-center justify-between"
@@ -5181,14 +5760,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {sup.fullName}
                         </span>
                         <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                          حضور روزانه پیوسته (پیش‌فرض سیستم)
+                          حضور پیوسته (پیش‌فرض سیستم)
                         </span>
                       </div>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold">
-                        هر روز
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingShiftId(null);
+                          setNewShiftSupId(sup.id);
+                          setNewShiftDormId(dorms[0]?.id || 'all');
+                          setNewShiftDate(formatJalaliDate(shiftViewYear, shiftViewMonth, 1, 'fa'));
+                          setNewShiftType('full_day');
+                          setNewShiftStartTime('۰۷:۰۰');
+                          setNewShiftEndTime('۰۷:۰۰');
+                          setNewShiftEndsNextDay(true);
+                          setNewShiftNotes('');
+                          setIsAddShiftModalOpen(true);
+                        }}
+                        className="text-[10px] px-2.5 py-1 rounded-full bg-teal-100 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 hover:bg-teal-200 font-bold cursor-pointer"
+                      >
+                        + ثبت شیفت
+                      </button>
                     </div>
-                  ))}
+                  ));
+                })()}
               </div>
             </div>
 
@@ -5310,35 +5905,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    const sup = supervisors.find((s) => s.id === newShiftSupId);
-                    const dorm = newShiftDormId === 'all' ? null : dorms.find((d) => d.id === newShiftDormId);
-                    if (!sup) return;
-
-                    const payload: Omit<SupervisorShiftSchedule, 'id'> = {
-                      supervisorId: sup.id,
-                      supervisorName: sup.fullName,
-                      dormId: dorm ? dorm.id : 'all',
-                      dormName: dorm ? dorm.name : 'کلیه سراهای دانشجویی پردیس',
-                      dayOfWeek: newShiftDay,
+                    const payload = buildMonthlyShiftPayload({
+                      supId: newShiftSupId,
+                      dormId: newShiftDormId,
+                      dateStr: newShiftDate,
                       shiftType: newShiftType,
-                      startTime: newShiftStartTime.trim(),
-                      endTime: newShiftEndTime.trim(),
-                      notes: newShiftNotes.trim(),
-                      isEveryDay: newShiftDay === 'all' || newShiftIsEveryDay,
-                    };
+                      startTime: newShiftStartTime,
+                      endTime: newShiftEndTime,
+                      endsNextDay: newShiftEndsNextDay,
+                      notes: newShiftNotes,
+                    });
+                    if (!payload) return;
 
                     if (editingShiftId) {
                       Storage.updateShiftSchedule(editingShiftId, payload);
                       setShiftSchedules(Storage.getShiftSchedules());
                       setIsAddShiftModalOpen(false);
                       setEditingShiftId(null);
-                      setShiftFeedback(`نوبت کاری «${sup.fullName}» با موفقیت ویرایش و ذخیره شد.`);
+                      setShiftFeedback(`نوبت کاری تاریخ ${payload.shiftDate} برای «${payload.supervisorName}» ویرایش و ذخیره شد.`);
                     } else {
                       Storage.addShiftSchedule(payload);
                       setShiftSchedules(Storage.getShiftSchedules());
+                      const parsed = parseJalaliDate(payload.shiftDate || '');
+                      if (parsed) {
+                        setShiftViewYear(parsed.jy);
+                        setShiftViewMonth(parsed.jm);
+                      }
                       setNewShiftNotes('');
                       setIsAddShiftModalOpen(false);
-                      setShiftFeedback(`شیفت جدید برای «${sup.fullName}» با موفقیت ثبت شد.`);
+                      setShiftFeedback(`شیفت تاریخ ${payload.shiftDate} برای «${payload.supervisorName}» با موفقیت ثبت شد.`);
                     }
                   }}
                   className="space-y-4 text-xs"
@@ -5373,29 +5968,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">روز هفته *</label>
-                      <select
-                        value={newShiftDay}
-                        onChange={(e) => {
-                          const dayVal = e.target.value as DayOfWeek | 'all';
-                          setNewShiftDay(dayVal);
-                          setNewShiftIsEveryDay(dayVal === 'all');
-                        }}
-                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                      >
-                        <option value="all">همه روزها (حضور روزانه)</option>
-                        <option value="saturday">شنبه</option>
-                        <option value="sunday">یکشنبه</option>
-                        <option value="monday">دوشنبه</option>
-                        <option value="tuesday">سه‌شنبه</option>
-                        <option value="wednesday">چهارشنبه</option>
-                        <option value="thursday">پنجشنبه</option>
-                        <option value="friday">جمعه</option>
-                      </select>
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                        تاریخ شروع شیفت (شمسی) *
+                      </label>
+                      <PersianDatePicker
+                        value={newShiftDate}
+                        onChange={setNewShiftDate}
+                        digits="fa"
+                        required
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center font-bold"
+                      />
                     </div>
 
                     <div>
-                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">نوبت شیفت *</label>
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">نوع شیفت *</label>
                       <select
                         value={newShiftType}
                         onChange={(e) => {
@@ -5404,13 +5990,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           const defHours = getDefaultShiftHours(val);
                           setNewShiftStartTime(defHours.start);
                           setNewShiftEndTime(defHours.end);
+                          setNewShiftEndsNextDay(defHours.endsNextDay);
                         }}
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                       >
+                        <option value="full_day">شیفت ۲۴ ساعته کامل (تا روز بعد)</option>
                         <option value="morning">شیفت صبح</option>
                         <option value="evening">شیفت عصر</option>
-                        <option value="night">شیفت شب</option>
-                        <option value="full_day">تمام‌وقت / روزانه</option>
+                        <option value="night">شیفت شب (تا صبح فردا)</option>
                       </select>
                     </div>
                   </div>
@@ -5420,22 +6007,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">ساعت شروع</label>
                       <PersianTimePicker
                         value={newShiftStartTime}
-                        onChange={setNewShiftStartTime}
-                        placeholder="۱۵:۰۰"
+                        onChange={(val) => {
+                          setNewShiftStartTime(val);
+                          if (newShiftType === 'full_day') {
+                            setNewShiftEndTime(val);
+                            setNewShiftEndsNextDay(true);
+                          }
+                        }}
+                        placeholder="۰۷:۰۰"
                         digits="fa"
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                       />
                     </div>
                     <div>
-                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">ساعت پایان</label>
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                        ساعت پایان {newShiftEndsNextDay ? '(روز بعد)' : ''}
+                      </label>
                       <PersianTimePicker
                         value={newShiftEndTime}
                         onChange={setNewShiftEndTime}
-                        placeholder="۲۳:۰۰"
+                        placeholder="۰۷:۰۰"
                         digits="fa"
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                       />
                     </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/80 dark:border-teal-800/60 space-y-1.5">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newShiftEndsNextDay}
+                        onChange={(e) => setNewShiftEndsNextDay(e.target.checked)}
+                        className="rounded text-teal-600 focus:ring-teal-500"
+                      />
+                      <span className="font-bold text-teal-900 dark:text-teal-200">
+                        پایان شیفت در روز بعد است (مناسب شیفت ۲۴ ساعته کامل مثل ۰۷:۰۰ تا ۰۷:۰۰ فردا یا شیفت شب)
+                      </span>
+                    </label>
+                    {(() => {
+                      const dur = calculateShiftDurationHours(
+                        newShiftStartTime,
+                        newShiftEndTime,
+                        newShiftEndsNextDay
+                      );
+                      const endDatePreview = newShiftEndsNextDay
+                        ? addDaysToJalaliDate(newShiftDate, 1, 'fa')
+                        : newShiftDate;
+                      return (
+                        <div className="text-[11px] text-teal-700 dark:text-teal-300 font-medium pr-6">
+                          بازه نهایی: از <strong className="font-mono">{newShiftDate}</strong> ساعت{' '}
+                          <strong className="font-mono">{newShiftStartTime}</strong> تا{' '}
+                          <strong className="font-mono">{endDatePreview || newShiftDate}</strong> ساعت{' '}
+                          <strong className="font-mono">{newShiftEndTime}</strong>
+                          {dur !== null && (
+                            <span className="mr-1.5 px-1.5 py-0.5 rounded bg-teal-600 text-white font-bold">
+                              {formatDigits(dur, 'fa')} ساعت
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div>
@@ -5444,7 +6076,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       rows={2}
                       value={newShiftNotes}
                       onChange={(e) => setNewShiftNotes(e.target.value)}
-                      placeholder="نظارت بر سالن مطالعه، گشت شبانه، هماهنگی سرکشی..."
+                      placeholder="نظارت ۲۴ ساعته، تحویل شیفت صبح فردا، گشت شبانه..."
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     />
                   </div>
@@ -5465,29 +6097,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          const sup = supervisors.find((s) => s.id === newShiftSupId);
-                          const dorm = newShiftDormId === 'all' ? null : dorms.find((d) => d.id === newShiftDormId);
-                          if (!sup) return;
-                          Storage.addShiftSchedule({
-                            supervisorId: sup.id,
-                            supervisorName: sup.fullName,
-                            dormId: dorm ? dorm.id : 'all',
-                            dormName: dorm ? dorm.name : 'کلیه سراهای دانشجویی پردیس',
-                            dayOfWeek: newShiftDay,
+                          const payload = buildMonthlyShiftPayload({
+                            supId: newShiftSupId,
+                            dormId: newShiftDormId,
+                            dateStr: newShiftDate,
                             shiftType: newShiftType,
-                            startTime: newShiftStartTime.trim(),
-                            endTime: newShiftEndTime.trim(),
-                            notes: newShiftNotes.trim(),
-                            isEveryDay: newShiftDay === 'all' || newShiftIsEveryDay,
+                            startTime: newShiftStartTime,
+                            endTime: newShiftEndTime,
+                            endsNextDay: newShiftEndsNextDay,
+                            notes: newShiftNotes,
                           });
+                          if (!payload) return;
+                          Storage.addShiftSchedule(payload);
                           setShiftSchedules(Storage.getShiftSchedules());
+                          const nextDate = addDaysToJalaliDate(payload.shiftDate || '', 1, 'fa');
+                          if (nextDate) setNewShiftDate(nextDate);
                           setNewShiftNotes('');
-                          setShiftFeedback(`نوبت کاری برای «${sup.fullName}» ثبت شد. می‌توانید نوبت بعدی را وارد کنید.`);
+                          setShiftFeedback(`شیفت ${payload.shiftDate} ثبت شد. تاریخ روی روز بعد (${nextDate || ''}) تنظیم شد.`);
                         }}
                         className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                       >
                         <Plus className="w-4 h-4" />
-                        <span>ثبت و افزودن بعدی</span>
+                        <span>ثبت و رفتن به روز بعد</span>
+                      </button>
+                    )}
+                    {editingShiftId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const idToDelete = editingShiftId;
+                          setIsAddShiftModalOpen(false);
+                          setEditingShiftId(null);
+                          setAdminConfirmDialog({
+                            title: 'حذف برنامه شیفت',
+                            message: `آیا از حذف این نوبت کاری در تاریخ ${newShiftDate} مطمئن هستید؟`,
+                            confirmLabel: 'تأیید و حذف شیفت',
+                            onConfirm: () => {
+                              Storage.deleteShiftSchedule(idToDelete);
+                              setShiftSchedules(Storage.getShiftSchedules());
+                              setShiftFeedback('شیفت مورد نظر با موفقیت حذف گردید.');
+                            },
+                          });
+                        }}
+                        className="px-3.5 py-2.5 bg-rose-50 dark:bg-rose-950/60 text-rose-600 border border-rose-200 dark:border-rose-900 rounded-xl font-bold hover:bg-rose-100 cursor-pointer"
+                      >
+                        حذف
                       </button>
                     )}
                     <button
@@ -5521,7 +6175,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <HeartHandshake className="w-8 h-8" />
               </div>
               <div>
-                <h2 className="text-xl font-black">مرکز بهداشت روان و مشاوره سراهای دانشجویی</h2>
+                <h2 className="text-xl font-black">مرکز بهداشت روان و مشاوره دانشگاه (سامانه جامع خدمات دانشجویی)</h2>
                 <p className="text-xs text-teal-100 mt-1">
                   مدیریت روانشناسان و مشاوران، برنامه‌ریزی شیفت‌های کاری با اکسل، پایش تمام پیام‌ها و گزارش‌های فعالیت
                 </p>
@@ -5830,7 +6484,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   نظارت و اشراف کامل مدیر بر پیام‌ها و درخواست‌های مشاوره
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  مدیریت کل سراها به تمامی پیام‌های مشاوره، ارجاعات و تبادل نظرات مشاوران با دانشجوها دسترسی دارد
+                  مدیریت کل سامانه به تمامی پیام‌های مشاوره، ارجاعات و تبادل نظرات مشاوران با دانشجوها دسترسی دارد
                 </p>
               </div>
 
@@ -8835,6 +9489,194 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </div>
                     </button>
                   </div>
+
+                  {/* علت و توضیحات ترددی / درخواست خوابگاه */}
+                  {stFormResidenceType === 'commuter' ? (
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                      <div className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                        شرایط و علل قانونی ترددی بودن:
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {COMMUTER_ELIGIBILITY_OPTIONS.map((opt) => {
+                          const checked = stFormCommuterReasons.includes(opt.value);
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() =>
+                                setStFormCommuterReasons((prev) =>
+                                  prev.includes(opt.value)
+                                    ? prev.filter((r) => r !== opt.value)
+                                    : [...prev, opt.value]
+                                )
+                              }
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                                checked
+                                  ? 'bg-amber-600 text-white border-amber-600'
+                                  : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                              }`}
+                            >
+                              {checked ? '✓ ' : '+ '}
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <input
+                        type="text"
+                        value={stFormCommuterNotes}
+                        onChange={(e) => setStFormCommuterNotes(e.target.value)}
+                        placeholder="توضیحات عدم نیاز به خوابگاه / ترددی بودن..."
+                        className="w-full px-3 py-1.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-slate-800 text-xs"
+                      />
+                    </div>
+                  ) : (
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <input
+                        type="text"
+                        value={stFormDormNotes}
+                        onChange={(e) => setStFormDormNotes(e.target.value)}
+                        placeholder="توضیحات تکمیلی درخواست خوابگاه (اختیاری)..."
+                        className="w-full px-3 py-1.5 rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50/30 dark:bg-slate-800 text-xs"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* وضعیت خانواده، تأهل، شغل والدین و وضعیت زندگی */}
+                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                  <div className="font-extrabold text-indigo-700 dark:text-indigo-300 text-xs">
+                    وضعیت تأهل، خانواده، شغل والدین و شرایط زندگی
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                    <div>
+                      <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1 text-[11px]">
+                        وضعیت تأهل
+                      </label>
+                      <select
+                        value={stFormMaritalStatus}
+                        onChange={(e) => setStFormMaritalStatus(e.target.value as 'single' | 'married')}
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                      >
+                        <option value="single">مجرد</option>
+                        <option value="married">متأهل</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1 text-[11px]">
+                        تعداد اعضای خانواده
+                      </label>
+                      <input
+                        type="text"
+                        value={stFormFamilyMembers}
+                        onChange={(e) => setStFormFamilyMembers(e.target.value)}
+                        placeholder="مثلاً ۴ نفر"
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1 text-[11px]">
+                        وضعیت مسکن
+                      </label>
+                      <select
+                        value={stFormHousingStatus}
+                        onChange={(e) =>
+                          setStFormHousingStatus(e.target.value as NonNullable<Student['housingStatus']>)
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                      >
+                        {Object.entries(HOUSING_STATUS_LABELS).map(([k, label]) => (
+                          <option key={k} value={k}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1 text-[11px]">
+                        وضعیت معیشتی
+                      </label>
+                      <select
+                        value={stFormEconomicStatus}
+                        onChange={(e) =>
+                          setStFormEconomicStatus(e.target.value as NonNullable<Student['economicStatus']>)
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                      >
+                        {Object.entries(ECONOMIC_STATUS_LABELS).map(([k, label]) => (
+                          <option key={k} value={k}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <label className="flex items-center gap-2 text-[11px] font-bold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={stFormFatherAlive}
+                          onChange={(e) => {
+                            setStFormFatherAlive(e.target.checked);
+                            if (!e.target.checked) setStFormFatherOcc('');
+                          }}
+                          className="rounded text-teal-600"
+                        />
+                        <span>پدر در قید حیات است</span>
+                      </label>
+                      {stFormFatherAlive && (
+                        <input
+                          type="text"
+                          value={stFormFatherOcc}
+                          onChange={(e) => setStFormFatherOcc(e.target.value)}
+                          placeholder="شغل پدر (مثلاً فرهنگی، آزاد، کارمند...)"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      )}
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <label className="flex items-center gap-2 text-[11px] font-bold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={stFormMotherAlive}
+                          onChange={(e) => {
+                            setStFormMotherAlive(e.target.checked);
+                            if (!e.target.checked) setStFormMotherOcc('');
+                          }}
+                          className="rounded text-teal-600"
+                        />
+                        <span>مادر در قید حیات است</span>
+                      </label>
+                      {stFormMotherAlive && (
+                        <input
+                          type="text"
+                          value={stFormMotherOcc}
+                          onChange={(e) => setStFormMotherOcc(e.target.value)}
+                          placeholder="شغل مادر (مثلاً خانه‌دار، فرهنگی، کارمند...)"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="inline-flex items-center gap-1.5 text-[11px] font-bold cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={stFormHeadOfHousehold}
+                        onChange={(e) => setStFormHeadOfHousehold(e.target.checked)}
+                        className="rounded text-teal-600"
+                      />
+                      <span>سرپرست خانوار</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={stFormLivingNotes}
+                      onChange={(e) => setStFormLivingNotes(e.target.value)}
+                      placeholder="توضیحات تکمیلی وضعیت زندگی..."
+                      className="flex-1 min-w-[200px] px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -8937,7 +9779,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      بیماری خاص، آلرژی یا داروی مصرفی
+                      وضعیت سلامت جسمی
+                    </label>
+                    <select
+                      value={stFormPhysicalStatus}
+                      onChange={(e) =>
+                        setStFormPhysicalStatus(
+                          e.target.value as NonNullable<Student['physicalHealthStatus']>
+                        )
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    >
+                      {Object.entries(PHYSICAL_HEALTH_STATUS_LABELS).map(([k, label]) => (
+                        <option key={k} value={k}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      بیماری خاص / توضیحات پزشکی
                     </label>
                     <input
                       type="text"
@@ -8947,6 +9810,198 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
                     />
                   </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      وضعیت سلامت روان (محرمانه)
+                    </label>
+                    <select
+                      value={stFormMentalStatus}
+                      onChange={(e) =>
+                        setStFormMentalStatus(
+                          e.target.value as NonNullable<Student['mentalHealthStatus']>
+                        )
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    >
+                      {Object.entries(MENTAL_HEALTH_STATUS_LABELS).map(([k, label]) => (
+                        <option key={k} value={k}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* موارد جسمی، حساسیت، دارو و نیاز مشاوره‌ای */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <input
+                    type="text"
+                    value={stFormAllergies}
+                    onChange={(e) => setStFormAllergies(e.target.value)}
+                    placeholder="حساسیت‌های غذایی یا دارویی..."
+                    className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                  />
+                  <input
+                    type="text"
+                    value={stFormMedications}
+                    onChange={(e) => setStFormMedications(e.target.value)}
+                    placeholder="داروهای مصرفی مستمر..."
+                    className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {PHYSICAL_CONDITION_OPTIONS.map((opt) => {
+                    const active = stFormPhysicalConditions.includes(opt);
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() =>
+                          setStFormPhysicalConditions((prev) =>
+                            prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt]
+                          )
+                        }
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border cursor-pointer ${
+                          active
+                            ? 'bg-rose-600 text-white border-rose-600'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        {active ? '✓ ' : '+ '}
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="p-2.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-200/70 dark:border-indigo-900/50 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-indigo-800 dark:text-indigo-200">
+                      محورهای سلامت روان و مشاوره:
+                    </span>
+                    <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-800 dark:text-indigo-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={stFormWantsCounseling}
+                        onChange={(e) => setStFormWantsCounseling(e.target.checked)}
+                        className="rounded text-indigo-600"
+                      />
+                      <span>متقاضی ارتباط با مرکز مشاوره</span>
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {MENTAL_HEALTH_TOPIC_OPTIONS.map((opt) => {
+                      const active = stFormMentalTopics.includes(opt);
+                      return (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() =>
+                            setStFormMentalTopics((prev) =>
+                              prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt]
+                            )
+                          }
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border cursor-pointer ${
+                            active
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          {active ? '✓ ' : '+ '}
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <input
+                    type="text"
+                    value={stFormMentalNotes}
+                    onChange={(e) => setStFormMentalNotes(e.target.value)}
+                    placeholder="توضیحات محرمانه سلامت روان و مشاوره..."
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-900 text-xs"
+                  />
+                </div>
+
+                {/* توانمندی‌ها و علایق جداگانه (هنری، فرهنگی، ورزشی، علمی و فنی) */}
+                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                  <div className="font-extrabold text-fuchsia-700 dark:text-fuchsia-300 text-xs">
+                    توانمندی‌ها و علایق جداگانه دانشجو (قابل گزارش‌گیری)
+                  </div>
+                  {[
+                    {
+                      title: 'رشته‌های هنری',
+                      opts: ARTISTIC_SKILL_OPTIONS,
+                      vals: stFormArtistic,
+                      setVals: setStFormArtistic,
+                      other: stFormArtisticOther,
+                      setOther: setStFormArtisticOther,
+                      activeCls: 'bg-pink-600 text-white border-pink-600',
+                    },
+                    {
+                      title: 'فعالیت‌های فرهنگی و قرآنی',
+                      opts: CULTURAL_ACTIVITY_OPTIONS,
+                      vals: stFormCultural,
+                      setVals: setStFormCultural,
+                      other: stFormCulturalOther,
+                      setOther: setStFormCulturalOther,
+                      activeCls: 'bg-violet-600 text-white border-violet-600',
+                    },
+                    {
+                      title: 'رشته‌ها و فعالیت‌های ورزشی',
+                      opts: SPORTS_ACTIVITY_OPTIONS,
+                      vals: stFormSports,
+                      setVals: setStFormSports,
+                      other: stFormSportsOther,
+                      setOther: setStFormSportsOther,
+                      activeCls: 'bg-emerald-600 text-white border-emerald-600',
+                    },
+                    {
+                      title: 'مهارت‌های علمی، فنی و دیجیتال',
+                      opts: TECHNICAL_SKILL_OPTIONS,
+                      vals: stFormTechnical,
+                      setVals: setStFormTechnical,
+                      other: stFormTechnicalOther,
+                      setOther: setStFormTechnicalOther,
+                      activeCls: 'bg-sky-600 text-white border-sky-600',
+                    },
+                  ].map((group) => (
+                    <div key={group.title} className="space-y-1">
+                      <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                        {group.title}:
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {group.opts.map((opt) => {
+                          const active = group.vals.includes(opt);
+                          return (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() =>
+                                group.setVals((prev) =>
+                                  prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt]
+                                )
+                              }
+                              className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border cursor-pointer ${
+                                active
+                                  ? group.activeCls
+                                  : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                              }`}
+                            >
+                              {active ? '✓ ' : '+ '}
+                              {opt}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <input
+                        type="text"
+                        value={group.other}
+                        onChange={(e) => group.setOther(e.target.value)}
+                        placeholder={`سایر موارد ${group.title}...`}
+                        className="w-full px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800 text-[11px]"
+                      />
+                    </div>
+                  ))}
                 </div>
 
                 {/* فیلدهای سفارشی موجود */}
@@ -9787,7 +10842,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         students={students}
         settings={settings}
         initialDormId={selectedCartableDormId}
-        actorTitle="مدیریت کل امور سراهای دانشجویی"
+        actorTitle="مدیریت کل سامانه جامع خدمات دانشجویی"
       />
 
       {/* مدال تأیید عملیات حساس مدیر */}

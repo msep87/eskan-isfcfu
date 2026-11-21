@@ -2,7 +2,30 @@ import React, { useState, useMemo } from 'react';
 import { PersianDatePicker } from './PersianDatePicker';
 import { Dormitory, Room, Bed, Student } from '../types';
 import { Storage } from '../utils/storage';
-import { exportVacantBedsToExcel, exportStudentsToExcel, exportDomainReportToExcel, toEnglishDigits } from '../utils/excelUtils';
+import {
+  exportVacantBedsToExcel,
+  exportStudentsToExcel,
+  exportDomainReportToExcel,
+  exportStudentCapabilitiesReportToExcel,
+  toEnglishDigits,
+} from '../utils/excelUtils';
+import { getStudentResidenceType } from '../utils/financeUtils';
+import {
+  ARTISTIC_SKILL_OPTIONS,
+  COMMUTER_ELIGIBILITY_OPTIONS,
+  CULTURAL_ACTIVITY_OPTIONS,
+  ECONOMIC_STATUS_LABELS,
+  HOUSING_STATUS_LABELS,
+  MENTAL_HEALTH_STATUS_LABELS,
+  PHYSICAL_HEALTH_STATUS_LABELS,
+  SPORTS_ACTIVITY_OPTIONS,
+  TECHNICAL_SKILL_OPTIONS,
+  formatCommuterReasons,
+  formatParentOccupation,
+  getStudentBloodType,
+  getStudentSpecialConditionSummary,
+  joinSkillList,
+} from '../utils/studentProfileOptions';
 import {
   BarChart3,
   Download,
@@ -77,10 +100,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   students,
   cloudSyncTick = 0,
 }) => {
-  const [tab, setTab] = useState<'analytics' | 'domains' | 'vacant' | 'provinces' | 'majors' | 'health'>('analytics');
+  const [tab, setTab] = useState<'analytics' | 'domains' | 'capabilities' | 'vacant' | 'provinces' | 'majors' | 'health'>('analytics');
   const [analyticsDormFilter, setAnalyticsDormFilter] = useState<string>('all');
   const [selectedDormFilter, setSelectedDormFilter] = useState<string>('all');
   const [selectedTierFilter, setSelectedTierFilter] = useState<'all' | 'lower' | 'upper'>('all');
+
+  // فیلترهای گزارش جامع توانمندی‌ها، سکونت (خوابگاهی/ترددی)، خانواده و سلامت
+  const [capResidenceFilter, setCapResidenceFilter] = useState<'all' | 'dormitory' | 'commuter'>('all');
+  const [capCommuterReasonFilter, setCapCommuterReasonFilter] = useState<string>('all');
+  const [capArtisticFilter, setCapArtisticFilter] = useState<string>('all');
+  const [capCulturalFilter, setCapCulturalFilter] = useState<string>('all');
+  const [capSportsFilter, setCapSportsFilter] = useState<string>('all');
+  const [capTechnicalFilter, setCapTechnicalFilter] = useState<string>('all');
+  const [capPhysicalHealthFilter, setCapPhysicalHealthFilter] = useState<string>('all');
+  const [capMentalHealthFilter, setCapMentalHealthFilter] = useState<string>('all');
+  const [capCounselingOnly, setCapCounselingOnly] = useState<boolean>(false);
+  const [capEconomicFilter, setCapEconomicFilter] = useState<string>('all');
+  const [capSearchQuery, setCapSearchQuery] = useState<string>('');
 
   // متغیرهای فیلتر گزارش ارجاعی و عملکرد حوزه‌ها
   const [domainFilter, setDomainFilter] = useState<
@@ -199,6 +235,153 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
     return { bloodGroups: bgMap, specialConditions: conditions };
   }, [students, dormsMap, roomsMap]);
+
+  // گزارش و فیلتر جامع توانمندی‌ها، سکونت (خوابگاهی/ترددی)، خانواده و سلامت
+  const capabilitiesFilteredStudents = useMemo(() => {
+    const q = capSearchQuery.trim().toLowerCase();
+    return students.filter((s) => {
+      const resType = getStudentResidenceType(s);
+      if (capResidenceFilter !== 'all' && resType !== capResidenceFilter) return false;
+      if (
+        capCommuterReasonFilter !== 'all' &&
+        !(s.commuterEligibilityReasons || []).includes(capCommuterReasonFilter as any)
+      ) {
+        return false;
+      }
+      if (capArtisticFilter !== 'all') {
+        if (capArtisticFilter === '__any__') {
+          if (!joinSkillList(s.artisticSkills, s.artisticOther)) return false;
+        } else if (!(s.artisticSkills || []).includes(capArtisticFilter)) {
+          return false;
+        }
+      }
+      if (capCulturalFilter !== 'all') {
+        if (capCulturalFilter === '__any__') {
+          if (!joinSkillList(s.culturalActivities, s.culturalOther)) return false;
+        } else if (!(s.culturalActivities || []).includes(capCulturalFilter)) {
+          return false;
+        }
+      }
+      if (capSportsFilter !== 'all') {
+        if (capSportsFilter === '__any__') {
+          if (!joinSkillList(s.sportsActivities, s.sportsOther)) return false;
+        } else if (!(s.sportsActivities || []).includes(capSportsFilter)) {
+          return false;
+        }
+      }
+      if (capTechnicalFilter !== 'all') {
+        if (capTechnicalFilter === '__any__') {
+          if (!joinSkillList(s.technicalSkills, s.technicalOther)) return false;
+        } else if (!(s.technicalSkills || []).includes(capTechnicalFilter)) {
+          return false;
+        }
+      }
+      if (
+        capPhysicalHealthFilter !== 'all' &&
+        (s.physicalHealthStatus || 'healthy') !== capPhysicalHealthFilter
+      ) {
+        return false;
+      }
+      if (
+        capMentalHealthFilter !== 'all' &&
+        (s.mentalHealthStatus || 'good') !== capMentalHealthFilter
+      ) {
+        return false;
+      }
+      if (capCounselingOnly && !s.wantsCounselingContact) return false;
+      if (capEconomicFilter !== 'all' && (s.economicStatus || 'moderate') !== capEconomicFilter) {
+        return false;
+      }
+      if (q) {
+        const hay = [
+          s.fullName,
+          s.studentId,
+          s.fieldOfStudy,
+          s.city,
+          s.province,
+          s.fatherOccupation,
+          s.motherOccupation,
+          s.commuterRequestNotes,
+          s.livingSituationNotes,
+          joinSkillList(s.artisticSkills, s.artisticOther),
+          joinSkillList(s.culturalActivities, s.culturalOther),
+          joinSkillList(s.sportsActivities, s.sportsOther),
+          joinSkillList(s.technicalSkills, s.technicalOther),
+          getStudentSpecialConditionSummary(s),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [
+    students,
+    capResidenceFilter,
+    capCommuterReasonFilter,
+    capArtisticFilter,
+    capCulturalFilter,
+    capSportsFilter,
+    capTechnicalFilter,
+    capPhysicalHealthFilter,
+    capMentalHealthFilter,
+    capCounselingOnly,
+    capEconomicFilter,
+    capSearchQuery,
+  ]);
+
+  const capabilitiesStats = useMemo(() => {
+    let dormCount = 0;
+    let commuterCount = 0;
+    let withSkillsCount = 0;
+    let counselingReqCount = 0;
+    let healthAttentionCount = 0;
+    const skillCounts: Record<string, number> = {};
+
+    capabilitiesFilteredStudents.forEach((s) => {
+      if (getStudentResidenceType(s) === 'commuter') commuterCount += 1;
+      else dormCount += 1;
+      const allSkills = [
+        ...(s.artisticSkills || []),
+        ...(s.culturalActivities || []),
+        ...(s.sportsActivities || []),
+        ...(s.technicalSkills || []),
+      ];
+      if (
+        allSkills.length > 0 ||
+        s.artisticOther ||
+        s.culturalOther ||
+        s.sportsOther ||
+        s.technicalOther
+      ) {
+        withSkillsCount += 1;
+      }
+      allSkills.forEach((sk) => {
+        skillCounts[sk] = (skillCounts[sk] || 0) + 1;
+      });
+      if (s.wantsCounselingContact) counselingReqCount += 1;
+      if (
+        (s.physicalHealthStatus && s.physicalHealthStatus !== 'healthy') ||
+        (s.mentalHealthStatus && s.mentalHealthStatus !== 'good')
+      ) {
+        healthAttentionCount += 1;
+      }
+    });
+
+    const topSkills = Object.entries(skillCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12);
+
+    return {
+      dormCount,
+      commuterCount,
+      withSkillsCount,
+      counselingReqCount,
+      healthAttentionCount,
+      topSkills,
+    };
+  }, [capabilitiesFilteredStudents]);
 
   const handleExportVacant = () => {
     exportVacantBedsToExcel(vacantBedsList);
@@ -616,10 +799,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
             <div>
               <h3 className="font-extrabold text-base sm:text-lg text-slate-900 dark:text-white">
-                سامانه جامع گزارش‌گیری، پایش عملکرد حوزه‌ها و آمار سراها
+                سامانه جامع گزارش‌گیری، پایش عملکرد حوزه‌ها، توانمندی‌ها و سلامت دانشجویان
               </h3>
               <p className="text-xs text-slate-500">
-                گزارش عملکرد حوزه‌ها (تأسیسات، انبار، خدمات، حقوق دیگران، آسیب‌ها، اسکان) در بازه زمانی دلخواه و آمار کلی
+                گزارش‌گیری تفکیکی از وضعیت سکونت (خوابگاهی و ترددی)، توانمندی‌های هنری/فرهنگی/ورزشی/فنی، خانواده، سلامت جسمی و روانی و عملکرد حوزه‌ها
               </p>
             </div>
           </div>
@@ -653,6 +836,18 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           >
             <PieChartIcon className="w-3.5 h-3.5" />
             <span>تحلیل آماری و نمودارها (Recharts)</span>
+          </button>
+
+          <button
+            onClick={() => setTab('capabilities')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              tab === 'capabilities'
+                ? 'bg-fuchsia-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>گزارش توانمندی‌ها، ترددی/خوابگاهی، خانواده و سلامت ({students.length})</span>
           </button>
 
           <button
@@ -1609,12 +1804,377 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           )}
 
+          {/* تب گزارش جامع توانمندی‌ها، سکونت (ترددی/خوابگاهی)، خانواده و سلامت جسمی و روانی */}
+          {tab === 'capabilities' && (
+            <div className="space-y-5">
+              {/* پنل فیلترهای تخصصی */}
+              <div className="p-4 rounded-3xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-extrabold text-slate-800 dark:text-slate-100">
+                    <Filter className="w-4 h-4 text-fuchsia-600" />
+                    <span>فیلترهای گزارش‌گیری تخصصی توانمندی‌ها، وضعیت سکونت، خانواده و سلامت</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCapResidenceFilter('all');
+                        setCapCommuterReasonFilter('all');
+                        setCapArtisticFilter('all');
+                        setCapCulturalFilter('all');
+                        setCapSportsFilter('all');
+                        setCapTechnicalFilter('all');
+                        setCapPhysicalHealthFilter('all');
+                        setCapMentalHealthFilter('all');
+                        setCapCounselingOnly(false);
+                        setCapEconomicFilter('all');
+                        setCapSearchQuery('');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 flex items-center gap-1 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>پاک کردن فیلترها</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        exportStudentCapabilitiesReportToExcel(
+                          capabilitiesFilteredStudents,
+                          dormsMap,
+                          roomsMap,
+                          capResidenceFilter === 'commuter'
+                            ? 'ترددی'
+                            : capResidenceFilter === 'dormitory'
+                            ? 'خوابگاهی'
+                            : 'فیلترشده'
+                        )
+                      }
+                      className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>خروجی اکسل این گزارش ({capabilitiesFilteredStudents.length})</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={capSearchQuery}
+                      onChange={(e) => setCapSearchQuery(e.target.value)}
+                      placeholder="جستجو (نام، کد، شغل والدین، مهارت...)"
+                      className="w-full pr-8 pl-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                    />
+                  </div>
+
+                  <select
+                    value={capResidenceFilter}
+                    onChange={(e) => setCapResidenceFilter(e.target.value as 'all' | 'dormitory' | 'commuter')}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">نوع سکونت: همه (خوابگاهی + ترددی)</option>
+                    <option value="dormitory">فقط دانشجویان خوابگاهی</option>
+                    <option value="commuter">فقط دانشجویان ترددی (غیرخوابگاهی)</option>
+                  </select>
+
+                  <select
+                    value={capCommuterReasonFilter}
+                    onChange={(e) => setCapCommuterReasonFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">علت ترددی: همه</option>
+                    {COMMUTER_ELIGIBILITY_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capEconomicFilter}
+                    onChange={(e) => setCapEconomicFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">وضعیت معیشتی خانواده: همه</option>
+                    {Object.entries(ECONOMIC_STATUS_LABELS).map(([k, label]) => (
+                      <option key={k} value={k}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capArtisticFilter}
+                    onChange={(e) => setCapArtisticFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-pink-200 dark:border-pink-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">رشته هنری: همه</option>
+                    <option value="__any__">دارای هرگونه مهارت هنری</option>
+                    {ARTISTIC_SKILL_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capCulturalFilter}
+                    onChange={(e) => setCapCulturalFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-violet-200 dark:border-violet-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">فعالیت فرهنگی: همه</option>
+                    <option value="__any__">دارای هرگونه فعالیت فرهنگی</option>
+                    {CULTURAL_ACTIVITY_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capSportsFilter}
+                    onChange={(e) => setCapSportsFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">رشته ورزشی: همه</option>
+                    <option value="__any__">دارای هرگونه فعالیت ورزشی</option>
+                    {SPORTS_ACTIVITY_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capTechnicalFilter}
+                    onChange={(e) => setCapTechnicalFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">مهارت علمی و فنی: همه</option>
+                    <option value="__any__">دارای هرگونه مهارت علمی/فنی</option>
+                    {TECHNICAL_SKILL_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capPhysicalHealthFilter}
+                    onChange={(e) => setCapPhysicalHealthFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">سلامت جسمی: همه</option>
+                    {Object.entries(PHYSICAL_HEALTH_STATUS_LABELS).map(([k, label]) => (
+                      <option key={k} value={k}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capMentalHealthFilter}
+                    onChange={(e) => setCapMentalHealthFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">سلامت روان: همه</option>
+                    {Object.entries(MENTAL_HEALTH_STATUS_LABELS).map(([k, label]) => (
+                      <option key={k} value={k}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <label className="sm:col-span-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900 text-xs font-bold text-indigo-800 dark:text-indigo-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={capCounselingOnly}
+                      onChange={(e) => setCapCounselingOnly(e.target.checked)}
+                      className="rounded text-indigo-600"
+                    />
+                    <span>فقط دانشجویان متقاضی ارتباط محرمانه با مرکز مشاوره</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* کارت‌های شاخص آماری */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
+                  <span className="text-[11px] text-slate-500 block">نتیجه فیلتر</span>
+                  <span className="text-xl font-black text-slate-900 dark:text-white">
+                    {capabilitiesFilteredStudents.length} نفر
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800">
+                  <span className="text-[11px] text-teal-700 dark:text-teal-300 block">خوابگاهی</span>
+                  <span className="text-xl font-black text-teal-800 dark:text-teal-200">
+                    {capabilitiesStats.dormCount} نفر
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800">
+                  <span className="text-[11px] text-amber-700 dark:text-amber-300 block">ترددی (غیرخوابگاهی)</span>
+                  <span className="text-xl font-black text-amber-800 dark:text-amber-200">
+                    {capabilitiesStats.commuterCount} نفر
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-fuchsia-50 dark:bg-fuchsia-950/40 border border-fuchsia-200 dark:border-fuchsia-800">
+                  <span className="text-[11px] text-fuchsia-700 dark:text-fuchsia-300 block">دارای توانمندی ثبت‌شده</span>
+                  <span className="text-xl font-black text-fuchsia-800 dark:text-fuchsia-200">
+                    {capabilitiesStats.withSkillsCount} نفر
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800">
+                  <span className="text-[11px] text-indigo-700 dark:text-indigo-300 block">متقاضی مشاوره / مراقبت</span>
+                  <span className="text-xl font-black text-indigo-800 dark:text-indigo-200">
+                    {capabilitiesStats.counselingReqCount} / {capabilitiesStats.healthAttentionCount}
+                  </span>
+                </div>
+              </div>
+
+              {/* پرتکرارترین مهارت‌ها و علاقه‌مندی‌ها */}
+              {capabilitiesStats.topSkills.length > 0 && (
+                <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                  <div className="text-xs font-extrabold text-slate-700 dark:text-slate-200 mb-2.5">
+                    پرتکرارترین مهارت‌ها و فعالیت‌های ثبت‌شده در میان دانشجویان فیلترشده:
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {capabilitiesStats.topSkills.map(([skill, count]) => (
+                      <span
+                        key={skill}
+                        className="px-3 py-1 rounded-xl bg-fuchsia-50 dark:bg-fuchsia-950/40 border border-fuchsia-200 dark:border-fuchsia-800 text-xs font-bold text-fuchsia-900 dark:text-fuchsia-200"
+                      >
+                        {skill}: <strong>{count} نفر</strong>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* جدول دانشجویان */}
+              {capabilitiesFilteredStudents.length === 0 ? (
+                <div className="p-8 rounded-2xl bg-slate-50 dark:bg-slate-800/40 text-center text-xs text-slate-400">
+                  هیچ دانشجویی مطابق فیلترهای انتخاب‌شده یافت نشد.
+                </div>
+              ) : (
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
+                  <table className="w-full text-right text-xs min-w-[920px]">
+                    <thead className="bg-slate-50 dark:bg-slate-800 font-bold text-slate-600 dark:text-slate-300">
+                      <tr>
+                        <th className="p-2.5">دانشجو و رشته</th>
+                        <th className="p-2.5">وضعیت سکونت / علت ترددی</th>
+                        <th className="p-2.5">شغل والدین و مسکن</th>
+                        <th className="p-2.5">توانمندی‌ها و علایق (هنری / فرهنگی / ورزشی / فنی)</th>
+                        <th className="p-2.5">سلامت جسمی و روانی</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {capabilitiesFilteredStudents.slice(0, 150).map((s) => {
+                        const resType = getStudentResidenceType(s);
+                        const artistic = joinSkillList(s.artisticSkills, s.artisticOther);
+                        const cultural = joinSkillList(s.culturalActivities, s.culturalOther);
+                        const sports = joinSkillList(s.sportsActivities, s.sportsOther);
+                        const technical = joinSkillList(s.technicalSkills, s.technicalOther);
+                        return (
+                          <tr key={s.studentId} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 align-top">
+                            <td className="p-2.5">
+                              <div className="font-bold text-slate-900 dark:text-white">{s.fullName}</div>
+                              <div className="text-[11px] text-slate-500 font-mono">{s.studentId}</div>
+                              <div className="text-[11px] text-slate-500">
+                                {s.fieldOfStudy} ({s.entryTerm})
+                              </div>
+                            </td>
+                            <td className="p-2.5 space-y-1">
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded-lg text-[10px] font-extrabold ${
+                                  resType === 'commuter'
+                                    ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-200'
+                                    : 'bg-teal-100 text-teal-900 dark:bg-teal-900/50 dark:text-teal-200'
+                                }`}
+                              >
+                                {resType === 'commuter' ? 'ترددی (غیرخوابگاهی)' : 'خوابگاهی'}
+                              </span>
+                              {resType === 'commuter' && s.commuterEligibilityReasons && s.commuterEligibilityReasons.length > 0 && (
+                                <div className="text-[11px] text-amber-800 dark:text-amber-300 font-semibold">
+                                  {formatCommuterReasons(s.commuterEligibilityReasons)}
+                                </div>
+                              )}
+                              {resType === 'commuter' && s.commuterRequestNotes && (
+                                <div className="text-[10px] text-slate-500">{s.commuterRequestNotes}</div>
+                              )}
+                            </td>
+                            <td className="p-2.5 space-y-0.5 text-[11px]">
+                              <div>پدر: <strong>{formatParentOccupation(s.fatherAlive, s.fatherOccupation)}</strong></div>
+                              <div>مادر: <strong>{formatParentOccupation(s.motherAlive, s.motherOccupation)}</strong></div>
+                              {(s.housingStatus || s.economicStatus) && (
+                                <div className="text-[10px] text-slate-500">
+                                  {s.housingStatus ? HOUSING_STATUS_LABELS[s.housingStatus] : ''}
+                                  {s.economicStatus ? ` • ${ECONOMIC_STATUS_LABELS[s.economicStatus]}` : ''}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-2.5 space-y-1 text-[11px] max-w-[260px]">
+                              {artistic && (
+                                <div><span className="text-pink-600 font-bold">هنری: </span>{artistic}</div>
+                              )}
+                              {cultural && (
+                                <div><span className="text-violet-600 font-bold">فرهنگی: </span>{cultural}</div>
+                              )}
+                              {sports && (
+                                <div><span className="text-emerald-600 font-bold">ورزشی: </span>{sports}</div>
+                              )}
+                              {technical && (
+                                <div><span className="text-sky-600 font-bold">فنی: </span>{technical}</div>
+                              )}
+                              {!artistic && !cultural && !sports && !technical && (
+                                <span className="text-slate-400">ثبت نشده</span>
+                              )}
+                            </td>
+                            <td className="p-2.5 space-y-1 text-[11px]">
+                              <div>
+                                <span className="text-slate-400">جسمی: </span>
+                                <strong>{PHYSICAL_HEALTH_STATUS_LABELS[s.physicalHealthStatus || 'healthy']}</strong>
+                                {' '}({getStudentBloodType(s)})
+                              </div>
+                              {getStudentSpecialConditionSummary(s) !== 'ندارد' && (
+                                <div className="text-rose-600 font-semibold">
+                                  {getStudentSpecialConditionSummary(s)}
+                                </div>
+                              )}
+                              <div>
+                                <span className="text-slate-400">روان: </span>
+                                <strong className="text-indigo-700 dark:text-indigo-300">
+                                  {MENTAL_HEALTH_STATUS_LABELS[s.mentalHealthStatus || 'good']}
+                                </strong>
+                              </div>
+                              {s.wantsCounselingContact && (
+                                <span className="inline-block px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 text-[10px] font-extrabold">
+                                  متقاضی ارتباط مشاور
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {capabilitiesFilteredStudents.length > 150 && (
+                    <div className="p-2.5 text-center text-[11px] text-slate-500 bg-slate-50 dark:bg-slate-800/50">
+                      نمایش ۱۵۰ ردیف اول — برای مشاهده تمامی {capabilitiesFilteredStudents.length} دانشجو، خروجی اکسل را دریافت نمایید.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
 
         {/* دکمه خروجی کلیه اطلاعات به اکسل */}
         <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
           <span className="text-xs text-slate-400">
-            دانشگاه فرهنگیان اصفهان - اداره امور سراهای دانشجویی
+            دانشگاه فرهنگیان اصفهان - سامانه جامع خدمات دانشجویی
           </span>
           <button
             onClick={handleExportAllStudents}

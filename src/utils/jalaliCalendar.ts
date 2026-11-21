@@ -287,3 +287,88 @@ export function splitJalaliDateTime(value: string): { datePart: string; timePart
     timePart: timeMatch ? timeMatch[1] : '',
   };
 }
+
+export type JalaliDayOfWeekKey =
+  | 'saturday'
+  | 'sunday'
+  | 'monday'
+  | 'tuesday'
+  | 'wednesday'
+  | 'thursday'
+  | 'friday';
+
+const DAY_KEYS_BY_INDEX: JalaliDayOfWeekKey[] = [
+  'saturday',
+  'sunday',
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+];
+
+/**
+ * محاسبه کلید روز هفته (saturday..friday) برای یک تاریخ شمسی مشخص
+ */
+export function getJalaliDayOfWeekKey(jy: number, jm: number, jd: number): JalaliDayOfWeekKey {
+  const { gy, gm, gd } = jalaliToGregorian(jy, jm, jd);
+  const jsDay = new Date(gy, gm - 1, gd).getDay(); // 0=Sun..6=Sat
+  const idx = (jsDay + 1) % 7; // 0=Sat..6=Fri
+  return DAY_KEYS_BY_INDEX[idx];
+}
+
+export function getJalaliWeekdayLabelFromDate(dateStr: string): string {
+  const parsed = parseJalaliDate(dateStr);
+  if (!parsed) return '';
+  const { gy, gm, gd } = jalaliToGregorian(parsed.jy, parsed.jm, parsed.jd);
+  const jsDay = new Date(gy, gm - 1, gd).getDay();
+  const idx = (jsDay + 1) % 7;
+  return PERSIAN_WEEKDAY_FULL[idx] || '';
+}
+
+/**
+ * اضافه کردن N روز به یک تاریخ شمسی (مثلاً +1 برای تاریخ روز بعد در شیفت ۲۴ ساعته)
+ */
+export function addDaysToJalaliDate(
+  dateStr: string,
+  daysToAdd: number,
+  digits: 'fa' | 'en' = 'fa'
+): string {
+  const parsed = parseJalaliDate(dateStr);
+  if (!parsed) return '';
+  const { gy, gm, gd } = jalaliToGregorian(parsed.jy, parsed.jm, parsed.jd);
+  const next = new Date(gy, gm - 1, gd + daysToAdd);
+  const nextJ = gregorianToJalali(next.getFullYear(), next.getMonth() + 1, next.getDate());
+  return formatJalaliDate(nextJ.jy, nextJ.jm, nextJ.jd, digits);
+}
+
+/**
+ * استخراج کلید ماه شمسی به فرمت استاندارد انگلیسی YYYY/MM (مثلاً 1405/08)
+ */
+export function getJalaliMonthKey(dateStr?: string): string {
+  if (!dateStr) return '';
+  const parsed = parseJalaliDate(dateStr);
+  if (!parsed) return '';
+  return `${String(parsed.jy).padStart(4, '0')}/${String(parsed.jm).padStart(2, '0')}`;
+}
+
+/**
+ * محاسبه طول شیفت بر حسب ساعت (با پشتیبانی از شیفت ۲۴ ساعته کامل مثل ۰۷:۰۰ تا ۰۷:۰۰ روز بعد)
+ */
+export function calculateShiftDurationHours(
+  startTime?: string,
+  endTime?: string,
+  endsNextDay?: boolean
+): number | null {
+  const s = parseTimeString(startTime || '');
+  const e = parseTimeString(endTime || '');
+  if (!s || !e) return null;
+  const startMin = s.hour * 60 + s.minute;
+  let endMin = e.hour * 60 + e.minute;
+  if (endsNextDay || endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  const diffMin = endMin - startMin;
+  return Math.round((diffMin / 60) * 10) / 10;
+}
+

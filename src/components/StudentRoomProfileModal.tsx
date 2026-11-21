@@ -13,6 +13,18 @@ import { Storage, DISCIPLINARY_VIOLATION_PRESETS } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import { getStudentResidenceType } from '../utils/financeUtils';
 import {
+  ECONOMIC_STATUS_LABELS,
+  HOUSING_STATUS_LABELS,
+  MARITAL_STATUS_LABELS,
+  MENTAL_HEALTH_STATUS_LABELS,
+  PHYSICAL_HEALTH_STATUS_LABELS,
+  formatCommuterReasons,
+  formatParentOccupation,
+  getStudentBloodType,
+  getStudentSpecialConditionSummary,
+  joinSkillList,
+} from '../utils/studentProfileOptions';
+import {
   X,
   User,
   Phone,
@@ -163,7 +175,7 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
     typeof isRoomRepresentative === 'boolean'
       ? isRoomRepresentative
       : Boolean(room?.representativeStudentId === student.studentId);
-  const effectiveRoleLabel = actorRole === 'admin' ? 'مدیریت کل امور سراها' : 'سرپرست سرا';
+  const effectiveRoleLabel = actorRole === 'admin' ? 'مدیریت کل سامانه جامع خدمات دانشجویی' : 'سرپرست سرا';
 
   const recordPresets =
     recordType === 'report'
@@ -621,6 +633,168 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                   <span className="font-bold text-slate-800 dark:text-slate-100">{String(v)}</span>
                 </div>
               ))}
+            </div>
+
+            {/* وضعیت درخواست خوابگاه / ترددی، خانواده و شغل والدین، توانمندی‌ها و سلامت */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3 text-xs">
+              {/* وضعیت سکونت و خانواده */}
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700 space-y-1.5">
+                <div className="font-extrabold text-indigo-700 dark:text-indigo-300 text-[11px] mb-1">
+                  وضعیت سکونت، خانواده و شغل والدین
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                  <span>
+                    <span className="text-slate-400">وضعیت سکونت: </span>
+                    <strong className="text-slate-800 dark:text-slate-100">
+                      {getStudentResidenceType(student) === 'commuter' ? 'ترددی (عدم نیاز به خوابگاه)' : 'خوابگاهی (متقاضی خوابگاه)'}
+                    </strong>
+                  </span>
+                  {student.maritalStatus && (
+                    <span>
+                      <span className="text-slate-400">تأهل: </span>
+                      <strong>{MARITAL_STATUS_LABELS[student.maritalStatus]}</strong>
+                    </span>
+                  )}
+                  {student.isHeadOfHousehold && (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 font-bold text-[10px]">
+                      سرپرست خانوار
+                    </span>
+                  )}
+                </div>
+                {student.commuterEligibilityReasons && student.commuterEligibilityReasons.length > 0 && (
+                  <div className="text-[11px] text-amber-800 dark:text-amber-300 font-bold">
+                    علت ترددی: {formatCommuterReasons(student.commuterEligibilityReasons)}
+                  </div>
+                )}
+                {student.commuterRequestNotes && (
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                    <span className="text-slate-400">توضیحات ترددی: </span>
+                    {student.commuterRequestNotes}
+                  </div>
+                )}
+                {student.dormitoryRequestNotes && (
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                    <span className="text-slate-400">توضیحات درخواست خوابگاه: </span>
+                    {student.dormitoryRequestNotes}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">شغل پدر:</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-100">
+                      {formatParentOccupation(student.fatherAlive, student.fatherOccupation)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">شغل مادر:</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-100">
+                      {formatParentOccupation(student.motherAlive, student.motherOccupation)}
+                    </span>
+                  </div>
+                  {student.housingStatus && (
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">مسکن خانواده:</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-100">
+                        {HOUSING_STATUS_LABELS[student.housingStatus]}
+                      </span>
+                    </div>
+                  )}
+                  {student.economicStatus && (
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">وضعیت معیشتی:</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-100">
+                        {ECONOMIC_STATUS_LABELS[student.economicStatus]}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {student.livingSituationNotes && (
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300 pt-1">
+                    <span className="text-slate-400">توضیحات وضعیت زندگی: </span>
+                    {student.livingSituationNotes}
+                  </div>
+                )}
+              </div>
+
+              {/* توانمندی‌ها و پرونده سلامت */}
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700 space-y-1.5">
+                <div className="font-extrabold text-teal-700 dark:text-teal-300 text-[11px] mb-1">
+                  توانمندی‌ها، علایق و وضعیت سلامت جسمی و روانی
+                </div>
+                <div className="space-y-1 text-[11px]">
+                  {joinSkillList(student.artisticSkills, student.artisticOther) && (
+                    <div>
+                      <span className="text-pink-600 font-bold">هنری: </span>
+                      <span>{joinSkillList(student.artisticSkills, student.artisticOther)}</span>
+                    </div>
+                  )}
+                  {joinSkillList(student.culturalActivities, student.culturalOther) && (
+                    <div>
+                      <span className="text-violet-600 font-bold">فرهنگی: </span>
+                      <span>{joinSkillList(student.culturalActivities, student.culturalOther)}</span>
+                    </div>
+                  )}
+                  {joinSkillList(student.sportsActivities, student.sportsOther) && (
+                    <div>
+                      <span className="text-emerald-600 font-bold">ورزشی: </span>
+                      <span>{joinSkillList(student.sportsActivities, student.sportsOther)}</span>
+                    </div>
+                  )}
+                  {joinSkillList(student.technicalSkills, student.technicalOther) && (
+                    <div>
+                      <span className="text-sky-600 font-bold">علمی و فنی: </span>
+                      <span>{joinSkillList(student.technicalSkills, student.technicalOther)}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-1.5 mt-1.5 border-t border-slate-100 dark:border-slate-800 space-y-1 text-[11px]">
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    <span>
+                      <span className="text-slate-400">گروه خونی: </span>
+                      <strong className="text-rose-700 dark:text-rose-300">{getStudentBloodType(student)}</strong>
+                    </span>
+                    <span>
+                      <span className="text-slate-400">سلامت جسمی: </span>
+                      <strong>{PHYSICAL_HEALTH_STATUS_LABELS[student.physicalHealthStatus || 'healthy']}</strong>
+                    </span>
+                  </div>
+                  {getStudentSpecialConditionSummary(student) !== 'ندارد' && (
+                    <div className="text-rose-700 dark:text-rose-300 font-bold">
+                      ملاحظات جسمی: {getStudentSpecialConditionSummary(student)}
+                    </div>
+                  )}
+                  {(student.foodOrDrugAllergies || student.regularMedications) && (
+                    <div className="text-slate-600 dark:text-slate-300">
+                      {student.foodOrDrugAllergies && <span>حساسیت: {student.foodOrDrugAllergies} </span>}
+                      {student.regularMedications && <span>• دارو: {student.regularMedications}</span>}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    <span>
+                      <span className="text-slate-400">سلامت روان: </span>
+                      <strong className="text-indigo-700 dark:text-indigo-300">
+                        {MENTAL_HEALTH_STATUS_LABELS[student.mentalHealthStatus || 'good']}
+                      </strong>
+                    </span>
+                    {student.wantsCounselingContact && (
+                      <span className="px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200 text-[10px] font-extrabold">
+                        متقاضی ارتباط با مرکز مشاوره
+                      </span>
+                    )}
+                  </div>
+                  {student.mentalHealthTopics && student.mentalHealthTopics.length > 0 && (
+                    <div className="text-indigo-700 dark:text-indigo-300">
+                      محورهای مشاوره‌ای: {student.mentalHealthTopics.join('، ')}
+                    </div>
+                  )}
+                  {student.mentalHealthNotes && (
+                    <div className="text-slate-600 dark:text-slate-300">
+                      توضیحات محرمانه مشاوره: {student.mentalHealthNotes}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 

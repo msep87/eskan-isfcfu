@@ -1,5 +1,11 @@
 export type StudentResidenceType = 'dormitory' | 'commuter';
 
+export type CommuterEligibilityReason =
+  | 'isfahan_suburbs_30km'
+  | 'married'
+  | 'head_of_household'
+  | 'special_case';
+
 export interface Student {
   studentId: string; // شماره دانشجویی
   nationalId: string; // کد ملی
@@ -24,6 +30,41 @@ export interface Student {
   avatarColor?: string;
   isProfileCompleted: boolean;
   residenceType?: StudentResidenceType; // برچسب وضعیت سکونت: خوابگاهی یا ترددی (دانشجوی دارای اتاق پیش‌فرض خوابگاهی است)
+  dormitoryRequestStatus?: 'requested' | 'not_needed_commuter'; // انتخاب دانشجو در بدو ورود: درخواست خوابگاه یا عدم نیاز (ترددی)
+  commuterEligibilityReasons?: CommuterEligibilityReason[]; // علل قانونی ترددی بودن (اصفهان تا ۳۰ کیلومتر، متأهل، سرپرست خانوار، موارد خاص)
+  commuterRequestNotes?: string; // توضیحات دانشجو برای ترددی بودن / عدم نیاز به خوابگاه
+  dormitoryRequestNotes?: string; // توضیحات تکمیلی درخواست خوابگاه
+  // وضعیت خانواده، تأهل، زندگی و شغل والدین
+  maritalStatus?: 'single' | 'married';
+  isHeadOfHousehold?: boolean;
+  fatherAlive?: boolean;
+  fatherOccupation?: string;
+  motherAlive?: boolean;
+  motherOccupation?: string;
+  familyMembersCount?: string;
+  housingStatus?: 'owned' | 'rented' | 'organizational' | 'relatives' | 'other';
+  economicStatus?: 'good' | 'moderate' | 'needs_support';
+  livingSituationNotes?: string;
+  // توانمندی‌ها، مهارت‌ها و علایق قابل گزارش‌گیری (جداگانه)
+  artisticSkills?: string[];
+  artisticOther?: string;
+  culturalActivities?: string[];
+  culturalOther?: string;
+  sportsActivities?: string[];
+  sportsOther?: string;
+  technicalSkills?: string[];
+  technicalOther?: string;
+  // پرونده کامل سلامت جسمی و روانی
+  bloodType?: string;
+  physicalHealthStatus?: 'healthy' | 'needs_attention' | 'chronic_condition';
+  physicalConditions?: string[];
+  regularMedications?: string;
+  foodOrDrugAllergies?: string;
+  medicalDetails?: string;
+  mentalHealthStatus?: 'good' | 'mild_stress' | 'needs_counseling' | 'under_treatment';
+  mentalHealthTopics?: string[];
+  wantsCounselingContact?: boolean;
+  mentalHealthNotes?: string;
   assignedDormId?: string;
   assignedRoomId?: string;
   assignedBedId?: string;
@@ -766,10 +807,16 @@ export interface SupervisorShiftSchedule {
   supervisorName: string;
   dormId: string;
   dormName: string;
-  dayOfWeek: DayOfWeek | 'all'; // شنبه تا جمعه یا همه روزها
-  shiftType: 'morning' | 'evening' | 'night' | 'full_day'; // صبح، عصر، شب، ۲۴ ساعته
-  startTime?: string; // مثلاً ۰۷:۳۰
-  endTime?: string; // مثلاً ۱۵:۳۰
+  /** تاریخ دقیق شمسی شروع شیفت در برنامه ماهانه، مثلاً ۱۴۰۵/۰۸/۱۵ */
+  shiftDate?: string;
+  /** کلید ماه و سال شمسی برای فیلتر ماهانه، مثلاً 1405/08 */
+  monthKey?: string;
+  dayOfWeek: DayOfWeek | 'all'; // به‌صورت خودکار از تاریخ شمسی محاسبه می‌شود یا 'all' برای حضور پیوسته
+  shiftType: 'morning' | 'evening' | 'night' | 'full_day'; // صبح، عصر، شب، ۲۴ ساعته کامل
+  startTime?: string; // مثلاً ۰۷:۰۰
+  endTime?: string; // مثلاً ۰۷:۰۰ (روز بعد در شیفت ۲۴ ساعته)
+  /** آیا پایان شیفت در روز بعد است (مثلاً ۲۴ ساعته از ۰۷:۰۰ تا ۰۷:۰۰ فردا یا شیفت شب) */
+  endsNextDay?: boolean;
   notes?: string;
   isEveryDay?: boolean; // اگر شیفتی تعیین نشود یعنی هر روز حضور دارند
 }

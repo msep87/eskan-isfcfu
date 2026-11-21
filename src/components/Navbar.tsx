@@ -188,7 +188,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium">
-                مدیریت سراهای دانشجویی، آموزش، مالی، کتابخانه، هوشمندسازی و خدمات دانشجویی
+                پیشخوان جامع خدمات دانشجویی — آموزش، سراهای دانشجویی، مالی، فرهنگی، ورزشی، کتابخانه، مشاوره و هوشمندسازی
               </p>
             </div>
           </div>

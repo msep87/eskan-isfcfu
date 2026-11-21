@@ -261,15 +261,25 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
             : dormMap.get(a.targetDormId)?.name || 'سرای مشخص',
       }));
 
-    const supervisorShiftsSummary = supervisorShifts.map((sh) => ({
-      supervisorName: sh.supervisorName,
-      dormName: sh.dormName || dormMap.get(sh.dormId)?.name || 'نامشخص',
-      dayOfWeek: DAY_LABELS[sh.dayOfWeek] || sh.dayOfWeek,
-      shiftType: SHIFT_TYPE_LABELS[sh.shiftType] || sh.shiftType,
-      timeRange:
-        sh.startTime && sh.endTime ? `${sh.startTime} تا ${sh.endTime}` : 'طبق برنامه شیفت',
-      notes: sh.notes || '',
-    }));
+    const supervisorShiftsSummary = supervisorShifts.map((sh) => {
+      const isNextDay = Boolean(sh.endsNextDay || sh.shiftType === 'full_day' || sh.shiftType === 'night');
+      const shiftTypeText =
+        sh.shiftType === 'full_day'
+          ? 'شیفت ۲۴ ساعته کامل'
+          : SHIFT_TYPE_LABELS[sh.shiftType] || sh.shiftType;
+      return {
+        supervisorName: sh.supervisorName,
+        dormName: sh.dormName || dormMap.get(sh.dormId)?.name || 'نامشخص',
+        shiftDate: sh.shiftDate || undefined,
+        dayOfWeek: DAY_LABELS[sh.dayOfWeek] || sh.dayOfWeek,
+        shiftType: shiftTypeText,
+        timeRange:
+          sh.startTime && sh.endTime
+            ? `${sh.startTime} تا ${sh.endTime}${isNextDay ? ' (روز بعد)' : ''}`
+            : 'طبق برنامه شیفت ماهانه',
+        notes: sh.notes || '',
+      };
+    });
 
     const counselorMap = new Map(counselors.map((c) => [c.id, c]));
     const counselorShiftsSummary = counselorShifts.map((cs) => {

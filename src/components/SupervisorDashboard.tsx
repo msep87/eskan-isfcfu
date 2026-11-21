@@ -2,6 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { PersianDatePicker } from './PersianDatePicker';
 import { PersianTimeRangePicker } from './PersianTimeRangePicker';
 import {
+  getTodayJalali,
+  formatJalaliDate,
+  getJalaliWeekdayLabelFromDate,
+  addDaysToJalaliDate,
+  toEnglishDigits as toEnDigitsCal,
+} from '../utils/jalaliCalendar';
+import {
   Supervisor,
   Dormitory,
   Room,
@@ -125,10 +132,13 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
 
   // فرم ثبت گزارش شیفت و دفتر وقایع روزانه
   const [isAddShiftReportModalOpen, setIsAddShiftReportModalOpen] = useState(false);
-  const [repShiftDate, setRepShiftDate] = useState('۱۴۰۵/۰۷/۱۵');
+  const [repShiftDate, setRepShiftDate] = useState(() => {
+    const t = getTodayJalali();
+    return formatJalaliDate(t.jy, t.jm, t.jd, 'fa');
+  });
   const [repShiftDormId, setRepShiftDormId] = useState('');
-  const [repShiftType, setRepShiftType] = useState<ShiftLogReport['shiftType']>('evening');
-  const [repShiftTime, setRepShiftTime] = useState('۱۵:۰۰ الی ۲۳:۰۰');
+  const [repShiftType, setRepShiftType] = useState<ShiftLogReport['shiftType']>('full_day');
+  const [repShiftTime, setRepShiftTime] = useState('۰۷:۰۰ الی ۰۷:۰۰');
   const [repStudentCount, setRepStudentCount] = useState<number>(85);
   const [repInspections, setRepInspections] = useState('');
   const [repIncidents, setRepIncidents] = useState('');
@@ -2423,11 +2433,17 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
             };
 
             const shiftFaMap: Record<string, string> = {
-              morning: 'شیفت صبح (۰۷:۳۰ الی ۱۵:۳۰)',
-              evening: 'شیفت عصر (۱۵:۰۰ الی ۲۳:۰۰)',
-              night: 'شیفت شب (۲۲:۰۰ الی ۰۷:۳۰)',
-              full_day: 'حضور روزانه / ۲۴ ساعته',
+              morning: 'شیفت صبح',
+              evening: 'شیفت عصر',
+              night: 'شیفت شب',
+              full_day: 'شیفت ۲۴ ساعته کامل',
             };
+
+            const sortedMySchedules = [...mySchedules].sort((a, b) =>
+              toEnDigitsCal(a.shiftDate || '9999/99/99').localeCompare(
+                toEnDigitsCal(b.shiftDate || '9999/99/99')
+              )
+            );
 
             return (
               <>
@@ -2440,7 +2456,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                       </div>
                       <div>
                         <h3 className="font-extrabold text-base text-white">
-                          دفتر وقایع روزانه و تبادل گزارش‌های بین‌شیفتی سرپرستان
+                          برنامه شیفت‌بندی ماهانه و دفتر وقایع سرپرستان
                         </h3>
                         <p className="text-xs text-teal-200/90">
                           سرپرست حاضر: <strong className="text-amber-300 font-bold">{supervisor.fullName}</strong> • سرا: {currentDorm?.name || 'همه سراها'}
@@ -2448,24 +2464,46 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                       </div>
                     </div>
 
-                    {/* برچسب شیفت فعال این سرپرست */}
+                    {/* برچسب شیفت‌های ماهانه این سرپرست */}
                     <div className="pt-2 flex flex-wrap items-center gap-2 text-xs">
-                      <span className="text-slate-300">وضعیت برنامه حضور شما:</span>
+                      <span className="text-slate-300">برنامه شیفت‌های ماهانه شما:</span>
                       {isDefaultEveryDay ? (
                         <span className="px-3 py-1 rounded-xl bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 font-bold flex items-center gap-1.5 shadow-xs">
                           <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>حضور روزانه (هر روز) - برنامه پیش‌فرض سازمانی</span>
+                          <span>حضور پیوسته (برنامه ماهانه مشخصی ثبت نشده است)</span>
                         </span>
                       ) : (
                         <div className="flex flex-wrap gap-1.5">
-                          {mySchedules.map((sch) => (
-                            <span
-                              key={sch.id}
-                              className="px-2.5 py-1 rounded-lg bg-teal-700/60 text-teal-100 border border-teal-500/40 text-[11px] font-semibold"
-                            >
-                              {dayFaMap[sch.dayOfWeek] || sch.dayOfWeek} ({shiftFaMap[sch.shiftType] || sch.shiftType})
-                            </span>
-                          ))}
+                          {sortedMySchedules.map((sch) => {
+                            const wd = sch.shiftDate
+                              ? getJalaliWeekdayLabelFromDate(sch.shiftDate)
+                              : dayFaMap[sch.dayOfWeek] || sch.dayOfWeek;
+                            const isNextDay = Boolean(
+                              sch.endsNextDay || sch.shiftType === 'full_day' || sch.shiftType === 'night'
+                            );
+                            const nextDate =
+                              sch.shiftDate && isNextDay ? addDaysToJalaliDate(sch.shiftDate, 1, 'fa') : '';
+                            const timeText =
+                              sch.startTime && sch.endTime
+                                ? `${sch.startTime} تا ${sch.endTime}${isNextDay ? ' فردا' : ''}`
+                                : '';
+                            return (
+                              <span
+                                key={sch.id}
+                                title={nextDate ? `تا تاریخ ${nextDate} ساعت ${sch.endTime || ''}` : sch.notes || ''}
+                                className="px-2.5 py-1 rounded-lg bg-teal-700/60 text-teal-100 border border-teal-500/40 text-[11px] font-semibold flex items-center gap-1.5"
+                              >
+                                <span className="font-mono font-extrabold text-amber-200">
+                                  {sch.shiftDate || wd}
+                                </span>
+                                {sch.shiftDate && wd && <span className="opacity-80">({wd})</span>}
+                                <span>• {shiftFaMap[sch.shiftType] || sch.shiftType}</span>
+                                {timeText && (
+                                  <span className="font-mono text-teal-200 text-[10px]">({timeText})</span>
+                                )}
+                              </span>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -2758,26 +2796,33 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                   </label>
                   <select
                     value={repShiftType}
-                    onChange={(e) => setRepShiftType(e.target.value as any)}
+                    onChange={(e) => {
+                      const val = e.target.value as ShiftLogReport['shiftType'];
+                      setRepShiftType(val);
+                      if (val === 'full_day') setRepShiftTime('۰۷:۰۰ الی ۰۷:۰۰');
+                      else if (val === 'morning') setRepShiftTime('۰۷:۰۰ الی ۱۵:۰۰');
+                      else if (val === 'evening') setRepShiftTime('۱۵:۰۰ الی ۲۳:۰۰');
+                      else setRepShiftTime('۲۲:۰۰ الی ۰۷:۰۰');
+                    }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   >
-                    <option value="morning">شیفت صبح (۰۷:۳۰ الی ۱۵:۳۰)</option>
+                    <option value="full_day">شیفت ۲۴ ساعته کامل (۰۷:۰۰ الی ۰۷:۰۰ روز بعد)</option>
+                    <option value="morning">شیفت صبح (۰۷:۰۰ الی ۱۵:۰۰)</option>
                     <option value="evening">شیفت عصر (۱۵:۰۰ الی ۲۳:۰۰)</option>
-                    <option value="night">شیفت شب (۲۲:۰۰ الی ۰۷:۳۰)</option>
-                    <option value="full_day">شیفت ۲۴ ساعته / روزانه</option>
+                    <option value="night">شیفت شب (۲۲:۰۰ الی ۰۷:۰۰ روز بعد)</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    ساعت دقیق حضور یا بازه شیفت:
+                    ساعت دقیق حضور یا بازه شیفت {repShiftType === 'full_day' || repShiftType === 'night' ? '(تا روز بعد)' : ''}:
                   </label>
                   <PersianTimeRangePicker
                     value={repShiftTime}
                     onChange={setRepShiftTime}
                     digits="fa"
-                    defaultStart="۱۵:۰۰"
-                    defaultEnd="۲۳:۰۰"
+                    defaultStart="۰۷:۰۰"
+                    defaultEnd="۰۷:۰۰"
                     className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
                   />
                 </div>

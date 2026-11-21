@@ -58,7 +58,7 @@ export const INITIAL_SETTINGS: AppSettings = {
   currentAcademicYear: '۱۴۰۵-۱۴۰۶',
   currentSemester: 'نیمسال اول',
   universityName: 'دانشگاه فرهنگیان استان اصفهان',
-  announcementBanner: 'سامانه جامع خدمات دانشجویی - مدیریت سراها، آموزش، مالی، کتابخانه، هوشمندسازی و خدمات دانشجویی',
+  announcementBanner: 'سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان — پیشخوان یکپارچه خدمات آموزشی، رفاهی، سراهای دانشجویی، فرهنگی، ورزشی، کتابخانه، مشاوره و هوشمندسازی',
   fontFamily: 'vazir',
   fontSize: 'md',
   fontScale: 100,

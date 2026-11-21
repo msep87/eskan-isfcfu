@@ -195,7 +195,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   studentSecondaryEditEnabled = false,
   onToggleStudentSecondaryEdit,
   actorId = 'admin',
-  actorName = 'مدیریت کل امور سراها',
+  actorName = 'مدیریت کل سامانه جامع خدمات دانشجویی',
   actorRole = 'admin',
   onImpersonateUser,
 }) => {
@@ -6008,7 +6008,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             bed={profileBed}
             isRoomRepresentative={isProfileRep}
             isDefaultRepresentative={isProfileDefaultRep}
-            actorName="مدیریت کل امور سراها"
+            actorName="مدیریت کل سامانه جامع خدمات دانشجویی"
             actorRole="admin"
             actorId="admin"
             onDataChanged={onRefreshData}

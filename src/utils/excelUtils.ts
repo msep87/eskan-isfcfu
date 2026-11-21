@@ -1,4 +1,14 @@
 import {
+  parseJalaliDate,
+  formatJalaliDate,
+  getJalaliDayOfWeekKey,
+  getJalaliWeekdayLabelFromDate,
+  getJalaliMonthKey,
+  getTodayJalali,
+  addDaysToJalaliDate,
+  parseTimeString,
+} from './jalaliCalendar';
+import {
   Student,
   Dormitory,
   Room,
@@ -39,6 +49,18 @@ import {
   parseResidenceTypeValue,
   getStudentResidenceType,
 } from './financeUtils';
+import {
+  ECONOMIC_STATUS_LABELS,
+  HOUSING_STATUS_LABELS,
+  MARITAL_STATUS_LABELS,
+  MENTAL_HEALTH_STATUS_LABELS,
+  PHYSICAL_HEALTH_STATUS_LABELS,
+  formatCommuterReasons,
+  formatParentOccupation,
+  getStudentBloodType,
+  getStudentSpecialConditionSummary,
+  joinSkillList,
+} from './studentProfileOptions';
 
 // تبدیل اعداد فارسی و عربی به انگلیسی جهت پردازش دقیق
 export function toEnglishDigits(str: string | number): string {
@@ -680,33 +702,61 @@ export async function exportVacantBedsToExcel(
   XLSX.writeFile(wb, `گزارش_تخت_های_خالی_سراهای_فرهنگیان_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-// خروجی لیست کلیه دانشجویان با فیلدهای پویا
+// خروجی لیست کلیه دانشجویان با فیلدهای جامع (سکونت، خانواده، توانمندی‌ها، سلامت و فیلدهای پویا)
 export async function exportStudentsToExcel(students: Student[], dormsMap: Map<string, string>, roomsMap: Map<string, string>) {
   const XLSX = await import('xlsx');
   const data = students.map((s, idx) => {
+    const resType = getStudentResidenceType(s);
     const base: Record<string, any> = {
       'ردیف': idx + 1,
       'شماره دانشجویی': s.studentId,
       'کد ملی': s.nationalId,
       'نام و نام خانوادگی': s.fullName,
+      'نام پدر': s.fatherName || '',
       'رشته تحصیلی': s.fieldOfStudy,
       'ترم ورود': s.entryTerm,
+      'وضعیت تأهل': s.maritalStatus ? MARITAL_STATUS_LABELS[s.maritalStatus] : 'ثبت نشده',
+      'سرپرست خانوار': s.isHeadOfHousehold ? 'بله' : 'خیر',
       'استان': s.province,
       'شهر': s.city,
       'شماره همراه': s.mobile,
       'شماره ضروری': s.emergencyPhone,
       'شماره والدین': s.parentPhone,
       'نشانی دقیق': s.postalAddress || '',
-      'نوع سکونت': getStudentResidenceType(s) === 'dormitory' ? 'خوابگاهی' : 'ترددی',
+      'نوع سکونت': resType === 'dormitory' ? 'خوابگاهی (درخواست خوابگاه)' : 'ترددی (عدم نیاز به خوابگاه)',
+      'علت ترددی': resType === 'commuter' ? formatCommuterReasons(s.commuterEligibilityReasons) || '-' : '-',
+      'توضیحات وضعیت سکونت':
+        resType === 'commuter' ? s.commuterRequestNotes || '' : s.dormitoryRequestNotes || '',
       'سرای تخصیص یافته': s.assignedDormId ? dormsMap.get(s.assignedDormId) || s.assignedDormId : 'تخصیص نیافته',
       'اتاق تخصیص یافته': s.assignedRoomId ? roomsMap.get(s.assignedRoomId) || s.assignedRoomId : 'تخصیص نیافته',
+      'شغل پدر': formatParentOccupation(s.fatherAlive, s.fatherOccupation),
+      'شغل مادر': formatParentOccupation(s.motherAlive, s.motherOccupation),
+      'تعداد اعضای خانواده': s.familyMembersCount || '',
+      'وضعیت مسکن خانواده': s.housingStatus ? HOUSING_STATUS_LABELS[s.housingStatus] : '',
+      'وضعیت معیشتی خانواده': s.economicStatus ? ECONOMIC_STATUS_LABELS[s.economicStatus] : '',
+      'توضیحات وضعیت زندگی': s.livingSituationNotes || '',
+      'رشته‌های هنری': joinSkillList(s.artisticSkills, s.artisticOther) || '-',
+      'فعالیت‌های فرهنگی': joinSkillList(s.culturalActivities, s.culturalOther) || '-',
+      'رشته‌های ورزشی': joinSkillList(s.sportsActivities, s.sportsOther) || '-',
+      'مهارت‌های علمی و فنی': joinSkillList(s.technicalSkills, s.technicalOther) || '-',
+      'گروه خونی': getStudentBloodType(s),
+      'وضعیت سلامت جسمی': PHYSICAL_HEALTH_STATUS_LABELS[s.physicalHealthStatus || 'healthy'],
+      'بیماری خاص و ملاحظات جسمی': getStudentSpecialConditionSummary(s),
+      'حساسیت غذایی/دارویی': s.foodOrDrugAllergies || '',
+      'داروهای مصرفی مستمر': s.regularMedications || '',
+      'وضعیت سلامت روان': MENTAL_HEALTH_STATUS_LABELS[s.mentalHealthStatus || 'good'],
+      'محورهای مشاوره‌ای': (s.mentalHealthTopics || []).join('، ') || '-',
+      'متقاضی ارتباط با مرکز مشاوره': s.wantsCounselingContact ? 'بله' : 'خیر',
+      'توضیحات محرمانه سلامت روان': s.mentalHealthNotes || '',
       'وضعیت پروفایل': s.isProfileCompleted ? 'تکمیل شده' : 'ناقص',
     };
 
-    // اضافه کردن تمام ستون‌های سفارشی به اکسل
+    // اضافه کردن ستون‌های سفارشی غیرتکراری به اکسل
     if (s.customFields) {
       Object.entries(s.customFields).forEach(([key, val]) => {
-        base[key] = val;
+        if (!(key in base)) {
+          base[key] = val;
+        }
       });
     }
 
@@ -715,8 +765,58 @@ export async function exportStudentsToExcel(students: Student[], dormsMap: Map<s
 
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'لیست دانشجویان');
-  XLSX.writeFile(wb, `لیست_جامع_دانشجویان_سراها_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, 'لیست جامع دانشجویان');
+  XLSX.writeFile(wb, `لیست_جامع_دانشجویان_خدمات_دانشجویی_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// خروجی اکسل گزارش تخصصی توانمندی‌ها، وضعیت سکونت (ترددی/خوابگاهی)، خانواده و سلامت
+export async function exportStudentCapabilitiesReportToExcel(
+  students: Student[],
+  dormsMap: Map<string, string>,
+  roomsMap: Map<string, string>,
+  filterSummaryLabel = 'همه دانشجویان'
+) {
+  const XLSX = await import('xlsx');
+  const data = students.map((s, idx) => {
+    const resType = getStudentResidenceType(s);
+    return {
+      'ردیف': idx + 1,
+      'شماره دانشجویی': s.studentId,
+      'نام و نام خانوادگی': s.fullName,
+      'رشته تحصیلی': s.fieldOfStudy,
+      'ترم ورود': s.entryTerm,
+      'شماره همراه': s.mobile,
+      'استان / شهر': `${s.province || ''} - ${s.city || ''}`,
+      'وضعیت سکونت': resType === 'dormitory' ? 'خوابگاهی' : 'ترددی (غیرخوابگاهی)',
+      'علت ترددی': resType === 'commuter' ? formatCommuterReasons(s.commuterEligibilityReasons) || '-' : '-',
+      'توضیحات سکونت': resType === 'commuter' ? s.commuterRequestNotes || '' : s.dormitoryRequestNotes || '',
+      'سرا و اتاق': s.assignedDormId
+        ? `${dormsMap.get(s.assignedDormId) || ''} ${s.assignedRoomId ? roomsMap.get(s.assignedRoomId) || '' : ''}`
+        : 'فاقد اتاق',
+      'تأهل / سرپرست خانوار': `${s.maritalStatus ? MARITAL_STATUS_LABELS[s.maritalStatus] : 'مجرد'}${s.isHeadOfHousehold ? ' (سرپرست خانوار)' : ''}`,
+      'شغل پدر': formatParentOccupation(s.fatherAlive, s.fatherOccupation),
+      'شغل مادر': formatParentOccupation(s.motherAlive, s.motherOccupation),
+      'وضعیت مسکن و معیشت': `${s.housingStatus ? HOUSING_STATUS_LABELS[s.housingStatus] : '-'} / ${s.economicStatus ? ECONOMIC_STATUS_LABELS[s.economicStatus] : '-'}`,
+      'رشته‌های هنری': joinSkillList(s.artisticSkills, s.artisticOther) || '-',
+      'فعالیت‌های فرهنگی': joinSkillList(s.culturalActivities, s.culturalOther) || '-',
+      'رشته‌های ورزشی': joinSkillList(s.sportsActivities, s.sportsOther) || '-',
+      'مهارت‌های علمی و فنی': joinSkillList(s.technicalSkills, s.technicalOther) || '-',
+      'گروه خونی': getStudentBloodType(s),
+      'سلامت جسمی': PHYSICAL_HEALTH_STATUS_LABELS[s.physicalHealthStatus || 'healthy'],
+      'بیماری و ملاحظات جسمی': getStudentSpecialConditionSummary(s),
+      'حساسیت / داروی مستمر': [s.foodOrDrugAllergies, s.regularMedications].filter(Boolean).join(' | ') || '-',
+      'سلامت روان': MENTAL_HEALTH_STATUS_LABELS[s.mentalHealthStatus || 'good'],
+      'محورهای مشاوره‌ای': (s.mentalHealthTopics || []).join('، ') || '-',
+      'درخواست ارتباط با مشاور': s.wantsCounselingContact ? 'بله' : 'خیر',
+      'توضیحات محرمانه مشاوره': s.mentalHealthNotes || '',
+    };
+  });
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'توانمندی و سلامت');
+  const safeLabel = filterSummaryLabel.replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
+  XLSX.writeFile(wb, `گزارش_توانمندی_سکونت_سلامت_${safeLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 // خروجی اکسل گزارش ارجاعی و عملکرد حوزه‌ها در بازه زمانی دلخواه
@@ -808,69 +908,98 @@ const SHIFT_EN_MAP: Record<string, any> = {
   '۲۴ ساعته': 'full_day',
   'روزانه': 'full_day',
   'کامل': 'full_day',
+  '24 ساعته': 'full_day',
+  '۲۴ ساعته کامل': 'full_day',
+  '24 ساعته کامل': 'full_day',
+  'شبانه‌روزی': 'full_day',
+  'شبانه روزی': 'full_day',
+  'شیفت ۲۴ ساعته': 'full_day',
+  'شیفت ۲۴ ساعته کامل': 'full_day',
+  'شیفت 24 ساعته': 'full_day',
 };
 
-// خروجی اکسل جدول شیفت‌بندی سرپرستان
+const SHIFT_MONTHLY_FA_MAP: Record<string, string> = {
+  morning: 'شیفت صبح',
+  evening: 'شیفت عصر',
+  night: 'شیفت شب',
+  full_day: 'شیفت ۲۴ ساعته کامل',
+};
+
+// خروجی اکسل جدول شیفت‌بندی ماهانه سرپرستان
 export async function exportShiftScheduleToExcel(schedules: any[]) {
   const XLSX = await import('xlsx');
-  const data = schedules.map((s, idx) => ({
-    'ردیف': idx + 1,
-    'نام و نام خانوادگی سرپرست': s.supervisorName,
-    'سرای دانشجویی': s.dormName,
-    'روز هفته': DAY_FA_MAP[s.dayOfWeek] || s.dayOfWeek,
-    'نوبت شیفت': SHIFT_FA_MAP[s.shiftType] || s.shiftType,
-    'ساعت شروع': s.startTime || '-',
-    'ساعت پایان': s.endTime || '-',
-    'نوع حضور': s.isEveryDay ? 'حضور روزانه (هر روز)' : 'شیفت معین',
-    'توضیحات و دستورکار': s.notes || '',
-  }));
+  const data = schedules.map((s, idx) => {
+    const weekdayFromDate = s.shiftDate ? getJalaliWeekdayLabelFromDate(s.shiftDate) : '';
+    const isNextDay = Boolean(s.endsNextDay || s.shiftType === 'full_day' || s.shiftType === 'night');
+    const endDateStr = s.shiftDate && isNextDay ? addDaysToJalaliDate(s.shiftDate, 1, 'fa') : s.shiftDate || '-';
+    return {
+      'ردیف': idx + 1,
+      'تاریخ شیفت (شمسی)': s.shiftDate || 'بدون تاریخ (عمومی)',
+      'روز هفته': weekdayFromDate || DAY_FA_MAP[s.dayOfWeek] || s.dayOfWeek || '-',
+      'نام و نام خانوادگی سرپرست': s.supervisorName,
+      'سرای دانشجویی': s.dormName,
+      'نوبت شیفت': SHIFT_MONTHLY_FA_MAP[s.shiftType] || SHIFT_FA_MAP[s.shiftType] || s.shiftType,
+      'ساعت شروع': s.startTime || '-',
+      'ساعت پایان': s.endTime || '-',
+      'پایان در روز بعد': isNextDay ? `بله (${endDateStr})` : 'خیر',
+      'توضیحات و دستورکار': s.notes || '',
+    };
+  });
 
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'شیفت‌بندی سرپرستان');
-  XLSX.writeFile(wb, `برنامه_شیفت_بندی_سرپرستان_سراها_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, 'شیفت‌بندی ماهانه سرپرستان');
+  XLSX.writeFile(wb, `برنامه_شیفت_بندی_ماهانه_سرپرستان_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-// دانلود فایل نمونه و قالب خام اکسل شیفت‌بندی جهت بارگذاری توسط مدیر
+// دانلود فایل نمونه و قالب خام اکسل شیفت‌بندی ماهانه جهت بارگذاری توسط مدیر
 export async function exportShiftTemplateToExcel() {
   const XLSX = await import('xlsx');
+  const today = getTodayJalali();
+  const d1 = formatJalaliDate(today.jy, today.jm, 1, 'fa');
+  const d2 = formatJalaliDate(today.jy, today.jm, 2, 'fa');
+  const d3 = formatJalaliDate(today.jy, today.jm, 3, 'fa');
+
   const templateRows = [
     {
+      'تاریخ شیفت (شمسی)': d1,
       'نام و نام خانوادگی سرپرست': 'استاد علی قربانی',
       'سرای دانشجویی': 'سرای شهید باهنر (بلوک سینا)',
-      'روز هفته': 'شنبه',
+      'نوبت شیفت': '۲۴ ساعته کامل',
+      'ساعت شروع': '۰۷:۰۰',
+      'ساعت پایان': '۰۷:۰۰',
+      'پایان در روز بعد': 'بله',
+      'توضیحات': 'شیفت ۲۴ ساعته کامل از ۷ صبح تا ۷ صبح فردا و تحویل شیفت',
+    },
+    {
+      'تاریخ شیفت (شمسی)': d2,
+      'نام و نام خانوادگی سرپرست': 'استاد جواد احمدی',
+      'سرای دانشجویی': 'سرای شهید باهنر (بلوک فارابی)',
+      'نوبت شیفت': '۲۴ ساعته کامل',
+      'ساعت شروع': '۰۷:۰۰',
+      'ساعت پایان': '۰۷:۰۰',
+      'پایان در روز بعد': 'بله',
+      'توضیحات': 'حضور و غیاب الکترونیکی شبانه و نظارت کامل ۲۴ ساعته',
+    },
+    {
+      'تاریخ شیفت (شمسی)': d3,
+      'نام و نام خانوادگی سرپرست': 'سرکار خانم سمیه کریمی',
+      'سرای دانشجویی': 'سرای پردیس فاطمه‌الزهرا (س)',
       'نوبت شیفت': 'عصر',
       'ساعت شروع': '۱۵:۰۰',
       'ساعت پایان': '۲۳:۰۰',
-      'توضیحات': 'نظارت بر ساعت استراحت و سالن مطالعه',
-    },
-    {
-      'نام و نام خانوادگی سرپرست': 'استاد جواد احمدی',
-      'سرای دانشجویی': 'سرای شهید باهنر (بلوک فارابی)',
-      'روز هفته': 'یکشنبه',
-      'نوبت شیفت': 'شب',
-      'ساعت شروع': '۲۲:۰۰',
-      'ساعت پایان': '۰۷:۳۰',
-      'توضیحات': 'حضور و غیاب الکترونیکی شبانه رأس ۲۲:۳۰',
-    },
-    {
-      'نام و نام خانوادگی سرپرست': 'سرکار خانم سمیه کریمی',
-      'سرای دانشجویی': 'سرای پردیس فاطمه‌الزهرا (س)',
-      'روز هفته': 'همه روزها',
-      'نوبت شیفت': 'روزانه',
-      'ساعت شروع': '۰۸:۰۰',
-      'ساعت پایان': '۲۰:۰۰',
-      'توضیحات': 'حضور روزانه و نظارت پیوسته',
+      'پایان در روز بعد': 'خیر',
+      'توضیحات': 'نظارت بر سالن مطالعه و کنترل تردد عصرانه',
     },
   ];
 
   const ws = XLSX.utils.json_to_sheet(templateRows);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'قالب شیفت‌بندی');
-  XLSX.writeFile(wb, `قالب_اکسل_شیفت_بندی_سرپرستان.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, 'قالب شیفت‌بندی ماهانه');
+  XLSX.writeFile(wb, `قالب_اکسل_شیفت_بندی_ماهانه_سرپرستان.xlsx`);
 }
 
-// ورود و خواندن فایل اکسل شیفت‌بندی توسط مدیر
+// ورود و خواندن فایل اکسل شیفت‌بندی ماهانه توسط مدیر
 export async function importShiftScheduleFromExcel(
   file: File,
   supervisors: any[],
@@ -897,13 +1026,17 @@ export async function importShiftScheduleFromExcel(
         rows.forEach((row, i) => {
           const supName = String(row['نام و نام خانوادگی سرپرست'] || row['نام سرپرست'] || row['سرپرست'] || '').trim();
           const dormName = String(row['سرای دانشجویی'] || row['نام سرا'] || row['سرا'] || row['خوابگاه'] || '').trim();
-          const dayFa = String(row['روز هفته'] || row['روز'] || 'all').trim();
-          const shiftFa = String(row['نوبت شیفت'] || row['شیفت'] || 'full_day').trim();
+          const rawDate = String(
+            row['تاریخ شیفت (شمسی)'] || row['تاریخ شیفت'] || row['تاریخ'] || row['تاریخ (شمسی)'] || ''
+          ).trim();
+          const dayFa = String(row['روز هفته'] || row['روز'] || '').trim();
+          const shiftFa = String(row['نوبت شیفت'] || row['نوع شیفت'] || row['شیفت'] || 'full_day').trim();
           const startTime = String(row['ساعت شروع'] || '').trim();
           const endTime = String(row['ساعت پایان'] || '').trim();
+          const nextDayRaw = String(row['پایان در روز بعد'] || row['روز بعد'] || '').trim().toLowerCase();
           const notes = String(row['توضیحات'] || row['توضیحات و دستورکار'] || '').trim();
 
-          if (!supName && !dormName && !notes) return;
+          if (!supName && !dormName && !rawDate && !notes) return;
 
           // جستجوی سرپرست
           const matchedSup =
@@ -920,9 +1053,59 @@ export async function importShiftScheduleFromExcel(
             ? null
             : dorms.find((d) => d.name.includes(dormName) || dormName.includes(d.name)) || dorms[0];
 
-          const dayOfWeek = DAY_EN_MAP[dayFa] || 'all';
-          const shiftType = SHIFT_EN_MAP[shiftFa] || 'full_day';
-          const isEveryDay = dayOfWeek === 'all';
+          const parsedDate = parseJalaliDate(rawDate);
+          const formattedDate = parsedDate
+            ? formatJalaliDate(parsedDate.jy, parsedDate.jm, parsedDate.jd, 'fa')
+            : undefined;
+          const monthKey = formattedDate ? getJalaliMonthKey(formattedDate) : undefined;
+          const derivedDayOfWeek = parsedDate
+            ? getJalaliDayOfWeekKey(parsedDate.jy, parsedDate.jm, parsedDate.jd)
+            : DAY_EN_MAP[dayFa] || 'all';
+
+          const normalizedShiftFa = shiftFa.replace(/24/g, '۲۴').trim();
+          const shiftType =
+            SHIFT_EN_MAP[normalizedShiftFa] ||
+            (normalizedShiftFa.includes('۲۴') || normalizedShiftFa.includes('شبانه‌روز')
+              ? 'full_day'
+              : normalizedShiftFa.includes('صبح')
+              ? 'morning'
+              : normalizedShiftFa.includes('عصر')
+              ? 'evening'
+              : normalizedShiftFa.includes('شب')
+              ? 'night'
+              : 'full_day');
+
+          const resolvedStart =
+            startTime ||
+            (shiftType === 'full_day'
+              ? '۰۷:۰۰'
+              : shiftType === 'morning'
+              ? '۰۷:۰۰'
+              : shiftType === 'evening'
+              ? '۱۵:۰۰'
+              : '۲۲:۰۰');
+          const resolvedEnd =
+            endTime ||
+            (shiftType === 'full_day'
+              ? '۰۷:۰۰'
+              : shiftType === 'morning'
+              ? '۱۵:۰۰'
+              : shiftType === 'evening'
+              ? '۲۳:۰۰'
+              : '۰۷:۰۰');
+
+          const ps = parseTimeString(resolvedStart);
+          const pe = parseTimeString(resolvedEnd);
+          const inferredNextDay =
+            nextDayRaw.includes('بله') ||
+            nextDayRaw === 'yes' ||
+            nextDayRaw === 'true' ||
+            nextDayRaw === '1' ||
+            shiftType === 'full_day' ||
+            shiftType === 'night' ||
+            (ps !== null && pe !== null && pe.hour * 60 + pe.minute <= ps.hour * 60 + ps.minute);
+
+          const isEveryDay = !formattedDate && derivedDayOfWeek === 'all';
 
           if (matchedSup) {
             newSchedules.push({
@@ -931,10 +1114,13 @@ export async function importShiftScheduleFromExcel(
               supervisorName: matchedSup.fullName,
               dormId: matchedDorm ? matchedDorm.id : 'all',
               dormName: matchedDorm ? matchedDorm.name : 'کلیه سراهای دانشجویی پردیس',
-              dayOfWeek,
+              shiftDate: formattedDate,
+              monthKey,
+              dayOfWeek: derivedDayOfWeek,
               shiftType,
-              startTime: startTime || (shiftType === 'morning' ? '۰۷:۳۰' : shiftType === 'evening' ? '۱۵:۰۰' : shiftType === 'night' ? '۲۲:۰۰' : '۰۸:۰۰'),
-              endTime: endTime || (shiftType === 'morning' ? '۱۵:۳۰' : shiftType === 'evening' ? '۲۳:۰۰' : shiftType === 'night' ? '۰۷:۳۰' : '۲۰:۰۰'),
+              startTime: resolvedStart,
+              endTime: resolvedEnd,
+              endsNextDay: inferredNextDay,
               notes,
               isEveryDay,
             });
@@ -944,7 +1130,7 @@ export async function importShiftScheduleFromExcel(
         resolve({
           success: true,
           count: newSchedules.length,
-          message: `تعداد ${newSchedules.length} شیفت کاری با موفقیت از اکسل بارگذاری و جایگزین گردید.`,
+          message: `تعداد ${newSchedules.length} نوبت شیفت ماهانه با موفقیت از اکسل بارگذاری و جایگزین گردید.`,
           schedules: newSchedules,
         });
       } catch (err) {

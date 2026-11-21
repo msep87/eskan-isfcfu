@@ -830,7 +830,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                     <div className="flex flex-wrap gap-1.5">
                       {[
                         { id: 'supervisor', label: 'سرپرست خوابگاه' },
-                        { id: 'admin', label: 'مدیریت کل سراها' },
+                        { id: 'admin', label: 'مدیریت کل سامانه' },
                         { id: 'maintenance', label: 'واحد تأسیسات' },
                         { id: 'student_affairs', label: 'امور دانشجویی و تربیت بدنی' },
                         { id: 'education', label: 'کارشناس آموزش' },

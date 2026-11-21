@@ -2609,7 +2609,21 @@ function set<T>(key: string, value: T): boolean {
 }
 
 export const Storage = {
-  getSettings: (): AppSettings => get(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS),
+  getSettings: (): AppSettings => {
+    const raw = get(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
+    const banner = (raw?.announcementBanner || '').trim();
+    if (
+      banner &&
+      (banner.includes('سامانه جامع سراهای دانشجویی') ||
+        banner.includes('ورود به سامانه جهت'))
+    ) {
+      return {
+        ...raw,
+        announcementBanner: INITIAL_SETTINGS.announcementBanner,
+      };
+    }
+    return raw;
+  },
   setSettings: (settings: AppSettings): boolean => set(STORAGE_KEYS.SETTINGS, settings),
   
   getDormitories: (): Dormitory[] => get(STORAGE_KEYS.DORMITORIES, INITIAL_DORMITORIES),
@@ -7840,9 +7854,10 @@ export const Storage = {
         dormName: 'سرای تحت سرپرستی',
         dayOfWeek: 'all',
         shiftType: 'full_day',
-        startTime: '۰۸:۰۰',
-        endTime: '۲۰:۰۰',
-        notes: 'حضور روزانه پیوسته در سرا (پیش‌فرض خودکار سیستم)',
+        startTime: '۰۷:۰۰',
+        endTime: '۰۷:۰۰',
+        endsNextDay: true,
+        notes: 'حضور پیوسته در سرا (پیش‌فرض خودکار سیستم در صورت نبود برنامه ماهانه)',
         isEveryDay: true,
       },
     ];

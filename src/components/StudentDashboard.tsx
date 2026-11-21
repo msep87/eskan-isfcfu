@@ -79,6 +79,7 @@ import {
   resolveStudentPortals,
 } from '../utils/studentPortalsDefaults';
 import { renderPortalIcon } from './AdminStudentPortalsEditor';
+import { formatCommuterReasons } from '../utils/studentProfileOptions';
 
 interface StudentDashboardProps {
   student: Student;
@@ -251,10 +252,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             </div>
             <div>
               <div className="font-black text-sm sm:text-base">
-                پرونده اسکان شما ناقص است! تکمیل اطلاعات در بدو ورود الزامی می‌باشد
+                پرونده جامع دانشجویی شما ناقص است! تکمیل اطلاعات در بدو ورود الزامی می‌باشد
               </div>
               <div className="text-xs text-rose-700 dark:text-rose-300 mt-1 leading-relaxed">
-                بر اساس مقررات دانشگاه فرهنگیان، دسترسی به انتخاب اتاق و خدمات رفاهی خوابگاه منوط به ثبت کامل اطلاعات فردی، تماس، نشانی و وضعیت سلامت است.
+                بر اساس مقررات دانشگاه فرهنگیان، استفاده از پیشخوان جامع خدمات دانشجویی و تعیین وضعیت سکونت (درخواست خوابگاه یا ترددی بودن) منوط به تکمیل و تأیید اطلاعات فردی، خانواده، توانمندی‌ها و سلامت است.
               </div>
             </div>
           </div>
@@ -345,6 +346,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-white/20 font-bold backdrop-blur-xs">
                   دانشجومعلم دانشگاه فرهنگیان اصفهان
                 </span>
+                <span
+                  className={`text-[11px] px-2.5 py-0.5 rounded-full font-extrabold border ${
+                    isStudentDormResident
+                      ? 'bg-emerald-500/30 border-emerald-200/50 text-white'
+                      : 'bg-amber-400/30 border-amber-200/60 text-amber-100'
+                  }`}
+                >
+                  {isStudentDormResident ? 'دانشجوی خوابگاهی' : 'دانشجوی ترددی (غیرخوابگاهی)'}
+                </span>
               </div>
 
               <p className="text-xs sm:text-sm text-teal-100 flex flex-wrap items-center justify-center sm:justify-start gap-3 mt-1.5 font-medium">
@@ -377,10 +387,24 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             </div>
           </div>
 
-          {/* کارت وضعیت اسکان در سربرگ */}
-          <div className="bg-white/15 backdrop-blur-md rounded-2xl p-4 border border-white/20 text-center sm:text-right shrink-0 min-w-[210px]">
-            <div className="text-[11px] text-teal-100 font-bold mb-1">وضعیت تخصیص خوابگاه:</div>
-            {studentBed && studentRoom && studentDorm ? (
+          {/* کارت وضعیت سکونت در سربرگ */}
+          <div className="bg-white/15 backdrop-blur-md rounded-2xl p-4 border border-white/20 text-center sm:text-right shrink-0 min-w-[220px] max-w-[270px]">
+            <div className="text-[11px] text-teal-100 font-bold mb-1">وضعیت سکونت و اسکان:</div>
+            {!isStudentDormResident ? (
+              <div>
+                <div className="inline-flex items-center gap-1 text-[11px] font-extrabold text-amber-100 bg-amber-600/50 px-2.5 py-0.5 rounded-lg mb-1 border border-amber-300/50">
+                  <span>دانشجوی ترددی (عدم نیاز به خوابگاه)</span>
+                </div>
+                {student.commuterEligibilityReasons && student.commuterEligibilityReasons.length > 0 && (
+                  <div className="text-[11px] text-teal-50/90 mt-1 leading-snug">
+                    علت: {formatCommuterReasons(student.commuterEligibilityReasons)}
+                  </div>
+                )}
+                <div className="text-[10px] text-teal-100/90 mt-1 leading-relaxed">
+                  دسترسی کامل به کلیه خدمات دانشگاهی سامانه (به‌جز امکانات خوابگاهی)
+                </div>
+              </div>
+            ) : studentBed && studentRoom && studentDorm ? (
               <div>
                 {student.assignmentStatus === 'temporary' ? (
                   <div className="inline-flex items-center gap-1 text-[11px] font-extrabold text-amber-200 bg-amber-950/60 px-2 py-0.5 rounded-lg mb-1 border border-amber-400/40">
@@ -400,7 +424,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               </div>
             ) : (
               <div>
-                <div className="font-bold text-amber-300 text-sm">عدم تخصیص اتاق</div>
+                <div className="font-bold text-amber-300 text-sm">متقاضی خوابگاه (در انتظار اتاق)</div>
                 <div className="text-[11px] text-teal-100">جهت انتخاب تخت اقدام فرمایید</div>
               </div>
             )}
@@ -499,63 +523,67 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           }`}
         >
           <Users className="w-4 h-4" />
-          <span>مشاهده اتاق و مشخصات هم‌اتاقی‌ها</span>
+          <span>{isStudentDormResident ? 'پیشخوان، اتاق و هم‌اتاقی‌ها' : 'پیشخوان وضعیت دانشجو'}</span>
         </button>
 
-        <button
-          onClick={() => {
-            if (!student.isProfileCompleted) {
-              setIsProfileModalOpen(true);
-              return;
-            }
-            setActiveTab('picker');
-          }}
-          className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'picker'
-              ? 'bg-teal-600 text-white shadow-teal-600/20'
-              : !student.isProfileCompleted
-              ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 border-2 border-dashed border-amber-400'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          {!student.isProfileCompleted || !settings.selectionActive ? (
-            <Lock className="w-4 h-4 text-amber-600 shrink-0" />
-          ) : (
-            <Sparkles className="w-4 h-4 text-amber-500" />
-          )}
-          <span>انتخاب یا جابجایی اتاق و تخت بصری</span>
-          {!student.isProfileCompleted ? (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-extrabold mr-1 shrink-0">
-              قفل (نیازمند تکمیل پرونده)
-            </span>
-          ) : !settings.selectionActive ? (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-extrabold mr-1 shrink-0">
-              بسته توسط مدیر
-            </span>
-          ) : null}
-        </button>
+        {isStudentDormResident && (
+          <>
+            <button
+              onClick={() => {
+                if (!student.isProfileCompleted) {
+                  setIsProfileModalOpen(true);
+                  return;
+                }
+                setActiveTab('picker');
+              }}
+              className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+                activeTab === 'picker'
+                  ? 'bg-teal-600 text-white shadow-teal-600/20'
+                  : !student.isProfileCompleted
+                  ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 border-2 border-dashed border-amber-400'
+                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+              }`}
+            >
+              {!student.isProfileCompleted || !settings.selectionActive ? (
+                <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+              ) : (
+                <Sparkles className="w-4 h-4 text-amber-500" />
+              )}
+              <span>انتخاب یا جابجایی اتاق و تخت بصری</span>
+              {!student.isProfileCompleted ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-extrabold mr-1 shrink-0">
+                  قفل (نیازمند تکمیل پرونده)
+                </span>
+              ) : !settings.selectionActive ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-extrabold mr-1 shrink-0">
+                  بسته توسط مدیر
+                </span>
+              ) : null}
+            </button>
 
-        <button
-          onClick={() => setActiveTab('guest')}
-          className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'guest'
-              ? 'bg-indigo-600 text-white shadow-indigo-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <UserPlus className="w-4 h-4 text-indigo-500" />
-          <span>درخواست موافقت با مهمان</span>
-          {pendingGuestCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black">
-              {pendingGuestCount} در انتظار
-            </span>
-          )}
-          {approvedAwaitingDocsGuests.length > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-black">
-              موافقت شده
-            </span>
-          )}
-        </button>
+            <button
+              onClick={() => setActiveTab('guest')}
+              className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+                activeTab === 'guest'
+                  ? 'bg-indigo-600 text-white shadow-indigo-600/20'
+                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+              }`}
+            >
+              <UserPlus className="w-4 h-4 text-indigo-500" />
+              <span>درخواست موافقت با مهمان</span>
+              {pendingGuestCount > 0 && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black">
+                  {pendingGuestCount} در انتظار
+                </span>
+              )}
+              {approvedAwaitingDocsGuests.length > 0 && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-black">
+                  موافقت شده
+                </span>
+              )}
+            </button>
+          </>
+        )}
 
         <button
           onClick={() => setActiveTab('surveys')}
@@ -726,7 +754,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
           <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900 dark:text-white mb-4">
             <Bell className="w-5 h-5 text-teal-600" />
-            <span>اطلاعیه‌های مهم امور سراهای دانشجویی دانشگاه فرهنگیان</span>
+            <span>اطلاعیه‌های مهم سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان</span>
           </div>
 
           <div className="space-y-3">
@@ -798,7 +826,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                     ارزیابی عملکرد، نمره فردی / اتاق و وضعیت تذکرات انضباطی
                   </h3>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    نمرات ارزیابی و تذکرات ثبت‌شده توسط سرپرستی و مدیریت کل سراهای دانشجویی
+                    نمرات ارزیابی و تذکرات ثبت‌شده توسط واحدهای اجرایی و مدیریت کل سامانه جامع خدمات دانشجویی
                   </p>
                 </div>
               </div>
@@ -1103,22 +1131,48 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             )}
           </div>
 
-          <RoommatesCard
-            student={student}
-            dorm={studentDorm}
-            room={studentRoom}
-            bed={studentBed}
-            roommates={roommates}
-            roomWarnings={myRoomWarnings}
-            onSelectBedClick={() => {
-              if (!student.isProfileCompleted) {
-                setIsProfileModalOpen(true);
-                return;
-              }
-              setActiveTab('picker');
-            }}
-            isSelectionActive={settings.selectionActive}
-          />
+          {isStudentDormResident ? (
+            <RoommatesCard
+              student={student}
+              dorm={studentDorm}
+              room={studentRoom}
+              bed={studentBed}
+              roommates={roommates}
+              roomWarnings={myRoomWarnings}
+              onSelectBedClick={() => {
+                if (!student.isProfileCompleted) {
+                  setIsProfileModalOpen(true);
+                  return;
+                }
+                setActiveTab('picker');
+              }}
+              isSelectionActive={settings.selectionActive}
+            />
+          ) : (
+            <div className="bg-amber-50/80 dark:bg-amber-950/25 rounded-3xl p-5 sm:p-6 border border-amber-200 dark:border-amber-800/70 shadow-xs space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-black text-sm sm:text-base text-amber-950 dark:text-amber-200">
+                  وضعیت سکونت شما: دانشجوی ترددی (غیرخوابگاهی)
+                </h3>
+                <span className="px-3 py-1 rounded-full bg-amber-200/80 dark:bg-amber-900/60 text-amber-950 dark:text-amber-100 text-[11px] font-extrabold">
+                  بدون استفاده از امکانات خوابگاهی
+                </span>
+              </div>
+              <p className="text-xs text-amber-900/90 dark:text-amber-200/90 leading-relaxed">
+                شما به عنوان دانشجوی ترددی در سامانه جامع خدمات دانشجویی ثبت شده‌اید. کلیه خدمات دانشگاهی شامل امور آموزشی، فرهنگی و تشکل‌ها، برنامه‌های ورزشی، کتابخانه و پژوهش، نظرسنجی‌ها، انتخابات شورای صنفی، مرکز مشاوره، سامانه‌های دانشجویی و تسویه حساب به‌طور کامل برای شما فعال است.
+              </p>
+              {student.commuterEligibilityReasons && student.commuterEligibilityReasons.length > 0 && (
+                <div className="text-xs text-amber-900 dark:text-amber-100 font-bold">
+                  شرط ثبت‌شده ترددی: {formatCommuterReasons(student.commuterEligibilityReasons)}
+                </div>
+              )}
+              {student.commuterRequestNotes && (
+                <div className="text-xs text-slate-700 dark:text-slate-300 bg-white/80 dark:bg-slate-900/60 p-3 rounded-2xl border border-amber-200/70 dark:border-amber-800/40">
+                  <strong>توضیحات ثبت‌شده دانشجو:</strong> {student.commuterRequestNotes}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
