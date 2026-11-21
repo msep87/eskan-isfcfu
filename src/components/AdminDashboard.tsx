@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
+import { PersianTimePicker } from './PersianTimePicker';
+import { PersianDateTimePicker } from './PersianDateTimePicker';
 import {
   AppSettings,
   Dormitory,
@@ -4935,22 +4938,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 text-xs items-end">
                 <div className="sm:col-span-2">
                   <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">ساعت شروع</label>
-                  <input
-                    type="text"
+                  <PersianTimePicker
                     value={quickShiftStartTime}
-                    onChange={(e) => setQuickShiftStartTime(e.target.value)}
+                    onChange={setQuickShiftStartTime}
                     placeholder="۱۵:۰۰"
-                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-center font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    digits="fa"
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
                 <div className="sm:col-span-2">
                   <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">ساعت پایان</label>
-                  <input
-                    type="text"
+                  <PersianTimePicker
                     value={quickShiftEndTime}
-                    onChange={(e) => setQuickShiftEndTime(e.target.value)}
+                    onChange={setQuickShiftEndTime}
                     placeholder="۲۳:۰۰"
-                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-center font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    digits="fa"
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
                 <div className="sm:col-span-5">
@@ -5415,22 +5418,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">ساعت شروع</label>
-                      <input
-                        type="text"
+                      <PersianTimePicker
                         value={newShiftStartTime}
-                        onChange={(e) => setNewShiftStartTime(e.target.value)}
-                        placeholder="مثال: ۱۵:۰۰"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-center font-mono"
+                        onChange={setNewShiftStartTime}
+                        placeholder="۱۵:۰۰"
+                        digits="fa"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                       />
                     </div>
                     <div>
                       <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">ساعت پایان</label>
-                      <input
-                        type="text"
+                      <PersianTimePicker
                         value={newShiftEndTime}
-                        onChange={(e) => setNewShiftEndTime(e.target.value)}
-                        placeholder="مثال: ۲۳:۰۰"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-center font-mono"
+                        onChange={setNewShiftEndTime}
+                        placeholder="۲۳:۰۰"
+                        digits="fa"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                       />
                     </div>
                   </div>
@@ -6171,22 +6174,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">ساعت شروع</label>
-                      <input
-                        type="text"
+                      <PersianTimePicker
                         value={newCnsShiftStartTime}
-                        onChange={(e) => setNewCnsShiftStartTime(e.target.value)}
+                        onChange={setNewCnsShiftStartTime}
                         placeholder="۱۴:۰۰"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-center font-mono"
+                        digits="fa"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
                       />
                     </div>
                     <div>
                       <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">ساعت پایان</label>
-                      <input
-                        type="text"
+                      <PersianTimePicker
                         value={newCnsShiftEndTime}
-                        onChange={(e) => setNewCnsShiftEndTime(e.target.value)}
+                        onChange={setNewCnsShiftEndTime}
                         placeholder="۱۸:۰۰"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-center font-mono"
+                        digits="fa"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
                       />
                     </div>
                   </div>
@@ -7265,12 +7268,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     تاریخ و ساعت شروع انتخاب اتاق
                   </label>
-                  <input
-                    type="text"
+                  <PersianDateTimePicker
                     value={localSettings.selectionStartDate}
-                    onChange={(e) => setLocalSettings((prev) => ({ ...prev, selectionStartDate: e.target.value }))}
-                    placeholder="مثلاً 1403/07/01 - 08:00"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
+                    onChange={(val) => setLocalSettings((prev) => ({ ...prev, selectionStartDate: val }))}
+                    datePlaceholder="1405/07/01"
+                    timePlaceholder="08:00"
+                    digits="en"
+                    inputClassName="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
 
@@ -7278,12 +7282,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     تاریخ و ساعت پایان مهلت انتخاب اتاق
                   </label>
-                  <input
-                    type="text"
+                  <PersianDateTimePicker
                     value={localSettings.selectionEndDate}
-                    onChange={(e) => setLocalSettings((prev) => ({ ...prev, selectionEndDate: e.target.value }))}
-                    placeholder="مثلاً 1403/07/15 - 23:59"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
+                    onChange={(val) => setLocalSettings((prev) => ({ ...prev, selectionEndDate: val }))}
+                    datePlaceholder="1405/07/15"
+                    timePlaceholder="23:59"
+                    digits="en"
+                    inputClassName="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
               </div>
@@ -8621,11 +8626,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       تاریخ تولد
                     </label>
-                    <input
-                      type="text"
+                    <PersianDatePicker
                       value={stFormBirthDate}
-                      onChange={(e) => setStFormBirthDate(e.target.value)}
+                      onChange={setStFormBirthDate}
                       placeholder="1382/01/01"
+                      digits="en"
+                      defaultYear={1382}
                       dir="ltr"
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
                     />

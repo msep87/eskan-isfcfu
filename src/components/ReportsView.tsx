@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
 import { Dormitory, Room, Bed, Student } from '../types';
 import { Storage } from '../utils/storage';
 import { exportVacantBedsToExcel, exportStudentsToExcel, exportDomainReportToExcel, toEnglishDigits } from '../utils/excelUtils';
@@ -1132,13 +1133,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       <Calendar className="w-3 h-3 text-teal-600" />
                       <span>از تاریخ (شمسی):</span>
                     </label>
-                    <input
-                      type="text"
-                      placeholder="مثال: 1403/07/01"
+                    <PersianDatePicker
+                      placeholder="مثال: 1405/07/01"
                       value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-center font-mono"
+                      onChange={setStartDate}
+                      digits="en"
                       dir="ltr"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-center font-mono"
                     />
                   </div>
 
@@ -1148,13 +1149,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       <Calendar className="w-3 h-3 text-teal-600" />
                       <span>تا تاریخ (شمسی):</span>
                     </label>
-                    <input
-                      type="text"
-                      placeholder="مثال: 1403/07/30"
+                    <PersianDatePicker
+                      placeholder="مثال: 1405/07/30"
                       value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-center font-mono"
+                      onChange={setEndDate}
+                      digits="en"
                       dir="ltr"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-center font-mono"
                     />
                   </div>
 

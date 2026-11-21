@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
+import { PersianTimePicker } from './PersianTimePicker';
 import {
   StudentAffairsStaff,
   Student,
@@ -1882,37 +1884,37 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div>
                   <label className="block font-bold mb-1">تاریخ شروع</label>
-                  <input
-                    type="text"
+                  <PersianDatePicker
                     value={elStartDate}
-                    onChange={(e) => setElStartDate(e.target.value)}
+                    onChange={setElStartDate}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">ساعت شروع</label>
-                  <input
-                    type="text"
+                  <PersianTimePicker
                     value={elStartTime}
-                    onChange={(e) => setElStartTime(e.target.value)}
+                    onChange={setElStartTime}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">تاریخ پایان</label>
-                  <input
-                    type="text"
+                  <PersianDatePicker
                     value={elEndDate}
-                    onChange={(e) => setElEndDate(e.target.value)}
+                    onChange={setElEndDate}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">ساعت پایان</label>
-                  <input
-                    type="text"
+                  <PersianTimePicker
                     value={elEndTime}
-                    onChange={(e) => setElEndTime(e.target.value)}
+                    onChange={setElEndTime}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
@@ -2084,19 +2086,19 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1">تاریخ جلسه شورا</label>
-                  <input
-                    type="text"
+                  <PersianDatePicker
                     value={refSessionDate}
-                    onChange={(e) => setRefSessionDate(e.target.value)}
+                    onChange={setRefSessionDate}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">ساعت جلسه</label>
-                  <input
-                    type="text"
+                  <PersianTimePicker
                     value={refSessionTime}
-                    onChange={(e) => setRefSessionTime(e.target.value)}
+                    onChange={setRefSessionTime}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
@@ -2300,28 +2302,28 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
                 </div>
                 <div>
                   <label className="block font-bold mb-1">تاریخ شروع / اجرا</label>
-                  <input
-                    type="text"
+                  <PersianDatePicker
                     value={spScheduleDate}
-                    onChange={(e) => setSpScheduleDate(e.target.value)}
+                    onChange={setSpScheduleDate}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">ساعت شروع</label>
-                  <input
-                    type="text"
+                  <PersianTimePicker
                     value={spStartTime}
-                    onChange={(e) => setSpStartTime(e.target.value)}
+                    onChange={setSpStartTime}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">ساعت پایان</label>
-                  <input
-                    type="text"
+                  <PersianTimePicker
                     value={spEndTime}
-                    onChange={(e) => setSpEndTime(e.target.value)}
+                    onChange={setSpEndTime}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>

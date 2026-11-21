@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
+import { PersianTimeRangePicker } from './PersianTimeRangePicker';
+import { PersianDateTimePicker } from './PersianDateTimePicker';
 import {
   CounselorStaff,
   CounselorShiftSchedule,
@@ -680,11 +683,11 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   تاریخ شیفت *
                 </label>
-                <input
-                  type="text"
+                <PersianDatePicker
                   required
                   value={reportDate}
-                  onChange={(e) => setReportDate(e.target.value)}
+                  onChange={setReportDate}
+                  digits="fa"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium"
                 />
               </div>
@@ -693,13 +696,14 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   بازه زمانی حضور در شیفت *
                 </label>
-                <input
-                  type="text"
+                <PersianTimeRangePicker
                   required
                   value={reportTimeWindow}
-                  onChange={(e) => setReportTimeWindow(e.target.value)}
-                  placeholder="مثال: ۱۴:۰۰ الی ۱۸:۰۰"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium"
+                  onChange={setReportTimeWindow}
+                  digits="fa"
+                  defaultStart="۱۴:۰۰"
+                  defaultEnd="۱۸:۰۰"
+                  className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium"
                 />
               </div>
 
@@ -1011,12 +1015,13 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     زمان پیشنهادی جلسه حضوری
                   </label>
-                  <input
-                    type="text"
+                  <PersianDateTimePicker
                     value={suggestedSessionTime}
-                    onChange={(e) => setSuggestedSessionTime(e.target.value)}
-                    placeholder="مثال: شنبه ساعت ۱۶:۰۰"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium"
+                    onChange={setSuggestedSessionTime}
+                    datePlaceholder="۱۴۰۵/۰۸/۲۰"
+                    timePlaceholder="۱۶:۰۰"
+                    digits="fa"
+                    inputClassName="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium"
                   />
                 </div>
 

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
 import {
   AcademicNoticeType,
   AcademicStatusNotice,
@@ -1067,10 +1068,10 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     تاریخ اجرا / ابلاغ
                   </label>
-                  <input
-                    type="text"
+                  <PersianDatePicker
                     value={noticeEffectiveDate}
-                    onChange={(e) => setNoticeEffectiveDate(e.target.value)}
+                    onChange={setNoticeEffectiveDate}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     required
                   />

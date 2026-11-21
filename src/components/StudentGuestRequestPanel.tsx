@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
+import { PersianTimePicker } from './PersianTimePicker';
 import {
   Student,
   Dormitory,
@@ -583,13 +585,13 @@ export const StudentGuestRequestPanel: React.FC<StudentGuestRequestPanelProps> =
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   تاریخ ورود (شمسی) <span className="text-rose-500">*</span>
                 </label>
-                <input
-                  type="text"
+                <PersianDatePicker
                   value={arrivalDate}
-                  onChange={(e) => setArrivalDate(e.target.value)}
+                  onChange={setArrivalDate}
                   placeholder="1405/08/10"
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center focus:ring-2 focus:ring-teal-500"
+                  digits="en"
                   dir="ltr"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center focus:ring-2 focus:ring-teal-500"
                   required
                 />
               </div>
@@ -598,13 +600,12 @@ export const StudentGuestRequestPanel: React.FC<StudentGuestRequestPanelProps> =
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   زمان (ساعت) ورود <span className="text-rose-500">*</span>
                 </label>
-                <input
-                  type="text"
+                <PersianTimePicker
                   value={arrivalTime}
-                  onChange={(e) => setArrivalTime(e.target.value)}
+                  onChange={setArrivalTime}
                   placeholder="14:00"
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center focus:ring-2 focus:ring-teal-500"
-                  dir="ltr"
+                  digits="en"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-teal-500"
                   required
                 />
               </div>
@@ -613,13 +614,13 @@ export const StudentGuestRequestPanel: React.FC<StudentGuestRequestPanelProps> =
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   تاریخ خروج (شمسی) <span className="text-rose-500">*</span>
                 </label>
-                <input
-                  type="text"
+                <PersianDatePicker
                   value={departureDate}
-                  onChange={(e) => setDepartureDate(e.target.value)}
+                  onChange={setDepartureDate}
                   placeholder="1405/08/12"
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center focus:ring-2 focus:ring-teal-500"
+                  digits="en"
                   dir="ltr"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center focus:ring-2 focus:ring-teal-500"
                   required
                 />
               </div>
@@ -628,13 +629,12 @@ export const StudentGuestRequestPanel: React.FC<StudentGuestRequestPanelProps> =
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   زمان (ساعت) خروج <span className="text-rose-500">*</span>
                 </label>
-                <input
-                  type="text"
+                <PersianTimePicker
                   value={departureTime}
-                  onChange={(e) => setDepartureTime(e.target.value)}
+                  onChange={setDepartureTime}
                   placeholder="12:00"
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center focus:ring-2 focus:ring-teal-500"
-                  dir="ltr"
+                  digits="en"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-teal-500"
                   required
                 />
               </div>

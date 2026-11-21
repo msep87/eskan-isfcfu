@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
+import { PersianTimePicker } from './PersianTimePicker';
 import { Dormitory, Room, Student, MessageCategory, DisciplinaryViolationType } from '../types';
 import { Storage, DISCIPLINARY_VIOLATION_PRESETS } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
@@ -64,6 +66,21 @@ export const RoomActionCenterModal: React.FC<RoomActionCenterModalProps> = ({
   // فراخوانی
   const [summonsTarget, setSummonsTarget] = useState<'supervisor' | 'disciplinary_council' | 'security'>('supervisor');
   const [summonsSchedule, setSummonsSchedule] = useState('');
+  const [summonsDate, setSummonsDate] = useState('');
+  const [summonsTime, setSummonsTime] = useState('');
+  const [summonsLocation, setSummonsLocation] = useState('');
+
+  const updateSummonsComposite = (d: string, t: string, loc: string) => {
+    setSummonsDate(d);
+    setSummonsTime(t);
+    setSummonsLocation(loc);
+    const parts: string[] = [];
+    if (d.trim()) parts.push(`تاریخ ${d.trim()}`);
+    if (t.trim()) parts.push(`ساعت ${t.trim()}`);
+    const dateTimeStr = parts.join(' ');
+    const full = [dateTimeStr, loc.trim()].filter(Boolean).join(' - ');
+    setSummonsSchedule(full);
+  };
 
   // نمره منفی
   const [negCategory, setNegCategory] = useState<'discipline' | 'cleanliness' | 'both'>('discipline');
@@ -96,6 +113,9 @@ export const RoomActionCenterModal: React.FC<RoomActionCenterModalProps> = ({
     setAlsoAddRoomWarning(true);
     setSummonsTarget('supervisor');
     setSummonsSchedule('');
+    setSummonsDate('');
+    setSummonsTime('');
+    setSummonsLocation('');
     setNegCategory('discipline');
     setNegPoints('5');
     setDirectDisciplineScore(String(room.disciplineScore ?? 100));
@@ -684,17 +704,33 @@ export const RoomActionCenterModal: React.FC<RoomActionCenterModalProps> = ({
                         </button>
                       ))}
                     </div>
-                    <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    <div className="space-y-2">
+                      <label className="block font-bold text-slate-700 dark:text-slate-300">
                         تاریخ، ساعت و محل دقیق حضور (اختیاری)
                       </label>
-                      <input
-                        type="text"
-                        value={summonsSchedule}
-                        onChange={(e) => setSummonsSchedule(e.target.value)}
-                        placeholder="مثلاً سه‌شنبه ساعت ۱۰:۳۰ صبح - دفتر سرپرستی / شورای انضباطی"
-                        className="w-full px-3.5 py-2 rounded-xl border border-purple-200 dark:border-purple-700 bg-white dark:bg-slate-900"
-                      />
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <PersianDatePicker
+                          value={summonsDate}
+                          onChange={(val) => updateSummonsComposite(val, summonsTime, summonsLocation)}
+                          placeholder="تاریخ حضور (شمسی)"
+                          digits="fa"
+                          className="w-full px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                        <PersianTimePicker
+                          value={summonsTime}
+                          onChange={(val) => updateSummonsComposite(summonsDate, val, summonsLocation)}
+                          placeholder="ساعت حضور"
+                          digits="fa"
+                          className="w-full px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                        <input
+                          type="text"
+                          value={summonsLocation}
+                          onChange={(e) => updateSummonsComposite(summonsDate, summonsTime, e.target.value)}
+                          placeholder="محل حضور (دفتر سرپرستی...)"
+                          className="w-full px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}

@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
+import { PersianTimePicker } from './PersianTimePicker';
 import {
   Dormitory,
   Room,
@@ -357,10 +359,10 @@ export const RoomVisitReportModal: React.FC<RoomVisitReportModalProps> = ({
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     تاریخ بازدید *
                   </label>
-                  <input
-                    type="text"
+                  <PersianDatePicker
                     value={visitDate}
-                    onChange={(e) => setVisitDate(e.target.value)}
+                    onChange={setVisitDate}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
                     required
                   />
@@ -369,11 +371,11 @@ export const RoomVisitReportModal: React.FC<RoomVisitReportModalProps> = ({
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     ساعت بازدید *
                   </label>
-                  <input
-                    type="text"
+                  <PersianTimePicker
                     value={visitTime}
-                    onChange={(e) => setVisitTime(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
+                    onChange={setVisitTime}
+                    digits="fa"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     required
                   />
                 </div>

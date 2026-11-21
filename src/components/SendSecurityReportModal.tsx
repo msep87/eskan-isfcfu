@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useDeferredValue } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
 import {
   X,
   ShieldAlert,
@@ -526,11 +527,11 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
                   <Calendar className="w-3.5 h-3.5 text-slate-400" />
                   <span>تاریخ وقوع</span>
                 </label>
-                <input
-                  type="text"
+                <PersianDatePicker
                   value={incidentDate}
-                  onChange={(e) => setIncidentDate(e.target.value)}
+                  onChange={setIncidentDate}
                   placeholder="۱۴۰۵/۰۷/۱۵"
+                  digits="fa"
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                 />
               </div>

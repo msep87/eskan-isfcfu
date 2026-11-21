@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
 import confetti from 'canvas-confetti';
 import { Student } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
@@ -488,13 +489,14 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   تاریخ تولد *
                 </label>
-                <input
-                  type="text"
+                <PersianDatePicker
                   value={formData.birthDate || ''}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, birthDate: e.target.value }))}
+                  onChange={(val) => setFormData((prev) => ({ ...prev, birthDate: val }))}
                   placeholder="مثلاً 1383/05/15"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500 dir-ltr text-left"
+                  digits="en"
+                  defaultYear={1383}
                   dir="ltr"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500 dir-ltr text-left"
                   required
                 />
               </div>

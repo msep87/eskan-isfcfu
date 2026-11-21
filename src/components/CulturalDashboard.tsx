@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { PersianTimePicker } from './PersianTimePicker';
 import {
   CulturalStaff,
   Dormitory,
@@ -1297,23 +1298,23 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1">ساعت شروع *</label>
-                  <input
-                    type="text"
+                  <PersianTimePicker
                     required
                     value={prgStartTime}
-                    onChange={(e) => setPrgStartTime(e.target.value)}
+                    onChange={setPrgStartTime}
                     placeholder="۱۶:۰۰"
+                    digits="fa"
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">ساعت پایان *</label>
-                  <input
-                    type="text"
+                  <PersianTimePicker
                     required
                     value={prgEndTime}
-                    onChange={(e) => setPrgEndTime(e.target.value)}
+                    onChange={setPrgEndTime}
                     placeholder="۱۷:۳۰"
+                    digits="fa"
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>

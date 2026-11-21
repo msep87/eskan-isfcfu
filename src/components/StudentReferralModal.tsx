@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
 import {
   X,
   Send,
@@ -642,11 +643,11 @@ export const StudentReferralModal: React.FC<StudentReferralModalProps> = ({
                     <Calendar className="w-3.5 h-3.5" />
                     <span>تاریخ وقوع یا مشاهده:</span>
                   </label>
-                  <input
-                    type="text"
+                  <PersianDatePicker
                     value={incidentDate}
-                    onChange={(e) => setIncidentDate(e.target.value)}
+                    onChange={setIncidentDate}
                     placeholder="مثلاً ۱۴۰۵/۰۸/۲۷"
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-700 bg-white dark:bg-slate-900 text-xs font-bold"
                   />
                 </div>

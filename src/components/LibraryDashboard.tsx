@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
 import * as XLSX from 'xlsx';
 import {
   AppSettings,
@@ -900,12 +901,13 @@ export const LibraryDashboard: React.FC<LibraryDashboardProps> = ({
                     {/* عملیات روی درخواست در انتظار تایید */}
                     {req.status === 'pending' && (
                       <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row gap-2">
-                        <input
-                          type="text"
+                        <PersianDatePicker
                           value={loanDueById[req.id] || ''}
-                          onChange={(e) => setLoanDueById((p) => ({ ...p, [req.id]: e.target.value }))}
+                          onChange={(val) => setLoanDueById((p) => ({ ...p, [req.id]: val }))}
                           placeholder="موعد بازگشت (مثلاً ۱۴۰۵/۰۹/۲۵ - اختیاری)"
-                          className="sm:w-56 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
+                          digits="fa"
+                          wrapperClassName="sm:w-56"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
                         />
                         <input
                           type="text"
@@ -1538,11 +1540,11 @@ export const LibraryDashboard: React.FC<LibraryDashboardProps> = ({
 
               <div>
                 <label className="block font-bold mb-1">موعد بازگشت (اختیاری - پیش‌فرض ۱۴ روز)</label>
-                <input
-                  type="text"
+                <PersianDatePicker
                   value={directDueDate}
-                  onChange={(e) => setDirectDueDate(e.target.value)}
+                  onChange={setDirectDueDate}
                   placeholder="مثلاً ۱۴۰۵/۱۰/۰۵"
+                  digits="fa"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                 />
               </div>

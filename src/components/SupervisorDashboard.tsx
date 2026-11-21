@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { PersianDatePicker } from './PersianDatePicker';
+import { PersianTimeRangePicker } from './PersianTimeRangePicker';
 import {
   Supervisor,
   Dormitory,
@@ -2740,11 +2742,11 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     تاریخ شیفت (شمسی):
                   </label>
-                  <input
-                    type="text"
+                  <PersianDatePicker
                     placeholder="مثال: ۱۴۰۵/۰۷/۱۵"
                     value={repShiftDate}
-                    onChange={(e) => setRepShiftDate(e.target.value)}
+                    onChange={setRepShiftDate}
+                    digits="fa"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
                     required
                   />
@@ -2770,12 +2772,13 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     ساعت دقیق حضور یا بازه شیفت:
                   </label>
-                  <input
-                    type="text"
-                    placeholder="مثلاً ۱۵:۰۰ الی ۲۳:۰۰"
+                  <PersianTimeRangePicker
                     value={repShiftTime}
-                    onChange={(e) => setRepShiftTime(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    onChange={setRepShiftTime}
+                    digits="fa"
+                    defaultStart="۱۵:۰۰"
+                    defaultEnd="۲۳:۰۰"
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
                   />
                 </div>
               </div>
