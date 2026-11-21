@@ -58,6 +58,7 @@ const ROLE_LABELS: Record<StaffReferralActorRole, string> = {
   maintenance: 'واحد تأسیسات و فنی',
   library: 'کتابخانه و پژوهش',
   smart_campus: 'واحد هوشمندسازی',
+  graduation: 'واحد فارغ‌التحصیلان',
 };
 
 const COUNSELOR_PRESETS: Array<{ label: string; defaultTitle: string; defaultText: string }> = [

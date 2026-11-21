@@ -4,7 +4,7 @@ import {
   ClearanceUnitRole,
   GraduationClearanceRequest,
 } from '../types';
-import { CLEARANCE_UNITS_META, Storage } from '../utils/storage';
+import { CLEARANCE_UNITS_META, Storage, normalizePersianSearch } from '../utils/storage';
 import { GraduationClearancePrintModal } from './GraduationClearancePrintModal';
 import {
   FileCheck2,
@@ -34,6 +34,10 @@ interface GraduationClearanceReviewPanelProps {
    * و صرفاً اطلاعات مجاز به همراه عکس پرسنلی فرم تسویه نمایش داده شود.
    */
   restrictStudentPrivacy?: boolean;
+  /**
+   * برای کارشناس آموزش بر اساس رشته: اگر تعریف شده باشد، فقط پرونده‌های دانشجویان رشته‌های تحت پوشش نمایش داده می‌شود.
+   */
+  allowedFields?: string[];
 }
 
 export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewPanelProps> = ({
@@ -43,6 +47,7 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
   settings,
   onDataChange,
   restrictStudentPrivacy = false,
+  allowedFields,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'completed'>('pending');
@@ -73,15 +78,24 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
     [unitRole]
   );
 
+  const normalizedAllowedFields = useMemo(
+    () => (Array.isArray(allowedFields) ? allowedFields.map((f) => normalizePersianSearch(f)).filter(Boolean) : []),
+    [allowedFields]
+  );
+
   const relevantClearances = useMemo(() => {
+    const fieldScoped =
+      normalizedAllowedFields.length > 0
+        ? clearances.filter((c) => normalizedAllowedFields.includes(normalizePersianSearch(c.studentFieldOfStudy)))
+        : clearances;
     if (unitRole === 'admin' || unitRole === 'education') {
-      return clearances;
+      return fieldScoped;
     }
     // سایر واحدها فقط پرونده‌هایی را می‌بینند که تایید اولیه واحد آموزش را گرفته‌اند
-    return clearances.filter(
+    return fieldScoped.filter(
       (c) => c.educationGateStatus === 'approved' && (c.status === 'in_clearance' || c.status === 'completed')
     );
-  }, [clearances, unitRole]);
+  }, [clearances, unitRole, normalizedAllowedFields]);
 
   const stats = useMemo(() => {
     if (unitRole === 'education') {

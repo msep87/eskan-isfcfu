@@ -1350,6 +1350,7 @@ export async function exportActivityLogsToExcel(logs: ActivityLog[]) {
     security: 'حراست و انتظامات',
     library: 'کتابخانه و پژوهش',
     smart_campus: 'واحد هوشمندسازی',
+    graduation: 'واحد فارغ‌التحصیلان',
     system: 'سیستم',
   };
 

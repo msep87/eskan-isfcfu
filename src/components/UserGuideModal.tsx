@@ -35,6 +35,7 @@ import {
   ShieldAlert,
   Landmark,
   Cpu,
+  FileCheck2,
 } from 'lucide-react';
 import {
   ROLE_GUIDES,
@@ -112,6 +113,8 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         return <BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />;
       case 'smart_campus':
         return <Cpu className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />;
+      case 'graduation':
+        return <FileCheck2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />;
       case 'student':
         return <GraduationCap className="w-5 h-5 text-blue-600 dark:text-blue-400" />;
     }
@@ -185,6 +188,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                 { id: 'finance', label: 'امور مالی', role: 'finance' as UserRoleType },
                 { id: 'library', label: 'کتابخانه و پژوهش', role: 'library' as UserRoleType },
                 { id: 'smart_campus', label: 'واحد هوشمندسازی', role: 'smart_campus' as UserRoleType },
+                { id: 'graduation', label: 'واحد فارغ‌التحصیلان', role: 'graduation' as UserRoleType },
                 { id: 'student', label: 'دانشجومعلم', role: 'student' as UserRoleType },
               ] as const
             ).map((tab) => {

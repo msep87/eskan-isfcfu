@@ -150,6 +150,7 @@ export type MessageCategory =
   | 'security' // امور حراست، انتظامات و گزارش‌های حفاظتی
   | 'library' // امور کتابخانه، پژوهش و امانت کتب
   | 'smart_campus' // امور هوشمندسازی، کارت هوشمند و سامانه‌ها
+  | 'graduation' // امور فارغ‌التحصیلان و خاتمه تسویه
   | 'accommodation' // امور اسکان و انتخاب اتاق
   | 'maintenance' // خرابی تأسیسات و تعمیرات
   | 'services_cleaning' // خدمات، نظافت و بهداشت سرا
@@ -164,7 +165,7 @@ export type MessageCategory =
 export interface MessageReply {
   id: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation';
   content: string;
   date: string;
 }
@@ -173,10 +174,13 @@ export interface Message {
   id: string;
   senderId: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus';
-  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'all';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation';
+  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'all';
   receiverId?: string;
   receiverName?: string;
+  senderFieldOfStudy?: string; // رشته تحصیلی دانشجوی ارسال‌کننده جهت ارجاع خودکار به کارشناس آموزش مربوطه
+  targetEducationStaffId?: string; // شناسه کارشناس آموزش اختصاصی رشته (در صورت ارجاع مستقیم)
+  targetEducationStaffName?: string; // نام کارشناس آموزش اختصاصی رشته
   targetScope?: 'single' | 'field' | 'entry_term';
   targetFieldOfStudy?: string;
   targetEntryTerm?: string;
@@ -272,6 +276,7 @@ export interface EducationStaff {
   mobile?: string;
   photoUrl?: string; // تصویر پروفایل کارشناس آموزش
   department?: string; // واحد آموزش و امور دانشجویی
+  assignedFields?: string[]; // رشته‌های تحصیلی تحت پوشش کارشناس (خالی = همه رشته‌ها / کارشناس عمومی)
   role: 'education';
   status: 'active' | 'inactive';
   isActive?: boolean;
@@ -371,6 +376,21 @@ export interface SmartCampusStaff {
   notes?: string;
 }
 
+export interface GraduationStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل کارشناس امور فارغ‌التحصیلان
+  department?: string; // اداره امور فارغ‌التحصیلان
+  role: 'graduation';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
 export type SecurityReportCategory =
   | 'disciplinary_incident'
   | 'curfew_entry_exit'
@@ -407,7 +427,8 @@ export type StaffReferralActorRole =
   | 'cultural'
   | 'maintenance'
   | 'library'
-  | 'smart_campus';
+  | 'smart_campus'
+  | 'graduation';
 
 export interface SecurityReport {
   id: string;
@@ -797,6 +818,7 @@ export type CurrentUser =
   | { role: 'vice_dean'; staff: ViceDeanStaff }
   | { role: 'library'; staff: LibraryStaff }
   | { role: 'smart_campus'; staff: SmartCampusStaff }
+  | { role: 'graduation'; staff: GraduationStaff }
   | null;
 
 export type DayOfWeek = 'saturday' | 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
@@ -979,7 +1001,7 @@ export interface ActivityLog {
   timestamp: string; // ISO string برای مرتب‌سازی دقیق
   date: string; // تاریخ و ساعت شمسی خوانا
   actorName: string;
-  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'system';
+  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'system';
   actorUsername?: string;
   category: ActivityLogCategory;
   action: string;
@@ -1459,6 +1481,13 @@ export interface GraduationClearanceRequest {
   educationNote?: string;
   units: Record<ClearanceUnitRole, ClearanceUnitApproval>;
   completedAt?: string;
+  // خاتمه و تحویل نهایی توسط واحد فارغ‌التحصیلان
+  graduationFinalized?: boolean;
+  graduationFinalizedAt?: string;
+  graduationFinalizedBy?: string;
+  graduationFinalizedById?: string;
+  graduationFinalNote?: string;
+  graduationArchiveNumber?: string;
 }
 
 

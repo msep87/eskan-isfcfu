@@ -324,11 +324,36 @@ export const GraduationClearancePrintModal: React.FC<GraduationClearancePrintMod
                   صحت تاییدیه‌های الکترونیک سامانه جامع خدمات دانشجویی تایید می‌گردد.
                 </p>
               </div>
-              <div className="border border-slate-300 rounded-lg p-3 min-h-[76px] flex flex-col justify-between">
-                <p className="font-bold text-slate-700">تحویل و ثبت در اداره امور فارغ‌التحصیلان:</p>
-                <p className="text-[10px] text-slate-500">
-                  تاریخ تحویل: ...... / ...... / 140.... • شماره پرونده: ............
-                </p>
+              <div className={`border rounded-lg p-3 min-h-[76px] flex flex-col justify-between ${clearance.graduationFinalized ? 'border-emerald-500 bg-emerald-50/70' : 'border-slate-300'}`}>
+                <div className="flex items-center justify-between gap-1">
+                  <p className="font-bold text-slate-800">تحویل و ثبت در اداره امور فارغ‌التحصیلان:</p>
+                  {clearance.graduationFinalized && (
+                    <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 rounded">
+                      خاتمه‌یافته
+                    </span>
+                  )}
+                </div>
+                {clearance.graduationFinalized ? (
+                  <div className="text-[10px] text-slate-700 space-y-0.5 mt-1">
+                    <p>
+                      <span className="font-bold">کارشناس تاییدکننده:</span> {clearance.graduationFinalizedBy || '---'}
+                    </p>
+                    <p>
+                      <span className="font-bold">تاریخ خاتمه:</span> {clearance.graduationFinalizedAt || '---'} •{' '}
+                      <span className="font-bold">شماره بایگانی:</span>{' '}
+                      <span className="font-mono font-black" dir="ltr">
+                        {clearance.graduationArchiveNumber || '---'}
+                      </span>
+                    </p>
+                    {clearance.graduationFinalNote && (
+                      <p className="text-[9.5px] text-slate-600">{clearance.graduationFinalNote}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-500">
+                    تاریخ تحویل: ...... / ...... / 140.... • شماره پرونده: ............
+                  </p>
+                )}
               </div>
             </div>
 

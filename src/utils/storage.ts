@@ -63,6 +63,7 @@ import {
   ViceDeanStaff,
   LibraryStaff,
   SmartCampusStaff,
+  GraduationStaff,
   LibraryBook,
   LibraryBookRequest,
   ClearanceUnitRole,
@@ -115,6 +116,7 @@ import {
   INITIAL_VICE_DEAN_STAFF,
   INITIAL_LIBRARY_STAFF,
   INITIAL_SMART_CAMPUS_STAFF,
+  INITIAL_GRADUATION_STAFF,
   INITIAL_LIBRARY_BOOKS,
   INITIAL_LIBRARY_BOOK_REQUESTS,
   INITIAL_GRADUATION_CLEARANCES,
@@ -162,7 +164,8 @@ export type AvatarUploadRole =
   | 'security'
   | 'vice_dean'
   | 'library'
-  | 'smart_campus';
+  | 'smart_campus'
+  | 'graduation';
 
 export const CLEARANCE_UNITS_META: Array<{ role: ClearanceUnitRole; label: string; description: string }> = [
   { role: 'education', label: 'واحد آموزش', description: 'تایید گذراندن کلیه واحدهای درسی و پرونده آموزشی' },
@@ -243,6 +246,7 @@ const STORAGE_KEYS = {
   VICE_DEAN_STAFF: 'farhangian_dorm_vice_dean_staff_prod',
   LIBRARY_STAFF: 'farhangian_dorm_library_staff_prod',
   SMART_CAMPUS_STAFF: 'farhangian_dorm_smart_campus_staff_prod',
+  GRADUATION_STAFF: 'farhangian_dorm_graduation_staff_prod',
   LIBRARY_BOOKS: 'farhangian_dorm_library_books_prod',
   LIBRARY_BOOK_REQUESTS: 'farhangian_dorm_library_book_requests_prod',
   GRADUATION_CLEARANCES: 'farhangian_dorm_graduation_clearances_prod',
@@ -487,6 +491,7 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.VICE_DEAN_STAFF, INITIAL_VICE_DEAN_STAFF);
   setIfMissing(STORAGE_KEYS.LIBRARY_STAFF, INITIAL_LIBRARY_STAFF);
   setIfMissing(STORAGE_KEYS.SMART_CAMPUS_STAFF, INITIAL_SMART_CAMPUS_STAFF);
+  setIfMissing(STORAGE_KEYS.GRADUATION_STAFF, INITIAL_GRADUATION_STAFF);
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOKS, INITIAL_LIBRARY_BOOKS);
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, INITIAL_LIBRARY_BOOK_REQUESTS);
   setIfMissing(STORAGE_KEYS.GRADUATION_CLEARANCES, INITIAL_GRADUATION_CLEARANCES);
@@ -732,6 +737,7 @@ const STAFF_AUTH_KEYS: string[] = [
   STORAGE_KEYS.VICE_DEAN_STAFF,
   STORAGE_KEYS.LIBRARY_STAFF,
   STORAGE_KEYS.SMART_CAMPUS_STAFF,
+  STORAGE_KEYS.GRADUATION_STAFF,
 ];
 
 // کلیدهای بحرانی (ایجاد/ویرایش هر نوع کاربر و تنظیمات) که بلافاصله و بدون معطلی به سرور ابری ارسال می‌شوند
@@ -1039,6 +1045,7 @@ const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.VICE_DEAN_STAFF]: 'کاربران معاونت دانشجویی',
   [STORAGE_KEYS.LIBRARY_STAFF]: 'کاربران کتابخانه و پژوهش',
   [STORAGE_KEYS.SMART_CAMPUS_STAFF]: 'کاربران واحد هوشمندسازی',
+  [STORAGE_KEYS.GRADUATION_STAFF]: 'کاربران واحد فارغ‌التحصیلان',
   [STORAGE_KEYS.LIBRARY_BOOKS]: 'فهرست کتب کتابخانه',
   [STORAGE_KEYS.LIBRARY_BOOK_REQUESTS]: 'درخواست‌ها و امانات کتابخانه',
   [STORAGE_KEYS.GRADUATION_CLEARANCES]: 'تسویه حساب الکترونیک فارغ‌التحصیلان',
@@ -1260,6 +1267,7 @@ const STAFF_KEY_TO_AVATAR_ROLE: Record<string, AvatarUploadRole> = {
   [STORAGE_KEYS.VICE_DEAN_STAFF]: 'vice_dean',
   [STORAGE_KEYS.LIBRARY_STAFF]: 'library',
   [STORAGE_KEYS.SMART_CAMPUS_STAFF]: 'smart_campus',
+  [STORAGE_KEYS.GRADUATION_STAFF]: 'graduation',
 };
 
 function sanitizeStorageSegment(raw: string): string {
@@ -2430,6 +2438,115 @@ export function doesStudentMatchMessage(student: Student, msg: Message): boolean
     }
   }
   return false;
+}
+
+export function normalizeAssignedFieldsList(fields?: string[]): string[] {
+  if (!Array.isArray(fields)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of fields) {
+    const trimmed = String(raw || '').trim();
+    const key = normalizePersianSearch(trimmed);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+export function doesEducationStaffCoverField(
+  staff: EducationStaff,
+  fieldOfStudy?: string
+): boolean {
+  const assigned = normalizeAssignedFieldsList(staff.assignedFields);
+  if (assigned.length === 0) return true; // کارشناس عمومی (همه رشته‌ها)
+  const target = normalizePersianSearch(fieldOfStudy || '');
+  if (!target) return false;
+  return assigned.some((f) => normalizePersianSearch(f) === target);
+}
+
+export function resolveEducationStaffForField(
+  fieldOfStudy: string | undefined,
+  allEducationStaff: EducationStaff[]
+): EducationStaff[] {
+  const activeStaff = allEducationStaff.filter(
+    (e) => e.status !== 'inactive' && e.isActive !== false
+  );
+  const pool = activeStaff.length > 0 ? activeStaff : allEducationStaff;
+  const target = normalizePersianSearch(fieldOfStudy || '');
+  if (target) {
+    const dedicated = pool.filter((e) => {
+      const assigned = normalizeAssignedFieldsList(e.assignedFields);
+      return assigned.length > 0 && assigned.some((f) => normalizePersianSearch(f) === target);
+    });
+    if (dedicated.length > 0) return dedicated;
+  }
+  const general = pool.filter((e) => normalizeAssignedFieldsList(e.assignedFields).length === 0);
+  if (general.length > 0) return general;
+  return pool;
+}
+
+export function doesEducationStaffMatchMessage(
+  staff: EducationStaff,
+  msg: Message,
+  allEducationStaff: EducationStaff[],
+  students: Student[]
+): boolean {
+  if (!staff || !msg) return false;
+  // پیام‌هایی که خود همین کارشناس ارسال کرده همیشه برای خودش قابل مشاهده است
+  if (msg.senderId === staff.id) return true;
+
+  // اگر پیام اختصاصاً به یک کارشناس آموزش مشخص ارجاع شده باشد
+  if (msg.targetEducationStaffId) {
+    return msg.targetEducationStaffId === staff.id;
+  }
+
+  const isToEducation = msg.receiverType === 'education' || msg.category === 'education';
+  const isFromEducation = msg.senderRole === 'education';
+  const isBroadcastAll = msg.receiverType === 'all';
+  if (!isToEducation && !isFromEducation && !isBroadcastAll) return false;
+
+  const assigned = normalizeAssignedFieldsList(staff.assignedFields);
+
+  // پیام‌های ارسال‌شده توسط دانشجو به واحد آموزش بر اساس رشته تحصیلی به کارشناس مربوطه ارجاع می‌شوند
+  if (msg.senderRole === 'student' && (msg.receiverType === 'education' || msg.category === 'education')) {
+    let studentField = (msg.senderFieldOfStudy || '').trim();
+    if (!studentField) {
+      const sid = normalizeAsciiDigits(msg.senderId);
+      const found = students.find((s) => normalizeAsciiDigits(s.studentId) === sid);
+      studentField = (found?.fieldOfStudy || '').trim();
+    }
+    if (studentField) {
+      const matchedSpecialists = resolveEducationStaffForField(studentField, allEducationStaff);
+      if (matchedSpecialists.length > 0) {
+        return matchedSpecialists.some((s) => s.id === staff.id);
+      }
+      if (assigned.length > 0) {
+        return doesEducationStaffCoverField(staff, studentField);
+      }
+    }
+    // اگر رشته دانشجو ثبت نشده باشد، کارشناسان عمومی یا همه می‌بینند
+    return assigned.length === 0 || allEducationStaff.every((e) => normalizeAssignedFieldsList(e.assignedFields).length > 0);
+  }
+
+  // پیام‌های ارسال‌شده توسط یک کارشناس دیگر به دانشجویان یک رشته خاص: فقط برای خود ارسال‌کننده یا کارشناس همان رشته
+  if (msg.senderRole === 'education' && msg.senderId !== staff.id) {
+    if (msg.targetScope === 'field' && msg.targetFieldOfStudy) {
+      return doesEducationStaffCoverField(staff, msg.targetFieldOfStudy);
+    }
+    if (msg.receiverType === 'student' && msg.receiverId) {
+      const sid = normalizeAsciiDigits(msg.receiverId);
+      const found = students.find((s) => normalizeAsciiDigits(s.studentId) === sid);
+      if (found?.fieldOfStudy) {
+        const matched = resolveEducationStaffForField(found.fieldOfStudy, allEducationStaff);
+        return matched.some((s) => s.id === staff.id);
+      }
+    }
+    return false;
+  }
+
+  // سایر مکاتبات اداری (مدیر/سرپرست/سایر واحدها به واحد آموزش)
+  return isToEducation || isBroadcastAll;
 }
 
 export function compressAvatarImageFile(
@@ -3725,7 +3842,7 @@ export const Storage = {
 
   // تطبیق و اتصال دسته‌جمعی عکس‌های پرسنل و کادر بر اساس نام/کد کاربری
   batchAssignStaffPhotos: (
-    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus',
+    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation',
     photoMap: Record<string, string>
   ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     let matchedCount = 0;
@@ -3990,6 +4107,25 @@ export const Storage = {
           if (ref) Storage.setCurrentUser({ role: 'smart_campus', staff: ref });
         }
       }
+    } else if (role === 'graduation') {
+      const list = Storage.getGraduationStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setGraduationStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'graduation') {
+          const ref = list.find((gr) => gr.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'graduation', staff: ref });
+        }
+      }
     }
 
     if (matchedCount > 0 && saved) {
@@ -4007,6 +4143,7 @@ export const Storage = {
         vice_dean: 'کاربران معاونت دانشجویی',
         library: 'کاربران کتابخانه و پژوهش',
         smart_campus: 'کاربران واحد هوشمندسازی',
+        graduation: 'کاربران واحد فارغ‌التحصیلان',
       };
       Storage.addActivityLog({
         category: 'staff',
@@ -4088,7 +4225,7 @@ export const Storage = {
     messageId: string,
     reply: {
       senderName: string;
-      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus';
+      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation';
       content: string;
       date: string;
     }
@@ -4425,6 +4562,7 @@ export const Storage = {
     viceDeanStaff: Storage.getViceDeanStaff(),
     libraryStaff: Storage.getLibraryStaff(),
     smartCampusStaff: Storage.getSmartCampusStaff(),
+    graduationStaff: Storage.getGraduationStaff(),
     libraryBooks: Storage.getLibraryBooks(),
     libraryBookRequests: Storage.getLibraryBookRequests(),
     graduationClearances: Storage.getGraduationClearances(),
@@ -4474,7 +4612,8 @@ export const Storage = {
       | 'security'
       | 'vice_dean'
       | 'library'
-      | 'smart_campus';
+      | 'smart_campus'
+      | 'graduation';
 
     interface ArchivedPhotoRecord {
       role: PhotoRole;
@@ -4577,6 +4716,7 @@ export const Storage = {
         'vice_dean',
         'library',
         'smart_campus',
+        'graduation',
       ]);
 
       // گام ۱: جمع‌آوری عکس‌های کاربران (لینک‌های عمومی Supabase Storage و تصاویر درون‌خطی) برای همه ۱۲ نقش کاربری
@@ -4617,6 +4757,7 @@ export const Storage = {
       registerUserPhotos('vice_dean', baseData.viceDeanStaff);
       registerUserPhotos('library', baseData.libraryStaff);
       registerUserPhotos('smart_campus', baseData.smartCampusStaff);
+      registerUserPhotos('graduation', baseData.graduationStaff);
 
       if (missingPhotoFetchQueue.length > 0) {
         onProgress?.(`در حال دریافت و ضمیمه‌کردن ${missingPhotoFetchQueue.length.toLocaleString('fa-IR')} تصویر از Supabase Storage...`);
@@ -4702,7 +4843,8 @@ export const Storage = {
         baseData.securityStaff.length +
         baseData.viceDeanStaff.length +
         baseData.libraryStaff.length +
-        baseData.smartCampusStaff.length;
+        baseData.smartCampusStaff.length +
+        baseData.graduationStaff.length;
 
       const fontsCount = Array.isArray(st.customFonts) ? st.customFonts.length : 0;
       const attachmentsCount = Array.isArray(st.aboutContent?.attachments)
@@ -4841,6 +4983,7 @@ export const Storage = {
     if (Array.isArray(data.viceDeanStaff)) writeCollection(STORAGE_KEYS.VICE_DEAN_STAFF, data.viceDeanStaff);
     if (Array.isArray(data.libraryStaff)) writeCollection(STORAGE_KEYS.LIBRARY_STAFF, data.libraryStaff);
     if (Array.isArray(data.smartCampusStaff)) writeCollection(STORAGE_KEYS.SMART_CAMPUS_STAFF, data.smartCampusStaff);
+    if (Array.isArray(data.graduationStaff)) writeCollection(STORAGE_KEYS.GRADUATION_STAFF, data.graduationStaff);
     if (Array.isArray(data.libraryBooks)) writeCollection(STORAGE_KEYS.LIBRARY_BOOKS, data.libraryBooks);
     if (Array.isArray(data.libraryBookRequests)) writeCollection(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, data.libraryBookRequests);
     if (Array.isArray(data.graduationClearances)) writeCollection(STORAGE_KEYS.GRADUATION_CLEARANCES, data.graduationClearances);
@@ -4908,7 +5051,8 @@ export const Storage = {
       | 'security'
       | 'vice_dean'
       | 'library'
-      | 'smart_campus';
+      | 'smart_campus'
+      | 'graduation';
 
     try {
       onProgress?.('در حال خواندن و اعتبارسنجی ساختار فایل پشتیبان...');
@@ -5053,6 +5197,7 @@ export const Storage = {
         'vice_dean',
         'library',
         'smart_campus',
+        'graduation',
       ]);
 
       if (Array.isArray(data.cloudPhotos)) {
@@ -5083,6 +5228,7 @@ export const Storage = {
         { role: 'vice_dean', prop: 'viceDeanStaff' },
         { role: 'library', prop: 'libraryStaff' },
         { role: 'smart_campus', prop: 'smartCampusStaff' },
+        { role: 'graduation', prop: 'graduationStaff' },
       ];
 
       for (const { role, prop } of roleArrayPairs) {
@@ -5118,6 +5264,7 @@ export const Storage = {
         vice_dean: STORAGE_KEYS.VICE_DEAN_STAFF,
         library: STORAGE_KEYS.LIBRARY_STAFF,
         smart_campus: STORAGE_KEYS.SMART_CAMPUS_STAFF,
+        graduation: STORAGE_KEYS.GRADUATION_STAFF,
       };
 
       const useBackgroundPhotoQueue = restoredPhotosCount > 45;
@@ -5478,7 +5625,7 @@ export const Storage = {
 
   // تغییر کلمه عبور برای تمام نقش‌ها
   changePassword: (
-    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus',
+    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation',
     userId: string,
     currentPasswordInput: string,
     newPasswordInput: string
@@ -5768,6 +5915,24 @@ export const Storage = {
         targetName: staff.fullName,
       });
       return { success: true, message: 'کلمه عبور واحد هوشمندسازی با موفقیت تغییر یافت.' };
+    }
+
+    if (role === 'graduation') {
+      const staffList = Storage.getGraduationStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) return { success: false, message: 'کاربر واحد فارغ‌التحصیلان یافت نشد.' };
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی واحد فارغ‌التحصیلان اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setGraduationStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور واحد فارغ‌التحصیلان',
+        details: `کلمه عبور کارشناس فارغ‌التحصیلان ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور واحد فارغ‌التحصیلان با موفقیت تغییر یافت.' };
     }
 
     if (role === 'student') {
@@ -6076,7 +6241,7 @@ export const Storage = {
 
   // تغییر یا ریست مستقیم رمز عبور کاربران توسط مدیر کل (بدون نیاز به رمز قبلی)
   adminResetUserPassword: (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation',
     idOrStudentId: string,
     newPasswordInput: string
   ): { success: boolean; message: string } => {
@@ -6366,6 +6531,25 @@ export const Storage = {
       return {
         success: true,
         message: `رمز عبور واحد هوشمندسازی «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'graduation') {
+      const list = Storage.getGraduationStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر واحد فارغ‌التحصیلان یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setGraduationStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز واحد فارغ‌التحصیلان توسط مدیر',
+        details: `کلمه عبور کارشناس فارغ‌التحصیلان ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور واحد فارغ‌التحصیلان «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
       };
     }
 
@@ -8105,6 +8289,10 @@ export const Storage = {
         actorName = currentUser.staff.fullName;
         actorRole = 'smart_campus';
         actorUsername = currentUser.staff.username;
+      } else if (currentUser.role === 'graduation') {
+        actorName = currentUser.staff.fullName;
+        actorRole = 'graduation';
+        actorUsername = currentUser.staff.username;
       }
     }
 
@@ -8893,12 +9081,14 @@ export const Storage = {
     if (list.some((s) => normalizeAsciiDigits(s.username).toLowerCase() === cleanUsername)) {
       return { success: false, message: 'این نام کاربری قبلاً برای کارشناس آموزش دیگری ثبت شده است.' };
     }
+    const normalizedFields = normalizeAssignedFieldsList(staffData.assignedFields);
     const newStaff: EducationStaff = {
       ...staffData,
       id: makeUniqueId('edu'),
       username: cleanUsername,
       role: 'education',
       department: staffData.department?.trim() || 'واحد آموزش و امور دانشجویی',
+      assignedFields: normalizedFields.length > 0 ? normalizedFields : undefined,
       status: staffData.status || 'active',
       isActive: staffData.isActive !== false,
     };
@@ -8907,7 +9097,7 @@ export const Storage = {
     Storage.addActivityLog({
       category: 'staff',
       action: 'ثبت کارشناس آموزش',
-      details: `کارشناس آموزش «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      details: `کارشناس آموزش «${newStaff.fullName}» (${newStaff.username})${normalizedFields.length > 0 ? ` — رشته‌ها: ${normalizedFields.join('، ')}` : ' — همه رشته‌ها'} در سامانه ثبت شد.`,
       targetName: newStaff.fullName,
     });
     return {
@@ -8932,6 +9122,10 @@ export const Storage = {
         return { success: false, message: 'این نام کاربری قبلاً برای کارشناس آموزش دیگری ثبت شده است.' };
       }
       normalizedUpdates.username = cleanU;
+    }
+    if ('assignedFields' in normalizedUpdates) {
+      const cleanFields = normalizeAssignedFieldsList(normalizedUpdates.assignedFields);
+      normalizedUpdates.assignedFields = cleanFields.length > 0 ? cleanFields : undefined;
     }
     list[idx] = { ...list[idx], ...normalizedUpdates };
     Storage.setEducationStaff(list);
@@ -9962,7 +10156,8 @@ export const Storage = {
       | 'cultural'
       | 'maintenance'
       | 'library'
-      | 'smart_campus';
+      | 'smart_campus'
+      | 'graduation';
     notifyStudentInbox?: boolean;
   }): { success: boolean; message: string; referrals?: DisciplinaryReferral[] } => {
     if (!payload.students || payload.students.length === 0) {
@@ -11539,7 +11734,8 @@ export const Storage = {
         | 'security'
         | 'vice_dean'
         | 'library'
-        | 'smart_campus';
+        | 'smart_campus'
+        | 'graduation';
       roleLabel: string;
       fullName: string;
       username: string;
@@ -11665,6 +11861,15 @@ export const Storage = {
         password: sc.password,
         isInactive: sc.status === 'inactive' || sc.isActive === false,
         user: { role: 'smart_campus' as const, staff: sc },
+      })),
+      ...Storage.getGraduationStaff().map((gr) => ({
+        role: 'graduation' as const,
+        roleLabel: 'واحد فارغ‌التحصیلان',
+        fullName: gr.fullName,
+        username: gr.username,
+        password: gr.password,
+        isInactive: gr.status === 'inactive' || gr.isActive === false,
+        user: { role: 'graduation' as const, staff: gr },
       })),
     ];
 
@@ -11851,7 +12056,8 @@ export const Storage = {
       | 'cultural'
       | 'maintenance'
       | 'library'
-      | 'smart_campus';
+      | 'smart_campus'
+      | 'graduation';
   }): { success: boolean; message: string; report?: SecurityReport } => {
     if (!payload.students || payload.students.length === 0) {
       return { success: false, message: 'لطفاً حداقل یک دانشجو برای ارسال گزارش به حراست انتخاب نمایید.' };
@@ -11927,7 +12133,8 @@ export const Storage = {
       | 'cultural'
       | 'maintenance'
       | 'library'
-      | 'smart_campus',
+      | 'smart_campus'
+      | 'graduation',
       string
     > = {
       supervisor: 'سرپرست سرا',
@@ -11942,6 +12149,7 @@ export const Storage = {
       cultural: 'امور فرهنگی',
       library: 'کتابخانه و پژوهش',
       smart_campus: 'واحد هوشمندسازی',
+      graduation: 'واحد فارغ‌التحصیلان',
     };
 
     Storage.addActivityLog({
@@ -12703,6 +12911,91 @@ export const Storage = {
   },
 
   // -------------------------------------------------------------
+  // متدهای مدیریت کاربران واحد فارغ‌التحصیلان
+  // -------------------------------------------------------------
+  getGraduationStaff: (): GraduationStaff[] =>
+    get<GraduationStaff[]>(STORAGE_KEYS.GRADUATION_STAFF, INITIAL_GRADUATION_STAFF),
+
+  setGraduationStaff: (staff: GraduationStaff[]): boolean =>
+    set(STORAGE_KEYS.GRADUATION_STAFF, staff),
+
+  addGraduationStaff: (
+    staffData: Omit<GraduationStaff, 'id'>
+  ): { success: boolean; message: string; staff?: GraduationStaff } => {
+    const list = Storage.getGraduationStaff();
+    const cleanUsername = normalizeAsciiDigits(staffData.username).toLowerCase();
+    if (!cleanUsername) {
+      return { success: false, message: 'نام کاربری واحد فارغ‌التحصیلان نمی‌تواند خالی باشد.' };
+    }
+    if (list.some((s) => normalizeAsciiDigits(s.username).toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کاربر فارغ‌التحصیلان دیگری ثبت شده است.' };
+    }
+    const newStaff: GraduationStaff = {
+      ...staffData,
+      id: makeUniqueId('grad'),
+      username: cleanUsername,
+      role: 'graduation',
+      department: staffData.department?.trim() || 'اداره امور فارغ‌التحصیلان',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setGraduationStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کارشناس واحد فارغ‌التحصیلان',
+      details: `کارشناس واحد فارغ‌التحصیلان «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کارشناس واحد فارغ‌التحصیلان «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateGraduationStaff: (
+    id: string,
+    updates: Partial<GraduationStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getGraduationStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر واحد فارغ‌التحصیلان یافت نشد.' };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizeAsciiDigits(normalizedUpdates.username).toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((s) => s.id !== id && normalizeAsciiDigits(s.username).toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر فارغ‌التحصیلان دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
+    Storage.setGraduationStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'graduation' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'graduation', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کارشناس واحد فارغ‌التحصیلان با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteGraduationStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getGraduationStaff();
+    const target = list.find((s) => s.id === id);
+    Storage.setGraduationStaff(list.filter((s) => s.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کارشناس واحد فارغ‌التحصیلان',
+        details: `حساب کاربری واحد فارغ‌التحصیلان «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کارشناس واحد فارغ‌التحصیلان با موفقیت حذف گردید.' };
+  },
+
+  // -------------------------------------------------------------
   // متدهای گردش کار تسویه حساب الکترونیک فراغت از تحصیل
   // -------------------------------------------------------------
   getGraduationClearances: (): GraduationClearanceRequest[] =>
@@ -13051,6 +13344,199 @@ export const Storage = {
     return {
       success: true,
       message: `درخواست بررسی مجدد به «${targetUnit.unitLabel}» ارسال شد.`,
+    };
+  },
+
+  finalizeGraduationClearance: (
+    clearanceId: string,
+    payload: {
+      staffId: string;
+      staffName: string;
+      archiveNumber?: string;
+      note?: string;
+    }
+  ): { success: boolean; message: string; request?: GraduationClearanceRequest } => {
+    const list = Storage.getGraduationClearances();
+    const idx = list.findIndex((r) => r.id === clearanceId);
+    if (idx === -1) return { success: false, message: 'پرونده تسویه حساب یافت نشد.' };
+    const cur = list[idx];
+    if (cur.status !== 'completed') {
+      return {
+        success: false,
+        message: 'این پرونده هنوز تایید تمامی واحدهای تسویه را تکمیل نکرده و قابل خاتمه نیست.',
+      };
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const archiveNumber = (payload.archiveNumber || '').trim() || cur.graduationArchiveNumber || `GRD-${cur.trackingCode.replace(/^CLR-?/i, '')}`;
+    const note = (payload.note || '').trim() || 'برگه تسویه حساب دریافت و فرآیند تسویه در اداره امور فارغ‌التحصیلان خاتمه یافت.';
+
+    const updated: GraduationClearanceRequest = {
+      ...cur,
+      graduationFinalized: true,
+      graduationFinalizedAt: nowStr,
+      graduationFinalizedBy: payload.staffName,
+      graduationFinalizedById: payload.staffId,
+      graduationArchiveNumber: archiveNumber,
+      graduationFinalNote: note,
+      updatedAt: nowStr,
+    };
+
+    list[idx] = updated;
+    Storage.setGraduationClearances(list);
+    Storage.addActivityLog({
+      category: 'graduation_clearance',
+      action: 'خاتمه نهایی فرآیند تسویه توسط واحد فارغ‌التحصیلان',
+      details: `پرونده تسویه ${cur.trackingCode} (${cur.studentName}) با شماره پرونده «${archiveNumber}» توسط ${payload.staffName} خاتمه و بایگانی شد.`,
+      targetName: cur.trackingCode,
+    });
+
+    Storage.addMessage({
+      senderId: payload.staffId,
+      senderName: `${payload.staffName} (واحد فارغ‌التحصیلان)`,
+      senderRole: 'graduation',
+      receiverType: 'student',
+      receiverId: cur.studentId,
+      receiverName: cur.studentName,
+      targetScope: 'single',
+      category: 'graduation',
+      subject: `خاتمه نهایی فرآیند تسویه حساب فراغت از تحصیل (${cur.trackingCode})`,
+      content: `فرآیند تسویه حساب فراغت از تحصیل شما در اداره امور فارغ‌التحصیلان با موفقیت تایید، دریافت و خاتمه یافت.\nشماره پرونده / بایگانی: ${archiveNumber}\nتوضیحات واحد فارغ‌التحصیلان: ${note}`,
+      date: nowStr,
+    });
+
+    return {
+      success: true,
+      message: `فرآیند تسویه حساب «${cur.studentName}» (${cur.trackingCode}) با شماره بایگانی «${archiveNumber}» با موفقیت خاتمه یافت.`,
+      request: updated,
+    };
+  },
+
+  bulkFinalizeGraduationClearances: (
+    clearanceIds: string[],
+    payload: {
+      staffId: string;
+      staffName: string;
+      note?: string;
+    }
+  ): { success: boolean; message: string; finalizedCount: number; skippedCount: number } => {
+    if (!Array.isArray(clearanceIds) || clearanceIds.length === 0) {
+      return { success: false, message: 'هیچ پرونده‌ای برای خاتمه یکجا انتخاب نشده است.', finalizedCount: 0, skippedCount: 0 };
+    }
+    const idSet = new Set(clearanceIds);
+    const list = Storage.getGraduationClearances();
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const note = (payload.note || '').trim() || 'دریافت یکجا و خاتمه نهایی فرآیند تسویه در اداره امور فارغ‌التحصیلان.';
+    let finalizedCount = 0;
+    let skippedCount = 0;
+    const finalizedStudents: GraduationClearanceRequest[] = [];
+
+    const updatedList = list.map((cur) => {
+      if (!idSet.has(cur.id)) return cur;
+      if (cur.status !== 'completed' || cur.graduationFinalized) {
+        skippedCount += 1;
+        return cur;
+      }
+      const archiveNumber = cur.graduationArchiveNumber || `GRD-${cur.trackingCode.replace(/^CLR-?/i, '')}`;
+      const next: GraduationClearanceRequest = {
+        ...cur,
+        graduationFinalized: true,
+        graduationFinalizedAt: nowStr,
+        graduationFinalizedBy: payload.staffName,
+        graduationFinalizedById: payload.staffId,
+        graduationArchiveNumber: archiveNumber,
+        graduationFinalNote: note,
+        updatedAt: nowStr,
+      };
+      finalizedCount += 1;
+      finalizedStudents.push(next);
+      return next;
+    });
+
+    if (finalizedCount === 0) {
+      return {
+        success: false,
+        message: 'هیچ پرونده واجد شرایطی (تکمیل‌شده و خاتمه‌نیافته) در موارد انتخاب‌شده یافت نشد.',
+        finalizedCount: 0,
+        skippedCount,
+      };
+    }
+
+    Storage.setGraduationClearances(updatedList);
+    Storage.addActivityLog({
+      category: 'graduation_clearance',
+      action: 'خاتمه یکجای فرآیند تسویه توسط واحد فارغ‌التحصیلان',
+      details: `تعداد ${finalizedCount} پرونده تسویه حساب تکمیل‌شده به‌صورت یکجا توسط ${payload.staffName} دریافت و خاتمه یافت.`,
+      targetName: `${finalizedCount} پرونده`,
+    });
+
+    // ارسال پیام اطلاع‌رسانی خاتمه تسویه برای دانشجویان مربوطه
+    const messages = Storage.getMessages();
+    finalizedStudents.forEach((cur) => {
+      messages.unshift({
+        id: makeUniqueId('msg'),
+        senderId: payload.staffId,
+        senderName: `${payload.staffName} (واحد فارغ‌التحصیلان)`,
+        senderRole: 'graduation',
+        receiverType: 'student',
+        receiverId: cur.studentId,
+        receiverName: cur.studentName,
+        targetScope: 'single',
+        category: 'graduation',
+        subject: `خاتمه نهایی فرآیند تسویه حساب فراغت از تحصیل (${cur.trackingCode})`,
+        content: `فرآیند تسویه حساب فراغت از تحصیل شما در اداره امور فارغ‌التحصیلان تایید و خاتمه یافت.\nشماره بایگانی: ${cur.graduationArchiveNumber}\nتوضیحات: ${note}`,
+        date: nowStr,
+        status: 'pending',
+        replies: [],
+      });
+    });
+    Storage.setMessages(messages);
+
+    return {
+      success: true,
+      message: `تعداد ${finalizedCount.toLocaleString('fa-IR')} پرونده تسویه حساب تکمیل‌شده با موفقیت خاتمه و بایگانی شد.`,
+      finalizedCount,
+      skippedCount,
+    };
+  },
+
+  reopenGraduationClearanceFinalization: (
+    clearanceId: string,
+    payload: { staffName: string }
+  ): { success: boolean; message: string } => {
+    const list = Storage.getGraduationClearances();
+    const idx = list.findIndex((r) => r.id === clearanceId);
+    if (idx === -1) return { success: false, message: 'پرونده تسویه حساب یافت نشد.' };
+    const cur = list[idx];
+    if (!cur.graduationFinalized) {
+      return { success: false, message: 'این پرونده در وضعیت خاتمه‌یافته قرار ندارد.' };
+    }
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    list[idx] = {
+      ...cur,
+      graduationFinalized: false,
+      updatedAt: nowStr,
+    };
+    Storage.setGraduationClearances(list);
+    Storage.addActivityLog({
+      category: 'graduation_clearance',
+      action: 'بازگشایی وضعیت خاتمه تسویه توسط واحد فارغ‌التحصیلان',
+      details: `وضعیت خاتمه پرونده ${cur.trackingCode} (${cur.studentName}) توسط ${payload.staffName} به حالت آماده خاتمه بازگردانده شد.`,
+      targetName: cur.trackingCode,
+      severity: 'warning',
+    });
+    return {
+      success: true,
+      message: `وضعیت خاتمه پرونده «${cur.studentName}» بازگشایی شد.`,
     };
   },
 

@@ -46,6 +46,7 @@ import {
   ViceDeanStaff,
   LibraryStaff,
   SmartCampusStaff,
+  GraduationStaff,
   LibraryBook,
   LibraryBookRequest,
   GraduationClearanceRequest,
@@ -205,6 +206,9 @@ export const INITIAL_LIBRARY_STAFF: LibraryStaff[] = [];
 
 // کاربران واحد هوشمندسازی (کاملاً خالی)
 export const INITIAL_SMART_CAMPUS_STAFF: SmartCampusStaff[] = [];
+
+// کارشناسان واحد فارغ‌التحصیلان (کاملاً خالی)
+export const INITIAL_GRADUATION_STAFF: GraduationStaff[] = [];
 
 // فهرست کتب موجود کتابخانه (کاملاً خالی)
 export const INITIAL_LIBRARY_BOOKS: LibraryBook[] = [];

@@ -17,9 +17,10 @@ import {
   ViceDeanStaff,
   LibraryStaff,
   SmartCampusStaff,
+  GraduationStaff,
   CurrentUser,
 } from '../types';
-import { Storage, compressAvatarImageFile } from '../utils/storage';
+import { Storage, compressAvatarImageFile, normalizeAssignedFieldsList } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import { getStudentResidenceType } from '../utils/financeUtils';
 import { compareStudents } from '../utils/studentSearchSort';
@@ -81,6 +82,8 @@ import {
   BookOpen,
   Cpu,
   LogIn,
+  FileCheck2,
+  Plus,
 } from 'lucide-react';
 
 export type UserCategoryKey =
@@ -97,7 +100,8 @@ export type UserCategoryKey =
   | 'security'
   | 'vice_dean'
   | 'library'
-  | 'smart_campus';
+  | 'smart_campus'
+  | 'graduation';
 
 interface AdminUsersPanelProps {
   activeCategory: UserCategoryKey;
@@ -119,6 +123,7 @@ interface AdminUsersPanelProps {
   viceDeanStaff?: ViceDeanStaff[];
   libraryStaff?: LibraryStaff[];
   smartCampusStaff?: SmartCampusStaff[];
+  graduationStaff?: GraduationStaff[];
   onRefreshData: () => void;
   onOpenExcelModal: (tab: ExcelImportTab) => void;
   onOpenReports: () => void;
@@ -151,7 +156,8 @@ type StaffRole =
   | 'security'
   | 'vice_dean'
   | 'library'
-  | 'smart_campus';
+  | 'smart_campus'
+  | 'graduation';
 type StudentSortKey =
   | 'default'
   | 'lastName'
@@ -181,6 +187,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   viceDeanStaff = [],
   libraryStaff = [],
   smartCampusStaff = [],
+  graduationStaff = [],
   onRefreshData,
   onOpenExcelModal,
   onOpenReports,
@@ -249,8 +256,26 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const [formNotes, setFormNotes] = useState('');
   const [formActive, setFormActive] = useState(true);
   const [formDormIds, setFormDormIds] = useState<string[]>([]);
+  const [formAssignedFields, setFormAssignedFields] = useState<string[]>([]);
+  const [customFieldInput, setCustomFieldInput] = useState('');
   const [formPhotoUrl, setFormPhotoUrl] = useState('');
   const [formError, setFormError] = useState('');
+
+  const availableEducationFields = useMemo(() => {
+    const raw: string[] = [];
+    students.forEach((s) => {
+      if (s.fieldOfStudy && s.fieldOfStudy.trim()) raw.push(s.fieldOfStudy.trim());
+    });
+    educationStaff.forEach((edu) => {
+      (edu.assignedFields || []).forEach((f) => {
+        if (f && f.trim()) raw.push(f.trim());
+      });
+    });
+    formAssignedFields.forEach((f) => {
+      if (f && f.trim()) raw.push(f.trim());
+    });
+    return normalizeAssignedFieldsList(raw).sort((a, b) => a.localeCompare(b, 'fa'));
+  }, [students, educationStaff, formAssignedFields]);
 
   // وضعیت بارگذاری جمعی عکس‌ها (پوشه یا چند فایل)
   const [batchPhotoStatus, setBatchPhotoStatus] = useState<{
@@ -393,6 +418,12 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           showToast('error', res.message);
           return;
         }
+      } else if (role === 'graduation') {
+        const res = Storage.updateGraduationStaff(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
       }
 
       const syncRes = await Storage.waitForPendingCloudSync();
@@ -493,6 +524,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             ? libraryStaff
             : targetRole === 'smart_campus'
             ? smartCampusStaff
+            : targetRole === 'graduation'
+            ? graduationStaff
             : counselors;
         const found = pool.find((u) => normKey(u.username) === nk || normKey(u.id) === nk);
         if (found) {
@@ -981,7 +1014,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       if (q) {
         const txt = `${norm(edu.fullName)} ${norm(edu.username)} ${norm(edu.mobile || edu.phone)} ${norm(
           edu.department
-        )} ${norm(edu.notes)}`;
+        )} ${norm((edu.assignedFields || []).join(' '))} ${norm(edu.notes)}`;
         if (!txt.includes(q)) return false;
       }
       return true;
@@ -1092,6 +1125,22 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     });
   }, [smartCampusStaff, staffQuery, staffStatusFilter]);
 
+  const filteredGraduation = useMemo(() => {
+    const q = norm(staffQuery);
+    return graduationStaff.filter((gr) => {
+      const isActive = gr.status !== 'inactive' && gr.isActive !== false;
+      if (staffStatusFilter === 'active' && !isActive) return false;
+      if (staffStatusFilter === 'inactive' && isActive) return false;
+      if (q) {
+        const txt = `${norm(gr.fullName)} ${norm(gr.username)} ${norm(gr.mobile || gr.phone)} ${norm(
+          gr.department
+        )} ${norm(gr.notes)}`;
+        if (!txt.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [graduationStaff, staffQuery, staffStatusFilter]);
+
   // باز کردن مدال افزودن کاربر پرسنل
   const openAddStaffModal = (role: StaffRole) => {
     setStaffModalRole(role);
@@ -1120,12 +1169,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         ? 'واحد کتابخانه و پژوهش'
         : role === 'smart_campus'
         ? 'واحد هوشمندسازی و فناوری'
+        : role === 'graduation'
+        ? 'اداره امور فارغ‌التحصیلان'
         : ''
     );
     setFormOfficeLocation(role === 'vice_dean' ? 'معاون دانشجویی' : '');
     setFormNotes('');
     setFormActive(true);
     setFormPhotoUrl('');
+    setFormAssignedFields([]);
+    setCustomFieldInput('');
     setFormDormIds(
       role === 'supervisor'
         ? dorms[0]?.id
@@ -1154,6 +1207,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       | ViceDeanStaff
       | LibraryStaff
       | SmartCampusStaff
+      | GraduationStaff
   ) => {
     setStaffModalRole(role);
     setEditingStaffId(user.id);
@@ -1208,6 +1262,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormDepartment(edu.department || 'واحد امور آموزشی');
       setFormNotes(edu.notes || '');
       setFormActive(edu.status !== 'inactive' && edu.isActive !== false);
+      setFormAssignedFields(normalizeAssignedFieldsList(edu.assignedFields));
+      setCustomFieldInput('');
     } else if (role === 'cultural') {
       const cul = user as CulturalStaff;
       setFormDepartment(cul.department || 'واحد امور فرهنگی و اجتماعی سراها');
@@ -1242,6 +1298,11 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormDepartment(sm.department || 'واحد هوشمندسازی و فناوری');
       setFormNotes(sm.notes || '');
       setFormActive(sm.status !== 'inactive' && sm.isActive !== false);
+    } else if (role === 'graduation') {
+      const gr = user as GraduationStaff;
+      setFormDepartment(gr.department || 'اداره امور فارغ‌التحصیلان');
+      setFormNotes(gr.notes || '');
+      setFormActive(gr.status !== 'inactive' && gr.isActive !== false);
     }
 
     setStaffModalOpen(true);
@@ -1534,6 +1595,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         showToast('success', res.message);
       }
     } else if (staffModalRole === 'education') {
+      const cleanAssignedFields = normalizeAssignedFieldsList(formAssignedFields);
       if (editingStaffId) {
         const res = Storage.updateEducationStaff(editingStaffId, {
           fullName: cleanName,
@@ -1543,6 +1605,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           mobile: cleanPhone,
           photoUrl: resolvedPhotoUrl || undefined,
           department: formDepartment.trim() || 'واحد امور آموزشی',
+          assignedFields: cleanAssignedFields,
           status: formActive ? 'active' : 'inactive',
           isActive: formActive,
           notes: formNotes.trim() || undefined,
@@ -1561,6 +1624,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           mobile: cleanPhone,
           photoUrl: resolvedPhotoUrl || undefined,
           department: formDepartment.trim() || 'واحد امور آموزشی',
+          assignedFields: cleanAssignedFields,
           role: 'education',
           status: formActive ? 'active' : 'inactive',
           isActive: formActive,
@@ -1813,6 +1877,45 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         }
         showToast('success', res.message);
       }
+    } else if (staffModalRole === 'graduation') {
+      if (editingStaffId) {
+        const res = Storage.updateGraduationStaff(editingStaffId, {
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'اداره امور فارغ‌التحصیلان',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      } else {
+        const res = Storage.addGraduationStaff({
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'اداره امور فارغ‌التحصیلان',
+          role: 'graduation',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      }
     }
 
     const syncRes = await Storage.waitForPendingCloudSync();
@@ -1911,6 +2014,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       baseMessage = Storage.deleteLibraryStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'smart_campus') {
       baseMessage = Storage.deleteSmartCampusStaff(deleteTarget.id).message;
+    } else if (deleteTarget.role === 'graduation') {
+      baseMessage = Storage.deleteGraduationStaff(deleteTarget.id).message;
     }
     const syncRes = await Storage.waitForPendingCloudSync();
     setDeleteTarget(null);
@@ -2049,6 +2154,15 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       activeBg: 'bg-cyan-700 text-white border-cyan-700 shadow-lg shadow-cyan-700/25',
       badgeBg: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300',
     },
+    {
+      key: 'graduation' as const,
+      title: 'واحد فارغ‌التحصیلان',
+      subtitle: 'مشاهده گردش کار تسویه، دریافت و چاپ تکی/یکجای برگه‌ها و خاتمه فرآیند',
+      count: graduationStaff.length,
+      icon: FileCheck2,
+      activeBg: 'bg-emerald-700 text-white border-emerald-700 shadow-lg shadow-emerald-700/25',
+      badgeBg: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+    },
   ];
 
   const roleLabels: Record<StaffRole, string> = {
@@ -2065,6 +2179,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     vice_dean: 'معاونت دانشجویی',
     library: 'کتابخانه و پژوهش',
     smart_campus: 'واحد هوشمندسازی',
+    graduation: 'کارشناس واحد فارغ‌التحصیلان',
   };
 
   return (
@@ -2102,7 +2217,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 securityStaff.length +
                 viceDeanStaff.length +
                 libraryStaff.length +
-                smartCampusStaff.length}
+                smartCampusStaff.length +
+                graduationStaff.length}
             </span>
           </div>
         </div>
@@ -3203,6 +3319,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 {activeCategory === 'vice_dean' && <Landmark className="w-5 h-5 text-indigo-700" />}
                 {activeCategory === 'library' && <BookOpen className="w-5 h-5 text-indigo-600" />}
                 {activeCategory === 'smart_campus' && <Cpu className="w-5 h-5 text-cyan-600" />}
+                {activeCategory === 'graduation' && <FileCheck2 className="w-5 h-5 text-emerald-600" />}
               </div>
               <div>
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
@@ -3219,6 +3336,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'vice_dean' && `مدیریت کاربران معاونت دانشجویی (${filteredViceDean.length} از ${viceDeanStaff.length})`}
                   {activeCategory === 'library' && `مدیریت کاربران کتابخانه و پژوهش (${filteredLibrary.length} از ${libraryStaff.length})`}
                   {activeCategory === 'smart_campus' && `مدیریت کاربران واحد هوشمندسازی (${filteredSmartCampus.length} از ${smartCampusStaff.length})`}
+                  {activeCategory === 'graduation' && `مدیریت کاربران واحد فارغ‌التحصیلان (${filteredGraduation.length} از ${graduationStaff.length})`}
                 </h3>
                 <p className="text-xs text-slate-400">
                   مشاهده، جستجوی پیشرفته، ویرایش مشخصات، تغییر یا ریست رمز عبور و ورود تکی یا گروهی
@@ -3255,6 +3373,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       ? 'library'
                       : activeCategory === 'smart_campus'
                       ? 'smart_campus'
+                      : activeCategory === 'graduation'
+                      ? 'graduation'
                       : 'counselor'
                   )
                 }
@@ -3275,6 +3395,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'vice_dean' && 'افزودن کاربر معاونت دانشجویی'}
                   {activeCategory === 'library' && 'افزودن کاربر کتابخانه و پژوهش'}
                   {activeCategory === 'smart_campus' && 'افزودن کاربر واحد هوشمندسازی'}
+                  {activeCategory === 'graduation' && 'افزودن کاربر واحد فارغ‌التحصیلان'}
                 </span>
               </button>
 
@@ -3283,7 +3404,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 activeCategory !== 'security' &&
                 activeCategory !== 'vice_dean' &&
                 activeCategory !== 'library' &&
-                activeCategory !== 'smart_campus' && (
+                activeCategory !== 'smart_campus' &&
+                activeCategory !== 'graduation' && (
                 <button
                   type="button"
                   onClick={() =>
@@ -3336,6 +3458,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     ? 'library'
                     : activeCategory === 'smart_campus'
                     ? 'smart_campus'
+                    : activeCategory === 'graduation'
+                    ? 'graduation'
                     : 'counselor';
                 return (
                   <>
@@ -3404,7 +3528,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
               activeCategory !== 'student_affairs' &&
               activeCategory !== 'vice_dean' &&
               activeCategory !== 'library' &&
-              activeCategory !== 'smart_campus' && (
+              activeCategory !== 'smart_campus' &&
+              activeCategory !== 'graduation' && (
               <div className="flex items-center gap-1.5">
                 <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <select
@@ -3454,7 +3579,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     activeCategory !== 'student_affairs' &&
                     activeCategory !== 'vice_dean' &&
                     activeCategory !== 'library' &&
-                    activeCategory !== 'smart_campus' && (
+                    activeCategory !== 'smart_campus' &&
+                    activeCategory !== 'graduation' && (
                     <th className="p-3">محدوده سرا / تخصص</th>
                   )}
                   {(activeCategory === 'warehouse' ||
@@ -3465,8 +3591,11 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     activeCategory === 'student_affairs' ||
                     activeCategory === 'vice_dean' ||
                     activeCategory === 'library' ||
-                    activeCategory === 'smart_campus') && (
-                    <th className="p-3">بخش / سمت و توضیحات</th>
+                    activeCategory === 'smart_campus' ||
+                    activeCategory === 'graduation') && (
+                    <th className="p-3">
+                      {activeCategory === 'education' ? 'بخش / رشته‌های تحت پوشش' : 'بخش / سمت و توضیحات'}
+                    </th>
                   )}
                   {activeCategory !== 'supervisors' && <th className="p-3">وضعیت</th>}
                   <th className="p-3 text-center">عملیات مدیریت</th>
@@ -4466,9 +4595,25 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           <td className="p-3 font-mono" dir="ltr">
                             {edu.mobile || edu.phone || '-'}
                           </td>
-                          <td className="p-3">
+                          <td className="p-3 space-y-1">
                             <div className="font-semibold text-sky-700 dark:text-sky-300">
                               {edu.department || 'واحد امور آموزشی'}
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {edu.assignedFields && edu.assignedFields.length > 0 ? (
+                                edu.assignedFields.map((fld) => (
+                                  <span
+                                    key={fld}
+                                    className="px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-[10px] font-bold"
+                                  >
+                                    {fld}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold">
+                                  همه رشته‌ها (عمومی)
+                                </span>
+                              )}
                             </div>
                             {edu.notes && <div className="text-[11px] text-slate-400">{edu.notes}</div>}
                           </td>
@@ -5486,6 +5631,150 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       );
                     })
                   ))}
+
+                {activeCategory === 'graduation' &&
+                  (filteredGraduation.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-slate-400">
+                        هیچ کاربر واحد فارغ‌التحصیلان با مشخصات جستجوشده یافت نشد. برای ثبت کاربر از دکمه «افزودن کاربر واحد فارغ‌التحصیلان» استفاده کنید.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredGraduation.map((gr) => {
+                      const isActive = gr.status !== 'inactive' && gr.isActive !== false;
+                      const passKey = `gr_${gr.id}`;
+                      const isShown = revealedPasswords[passKey];
+                      return (
+                        <tr key={gr.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              {gr.photoUrl ? (
+                                <img
+                                  src={gr.photoUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover border border-emerald-300 dark:border-emerald-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-emerald-700 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                  {(gr.fullName || 'ف').slice(0, 1)}
+                                </div>
+                              )}
+                              <span>{gr.fullName}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
+                            {gr.username}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                {isShown ? gr.password : '••••••'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => toggleRevealPassword(passKey)}
+                                className="p-1 text-slate-400 hover:text-emerald-600 cursor-pointer"
+                              >
+                                {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono" dir="ltr">
+                            {gr.mobile || gr.phone || '-'}
+                          </td>
+                          <td className="p-3 space-y-1">
+                            <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                              {gr.department || 'اداره امور فارغ‌التحصیلان'}
+                            </div>
+                            {gr.notes && <div className="text-[11px] text-slate-500">{gr.notes}</div>}
+                          </td>
+                          <td className="p-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextStatus = isActive ? 'inactive' : 'active';
+                                Storage.updateGraduationStaff(gr.id, {
+                                  status: nextStatus,
+                                  isActive: nextStatus === 'active',
+                                });
+                                onRefreshData();
+                              }}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                                isActive
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                              }`}
+                            >
+                              {isActive ? 'فعال' : 'غیرفعال'}
+                            </button>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {actorRole === 'admin' && onImpersonateUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onImpersonateUser({ role: 'graduation', staff: gr })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                  title={`ورود مستقیم به کارتابل واحد فارغ‌التحصیلان (${gr.fullName})`}
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <label className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer">
+                                <Camera className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleQuickSinglePhotoUpload('graduation', gr.id, gr.fullName, e, gr.username)
+                                  }
+                                  className="hidden"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => openEditStaffModal('graduation', gr)}
+                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPasswordError('');
+                                  setNewPasswordInput('');
+                                  setPasswordModalTarget({
+                                    role: 'graduation',
+                                    id: gr.id,
+                                    fullName: gr.fullName,
+                                    usernameOrCode: gr.username,
+                                    defaultResetValue: '123456',
+                                    defaultResetLabel: 'ریست فوری به 123456',
+                                  });
+                                }}
+                                className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({
+                                    role: 'graduation',
+                                    id: gr.id,
+                                    fullName: gr.fullName,
+                                  })
+                                }
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ))}
               </tbody>
             </table>
           </div>
@@ -5674,7 +5963,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   staffModalRole === 'security' ||
                   staffModalRole === 'vice_dean' ||
                   staffModalRole === 'library' ||
-                  staffModalRole === 'smart_campus') && (
+                  staffModalRole === 'smart_campus' ||
+                  staffModalRole === 'graduation') && (
                   <div className="sm:col-span-2">
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       {staffModalRole === 'procurement'
@@ -5693,6 +5983,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                         ? 'بخش / واحد کتابخانه و پژوهش'
                         : staffModalRole === 'smart_campus'
                         ? 'بخش / واحد هوشمندسازی و فناوری'
+                        : staffModalRole === 'graduation'
+                        ? 'بخش / اداره امور فارغ‌التحصیلان'
                         : 'بخش / واحد مالی'}
                     </label>
                     <input
@@ -5716,6 +6008,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'واحد کتابخانه و پژوهش پردیس'
                           : staffModalRole === 'smart_campus'
                           ? 'واحد هوشمندسازی و فناوری اطلاعات'
+                          : staffModalRole === 'graduation'
+                          ? 'اداره امور فارغ‌التحصیلان و صدور مدارک'
                           : 'واحد امور مالی و حسابداری پردیس'
                       }
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
@@ -5751,6 +6045,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'مسئول کتابخانه و پژوهش — امانت کتب و تسویه فارغ‌التحصیلان...'
                           : staffModalRole === 'smart_campus'
                           ? 'کارشناس واحد هوشمندسازی — کارت هوشمند، تردد و سامانه‌ها...'
+                          : staffModalRole === 'graduation'
+                          ? 'مسئول واحد فارغ‌التحصیلان — دریافت و چاپ برگه‌های تسویه و خاتمه پرونده...'
                           : staffModalRole === 'maintenance'
                           ? 'سرپرست شیفت تأسیسات / تکنسین فنی...'
                           : staffModalRole === 'counselor'
@@ -5763,6 +6059,127 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 )}
               </div>
 
+              {staffModalRole === 'education' && (
+                <div className="p-3.5 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800/70 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <label className="font-extrabold text-sky-900 dark:text-sky-200 flex items-center gap-1.5">
+                        <GraduationCap className="w-4 h-4 text-sky-600" />
+                        <span>رشته‌های تحصیلی تحت پوشش این کارشناس آموزش</span>
+                      </label>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                        پیام‌های آموزشی و درخواست‌های هر دانشجو به‌طور خودکار به کارتابل کارشناس رشته مربوطه ارسال می‌شود. در صورت انتخاب نکردن هیچ رشته‌ای، این کارشناس به صورت عمومی برای «همه رشته‌ها» عمل می‌کند.
+                      </p>
+                    </div>
+                    {formAssignedFields.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFormAssignedFields([])}
+                        className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer shrink-0"
+                      >
+                        حذف همه (پوشش همه رشته‌ها)
+                      </button>
+                    )}
+                  </div>
+
+                  {formAssignedFields.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {formAssignedFields.map((fld) => (
+                        <span
+                          key={fld}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-sky-600 text-white text-[11px] font-bold"
+                        >
+                          <span>{fld}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormAssignedFields((prev) => prev.filter((item) => item !== fld))
+                            }
+                            className="hover:text-rose-200 cursor-pointer"
+                            title="حذف رشته"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {availableEducationFields.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-0.5">
+                      {availableEducationFields.map((fld) => {
+                        const checked = formAssignedFields.includes(fld);
+                        return (
+                          <label
+                            key={fld}
+                            className={`px-2.5 py-2 rounded-xl border flex items-center gap-2 cursor-pointer transition text-[11px] ${
+                              checked
+                                ? 'bg-sky-100/90 dark:bg-sky-900/50 border-sky-400 text-sky-900 dark:text-sky-100 font-bold'
+                                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setFormAssignedFields((prev) =>
+                                    normalizeAssignedFieldsList([...prev, fld])
+                                  );
+                                } else {
+                                  setFormAssignedFields((prev) => prev.filter((item) => item !== fld));
+                                }
+                              }}
+                              className="w-4 h-4 rounded text-sky-600 cursor-pointer shrink-0"
+                            />
+                            <span className="truncate" title={fld}>
+                              {fld}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="text"
+                      value={customFieldInput}
+                      onChange={(e) => setCustomFieldInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const trimmed = customFieldInput.trim();
+                          if (trimmed) {
+                            setFormAssignedFields((prev) =>
+                              normalizeAssignedFieldsList([...prev, trimmed])
+                            );
+                            setCustomFieldInput('');
+                          }
+                        }
+                      }}
+                      placeholder="افزودن نام رشته جدید به صورت دستی (مثلاً آموزش ابتدایی)..."
+                      className="flex-1 px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-800 text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const trimmed = customFieldInput.trim();
+                        if (!trimmed) return;
+                        setFormAssignedFields((prev) =>
+                          normalizeAssignedFieldsList([...prev, trimmed])
+                        );
+                        setCustomFieldInput('');
+                      }}
+                      className="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>افزودن رشته</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {staffModalRole !== 'warehouse' &&
                 staffModalRole !== 'finance' &&
                 staffModalRole !== 'procurement' &&
@@ -5772,6 +6189,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 staffModalRole !== 'vice_dean' &&
                 staffModalRole !== 'library' &&
                 staffModalRole !== 'smart_campus' &&
+                staffModalRole !== 'graduation' &&
                 dorms.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">

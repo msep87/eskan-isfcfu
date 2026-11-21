@@ -115,6 +115,7 @@ const REPORTER_ROLE_LABELS: Record<SecurityReport['reportedByRole'], string> = {
   cultural: 'امور فرهنگی',
   library: 'کتابخانه و پژوهش',
   smart_campus: 'واحد هوشمندسازی',
+  graduation: 'واحد فارغ‌التحصیلان',
 };
 
 const EVAL_TYPE_LABELS: Record<StudentEvaluation['type'], { label: string; cls: string }> = {

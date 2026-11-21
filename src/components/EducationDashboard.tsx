@@ -10,6 +10,9 @@ import {
 } from '../types';
 import {
   Storage,
+  doesEducationStaffCoverField,
+  doesEducationStaffMatchMessage,
+  normalizeAssignedFieldsList,
   normalizePersianSearch,
 } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
@@ -93,30 +96,45 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
     setTimeout(() => setFeedback(null), 4500);
   };
 
+  const assignedFields = useMemo(
+    () => normalizeAssignedFieldsList(staff.assignedFields),
+    [staff.assignedFields]
+  );
+  const [onlyMyFields, setOnlyMyFields] = useState<boolean>(true);
+  const isFieldScoped = assignedFields.length > 0 && onlyMyFields;
+
+  const scopedStudents = useMemo(() => {
+    if (!isFieldScoped) return students;
+    return students.filter((s) => doesEducationStaffCoverField(staff, s.fieldOfStudy));
+  }, [students, staff, isFieldScoped]);
+
   // رشته‌ها و ورودی‌های یکتا برای ارسال پیام گروهی
   const uniqueFields = useMemo(() => {
     const set = new Set<string>();
-    students.forEach((s) => {
+    scopedStudents.forEach((s) => {
       const val = (s.fieldOfStudy || '').trim();
       if (val) set.add(val);
     });
+    if (isFieldScoped) {
+      assignedFields.forEach((f) => set.add(f));
+    }
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'fa'));
-  }, [students]);
+  }, [scopedStudents, isFieldScoped, assignedFields]);
 
   const uniqueEntryTerms = useMemo(() => {
     const set = new Set<string>();
-    students.forEach((s) => {
+    scopedStudents.forEach((s) => {
       const val = (s.entryTerm || '').trim();
       if (val) set.add(val);
     });
     return Array.from(set).sort((a, b) => b.localeCompare(a, 'fa'));
-  }, [students]);
+  }, [scopedStudents]);
 
   // جستجوی دانشجو بر اساس نام و نام خانوادگی، رشته تحصیلی، کد دانشجویی یا کد ملی
   const matchStudents = (query: string) => {
     const q = normalizePersianSearch(query);
-    if (!q) return students.slice(0, 12);
-    return students
+    if (!q) return scopedStudents.slice(0, 12);
+    return scopedStudents
       .filter((s) => {
         const hay = [
           s.fullName,
@@ -167,16 +185,15 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
     return students.filter((s) => normalizePersianSearch(s.entryTerm || '') === normTerm).length;
   }, [students, selectedEntryTerm]);
 
-  // فیلتر اکید پیام‌ها: فقط پیام‌های مربوط به کارشناس آموزش (بدون دسترسی به گزارش‌های محرمانه یا پیام‌های سایر واحدها)
+  // فیلتر اکید پیام‌ها: پیام‌های مربوط به این کارشناس آموزش بر اساس رشته‌های تحت پوشش (بدون دسترسی به گزارش‌های محرمانه یا رشته‌های سایر کارشناسان)
   const educationMessages = useMemo(() => {
+    const allEducationStaff = Storage.getEducationStaff();
     return messages.filter(
       (m) =>
         !m.isConfidential &&
-        (m.receiverType === 'education' ||
-          m.category === 'education' ||
-          m.senderRole === 'education')
+        doesEducationStaffMatchMessage(staff, m, allEducationStaff, students)
     );
-  }, [messages]);
+  }, [messages, staff, students, cloudSyncTick]);
 
   const filteredInboxMessages = useMemo(() => {
     const q = normalizePersianSearch(inboxSearch);
@@ -213,10 +230,11 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
     [messages, students, cloudSyncTick]
   );
 
-  const pendingClearanceGateCount = useMemo(
-    () => Storage.getGraduationClearances().filter((c) => c.status === 'pending_education').length,
-    [messages, students, cloudSyncTick]
-  );
+  const pendingClearanceGateCount = useMemo(() => {
+    const all = Storage.getGraduationClearances().filter((c) => c.status === 'pending_education');
+    if (assignedFields.length === 0) return all.length;
+    return all.filter((c) => doesEducationStaffCoverField(staff, c.studentFieldOfStudy)).length;
+  }, [messages, students, cloudSyncTick, assignedFields, staff]);
 
   const handleSendEducationMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -412,6 +430,32 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
               <p className="text-xs text-sky-100/80 mt-1 leading-relaxed">
                 {staff.department || 'واحد امور آموزشی دانشگاه فرهنگیان'} • پاسخ‌گویی به پیام‌های آموزشی دانشجویان، ارسال پیام تکی یا گروهی (بر اساس رشته/ورودی) و اعلام مرخصی تحصیلی یا اخراج به مدیر سامانه
               </p>
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <span className="text-[11px] font-bold text-sky-200">رشته‌های تحت پوشش:</span>
+                {assignedFields.length > 0 ? (
+                  <>
+                    {assignedFields.map((field) => (
+                      <span
+                        key={field}
+                        className="px-2.5 py-0.5 rounded-full bg-emerald-400/20 border border-emerald-300/40 text-emerald-100 text-[11px] font-extrabold"
+                      >
+                        {field}
+                      </span>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setOnlyMyFields((prev) => !prev)}
+                      className="mr-1 px-2.5 py-0.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/25 text-white text-[10px] font-bold transition cursor-pointer"
+                    >
+                      {onlyMyFields ? 'فیلتر فعال: فقط رشته‌های من (نمایش همه)' : 'نمایش همه رشته‌ها (محدود به رشته‌های من)'}
+                    </button>
+                  </>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full bg-white/15 border border-white/20 text-sky-100 text-[11px] font-bold">
+                    همه رشته‌های تحصیلی (کارشناس عمومی)
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1242,6 +1286,7 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
           reviewerName={staff.fullName}
           settings={settings}
           onDataChange={onRefreshData}
+          allowedFields={isFieldScoped ? assignedFields : undefined}
         />
       )}
     </div>

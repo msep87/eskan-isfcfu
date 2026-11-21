@@ -53,6 +53,7 @@ const SecurityDashboard = lazy(() => import('./components/SecurityDashboard').th
 const ViceDeanDashboard = lazy(() => import('./components/ViceDeanDashboard').then((m) => ({ default: m.ViceDeanDashboard })));
 const LibraryDashboard = lazy(() => import('./components/LibraryDashboard').then((m) => ({ default: m.LibraryDashboard })));
 const SmartCampusDashboard = lazy(() => import('./components/SmartCampusDashboard').then((m) => ({ default: m.SmartCampusDashboard })));
+const GraduationDashboard = lazy(() => import('./components/GraduationDashboard').then((m) => ({ default: m.GraduationDashboard })));
 import { resolveFontCssFamily } from './utils/fonts';
 import {
   DEFAULT_HOME_NOTES_TITLE,
@@ -171,6 +172,12 @@ function getImpersonatedUserMeta(user: NonNullable<CurrentUser>): {
       return {
         fullName: user.staff.fullName,
         roleLabel: 'کارشناس واحد هوشمندسازی',
+        identifier: user.staff.username,
+      };
+    case 'graduation':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'کارشناس واحد فارغ‌التحصیلان',
         identifier: user.staff.username,
       };
     case 'admin':
@@ -297,6 +304,11 @@ export default function App() {
       const refreshedSmart = Storage.getSmartCampusStaff().find((sm) => sm.id === user.staff.id);
       if (refreshedSmart) {
         setCurrentUser({ role: 'smart_campus', staff: refreshedSmart });
+      }
+    } else if (user && user.role === 'graduation') {
+      const refreshedGrad = Storage.getGraduationStaff().find((gr) => gr.id === user.staff.id);
+      if (refreshedGrad) {
+        setCurrentUser({ role: 'graduation', staff: refreshedGrad });
       }
     } else if (user && user.role === 'counselor') {
       const refreshedCns = Storage.getCounselors().find((c) => c.id === user.counselor.id);
@@ -590,7 +602,8 @@ export default function App() {
             currentUser.role !== 'education' &&
             currentUser.role !== 'cultural' &&
             currentUser.role !== 'library' &&
-            currentUser.role !== 'smart_campus'
+            currentUser.role !== 'smart_campus' &&
+            currentUser.role !== 'graduation'
           ) {
             setIsReportsModalOpen(true);
           }
@@ -1124,6 +1137,18 @@ export default function App() {
             onOpenMessages={() => setIsMessagesModalOpen(true)}
           />
         )}
+
+        {/* ۱۶. در صورتی که کاربر واحد فارغ‌التحصیلان است */}
+        {currentUser?.role === 'graduation' && (
+          <GraduationDashboard
+            staff={currentUser.staff}
+            messages={messages}
+            settings={settings}
+            onDataChange={refreshAllData}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onOpenUserGuide={(r) => handleOpenUserGuide(r || 'graduation')}
+          />
+        )}
         </Suspense>
 
       </main>
@@ -1144,7 +1169,8 @@ export default function App() {
               currentUser.role !== 'education' &&
               currentUser.role !== 'cultural' &&
               currentUser.role !== 'library' &&
-              currentUser.role !== 'smart_campus' && (
+              currentUser.role !== 'smart_campus' &&
+              currentUser.role !== 'graduation' && (
               <>
                 <button
                   type="button"
@@ -1232,6 +1258,7 @@ export default function App() {
           currentUser.role !== 'cultural' &&
           currentUser.role !== 'library' &&
           currentUser.role !== 'smart_campus' &&
+          currentUser.role !== 'graduation' &&
           isReportsModalOpen && (
             <ReportsView
               isOpen={isReportsModalOpen}
@@ -1282,6 +1309,7 @@ export default function App() {
           currentUser.role !== 'cultural' &&
           currentUser.role !== 'library' &&
           currentUser.role !== 'smart_campus' &&
+          currentUser.role !== 'graduation' &&
           isAiChatOpen && (
             <AiDormAssistant
               isOpen={isAiChatOpen}

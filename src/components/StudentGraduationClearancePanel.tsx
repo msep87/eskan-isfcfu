@@ -165,7 +165,9 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
 
           <div
             className={`p-3 rounded-xl border flex items-center gap-2.5 ${
-              myClearance?.status === 'completed'
+              myClearance?.graduationFinalized
+                ? 'bg-emerald-100/80 dark:bg-emerald-950/50 border-emerald-400 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+                : myClearance?.status === 'completed'
                 ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
                 : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
             }`}
@@ -174,11 +176,44 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
               ۳
             </span>
             <div>
-              <div className="font-extrabold">چاپ و تحویل نهایی</div>
-              <div className="text-[11px] opacity-80">تحویل به اداره امور فارغ‌التحصیلان</div>
+              <div className="font-extrabold">
+                {myClearance?.graduationFinalized ? 'خاتمه و بایگانی نهایی' : 'دریافت و خاتمه در فارغ‌التحصیلان'}
+              </div>
+              <div className="text-[11px] opacity-80">
+                {myClearance?.graduationFinalized
+                  ? `تایید و خاتمه توسط واحد فارغ‌التحصیلان${myClearance.graduationArchiveNumber ? ` (بایگانی: ${myClearance.graduationArchiveNumber})` : ''}`
+                  : 'بررسی نهایی و خاتمه توسط واحد فارغ‌التحصیلان'}
+              </div>
             </div>
           </div>
         </div>
+
+        {myClearance?.graduationFinalized && (
+          <div className="mt-4 p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-start gap-2.5">
+              <FileCheck2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <div className="font-black">
+                  فرآیند تسویه حساب شما توسط واحد فارغ‌التحصیلان رسماً خاتمه یافت.
+                </div>
+                <div className="text-[11px] opacity-90">
+                  کارشناس تاییدکننده: <span className="font-bold">{myClearance.graduationFinalizedBy || 'واحد فارغ‌التحصیلان'}</span>
+                  {myClearance.graduationFinalizedAt && (
+                    <> • تاریخ خاتمه: <span className="font-bold">{new Date(myClearance.graduationFinalizedAt).toLocaleDateString('fa-IR')}</span></>
+                  )}
+                  {myClearance.graduationArchiveNumber && (
+                    <> • شماره بایگانی: <span className="font-mono font-bold" dir="ltr">{myClearance.graduationArchiveNumber}</span></>
+                  )}
+                </div>
+                {myClearance.graduationFinalNote && (
+                  <div className="text-[11px] text-emerald-800 dark:text-emerald-300">
+                    توضیحات واحد فارغ‌التحصیلان: {myClearance.graduationFinalNote}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {feedback && (

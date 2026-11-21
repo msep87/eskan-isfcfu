@@ -39,6 +39,7 @@ interface LoginModalProps {
       | 'vice_dean'
       | 'library'
       | 'smart_campus'
+      | 'graduation'
       | 'student'
   ) => void;
 }

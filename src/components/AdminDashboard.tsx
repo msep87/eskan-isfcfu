@@ -55,6 +55,7 @@ import {
   ViceDeanStaff,
   LibraryStaff,
   SmartCampusStaff,
+  GraduationStaff,
   AboutCapabilityItem,
   AboutAttachmentFile,
   AboutContentSettings,
@@ -428,6 +429,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [viceDeanStaffList, setViceDeanStaffList] = useState<ViceDeanStaff[]>(Storage.getViceDeanStaff());
   const [libraryStaffList, setLibraryStaffList] = useState<LibraryStaff[]>(Storage.getLibraryStaff());
   const [smartCampusStaffList, setSmartCampusStaffList] = useState<SmartCampusStaff[]>(Storage.getSmartCampusStaff());
+  const [graduationStaffList, setGraduationStaffList] = useState<GraduationStaff[]>(Storage.getGraduationStaff());
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
   const [academicNotices, setAcademicNotices] = useState<AcademicStatusNotice[]>(Storage.getAcademicNotices());
   const [academicNoticeFilter, setAcademicNoticeFilter] = useState<'all' | 'pending' | 'reviewed' | 'action_taken'>('all');
@@ -445,6 +447,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setViceDeanStaffList(Storage.getViceDeanStaff());
     setLibraryStaffList(Storage.getLibraryStaff());
     setSmartCampusStaffList(Storage.getSmartCampusStaff());
+    setGraduationStaffList(Storage.getGraduationStaff());
     setAcademicNotices(Storage.getAcademicNotices());
     onRefreshData();
   };
@@ -469,6 +472,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setViceDeanStaffList(Storage.getViceDeanStaff());
     setLibraryStaffList(Storage.getLibraryStaff());
     setSmartCampusStaffList(Storage.getSmartCampusStaff());
+    setGraduationStaffList(Storage.getGraduationStaff());
     setAcademicNotices(Storage.getAcademicNotices());
   }, [cloudSyncTick]);
 
@@ -2778,7 +2782,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           securityStaffList.length +
           viceDeanStaffList.length +
           libraryStaffList.length +
-          smartCampusStaffList.length;
+          smartCampusStaffList.length +
+          graduationStaffList.length;
 
         const pendingRequestsTotal =
           pendingStudents.length +
@@ -3308,7 +3313,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         securityStaffList.length +
                         viceDeanStaffList.length +
                         libraryStaffList.length +
-                        smartCampusStaffList.length
+                        smartCampusStaffList.length +
+                        graduationStaffList.length
                       ).toLocaleString('fa-IR'),
                       badgeClass: 'bg-teal-100 text-teal-800 dark:bg-teal-900/70 dark:text-teal-200',
                     },
@@ -3514,6 +3520,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           viceDeanStaff={viceDeanStaffList}
           libraryStaff={libraryStaffList}
           smartCampusStaff={smartCampusStaffList}
+          graduationStaff={graduationStaffList}
           onRefreshData={handleUsersRefresh}
           onOpenExcelModal={onOpenExcelModal}
           onOpenReports={onOpenReports}
@@ -8485,6 +8492,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { key: 'vice_dean' as const, label: `معاونت دانشجویی (${viceDeanStaffList.length})` },
                 { key: 'library' as const, label: `کتابخانه و پژوهش (${libraryStaffList.length})` },
                 { key: 'smart_campus' as const, label: `واحد هوشمندسازی (${smartCampusStaffList.length})` },
+                { key: 'graduation' as const, label: `واحد فارغ‌التحصیلان (${graduationStaffList.length})` },
               ].map((item) => (
                 <button
                   key={item.key}
