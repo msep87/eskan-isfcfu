@@ -200,6 +200,11 @@ import {
   Bus,
   Server,
   Globe,
+  PanelRight,
+  PanelLeft,
+  PanelTop,
+  PinOff,
+  Menu,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -263,9 +268,97 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   focusAboutEditorTick = 0,
 }) => {
   // تب‌های اصلی داشبورد مدیر (در بدو ورود هیچ بخشی باز نباشد تا صفحه سریع بارگذاری شود)
-  const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'warehouse' | 'shifts' | 'counseling' | 'surveys' | 'clearance' | 'activity_log' | 'settings' | null>(null);
+  type AdminMainTabKey =
+    | 'cartable'
+    | 'users'
+    | 'announcements'
+    | 'requests'
+    | 'maintenance'
+    | 'warehouse'
+    | 'shifts'
+    | 'counseling'
+    | 'surveys'
+    | 'clearance'
+    | 'activity_log'
+    | 'settings';
+  type AdminMenuLayoutMode = 'top_cards' | 'sidebar_right' | 'sidebar_left';
+
+  const [mainTab, setMainTab] = useState<AdminMainTabKey | null>(null);
+  const [tabHistory, setTabHistory] = useState<AdminMainTabKey[]>([]);
+  const [adminMenuLayout, setAdminMenuLayout] = useState<AdminMenuLayoutMode>(() => {
+    try {
+      const saved = localStorage.getItem('cfu_admin_menu_layout');
+      if (saved === 'top_cards' || saved === 'sidebar_right' || saved === 'sidebar_left') {
+        return saved;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return 'top_cards';
+  });
+  const [adminSidebarAutoHide, setAdminSidebarAutoHide] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('cfu_admin_sidebar_autohide') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isAutoHideExpanded, setIsAutoHideExpanded] = useState<boolean>(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
   const [usersCategory, setUsersCategory] = useState<UserCategoryKey>('students');
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('cfu_admin_menu_layout', adminMenuLayout);
+    } catch {
+      // ignore
+    }
+  }, [adminMenuLayout]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('cfu_admin_sidebar_autohide', String(adminSidebarAutoHide));
+    } catch {
+      // ignore
+    }
+  }, [adminSidebarAutoHide]);
+
+  const handleToggleOrSelectTab = (tab: AdminMainTabKey) => {
+    if (tab === 'activity_log') {
+      setActivityLogs(Storage.getActivityLogs());
+    }
+    setMainTab((current) => {
+      if (current === tab) {
+        // کلیک مجدد روی منوی باز باعث بسته شدن آن می‌شود
+        return null;
+      }
+      if (current !== null) {
+        setTabHistory((prev) => [...prev.slice(-14), current]);
+      }
+      return tab;
+    });
+    setIsMobileSidebarOpen(false);
+    if (adminSidebarAutoHide) {
+      setIsAutoHideExpanded(false);
+    }
+  };
+
+  const handleGoBackTab = () => {
+    setTabHistory((prev) => {
+      if (prev.length === 0) {
+        setMainTab(null);
+        return prev;
+      }
+      const nextHistory = prev.slice(0, -1);
+      const targetTab = prev[prev.length - 1];
+      if (targetTab === 'activity_log') {
+        setActivityLogs(Storage.getActivityLogs());
+      }
+      setMainTab(targetTab);
+      return nextHistory;
+    });
+  };
 
   // وضعیت مشاهده فقط-خواندنی انبار و کارپردازی برای مدیر کل
   const [adminWhSubTab, setAdminWhSubTab] = useState<'inventory' | 'transactions' | 'requests' | 'procurement'>('inventory');
@@ -2548,6 +2641,104 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
           </div>
         </div>
+
+        {/* نوار انتخاب چیدمان منوی کاربردی (بالا، عمودی راست، عمودی چپ + حالت ثابت یا اتوهاید) */}
+        <div className="mt-5 pt-4 border-t border-white/15 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-300 font-bold flex items-center gap-1.5">
+              <LayoutGrid className="w-3.5 h-3.5 text-purple-300" />
+              <span>چیدمان منوی کاربردی:</span>
+            </span>
+            <div className="inline-flex items-center p-1 rounded-xl bg-white/10 border border-white/15 gap-1">
+              <button
+                type="button"
+                onClick={() => setAdminMenuLayout('top_cards')}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  adminMenuLayout === 'top_cards'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-200 hover:bg-white/10'
+                }`}
+              >
+                <PanelTop className="w-3.5 h-3.5" />
+                <span>کارتی بالا</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdminMenuLayout('sidebar_right')}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  adminMenuLayout === 'sidebar_right'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-200 hover:bg-white/10'
+                }`}
+              >
+                <PanelRight className="w-3.5 h-3.5" />
+                <span>داشبورد عمودی راست</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdminMenuLayout('sidebar_left')}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  adminMenuLayout === 'sidebar_left'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-200 hover:bg-white/10'
+                }`}
+              >
+                <PanelLeft className="w-3.5 h-3.5" />
+                <span>داشبورد عمودی چپ</span>
+              </button>
+            </div>
+
+            {adminMenuLayout !== 'top_cards' && (
+              <div className="inline-flex items-center p-1 rounded-xl bg-white/10 border border-white/15 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setAdminSidebarAutoHide(false)}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                    !adminSidebarAutoHide
+                      ? 'bg-emerald-400 text-slate-950 shadow-sm'
+                      : 'text-slate-200 hover:bg-white/10'
+                  }`}
+                  title="منوی عمودی همیشه کنار صفحه در دسترس باشد"
+                >
+                  <Pin className="w-3.5 h-3.5" />
+                  <span>همیشه در دسترس</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminSidebarAutoHide(true)}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                    adminSidebarAutoHide
+                      ? 'bg-amber-400 text-slate-950 shadow-sm'
+                      : 'text-slate-200 hover:bg-white/10'
+                  }`}
+                  title="منوی عمودی به‌صورت خودکار مخفی شود و با بردن ماوس یا کلیک باز گردد"
+                >
+                  <PinOff className="w-3.5 h-3.5" />
+                  <span>مخفی خودکار (Auto-Hide)</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/10 text-teal-200 font-bold">
+              {students.length.toLocaleString('fa-IR')} دانشجو
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/10 text-indigo-200 font-bold">
+              {dorms.length.toLocaleString('fa-IR')} سرا ({rooms.length.toLocaleString('fa-IR')} اتاق)
+            </span>
+            {adminMenuLayout !== 'top_cards' && (
+              <button
+                type="button"
+                onClick={() => setIsMobileSidebarOpen(true)}
+                className="lg:hidden px-3 py-1.5 rounded-lg bg-white text-slate-900 font-extrabold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Menu className="w-3.5 h-3.5" />
+                <span>فهرست منوها</span>
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* پیام بازخورد تأیید یا رد اسکان */}
@@ -2569,282 +2760,735 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* نوارهای اصلی ناوبری مدیریت (Tabs) */}
-      <div className="flex flex-wrap gap-2 p-1.5 bg-slate-200/70 dark:bg-slate-800/80 rounded-2xl shadow-inner">
-        
-        {/* ۱. تب کارتابل سرپرستی مدیر کل */}
-        <button
-          onClick={() => setMainTab('cartable')}
-          className={`flex-1 min-w-[200px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'cartable'
-              ? 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Building2 className="w-4 h-4 text-purple-600" />
-          <span>کارتابل و مدیریت جامع سراها</span>
-        </button>
+      {/* ========================================================= */}
+      {/* ناوبری یکپارچه و قابل تنظیم مدیریت کل (کارتی بالا / عمودی راست / عمودی چپ / اتوهاید) */}
+      {/* ========================================================= */}
+      {(() => {
+        const totalUsersCount =
+          students.length +
+          supervisors.length +
+          campusStaff.length +
+          warehouseStaffList.length +
+          procurementStaffList.length +
+          counselorsList.length +
+          financeStaffList.length +
+          educationStaffList.length +
+          culturalStaffList.length +
+          studentAffairsStaffList.length +
+          securityStaffList.length +
+          viceDeanStaffList.length +
+          libraryStaffList.length +
+          smartCampusStaffList.length;
 
-        {/* ۲. تب مجزای مدیریت کاربران (دانشجویان، سرپرستان، تأسیسات، انبار، مشاوران) */}
-        <button
-          onClick={() => setMainTab('users')}
-          className={`flex-1 min-w-[200px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'users'
-              ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Users className="w-4 h-4 text-teal-600" />
-          <span>مدیریت کاربران سامانه</span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
-            {students.length + supervisors.length + campusStaff.length + warehouseStaffList.length + procurementStaffList.length + counselorsList.length + financeStaffList.length + educationStaffList.length + culturalStaffList.length + studentAffairsStaffList.length + securityStaffList.length + viceDeanStaffList.length + libraryStaffList.length + smartCampusStaffList.length}
-          </span>
-        </button>
+        const pendingRequestsTotal =
+          pendingStudents.length +
+          Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length +
+          academicNotices.filter((n) => n.status === 'pending').length;
 
-        {/* ۳. تب انتشار اطلاعیه‌های سایت و صفحه اول */}
-        <button
-          onClick={() => setMainTab('announcements')}
-          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'announcements'
-              ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Bell className="w-4 h-4 text-teal-600" />
-          <span>اطلاعیه‌های سایت و صفحه اول</span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
-            {announcements.length}
-          </span>
-        </button>
+        const activeSurveysTotal = Storage.getSurveys().filter((s) => s.status === 'active').length;
+        const activeClearancesTotal = Storage.getGraduationClearances().filter(
+          (c) => c.status === 'pending_education' || c.status === 'in_clearance'
+        ).length;
 
-        {/* ۴. تب درخواست‌های اسکان، مهمان و آموزش */}
-        <button
-          onClick={() => setMainTab('requests')}
-          className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'requests'
-              ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Clock className="w-4 h-4 text-amber-500" />
-          <span>درخواست‌های اسکان، مهمان و آموزش</span>
-          {(pendingStudents.length +
-            Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length +
-            academicNotices.filter((n) => n.status === 'pending').length) > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-white font-black animate-pulse">
-              {pendingStudents.length +
-                Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length +
-                academicNotices.filter((n) => n.status === 'pending').length}
-            </span>
-          )}
-        </button>
+        const adminMenuItems: Array<{
+          key: AdminMainTabKey;
+          title: string;
+          desc: string;
+          icon: React.ComponentType<{ className?: string }>;
+          iconTone: string;
+          activeRing: string;
+          badge?: string;
+          badgePulse?: boolean;
+          badgeClass?: string;
+        }> = [
+          {
+            key: 'cartable',
+            title: 'کارتابل و مدیریت جامع سراها',
+            desc: 'اتاق‌ها و تخت‌ها، باز/بسته انتخاب اتاق و ورود سرا (تکی/اکسل)',
+            icon: Building2,
+            iconTone: 'text-purple-600 bg-purple-50 dark:bg-purple-950/50 border-purple-200 dark:border-purple-800',
+            activeRing: 'border-purple-500 bg-purple-50/70 dark:bg-purple-950/40 shadow-md shadow-purple-500/10',
+          },
+          {
+            key: 'users',
+            title: 'مدیریت کاربران سامانه',
+            desc: 'دانشجویان (خوابگاهی/ترددی)، سرپرستان و واحدهای دانشگاهی',
+            icon: Users,
+            iconTone: 'text-teal-600 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-800',
+            activeRing: 'border-teal-500 bg-teal-50/70 dark:bg-teal-950/40 shadow-md shadow-teal-500/10',
+            badge: totalUsersCount.toLocaleString('fa-IR'),
+            badgeClass: 'bg-teal-100 text-teal-800 dark:bg-teal-900/70 dark:text-teal-200',
+          },
+          {
+            key: 'announcements',
+            title: 'اطلاعیه‌های سایت و صفحه اول',
+            desc: 'انتشار و مدیریت اطلاعیه‌های عمومی و فوری پیشخوان',
+            icon: Bell,
+            iconTone: 'text-cyan-600 bg-cyan-50 dark:bg-cyan-950/50 border-cyan-200 dark:border-cyan-800',
+            activeRing: 'border-cyan-500 bg-cyan-50/70 dark:bg-cyan-950/40 shadow-md shadow-cyan-500/10',
+            badge: announcements.length.toLocaleString('fa-IR'),
+            badgeClass: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/70 dark:text-cyan-200',
+          },
+          {
+            key: 'requests',
+            title: 'درخواست‌های اسکان، مهمان و آموزش',
+            desc: 'بررسی و تأیید درخواست‌های اسکان موقت، مهمان و مکاتبات',
+            icon: Clock,
+            iconTone: 'text-amber-600 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800',
+            activeRing: 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/40 shadow-md shadow-amber-500/10',
+            badge: pendingRequestsTotal > 0 ? pendingRequestsTotal.toLocaleString('fa-IR') : undefined,
+            badgePulse: pendingRequestsTotal > 0,
+            badgeClass: 'bg-amber-500 text-white',
+          },
+          {
+            key: 'maintenance',
+            title: 'تأسیسات و امور فنی سراها',
+            desc: 'ارجاع، پیگیری و گزارش تعمیرات و وضعیت فنی سراها',
+            icon: Wrench,
+            iconTone: 'text-orange-600 bg-orange-50 dark:bg-orange-950/50 border-orange-200 dark:border-orange-800',
+            activeRing: 'border-orange-500 bg-orange-50/70 dark:bg-orange-950/40 shadow-md shadow-orange-500/10',
+            badge: activeCampusMaintCount > 0 ? activeCampusMaintCount.toLocaleString('fa-IR') : undefined,
+            badgePulse: activeCampusMaintCount > 0,
+            badgeClass: 'bg-rose-600 text-white',
+          },
+          {
+            key: 'warehouse',
+            title: 'انبار و کارپردازی (مشاهده)',
+            desc: 'پایش موجودی انبار، تراکنش‌ها و وضعیت خرید کارپرداز',
+            icon: Package,
+            iconTone: 'text-violet-600 bg-violet-50 dark:bg-violet-950/50 border-violet-200 dark:border-violet-800',
+            activeRing: 'border-violet-500 bg-violet-50/70 dark:bg-violet-950/40 shadow-md shadow-violet-500/10',
+          },
+          {
+            key: 'shifts',
+            title: 'شیفت‌بندی ماهانه سرپرستان',
+            desc: 'برنامه نوبت‌کاری ماهانه، ورود تکی/اکسل و گزارش تحویل شیفت',
+            icon: Calendar,
+            iconTone: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800',
+            activeRing: 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 shadow-md shadow-emerald-500/10',
+          },
+          {
+            key: 'counseling',
+            title: 'مرکز مشاوره و روانشناسی',
+            desc: 'مدیریت مشاوران، شیفت‌های مشاوره و گزارش‌های مرکز',
+            icon: HeartHandshake,
+            iconTone: 'text-teal-600 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-800',
+            activeRing: 'border-teal-500 bg-teal-50/70 dark:bg-teal-950/40 shadow-md shadow-teal-500/10',
+            badge: `${counselorsList.length} مشاور`,
+            badgeClass: 'bg-teal-100 text-teal-800 dark:bg-teal-900/70 dark:text-teal-200',
+          },
+          {
+            key: 'surveys',
+            title: 'نظرسنجی‌های دوره‌ای',
+            desc: 'ایجاد، مدیریت و تحلیل نتایج نظرسنجی‌های دانشجویی',
+            icon: ClipboardList,
+            iconTone: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800',
+            activeRing: 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/40 shadow-md shadow-indigo-500/10',
+            badge: activeSurveysTotal > 0 ? `${activeSurveysTotal} فعال` : undefined,
+            badgeClass: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/70 dark:text-indigo-200',
+          },
+          {
+            key: 'clearance',
+            title: 'تسویه حساب فارغ‌التحصیلان',
+            desc: 'نظارت جامع بر فرآیند تسویه حساب واحدهای دانشگاهی',
+            icon: GraduationCap,
+            iconTone: 'text-sky-600 bg-sky-50 dark:bg-sky-950/50 border-sky-200 dark:border-sky-800',
+            activeRing: 'border-sky-500 bg-sky-50/70 dark:bg-sky-950/40 shadow-md shadow-sky-500/10',
+            badge: activeClearancesTotal > 0 ? `${activeClearancesTotal} در جریان` : undefined,
+            badgeClass: 'bg-sky-100 text-sky-800 dark:bg-sky-900/70 dark:text-sky-200',
+          },
+          {
+            key: 'activity_log',
+            title: 'لاگ فعالیت‌ها و دسترسی‌ها',
+            desc: 'تاریخچه عملیات کاربران، رخدادهای سیستمی و پایش امنیتی',
+            icon: Activity,
+            iconTone: 'text-rose-600 bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800',
+            activeRing: 'border-rose-500 bg-rose-50/70 dark:bg-rose-950/40 shadow-md shadow-rose-500/10',
+            badge: activityLogs.length.toLocaleString('fa-IR'),
+            badgeClass: 'bg-rose-100 text-rose-800 dark:bg-rose-900/70 dark:text-rose-200',
+          },
+          {
+            key: 'settings',
+            title: 'تنظیمات و ظاهر سامانه',
+            desc: 'شخصی‌سازی ظاهر و فونت، سامانه‌ها، پشتیبان‌گیری و سرور ابری',
+            icon: Settings,
+            iconTone: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800',
+            activeRing: 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/40 shadow-md shadow-indigo-500/10',
+          },
+        ];
 
-        {/* ۵. تب مدیریت تأسیسات و امور فنی دانشگاه */}
-        <button
-          onClick={() => setMainTab('maintenance')}
-          className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'maintenance'
-              ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Wrench className="w-4 h-4 text-amber-600" />
-          <span>تأسیسات و امور فنی سراها</span>
-          {activeCampusMaintCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-600 text-white font-black animate-pulse">
-              {activeCampusMaintCount}
-            </span>
-          )}
-        </button>
+        const activeMenuItem = adminMenuItems.find((item) => item.key === mainTab) || null;
+        const previousTabKey = tabHistory.length > 0 ? tabHistory[tabHistory.length - 1] : null;
+        const previousMenuItem = previousTabKey
+          ? adminMenuItems.find((item) => item.key === previousTabKey) || null
+          : null;
 
-        {/* ۵-ب. تب مشاهده موجودی انبار و وضعیت خرید کارپرداز (فقط مشاهده) */}
-        <button
-          onClick={() => setMainTab('warehouse')}
-          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'warehouse'
-              ? 'bg-white dark:bg-slate-900 text-violet-700 dark:text-violet-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Package className="w-4 h-4 text-violet-600" />
-          <span>انبار و کارپردازی (فقط مشاهده)</span>
-        </button>
+        const renderMenuCard = (item: (typeof adminMenuItems)[number], compactVertical = false) => {
+          const IconComp = item.icon;
+          const isOpen = mainTab === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => handleToggleOrSelectTab(item.key)}
+              title={isOpen ? `کلیک مجدد برای بستن «${item.title}»` : `باز کردن «${item.title}»`}
+              className={`group text-right rounded-2xl border transition-all duration-150 cursor-pointer w-full ${
+                compactVertical ? 'p-3' : 'p-4'
+              } ${
+                isOpen
+                  ? `${item.activeRing} ring-1 ring-inset ring-black/5 dark:ring-white/10`
+                  : 'bg-white dark:bg-slate-900 border-slate-200/90 dark:border-slate-800 hover:border-teal-400 dark:hover:border-teal-600 hover:shadow-md shadow-2xs'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2.5">
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <div
+                    className={`${
+                      compactVertical ? 'w-8 h-8 rounded-xl' : 'w-10 h-10 rounded-xl'
+                    } border flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${item.iconTone}`}
+                  >
+                    <IconComp className={compactVertical ? 'w-4 h-4' : 'w-5 h-5'} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center flex-wrap gap-1.5">
+                      <span
+                        className={`font-extrabold leading-snug ${
+                          compactVertical ? 'text-xs' : 'text-xs sm:text-sm'
+                        } ${isOpen ? 'text-slate-950 dark:text-white' : 'text-slate-800 dark:text-slate-100'}`}
+                      >
+                        {item.title}
+                      </span>
+                      {item.badge && (
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
+                            item.badgeClass || 'bg-slate-100 text-slate-700'
+                          } ${item.badgePulse ? 'animate-pulse' : ''}`}
+                        >
+                          {item.badge}
+                        </span>
+                      )}
+                    </div>
+                    <p
+                      className={`text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed mt-1 ${
+                        compactVertical ? 'line-clamp-1' : 'line-clamp-2'
+                      }`}
+                    >
+                      {item.desc}
+                    </p>
+                  </div>
+                </div>
+                <ChevronDown
+                  className={`w-4 h-4 shrink-0 mt-1 transition-transform duration-200 ${
+                    isOpen ? 'rotate-180 text-teal-600 dark:text-teal-400' : 'text-slate-400 group-hover:text-teal-600'
+                  }`}
+                />
+              </div>
+              {isOpen && (
+                <div className="mt-2 pt-1.5 border-t border-black/5 dark:border-white/10 flex items-center justify-between text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                  <span>بخش فعال است</span>
+                  <span>کلیک مجدد برای بستن</span>
+                </div>
+              )}
+            </button>
+          );
+        };
 
-        {/* ۶. تب شیفت‌بندی سرپرستان و حضور و غیاب */}
-        <button
-          onClick={() => setMainTab('shifts')}
-          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'shifts'
-              ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Calendar className="w-4 h-4 text-teal-600" />
-          <span>شیفت‌بندی سرپرستان و گزارش‌ها</span>
-        </button>
+        const renderVerticalSidebarBody = (forFloatingAutoHide = false) => (
+          <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-3xl border border-slate-200/90 dark:border-slate-800 shadow-xl flex flex-col max-h-[calc(100vh-6.5rem)] overflow-hidden">
+            <div className="px-3.5 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/80 dark:bg-slate-800/50 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <LayoutGrid className="w-4 h-4 text-purple-600 shrink-0" />
+                <span className="font-black text-xs text-slate-800 dark:text-white truncate">
+                  منوی کاربردی مدیریت
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setAdminSidebarAutoHide((prev) => !prev)}
+                  className={`p-1.5 rounded-lg text-xs transition cursor-pointer ${
+                    adminSidebarAutoHide
+                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                  }`}
+                  title={
+                    adminSidebarAutoHide
+                      ? 'تثبیت دائمی منوی عمودی (خروج از Auto-Hide)'
+                      : 'تبدیل به حالت مخفی خودکار (Auto-Hide)'
+                  }
+                >
+                  {adminSidebarAutoHide ? <Pin className="w-3.5 h-3.5" /> : <PinOff className="w-3.5 h-3.5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAdminMenuLayout((prev) =>
+                      prev === 'sidebar_right' ? 'sidebar_left' : 'sidebar_right'
+                    )
+                  }
+                  className="p-1.5 rounded-lg bg-slate-200/70 dark:bg-slate-700/70 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                  title="انتقال داشبورد عمودی به سمت مقابل"
+                >
+                  {adminMenuLayout === 'sidebar_right' ? (
+                    <PanelLeft className="w-3.5 h-3.5" />
+                  ) : (
+                    <PanelRight className="w-3.5 h-3.5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminMenuLayout('top_cards')}
+                  className="p-1.5 rounded-lg bg-slate-200/70 dark:bg-slate-700/70 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                  title="تغییر به چیدمان کارتی بالا"
+                >
+                  <PanelTop className="w-3.5 h-3.5" />
+                </button>
+                {forFloatingAutoHide && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAutoHideExpanded(false);
+                      setIsMobileSidebarOpen(false);
+                    }}
+                    className="p-1.5 rounded-lg bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 cursor-pointer"
+                    title="جمع کردن منو"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
 
-        {/* ۷. تب مرکز مشاوره، روانشناسان و شیفت‌ها */}
-        <button
-          onClick={() => setMainTab('counseling')}
-          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'counseling'
-              ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <HeartHandshake className="w-4 h-4 text-teal-600" />
-          <span>مرکز مشاوره و شیفت‌های روانشناسی</span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-extrabold">
-            {counselorsList.length} مشاور
-          </span>
-        </button>
+            <div className="p-2.5 space-y-2 overflow-y-auto flex-1">
+              {adminMenuItems.map((item) => renderMenuCard(item, true))}
+            </div>
+          </div>
+        );
 
-        {/* ۷-ب. تب نظرسنجی‌های دوره‌ای دانشجویان */}
-        <button
-          onClick={() => setMainTab('surveys')}
-          className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'surveys'
-              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <ClipboardList className="w-4 h-4 text-indigo-600" />
-          <span>نظرسنجی‌های دوره‌ای</span>
-          {Storage.getSurveys().filter((s) => s.status === 'active').length > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 font-extrabold">
-              {Storage.getSurveys().filter((s) => s.status === 'active').length} فعال
-            </span>
-          )}
-        </button>
+        return (
+          <>
+            {/* حالت ۱: منوی کارتی یکپارچه در بالای صفحه (بدون تکرار منو در پایین) */}
+            {adminMenuLayout === 'top_cards' && (
+              <div className="bg-white/90 dark:bg-slate-900/90 rounded-3xl p-4 sm:p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2 text-xs font-extrabold text-slate-700 dark:text-slate-200">
+                    <LayoutGrid className="w-4 h-4 text-purple-600" />
+                    <span>منوی کاربردی مدیریت کل (روی هر بخش کلیک کنید تا باز یا بسته شود)</span>
+                  </div>
+                  {mainTab && (
+                    <div className="flex items-center gap-1.5">
+                      {previousMenuItem && (
+                        <button
+                          type="button"
+                          onClick={handleGoBackTab}
+                          className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <ArrowRight className="w-3.5 h-3.5" />
+                          <span>بازگشت به «{previousMenuItem.title}»</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setMainTab(null)}
+                        className="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>بستن بخش بازشده</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-        {/* ۷-ج. تب نظارت و پیگیری تسویه حساب فارغ‌التحصیلان */}
-        <button
-          onClick={() => setMainTab('clearance')}
-          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'clearance'
-              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4 text-sky-600" />
-          <span>تسویه حساب فارغ‌التحصیلان</span>
-          {Storage.getGraduationClearances().filter((c) => c.status === 'pending_education' || c.status === 'in_clearance').length > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 font-extrabold">
-              {Storage.getGraduationClearances().filter((c) => c.status === 'pending_education' || c.status === 'in_clearance').length} در جریان
-            </span>
-          )}
-        </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {adminMenuItems.map((item) => renderMenuCard(item, false))}
+                </div>
+              </div>
+            )}
 
-        {/* ۸. تب گزارش لاگ فعالیت‌ها و دسترسی‌های کاربران */}
-        <button
-          onClick={() => {
-            setActivityLogs(Storage.getActivityLogs());
-            setMainTab('activity_log');
-          }}
-          className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'activity_log'
-              ? 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Activity className="w-4 h-4 text-rose-600" />
-          <span>لاگ فعالیت‌ها و دسترسی‌ها</span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-extrabold">
-            {activityLogs.length}
-          </span>
-        </button>
+            {/* حالت ۲: داشبورد عمودی Auto-Hide در سمت راست یا چپ صفحه */}
+            {adminMenuLayout !== 'top_cards' && adminSidebarAutoHide && (
+              <div
+                onMouseEnter={() => setIsAutoHideExpanded(true)}
+                onMouseLeave={() => setIsAutoHideExpanded(false)}
+                className={`hidden lg:flex fixed top-24 z-40 items-start transition-all duration-200 ${
+                  adminMenuLayout === 'sidebar_right' ? 'right-2' : 'left-2'
+                }`}
+              >
+                {!isAutoHideExpanded ? (
+                  <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-700 shadow-xl rounded-2xl p-1.5 flex flex-col items-center gap-1.5 max-h-[calc(100vh-7rem)] overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => setIsAutoHideExpanded(true)}
+                      className="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center shadow-sm cursor-pointer"
+                      title="باز کردن منوی عمودی مدیریت"
+                    >
+                      <Menu className="w-4 h-4" />
+                    </button>
+                    {adminMenuItems.map((item) => {
+                      const IconComp = item.icon;
+                      const isOpen = mainTab === item.key;
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => handleToggleOrSelectTab(item.key)}
+                          title={item.title}
+                          className={`relative w-10 h-10 rounded-xl border flex items-center justify-center transition cursor-pointer ${
+                            isOpen
+                              ? `${item.iconTone} ring-2 ring-teal-500 shadow-sm`
+                              : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-teal-400'
+                          }`}
+                        >
+                          <IconComp className="w-4 h-4" />
+                          {item.badgePulse && (
+                            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="w-80 animate-in fade-in duration-150">
+                    {renderVerticalSidebarBody(true)}
+                  </div>
+                )}
+              </div>
+            )}
 
-        {/* ۹. تب پیکربندی و ظاهر سیستم */}
-        <button
-          onClick={() => setMainTab('settings')}
-          className={`flex-1 min-w-[180px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer ${
-            mainTab === 'settings'
-              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Settings className="w-4 h-4 text-indigo-600" />
-          <span>تنظیمات و ظاهر سامانه</span>
-        </button>
+            {/* کشوی موبایل برای حالت داشبورد عمودی در نمایشگرهای کوچک */}
+            {adminMenuLayout !== 'top_cards' && isMobileSidebarOpen && (
+              <div
+                className="lg:hidden fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex p-3"
+                onClick={() => setIsMobileSidebarOpen(false)}
+              >
+                <div
+                  className={`w-80 max-w-[90vw] ${adminMenuLayout === 'sidebar_left' ? 'mr-auto' : 'ml-auto'}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {renderVerticalSidebarBody(true)}
+                </div>
+              </div>
+            )}
 
-      </div>
+            {/* نوار بازگشت و کنترل بخش فعال (در همه چیدمان‌ها هنگام باز بودن یک بخش) */}
+            {activeMenuItem && (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl px-4 py-3 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${activeMenuItem.iconTone}`}>
+                    <activeMenuItem.icon className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-black text-xs sm:text-sm text-slate-900 dark:text-white truncate">
+                      {activeMenuItem.title}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                      {activeMenuItem.desc}
+                    </div>
+                  </div>
+                </div>
 
-      {/* حالت پیش‌فرض در بدو ورود: بدون باز بودن بخش سنگین جهت سرعت بالای بارگذاری */}
-      {mainTab === null && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5 animate-in fade-in duration-150">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
-            <div>
-              <h2 className="font-black text-base sm:text-lg text-slate-900 dark:text-white">
-                خوش آمدید! برای شروع، بخش مورد نظر را از نوار بالا یا دسترسی سریع زیر انتخاب کنید
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                جهت افزایش سرعت بارگذاری صفحه اول پنل مدیریت، فهرست اتاق‌ها و دانشجویان تا پیش از انتخاب بخش مربوطه بارگذاری نمی‌شود.
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleGoBackTab}
+                    className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" />
+                    <span>
+                      {previousMenuItem
+                        ? `بازگشت به ${previousMenuItem.title}`
+                        : 'بازگشت به منوی اصلی'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMainTab(null)}
+                    className="px-3.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>بستن بخش</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ظرف چیدمان سایدبار عمودی ثابت (سمت راست یا چپ) در کنار محتوای بخش فعال */}
+            {adminMenuLayout !== 'top_cards' && !adminSidebarAutoHide && (
+              <div className="hidden" aria-hidden="true" />
+            )}
+          </>
+        );
+      })()}
+
+      {/* ظرف اصلی محتوا همراه با سایدبار عمودی ثابت (در صورت انتخاب چیدمان عمودی همیشه در دسترس) */}
+      <div
+        className={
+          adminMenuLayout !== 'top_cards' && !adminSidebarAutoHide
+            ? `flex flex-col lg:flex-row ${
+                adminMenuLayout === 'sidebar_left' ? 'lg:flex-row-reverse' : ''
+              } gap-5 items-start`
+            : 'space-y-6'
+        }
+      >
+        {adminMenuLayout !== 'top_cards' && !adminSidebarAutoHide && (
+          <aside className="hidden lg:block w-72 xl:w-80 shrink-0 sticky top-20">
+            <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-3xl border border-slate-200/90 dark:border-slate-800 shadow-sm flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
+              <div className="px-3.5 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/80 dark:bg-slate-800/50 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <LayoutGrid className="w-4 h-4 text-purple-600 shrink-0" />
+                  <span className="font-black text-xs text-slate-800 dark:text-white truncate">
+                    داشبورد عمودی مدیریت
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setAdminSidebarAutoHide(true)}
+                    className="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 hover:bg-amber-200 text-amber-800 dark:text-amber-300 transition cursor-pointer"
+                    title="تبدیل به مخفی خودکار (Auto-Hide)"
+                  >
+                    <PinOff className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAdminMenuLayout((prev) =>
+                        prev === 'sidebar_right' ? 'sidebar_left' : 'sidebar_right'
+                      )
+                    }
+                    className="p-1.5 rounded-lg bg-slate-200/70 dark:bg-slate-700/70 hover:bg-slate-300 text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                    title="انتقال به سمت مقابل صفحه"
+                  >
+                    {adminMenuLayout === 'sidebar_right' ? (
+                      <PanelLeft className="w-3.5 h-3.5" />
+                    ) : (
+                      <PanelRight className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdminMenuLayout('top_cards')}
+                    className="p-1.5 rounded-lg bg-slate-200/70 dark:bg-slate-700/70 hover:bg-slate-300 text-slate-700 dark:text-slate-200 transition cursor-pointer"
+                    title="تغییر به چیدمان کارتی بالا"
+                  >
+                    <PanelTop className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-2.5 space-y-2 overflow-y-auto flex-1">
+                {(
+                  [
+                    {
+                      key: 'cartable' as const,
+                      title: 'کارتابل و مدیریت جامع سراها',
+                      desc: 'اتاق‌ها، باز/بسته انتخاب اتاق و ورود سرا',
+                      icon: Building2,
+                      iconTone: 'text-purple-600 bg-purple-50 dark:bg-purple-950/50 border-purple-200 dark:border-purple-800',
+                      activeRing: 'border-purple-500 bg-purple-50/70 dark:bg-purple-950/40',
+                    },
+                    {
+                      key: 'users' as const,
+                      title: 'مدیریت کاربران سامانه',
+                      desc: 'دانشجویان، سرپرستان و واحدهای دانشگاه',
+                      icon: Users,
+                      iconTone: 'text-teal-600 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-800',
+                      activeRing: 'border-teal-500 bg-teal-50/70 dark:bg-teal-950/40',
+                      badge: (
+                        students.length +
+                        supervisors.length +
+                        campusStaff.length +
+                        warehouseStaffList.length +
+                        procurementStaffList.length +
+                        counselorsList.length +
+                        financeStaffList.length +
+                        educationStaffList.length +
+                        culturalStaffList.length +
+                        studentAffairsStaffList.length +
+                        securityStaffList.length +
+                        viceDeanStaffList.length +
+                        libraryStaffList.length +
+                        smartCampusStaffList.length
+                      ).toLocaleString('fa-IR'),
+                      badgeClass: 'bg-teal-100 text-teal-800 dark:bg-teal-900/70 dark:text-teal-200',
+                    },
+                    {
+                      key: 'announcements' as const,
+                      title: 'اطلاعیه‌های سایت و صفحه اول',
+                      desc: 'انتشار اطلاعیه‌های عمومی و فوری',
+                      icon: Bell,
+                      iconTone: 'text-cyan-600 bg-cyan-50 dark:bg-cyan-950/50 border-cyan-200 dark:border-cyan-800',
+                      activeRing: 'border-cyan-500 bg-cyan-50/70 dark:bg-cyan-950/40',
+                      badge: announcements.length.toLocaleString('fa-IR'),
+                      badgeClass: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/70 dark:text-cyan-200',
+                    },
+                    {
+                      key: 'requests' as const,
+                      title: 'درخواست‌های اسکان، مهمان و آموزش',
+                      desc: 'بررسی اسکان موقت، مهمان و مکاتبات',
+                      icon: Clock,
+                      iconTone: 'text-amber-600 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800',
+                      activeRing: 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/40',
+                      badge:
+                        pendingStudents.length +
+                          Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length +
+                          academicNotices.filter((n) => n.status === 'pending').length >
+                        0
+                          ? (
+                              pendingStudents.length +
+                              Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length +
+                              academicNotices.filter((n) => n.status === 'pending').length
+                            ).toLocaleString('fa-IR')
+                          : undefined,
+                      badgeClass: 'bg-amber-500 text-white',
+                    },
+                    {
+                      key: 'maintenance' as const,
+                      title: 'تأسیسات و امور فنی سراها',
+                      desc: 'ارجاع و پیگیری خرابی‌ها و تعمیرات',
+                      icon: Wrench,
+                      iconTone: 'text-orange-600 bg-orange-50 dark:bg-orange-950/50 border-orange-200 dark:border-orange-800',
+                      activeRing: 'border-orange-500 bg-orange-50/70 dark:bg-orange-950/40',
+                      badge: activeCampusMaintCount > 0 ? activeCampusMaintCount.toLocaleString('fa-IR') : undefined,
+                      badgeClass: 'bg-rose-600 text-white',
+                    },
+                    {
+                      key: 'warehouse' as const,
+                      title: 'انبار و کارپردازی (مشاهده)',
+                      desc: 'موجودی انبار و وضعیت خرید کارپرداز',
+                      icon: Package,
+                      iconTone: 'text-violet-600 bg-violet-50 dark:bg-violet-950/50 border-violet-200 dark:border-violet-800',
+                      activeRing: 'border-violet-500 bg-violet-50/70 dark:bg-violet-950/40',
+                    },
+                    {
+                      key: 'shifts' as const,
+                      title: 'شیفت‌بندی ماهانه سرپرستان',
+                      desc: 'جدول ماهانه، ورود تکی/اکسل و گزارش‌ها',
+                      icon: Calendar,
+                      iconTone: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800',
+                      activeRing: 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40',
+                    },
+                    {
+                      key: 'counseling' as const,
+                      title: 'مرکز مشاوره و روانشناسی',
+                      desc: 'مشاوران، شیفت‌ها و گزارش‌های مرکز',
+                      icon: HeartHandshake,
+                      iconTone: 'text-teal-600 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-800',
+                      activeRing: 'border-teal-500 bg-teal-50/70 dark:bg-teal-950/40',
+                      badge: `${counselorsList.length} مشاور`,
+                      badgeClass: 'bg-teal-100 text-teal-800 dark:bg-teal-900/70 dark:text-teal-200',
+                    },
+                    {
+                      key: 'surveys' as const,
+                      title: 'نظرسنجی‌های دوره‌ای',
+                      desc: 'ایجاد و تحلیل نظرسنجی‌های دانشجویی',
+                      icon: ClipboardList,
+                      iconTone: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800',
+                      activeRing: 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/40',
+                    },
+                    {
+                      key: 'clearance' as const,
+                      title: 'تسویه حساب فارغ‌التحصیلان',
+                      desc: 'نظارت بر فرآیند تسویه حساب واحدها',
+                      icon: GraduationCap,
+                      iconTone: 'text-sky-600 bg-sky-50 dark:bg-sky-950/50 border-sky-200 dark:border-sky-800',
+                      activeRing: 'border-sky-500 bg-sky-50/70 dark:bg-sky-950/40',
+                    },
+                    {
+                      key: 'activity_log' as const,
+                      title: 'لاگ فعالیت‌ها و دسترسی‌ها',
+                      desc: 'تاریخچه عملیات و پایش امنیتی سامانه',
+                      icon: Activity,
+                      iconTone: 'text-rose-600 bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800',
+                      activeRing: 'border-rose-500 bg-rose-50/70 dark:bg-rose-950/40',
+                      badge: activityLogs.length.toLocaleString('fa-IR'),
+                      badgeClass: 'bg-rose-100 text-rose-800 dark:bg-rose-900/70 dark:text-rose-200',
+                    },
+                    {
+                      key: 'settings' as const,
+                      title: 'تنظیمات و ظاهر سامانه',
+                      desc: 'شخصی‌سازی ظاهر و فونت، سامانه‌ها و بکاپ',
+                      icon: Settings,
+                      iconTone: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800',
+                      activeRing: 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/40',
+                    },
+                  ] as Array<{
+                    key: AdminMainTabKey;
+                    title: string;
+                    desc: string;
+                    icon: React.ComponentType<{ className?: string }>;
+                    iconTone: string;
+                    activeRing: string;
+                    badge?: string;
+                    badgeClass?: string;
+                  }>
+                ).map((item) => {
+                  const IconComp = item.icon;
+                  const isOpen = mainTab === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => handleToggleOrSelectTab(item.key)}
+                      title={isOpen ? `کلیک مجدد برای بستن «${item.title}»` : `باز کردن «${item.title}»`}
+                      className={`group text-right p-3 rounded-2xl border transition-all duration-150 cursor-pointer w-full ${
+                        isOpen
+                          ? `${item.activeRing} shadow-sm`
+                          : 'bg-slate-50/70 dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-800 hover:border-teal-400'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <div className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${item.iconTone}`}>
+                            <IconComp className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center flex-wrap gap-1">
+                              <span className="font-extrabold text-xs text-slate-900 dark:text-white leading-snug">
+                                {item.title}
+                              </span>
+                              {item.badge && (
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-extrabold ${item.badgeClass || ''}`}>
+                                  {item.badge}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                              {item.desc}
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronDown
+                          className={`w-3.5 h-3.5 shrink-0 mt-1 transition-transform ${
+                            isOpen ? 'rotate-180 text-teal-600' : 'text-slate-400'
+                          }`}
+                        />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+        )}
+
+        <div className="flex-1 min-w-0 space-y-6">
+          {/* پیام سبک راهنما زمانی که هیچ بخشی باز نیست و منو در حالت عمودی قرار دارد */}
+          {mainTab === null && adminMenuLayout !== 'top_cards' && (
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 border border-dashed border-slate-300 dark:border-slate-700 text-center space-y-2.5">
+              <div className="w-12 h-12 rounded-2xl bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-300 flex items-center justify-center mx-auto">
+                <LayoutGrid className="w-6 h-6" />
+              </div>
+              <h3 className="font-black text-sm sm:text-base text-slate-800 dark:text-white">
+                بخشی برای نمایش انتخاب نشده است
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+                {adminSidebarAutoHide
+                  ? `برای شروع، نشانگر را روی نوار عمودی سمت ${adminMenuLayout === 'sidebar_right' ? 'راست' : 'چپ'} صفحه ببرید یا روی آیکون منو کلیک کنید تا بخش مورد نظر باز شود.`
+                  : `برای شروع، یکی از بخش‌های مدیریتی را از داشبورد عمودی سمت ${adminMenuLayout === 'sidebar_right' ? 'راست' : 'چپ'} انتخاب کنید. با کلیک مجدد روی هر بخش، بسته می‌شود.`}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs shrink-0">
-              <span className="px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-800 dark:text-teal-200 font-extrabold border border-teal-200 dark:border-teal-800">
-                {students.length.toLocaleString('fa-IR')} دانشجو
-              </span>
-              <span className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-200 font-extrabold border border-indigo-200 dark:border-indigo-800">
-                {dorms.length.toLocaleString('fa-IR')} سرا ({rooms.length.toLocaleString('fa-IR')} اتاق)
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {[
-              {
-                tab: 'cartable' as const,
-                title: 'کارتابل و مدیریت جامع سراها',
-                desc: 'مدیریت اتاق‌ها و تخت‌ها، باز/بسته کردن انتخاب اتاق و ورود سراها (تکی و اکسل)',
-                icon: Building2,
-                tone: 'text-purple-600 bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-900',
-              },
-              {
-                tab: 'users' as const,
-                title: 'مدیریت کاربران سامانه',
-                desc: 'دانشجویان (خوابگاهی و ترددی)، سرپرستان، کارشناسان و واحدهای دانشگاهی',
-                icon: Users,
-                tone: 'text-teal-600 bg-teal-50 dark:bg-teal-950/40 border-teal-200 dark:border-teal-900',
-              },
-              {
-                tab: 'shifts' as const,
-                title: 'شیفت‌بندی ماهانه سرپرستان',
-                desc: 'برنامه نوبت‌کاری ماهانه، ورود تکی یا اکسل و گزارش تحویل شیفت',
-                icon: Calendar,
-                tone: 'text-amber-600 bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900',
-              },
-              {
-                tab: 'settings' as const,
-                title: 'تنظیمات و ظاهر سامانه',
-                desc: 'شخصی‌سازی ظاهر و فونت، سامانه‌های دانشجویان، پشتیبان‌گیری و سرور ابری',
-                icon: Settings,
-                tone: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-900',
-              },
-            ].map((card) => {
-              const IconComp = card.icon;
-              return (
-                <button
-                  key={card.tab}
-                  type="button"
-                  onClick={() => setMainTab(card.tab)}
-                  className="text-right p-4 rounded-2xl bg-slate-50/70 dark:bg-slate-800/50 hover:bg-white dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-teal-400 transition shadow-2xs hover:shadow-md cursor-pointer space-y-2"
-                >
-                  <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${card.tone}`}>
-                    <IconComp className="w-4 h-4" />
-                  </div>
-                  <div className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white">
-                    {card.title}
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                    {card.desc}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+          )}
 
       {/* ========================================================= */}
       {/* بخش مجزا و منظم مدیریت کاربران سامانه */}
@@ -9240,6 +9884,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         </div>
       )}
+
+        </div>
+      </div>
 
       {/* مدال افزودن یا ویرایش کامل همه اطلاعات دانشجو توسط مدیر */}
       {isAddStudentModalOpen && (

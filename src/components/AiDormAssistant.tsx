@@ -367,10 +367,10 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
         registeredStudentsCount: students.length,
       },
       dormsSummary,
-      roomsSummary,
+      roomsSummary: roomsSummary.slice(0, 60),
       publicAnnouncements,
-      supervisorShiftsSummary,
-      counselorShiftsSummary,
+      supervisorShiftsSummary: supervisorShiftsSummary.slice(-40),
+      counselorShiftsSummary: counselorShiftsSummary.slice(-30),
       currentUserContext,
     };
   }, [currentUser, settings, dorms, rooms, beds, students, announcements]);
@@ -440,7 +440,11 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
 
       const response = await fetch(AI_CHAT_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
         body: JSON.stringify({
           message: trimmed,
           history: historyForApi,
@@ -456,14 +460,39 @@ export const AiDormAssistant: React.FC<AiDormAssistantProps> = ({
         throw new Error(AI_RATE_LIMIT_MESSAGE);
       }
 
-      const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        throw new Error(
-          'تابع سرور دستیار هوشمند (/api/ai-chat) پاسخ JSON برنگرداند (احتمالاً صفحه اصلی سایت برگشت داده شده است). لطفاً استقرار پوشه functions در ریشه پروژه روی Cloudflare Pages و تنظیم کلید GROQ_API_KEY را بررسی نمایید.'
-        );
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      const rawResponseText = await response.text().catch(() => '');
+      let data: Record<string, unknown> | null = null;
+      if (rawResponseText.trim()) {
+        try {
+          const parsed = JSON.parse(rawResponseText);
+          if (parsed && typeof parsed === 'object') {
+            data = parsed as Record<string, unknown>;
+          }
+        } catch {
+          data = null;
+        }
       }
 
-      const data = await response.json().catch(() => ({} as Record<string, unknown>));
+      if (!data) {
+        const looksLikeHtml =
+          contentType.includes('text/html') || /^\s*<!doctype\s+html|^\s*<html/i.test(rawResponseText);
+        if (response.status === 404 || response.status === 405) {
+          throw new Error(
+            `مسیر سرور دستیار هوشمند (/api/ai-chat) یافت نشد (کد ${response.status}). لطفاً اطمینان حاصل کنید پوشه functions/api/ai-chat.js در ریشه پروژه روی Cloudflare Pages مستقر شده است.`
+          );
+        }
+        if (response.status >= 500) {
+          throw new Error(
+            `سرور دستیار هوشمند با خطای موقت (کد ${response.status}) مواجه شد. لطفاً چند ثانیه بعد دوباره تلاش کنید.`
+          );
+        }
+        throw new Error(
+          looksLikeHtml
+            ? `تابع سرور دستیار هوشمند (/api/ai-chat) صفحه HTML برگرداند (کد ${response.status}). اگر سایت را روی Cloudflare Pages مستقر کرده‌اید، از وجود پوشه functions در ریشه مخزن، فایل _routes.json در خروجی و به‌روزرسانی کش مرورگر (Ctrl+Shift+R) اطمینان حاصل نمایید.`
+            : `تابع سرور دستیار هوشمند (/api/ai-chat) پاسخ JSON معتبر برنگرداند (کد ${response.status}). لطفاً استقرار پوشه functions و تنظیم کلید GROQ_API_KEY در Cloudflare Pages را بررسی نمایید.`
+        );
+      }
 
       if (!response.ok) {
         if (data?.code === 'RATE_LIMITED') {

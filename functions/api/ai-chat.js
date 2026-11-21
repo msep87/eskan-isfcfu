@@ -7,6 +7,7 @@ const CORS_HEADERS = {
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
   'Access-Control-Allow-Origin': '*',
+  'Cache-Control': 'no-store, no-cache, must-revalidate',
 };
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
@@ -125,7 +126,9 @@ export async function onRequestOptions() {
 
 export async function onRequestGet(context) {
   const apiKey = (context?.env?.GROQ_API_KEY || '').trim();
+  const geminiKey = (context?.env?.GEMINI_API_KEY || '').trim();
   const hasGroqKey = Boolean(apiKey);
+  const hasGeminiKey = Boolean(geminiKey);
   const url = new URL(context.request.url);
   let activeModels;
 
@@ -139,6 +142,7 @@ export async function onRequestGet(context) {
       status: 'ready',
       endpoint: '/api/ai-chat',
       hasGroqKey,
+      hasGeminiKey,
       ...(activeModels ? { activeModels } : {}),
     }),
     {
@@ -160,12 +164,13 @@ export async function onRequestPost(context) {
 
     const { message, history, publicContext, studentInfo } = body;
     const apiKey = (context?.env?.GROQ_API_KEY || '').trim();
+    const geminiKey = (context?.env?.GEMINI_API_KEY || '').trim();
 
-    if (!apiKey) {
+    if (!apiKey && !geminiKey) {
       return new Response(
         JSON.stringify({
           ok: false,
-          reply: 'کلید GROQ_API_KEY در تنظیمات Cloudflare یافت نشد.',
+          reply: 'کلید GROQ_API_KEY در تنظیمات محیطی سرور (Cloudflare Pages) یافت نشد.',
         }),
         { status: 500, headers: JSON_HEADERS }
       );
@@ -203,6 +208,66 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
       role: 'user',
       content: String(message || 'سلام').substring(0, 1000),
     });
+
+    // اگر کلید GROQ_API_KEY تنظیم نشده ولی GEMINI_API_KEY در محیط سرور موجود باشد، از Gemini REST API استفاده می‌شود
+    if (!apiKey && geminiKey) {
+      const geminiContents = [];
+      if (Array.isArray(history)) {
+        for (const item of history.slice(-6)) {
+          if (!item || typeof item !== 'object') continue;
+          const text = String(item.text || item.content || '').trim().substring(0, 600);
+          if (!text) continue;
+          const role = item.role === 'model' || item.role === 'assistant' ? 'model' : 'user';
+          geminiContents.push({ role, parts: [{ text }] });
+        }
+      }
+      geminiContents.push({
+        role: 'user',
+        parts: [{ text: String(message || 'سلام').substring(0, 1000) }],
+      });
+
+      const geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            contents: geminiContents,
+            generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
+          }),
+        }
+      );
+      const geminiData = await geminiRes.json().catch(() => ({}));
+      if (geminiRes.ok) {
+        const parts = geminiData?.candidates?.[0]?.content?.parts || [];
+        const reply = cleanReplyText(
+          parts.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('\n')
+        );
+        if (reply) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              success: true,
+              reply,
+              text: reply,
+              answer: reply,
+              modelUsed: 'gemini-2.5-flash',
+            }),
+            { status: 200, headers: JSON_HEADERS }
+          );
+        }
+      }
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          reply:
+            geminiData?.error?.message ||
+            'پاسخی از سرویس هوش مصنوعی دریافت نشد. لطفاً کلید GROQ_API_KEY را در تنظیمات سرور بررسی کنید.',
+        }),
+        { status: geminiRes.status >= 400 ? geminiRes.status : 502, headers: JSON_HEADERS }
+      );
+    }
 
     const configuredModel = (context?.env?.GROQ_MODEL || '').trim();
     const liveModels = await getCandidateModels(apiKey, false);
@@ -351,4 +416,14 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
       { status: 500, headers: JSON_HEADERS }
     );
   }
+}
+
+export async function onRequest() {
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      reply: 'متد درخواستی برای سرویس دستیار هوشمند پشتیبانی نمی‌شود (از POST استفاده کنید).',
+    }),
+    { status: 405, headers: JSON_HEADERS }
+  );
 }
