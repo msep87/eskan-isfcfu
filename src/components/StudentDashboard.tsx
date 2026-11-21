@@ -29,6 +29,7 @@ import { RoommatesCard } from './RoommatesCard';
 import { VisualBedPicker } from './VisualBedPicker';
 import { StudentProfileModal } from './StudentProfileModal';
 import { DormIdCardModal } from './DormIdCardModal';
+import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
 import { StudentGuestRequestPanel } from './StudentGuestRequestPanel';
 import { StudentSurveyPanel } from './StudentSurveyPanel';
 import { StudentLibraryPanel } from './StudentLibraryPanel';
@@ -115,6 +116,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   );
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isIdCardModalOpen, setIsIdCardModalOpen] = useState(false);
+  const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
   const [previewAnnImage, setPreviewAnnImage] = useState<string | null>(null);
 
   // وضعیت تعاملات فرهنگی، برنامه‌های ورزشی و انتخابات شورای صنفی
@@ -720,6 +722,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         >
           <QrCode className="w-4 h-4 text-amber-300" />
           <span>کارت شناسایی و مجوز اسکان سرا (چاپ / مجازی)</span>
+        </button>
+
+        <button
+          onClick={() => setIsTranscriptModalOpen(true)}
+          className="py-3.5 px-5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-black text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-amber-600/25 hover:scale-105"
+          title="مشاهده و چاپ کارنامه جامع فعالیت‌های فرهنگی، اجتماعی، ورزشی و انضباطی شما"
+        >
+          <Award className="w-4 h-4 text-yellow-100" />
+          <span>کارنامه فعالیت‌های فرهنگی، اجتماعی و ورزشی (چاپ)</span>
         </button>
 
         <button
@@ -2158,6 +2169,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         room={studentRoom}
         bed={studentBed}
         settings={settings}
+      />
+
+      {/* مدال کارنامه جامع فعالیت‌های فرهنگی، اجتماعی، ورزشی و انضباطی دانشجو */}
+      <StudentActivityTranscriptModal
+        isOpen={isTranscriptModalOpen}
+        onClose={() => setIsTranscriptModalOpen(false)}
+        initialStudent={student}
+        allowStudentPicker={false}
+        viewerRoleLabel="دانشجو"
       />
 
       <ImageLightboxModal

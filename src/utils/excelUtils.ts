@@ -819,6 +819,19 @@ export async function exportStudentCapabilitiesReportToExcel(
   XLSX.writeFile(wb, `گزارش_توانمندی_سکونت_سلامت_${safeLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
+// خروجی اکسل کاملاً سفارشی با دقیقاً ستون‌های انتخاب‌شده توسط کاربر
+export async function exportCustomColumnsStudentsToExcel(
+  rows: Record<string, string | number>[],
+  reportTitle = 'گزارش_سفارشی_دانشجویان'
+) {
+  const XLSX = await import('xlsx');
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'گزارش سفارشی');
+  const safeTitle = reportTitle.replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
+  XLSX.writeFile(wb, `${safeTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
 // خروجی اکسل گزارش ارجاعی و عملکرد حوزه‌ها در بازه زمانی دلخواه
 export async function exportDomainReportToExcel(
   items: Array<{

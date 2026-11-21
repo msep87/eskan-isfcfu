@@ -25,6 +25,7 @@ import { CulturalDashboard } from './CulturalDashboard';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { StudentReferralModal } from './StudentReferralModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -158,6 +159,7 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<ViceDeanTab>('supervisor');
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
+  const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
   const [securityBanner, setSecurityBanner] = useState<string | null>(null);
 
   // فیلترهای گزارش مفصل معاونت دانشجویی
@@ -773,6 +775,15 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsTranscriptModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-md"
+              title="مشاهده و چاپ کارنامه جامع فعالیت‌های فرهنگی، اجتماعی، ورزشی و انضباطی دانشجویان"
+            >
+              <Award className="w-4 h-4" />
+              <span>کارنامه فعالیت‌های دانشجو</span>
+            </button>
             <button
               type="button"
               onClick={onOpenReports}
@@ -1770,6 +1781,14 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
           setTimeout(() => setSecurityBanner(null), 4000);
           onRefreshData();
         }}
+      />
+
+      <StudentActivityTranscriptModal
+        isOpen={isTranscriptModalOpen}
+        onClose={() => setIsTranscriptModalOpen(false)}
+        allowStudentPicker={true}
+        studentsList={students}
+        viewerRoleLabel="معاونت دانشجویی"
       />
     </div>
   );

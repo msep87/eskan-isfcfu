@@ -31,6 +31,7 @@ import { escapeHtml } from '../utils/sanitizeHtml';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { StudentReferralModal } from './StudentReferralModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -190,6 +191,7 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
   const [activeTab, setActiveTab] = useState<'students' | 'sports' | 'elections' | 'disciplinary' | 'clearance'>('students');
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
+  const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
 
   // ۱. تب دانشجویان خوابگاهی و ترددی
   const [residencyFilter, setResidencyFilter] = useState<'all' | 'dorm' | 'commuter'>('all');
@@ -827,6 +829,15 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setIsTranscriptModalOpen(true)}
+              className="px-3.5 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-md"
+              title="مشاهده و چاپ کارنامه جامع فعالیت‌های فرهنگی، اجتماعی، ورزشی و انضباطی دانشجویان"
+            >
+              <Award className="w-4 h-4" />
+              <span>کارنامه فعالیت‌های دانشجو</span>
+            </button>
+
             <button
               onClick={onOpenReports}
               className="px-3.5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer"
@@ -2630,6 +2641,14 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
           setTimeout(() => setFeedback(null), 4000);
           reloadLocal();
         }}
+      />
+
+      <StudentActivityTranscriptModal
+        isOpen={isTranscriptModalOpen}
+        onClose={() => setIsTranscriptModalOpen(false)}
+        allowStudentPicker={true}
+        studentsList={students}
+        viewerRoleLabel="امور دانشجویی و تربیت بدنی"
       />
     </div>
   );

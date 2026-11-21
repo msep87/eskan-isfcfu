@@ -12,6 +12,7 @@ import {
 import { Storage, DISCIPLINARY_VIOLATION_PRESETS } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import { getStudentResidenceType } from '../utils/financeUtils';
+import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
 import {
   ECONOMIC_STATUS_LABELS,
   HOUSING_STATUS_LABELS,
@@ -96,6 +97,7 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
 }) => {
   const [activeTab, setActiveTab] = useState<ModalTab>('report_warning');
   const [isPhotoZoomed, setIsPhotoZoomed] = useState(false);
+  const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -519,6 +521,15 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
                   <Award className="w-3.5 h-3.5 text-amber-300" />
                   <span>نمره ارزیابی فعلی: {student.previousScore ?? 100} از ۱۰۰</span>
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setIsTranscriptOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white border border-white/30 font-black transition cursor-pointer shadow-sm"
+                  title="مشاهده و چاپ کارنامه جامع فعالیت‌های فرهنگی، اجتماعی، ورزشی و انضباطی این دانشجو"
+                >
+                  <Award className="w-3.5 h-3.5 text-amber-300" />
+                  <span>کارنامه فعالیت‌ها (چاپ)</span>
+                </button>
                 {actorRole === 'admin' && onEditStudent && (
                   <button
                     type="button"
@@ -1596,6 +1607,13 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
           </div>
         </div>
       )}
+      <StudentActivityTranscriptModal
+        isOpen={isTranscriptOpen}
+        onClose={() => setIsTranscriptOpen(false)}
+        initialStudent={student}
+        allowStudentPicker={false}
+        viewerRoleLabel={actorRole === 'admin' ? 'مدیریت کل' : 'سرپرستی سرا'}
+      />
     </div>
   );
 };

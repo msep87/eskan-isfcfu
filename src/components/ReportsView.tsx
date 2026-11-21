@@ -1,21 +1,34 @@
 import React, { useState, useMemo } from 'react';
 import { PersianDatePicker } from './PersianDatePicker';
-import { Dormitory, Room, Bed, Student } from '../types';
+import { Dormitory, Room, Bed, Student, StudentFinancialStatus } from '../types';
 import { Storage } from '../utils/storage';
 import {
   exportVacantBedsToExcel,
   exportStudentsToExcel,
   exportDomainReportToExcel,
-  exportStudentCapabilitiesReportToExcel,
+  exportCustomColumnsStudentsToExcel,
   toEnglishDigits,
 } from '../utils/excelUtils';
-import { getStudentResidenceType } from '../utils/financeUtils';
+import {
+  computeStudentFinancialInfo,
+  FINANCIAL_STATUS_LABELS,
+  getStudentResidenceType,
+} from '../utils/financeUtils';
+import { escapeHtml } from '../utils/sanitizeHtml';
+import {
+  computeStudentActivityTranscript,
+  loadTranscriptDataContext,
+  printHtmlInHiddenIframe,
+} from '../utils/studentTranscriptUtils';
+import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
 import {
   ARTISTIC_SKILL_OPTIONS,
+  BLOOD_TYPE_OPTIONS,
   COMMUTER_ELIGIBILITY_OPTIONS,
   CULTURAL_ACTIVITY_OPTIONS,
   ECONOMIC_STATUS_LABELS,
   HOUSING_STATUS_LABELS,
+  MARITAL_STATUS_LABELS,
   MENTAL_HEALTH_STATUS_LABELS,
   PHYSICAL_HEALTH_STATUS_LABELS,
   SPORTS_ACTIVITY_OPTIONS,
@@ -27,6 +40,7 @@ import {
   joinSkillList,
 } from '../utils/studentProfileOptions';
 import {
+  Award,
   BarChart3,
   Download,
   Printer,
@@ -55,6 +69,8 @@ import {
   ShieldCheck,
   CheckCheck,
   PieChart as PieChartIcon,
+  SlidersHorizontal,
+  Columns3,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -105,18 +121,48 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [selectedDormFilter, setSelectedDormFilter] = useState<string>('all');
   const [selectedTierFilter, setSelectedTierFilter] = useState<'all' | 'lower' | 'upper'>('all');
 
-  // فیلترهای گزارش جامع توانمندی‌ها، سکونت (خوابگاهی/ترددی)، خانواده و سلامت
+  // فیلترهای گزارش‌ساز جامع و سفارشی دانشجویان (همه فیلدها + انتخاب ستون چاپ و اکسل)
   const [capResidenceFilter, setCapResidenceFilter] = useState<'all' | 'dormitory' | 'commuter'>('all');
   const [capCommuterReasonFilter, setCapCommuterReasonFilter] = useState<string>('all');
+  const [capDormFilter, setCapDormFilter] = useState<string>('all');
+  const [capAssignmentFilter, setCapAssignmentFilter] = useState<'all' | 'confirmed' | 'temporary' | 'unassigned'>('all');
+  const [capProvinceFilter, setCapProvinceFilter] = useState<string>('all');
+  const [capCityFilter, setCapCityFilter] = useState<string>('all');
+  const [capFieldFilter, setCapFieldFilter] = useState<string>('all');
+  const [capEntryTermFilter, setCapEntryTermFilter] = useState<string>('all');
+  const [capProfileFilter, setCapProfileFilter] = useState<'all' | 'completed' | 'incomplete'>('all');
+  const [capMaritalFilter, setCapMaritalFilter] = useState<'all' | 'single' | 'married'>('all');
+  const [capHeadHouseholdOnly, setCapHeadHouseholdOnly] = useState<boolean>(false);
+  const [capHousingFilter, setCapHousingFilter] = useState<string>('all');
+  const [capEconomicFilter, setCapEconomicFilter] = useState<string>('all');
   const [capArtisticFilter, setCapArtisticFilter] = useState<string>('all');
   const [capCulturalFilter, setCapCulturalFilter] = useState<string>('all');
   const [capSportsFilter, setCapSportsFilter] = useState<string>('all');
   const [capTechnicalFilter, setCapTechnicalFilter] = useState<string>('all');
+  const [capBloodFilter, setCapBloodFilter] = useState<string>('all');
   const [capPhysicalHealthFilter, setCapPhysicalHealthFilter] = useState<string>('all');
   const [capMentalHealthFilter, setCapMentalHealthFilter] = useState<string>('all');
   const [capCounselingOnly, setCapCounselingOnly] = useState<boolean>(false);
-  const [capEconomicFilter, setCapEconomicFilter] = useState<string>('all');
+  const [capFinancialFilter, setCapFinancialFilter] = useState<'all' | StudentFinancialStatus>('all');
+  const [capMinActivityScore, setCapMinActivityScore] = useState<number>(0);
   const [capSearchQuery, setCapSearchQuery] = useState<string>('');
+  const [isColumnPickerOpen, setIsColumnPickerOpen] = useState<boolean>(true);
+  const [transcriptStudent, setTranscriptStudent] = useState<Student | null>(null);
+  const [customReportTitle, setCustomReportTitle] = useState<string>('گزارش سفارشی اطلاعات دانشجویان');
+
+  const [selectedCustomCols, setSelectedCustomCols] = useState<string[]>([
+    'rowIndex',
+    'studentId',
+    'fullName',
+    'fatherName',
+    'fieldOfStudy',
+    'entryTerm',
+    'mobile',
+    'residenceType',
+    'dormName',
+    'roomNumber',
+    'activityScore',
+  ]);
 
   // متغیرهای فیلتر گزارش ارجاعی و عملکرد حوزه‌ها
   const [domainFilter, setDomainFilter] = useState<
@@ -236,7 +282,192 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     return { bloodGroups: bgMap, specialConditions: conditions };
   }, [students, dormsMap, roomsMap]);
 
-  // گزارش و فیلتر جامع توانمندی‌ها، سکونت (خوابگاهی/ترددی)، خانواده و سلامت
+  const bedsMap = useMemo(() => new Map(beds.map((b) => [b.id, b.label])), [beds]);
+
+  const studentFinancesMap = useMemo(() => {
+    void cloudSyncTick;
+    const all = Storage.getStudentFinances();
+    return new Map(all.map((f) => [f.studentId, f]));
+  }, [cloudSyncTick, isOpen]);
+
+  const studentTranscriptScoreMap = useMemo(() => {
+    void cloudSyncTick;
+    if (!isOpen) return new Map<string, { score: number; grade: string }>();
+    const ctx = loadTranscriptDataContext();
+    const map = new Map<string, { score: number; grade: string }>();
+    students.forEach((s) => {
+      const tr = computeStudentActivityTranscript(s, ctx);
+      map.set(s.studentId, { score: tr.normalizedScore100, grade: tr.gradeLabel });
+    });
+    return map;
+  }, [students, cloudSyncTick, isOpen]);
+
+  const uniqueProvinces = useMemo(
+    () => Array.from(new Set(students.map((s) => s.province).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'fa')),
+    [students]
+  );
+  const uniqueCities = useMemo(() => {
+    const src = capProvinceFilter === 'all' ? students : students.filter((s) => s.province === capProvinceFilter);
+    return Array.from(new Set(src.map((s) => s.city).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'fa'));
+  }, [students, capProvinceFilter]);
+  const uniqueFields = useMemo(
+    () => Array.from(new Set(students.map((s) => s.fieldOfStudy).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'fa')),
+    [students]
+  );
+  const uniqueEntryTerms = useMemo(
+    () => Array.from(new Set(students.map((s) => s.entryTerm).filter(Boolean))).sort(),
+    [students]
+  );
+
+  const CUSTOM_REPORT_COLUMNS = useMemo(
+    () => [
+      { key: 'rowIndex', label: 'ردیف', group: 'هویتی' },
+      { key: 'studentId', label: 'شماره دانشجویی', group: 'هویتی' },
+      { key: 'nationalId', label: 'کد ملی', group: 'هویتی' },
+      { key: 'fullName', label: 'نام و نام خانوادگی', group: 'هویتی' },
+      { key: 'fatherName', label: 'نام پدر', group: 'هویتی' },
+      { key: 'birthDate', label: 'تاریخ تولد', group: 'هویتی' },
+      { key: 'fieldOfStudy', label: 'رشته تحصیلی', group: 'تحصیلی' },
+      { key: 'entryTerm', label: 'ترم ورود', group: 'تحصیلی' },
+      { key: 'profileCompleted', label: 'وضعیت تکمیل پرونده', group: 'تحصیلی' },
+      { key: 'mobile', label: 'شماره همراه', group: 'تماس و نشانی' },
+      { key: 'parentPhone', label: 'تلفن والدین', group: 'تماس و نشانی' },
+      { key: 'emergencyPhone', label: 'تلفن اضطراری', group: 'تماس و نشانی' },
+      { key: 'province', label: 'استان', group: 'تماس و نشانی' },
+      { key: 'city', label: 'شهر', group: 'تماس و نشانی' },
+      { key: 'postalAddress', label: 'نشانی دقیق', group: 'تماس و نشانی' },
+      { key: 'residenceType', label: 'نوع سکونت (خوابگاهی/ترددی)', group: 'اسکان' },
+      { key: 'commuterReasons', label: 'علت ترددی', group: 'اسکان' },
+      { key: 'residenceNotes', label: 'توضیحات سکونت/ترددی', group: 'اسکان' },
+      { key: 'dormName', label: 'سرای دانشجویی', group: 'اسکان' },
+      { key: 'roomNumber', label: 'اتاق', group: 'اسکان' },
+      { key: 'bedLabel', label: 'تخت', group: 'اسکان' },
+      { key: 'assignmentStatus', label: 'وضعیت اسکان', group: 'اسکان' },
+      { key: 'maritalStatus', label: 'تأهل', group: 'خانواده' },
+      { key: 'isHeadOfHousehold', label: 'سرپرست خانوار', group: 'خانواده' },
+      { key: 'fatherOccupation', label: 'شغل پدر', group: 'خانواده' },
+      { key: 'motherOccupation', label: 'شغل مادر', group: 'خانواده' },
+      { key: 'familyMembersCount', label: 'تعداد اعضای خانواده', group: 'خانواده' },
+      { key: 'housingStatus', label: 'وضعیت مسکن', group: 'خانواده' },
+      { key: 'economicStatus', label: 'وضعیت معیشتی', group: 'خانواده' },
+      { key: 'artisticSkills', label: 'رشته‌های هنری', group: 'توانمندی و فعالیت' },
+      { key: 'culturalActivities', label: 'فعالیت‌های فرهنگی', group: 'توانمندی و فعالیت' },
+      { key: 'sportsActivities', label: 'رشته‌های ورزشی', group: 'توانمندی و فعالیت' },
+      { key: 'technicalSkills', label: 'مهارت‌های علمی و فنی', group: 'توانمندی و فعالیت' },
+      { key: 'activityScore', label: 'امتیاز کارنامه فعالیت‌ها (از ۱۰۰)', group: 'توانمندی و فعالیت' },
+      { key: 'activityGrade', label: 'رتبه کارنامه فعالیت‌ها', group: 'توانمندی و فعالیت' },
+      { key: 'bloodType', label: 'گروه خونی', group: 'سلامت و مالی' },
+      { key: 'physicalHealth', label: 'سلامت جسمی', group: 'سلامت و مالی' },
+      { key: 'specialCondition', label: 'بیماری خاص و ملاحظات', group: 'سلامت و مالی' },
+      { key: 'medicationsAllergies', label: 'دارو / حساسیت', group: 'سلامت و مالی' },
+      { key: 'mentalHealth', label: 'سلامت روان', group: 'سلامت و مالی' },
+      { key: 'counselingRequest', label: 'متقاضی مشاوره', group: 'سلامت و مالی' },
+      { key: 'financialStatus', label: 'وضعیت مالی و بدهی', group: 'سلامت و مالی' },
+    ],
+    []
+  );
+
+  const getCustomColumnValue = (s: Student, idx: number, colKey: string): string => {
+    const resType = getStudentResidenceType(s);
+    const fin = computeStudentFinancialInfo(s, studentFinancesMap.get(s.studentId));
+    const trInfo = studentTranscriptScoreMap.get(s.studentId);
+    switch (colKey) {
+      case 'rowIndex':
+        return String(idx + 1);
+      case 'studentId':
+        return s.studentId || '-';
+      case 'nationalId':
+        return s.nationalId || '-';
+      case 'fullName':
+        return s.fullName || '-';
+      case 'fatherName':
+        return s.fatherName || '-';
+      case 'birthDate':
+        return s.birthDate || '-';
+      case 'fieldOfStudy':
+        return s.fieldOfStudy || '-';
+      case 'entryTerm':
+        return s.entryTerm || '-';
+      case 'profileCompleted':
+        return s.isProfileCompleted ? 'تکمیل‌شده' : 'ناقص';
+      case 'mobile':
+        return s.mobile || s.phone || '-';
+      case 'parentPhone':
+        return s.parentPhone || '-';
+      case 'emergencyPhone':
+        return s.emergencyPhone || '-';
+      case 'province':
+        return s.province || '-';
+      case 'city':
+        return s.city || '-';
+      case 'postalAddress':
+        return s.postalAddress || '-';
+      case 'residenceType':
+        return resType === 'dormitory' ? 'خوابگاهی' : 'ترددی (غیرخوابگاهی)';
+      case 'commuterReasons':
+        return resType === 'commuter' ? formatCommuterReasons(s.commuterEligibilityReasons) || '-' : '-';
+      case 'residenceNotes':
+        return (resType === 'commuter' ? s.commuterRequestNotes : s.dormitoryRequestNotes) || '-';
+      case 'dormName':
+        return s.assignedDormId ? dormsMap.get(s.assignedDormId) || s.assignedDormName || '-' : resType === 'commuter' ? 'ترددی' : 'فاقد سرا';
+      case 'roomNumber':
+        return s.assignedRoomId ? roomsMap.get(s.assignedRoomId) || s.assignedRoomNumber || '-' : '-';
+      case 'bedLabel':
+        return s.assignedBedId ? bedsMap.get(s.assignedBedId) || '-' : '-';
+      case 'assignmentStatus':
+        return s.assignmentStatus === 'confirmed'
+          ? 'اسکان قطعی'
+          : s.assignmentStatus === 'temporary'
+          ? 'اسکان موقت'
+          : 'فاقد اتاق';
+      case 'maritalStatus':
+        return s.maritalStatus ? MARITAL_STATUS_LABELS[s.maritalStatus] : 'مجرد';
+      case 'isHeadOfHousehold':
+        return s.isHeadOfHousehold ? 'بله' : 'خیر';
+      case 'fatherOccupation':
+        return formatParentOccupation(s.fatherAlive, s.fatherOccupation);
+      case 'motherOccupation':
+        return formatParentOccupation(s.motherAlive, s.motherOccupation);
+      case 'familyMembersCount':
+        return s.familyMembersCount ? String(s.familyMembersCount) : '-';
+      case 'housingStatus':
+        return s.housingStatus ? HOUSING_STATUS_LABELS[s.housingStatus] : '-';
+      case 'economicStatus':
+        return s.economicStatus ? ECONOMIC_STATUS_LABELS[s.economicStatus] : '-';
+      case 'artisticSkills':
+        return joinSkillList(s.artisticSkills, s.artisticOther) || '-';
+      case 'culturalActivities':
+        return joinSkillList(s.culturalActivities, s.culturalOther) || '-';
+      case 'sportsActivities':
+        return joinSkillList(s.sportsActivities, s.sportsOther) || '-';
+      case 'technicalSkills':
+        return joinSkillList(s.technicalSkills, s.technicalOther) || '-';
+      case 'activityScore':
+        return trInfo ? `${trInfo.score} از ۱۰۰` : '-';
+      case 'activityGrade':
+        return trInfo ? trInfo.grade : '-';
+      case 'bloodType':
+        return getStudentBloodType(s);
+      case 'physicalHealth':
+        return PHYSICAL_HEALTH_STATUS_LABELS[s.physicalHealthStatus || 'healthy'];
+      case 'specialCondition':
+        return getStudentSpecialConditionSummary(s);
+      case 'medicationsAllergies':
+        return [s.foodOrDrugAllergies, s.regularMedications].filter(Boolean).join(' | ') || '-';
+      case 'mentalHealth':
+        return MENTAL_HEALTH_STATUS_LABELS[s.mentalHealthStatus || 'good'];
+      case 'counselingRequest':
+        return s.wantsCounselingContact ? 'بله' : 'خیر';
+      case 'financialStatus':
+        return fin.debtAmount > 0
+          ? `${FINANCIAL_STATUS_LABELS[fin.financialStatus]} (${fin.debtAmount.toLocaleString('fa-IR')} ریال)`
+          : FINANCIAL_STATUS_LABELS[fin.financialStatus];
+      default:
+        return '-';
+    }
+  };
+
+  // گزارش و فیلتر جامع روی تمام فیلدهای دانشجو
   const capabilitiesFilteredStudents = useMemo(() => {
     const q = capSearchQuery.trim().toLowerCase();
     return students.filter((s) => {
@@ -246,6 +477,33 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         capCommuterReasonFilter !== 'all' &&
         !(s.commuterEligibilityReasons || []).includes(capCommuterReasonFilter as any)
       ) {
+        return false;
+      }
+      if (capDormFilter !== 'all') {
+        if (capDormFilter === '__none__') {
+          if (s.assignedDormId) return false;
+        } else if (s.assignedDormId !== capDormFilter) {
+          return false;
+        }
+      }
+      if (capAssignmentFilter !== 'all') {
+        const st = s.assignmentStatus || (s.assignedRoomId ? 'confirmed' : 'unassigned');
+        if (capAssignmentFilter === 'unassigned') {
+          if (s.assignedRoomId) return false;
+        } else if (st !== capAssignmentFilter) {
+          return false;
+        }
+      }
+      if (capProvinceFilter !== 'all' && s.province !== capProvinceFilter) return false;
+      if (capCityFilter !== 'all' && s.city !== capCityFilter) return false;
+      if (capFieldFilter !== 'all' && s.fieldOfStudy !== capFieldFilter) return false;
+      if (capEntryTermFilter !== 'all' && s.entryTerm !== capEntryTermFilter) return false;
+      if (capProfileFilter === 'completed' && !s.isProfileCompleted) return false;
+      if (capProfileFilter === 'incomplete' && s.isProfileCompleted) return false;
+      if (capMaritalFilter !== 'all' && (s.maritalStatus || 'single') !== capMaritalFilter) return false;
+      if (capHeadHouseholdOnly && !s.isHeadOfHousehold) return false;
+      if (capHousingFilter !== 'all' && (s.housingStatus || '') !== capHousingFilter) return false;
+      if (capEconomicFilter !== 'all' && (s.economicStatus || 'moderate') !== capEconomicFilter) {
         return false;
       }
       if (capArtisticFilter !== 'all') {
@@ -276,6 +534,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           return false;
         }
       }
+      if (capBloodFilter !== 'all' && getStudentBloodType(s) !== capBloodFilter) return false;
       if (
         capPhysicalHealthFilter !== 'all' &&
         (s.physicalHealthStatus || 'healthy') !== capPhysicalHealthFilter
@@ -289,19 +548,28 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         return false;
       }
       if (capCounselingOnly && !s.wantsCounselingContact) return false;
-      if (capEconomicFilter !== 'all' && (s.economicStatus || 'moderate') !== capEconomicFilter) {
-        return false;
+      if (capFinancialFilter !== 'all') {
+        const fin = computeStudentFinancialInfo(s, studentFinancesMap.get(s.studentId));
+        if (fin.financialStatus !== capFinancialFilter) return false;
+      }
+      if (capMinActivityScore > 0) {
+        const tr = studentTranscriptScoreMap.get(s.studentId);
+        if (!tr || tr.score < capMinActivityScore) return false;
       }
       if (q) {
         const hay = [
           s.fullName,
+          s.fatherName,
           s.studentId,
+          s.nationalId,
           s.fieldOfStudy,
           s.city,
           s.province,
+          s.mobile,
           s.fatherOccupation,
           s.motherOccupation,
           s.commuterRequestNotes,
+          s.dormitoryRequestNotes,
           s.livingSituationNotes,
           joinSkillList(s.artisticSkills, s.artisticOther),
           joinSkillList(s.culturalActivities, s.culturalOther),
@@ -320,16 +588,182 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     students,
     capResidenceFilter,
     capCommuterReasonFilter,
+    capDormFilter,
+    capAssignmentFilter,
+    capProvinceFilter,
+    capCityFilter,
+    capFieldFilter,
+    capEntryTermFilter,
+    capProfileFilter,
+    capMaritalFilter,
+    capHeadHouseholdOnly,
+    capHousingFilter,
+    capEconomicFilter,
     capArtisticFilter,
     capCulturalFilter,
     capSportsFilter,
     capTechnicalFilter,
+    capBloodFilter,
     capPhysicalHealthFilter,
     capMentalHealthFilter,
     capCounselingOnly,
-    capEconomicFilter,
+    capFinancialFilter,
+    capMinActivityScore,
     capSearchQuery,
+    studentFinancesMap,
+    studentTranscriptScoreMap,
   ]);
+
+  const activeCustomColumnDefs = useMemo(
+    () => CUSTOM_REPORT_COLUMNS.filter((c) => selectedCustomCols.includes(c.key)),
+    [CUSTOM_REPORT_COLUMNS, selectedCustomCols]
+  );
+
+  const toggleCustomColumn = (colKey: string) => {
+    setSelectedCustomCols((prev) => {
+      if (prev.includes(colKey)) {
+        if (prev.length <= 1) return prev; // حداقل یک ستون باید فعال بماند
+        return prev.filter((k) => k !== colKey);
+      }
+      return [...prev, colKey];
+    });
+  };
+
+  const applyColumnPreset = (preset: 'basic' | 'housing' | 'family_skills' | 'health' | 'activities' | 'all') => {
+    if (preset === 'basic') {
+      setSelectedCustomCols(['rowIndex', 'studentId', 'fullName', 'fatherName', 'fieldOfStudy', 'entryTerm', 'mobile', 'residenceType']);
+    } else if (preset === 'housing') {
+      setSelectedCustomCols(['rowIndex', 'studentId', 'fullName', 'fatherName', 'mobile', 'residenceType', 'dormName', 'roomNumber', 'bedLabel', 'assignmentStatus', 'commuterReasons']);
+    } else if (preset === 'family_skills') {
+      setSelectedCustomCols(['rowIndex', 'fullName', 'studentId', 'fatherOccupation', 'motherOccupation', 'housingStatus', 'economicStatus', 'artisticSkills', 'culturalActivities', 'sportsActivities', 'technicalSkills']);
+    } else if (preset === 'health') {
+      setSelectedCustomCols(['rowIndex', 'fullName', 'studentId', 'mobile', 'emergencyPhone', 'bloodType', 'physicalHealth', 'specialCondition', 'medicationsAllergies', 'mentalHealth', 'counselingRequest']);
+    } else if (preset === 'activities') {
+      setSelectedCustomCols(['rowIndex', 'studentId', 'fullName', 'fieldOfStudy', 'residenceType', 'dormName', 'activityScore', 'activityGrade', 'culturalActivities', 'sportsActivities']);
+    } else {
+      setSelectedCustomCols(CUSTOM_REPORT_COLUMNS.map((c) => c.key));
+    }
+  };
+
+  const handleResetAllCustomFilters = () => {
+    setCapResidenceFilter('all');
+    setCapCommuterReasonFilter('all');
+    setCapDormFilter('all');
+    setCapAssignmentFilter('all');
+    setCapProvinceFilter('all');
+    setCapCityFilter('all');
+    setCapFieldFilter('all');
+    setCapEntryTermFilter('all');
+    setCapProfileFilter('all');
+    setCapMaritalFilter('all');
+    setCapHeadHouseholdOnly(false);
+    setCapHousingFilter('all');
+    setCapEconomicFilter('all');
+    setCapArtisticFilter('all');
+    setCapCulturalFilter('all');
+    setCapSportsFilter('all');
+    setCapTechnicalFilter('all');
+    setCapBloodFilter('all');
+    setCapPhysicalHealthFilter('all');
+    setCapMentalHealthFilter('all');
+    setCapCounselingOnly(false);
+    setCapFinancialFilter('all');
+    setCapMinActivityScore(0);
+    setCapSearchQuery('');
+  };
+
+  const handleExportCustomColumnsExcel = () => {
+    const cols = activeCustomColumnDefs;
+    const rows = capabilitiesFilteredStudents.map((s, idx) => {
+      const obj: Record<string, string | number> = {};
+      cols.forEach((col) => {
+        obj[col.label] = getCustomColumnValue(s, idx, col.key);
+      });
+      return obj;
+    });
+    exportCustomColumnsStudentsToExcel(rows, customReportTitle || 'گزارش_سفارشی_دانشجویان');
+  };
+
+  const handlePrintCustomColumnsReport = () => {
+    const cols = activeCustomColumnDefs;
+    const todayFa = new Date().toLocaleDateString('fa-IR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const isLandscape = cols.length > 7;
+    const activeFilterChips: string[] = [];
+    if (capResidenceFilter !== 'all') {
+      activeFilterChips.push(`نوع سکونت: ${capResidenceFilter === 'dormitory' ? 'خوابگاهی' : 'ترددی'}`);
+    }
+    if (capDormFilter !== 'all') {
+      activeFilterChips.push(`سرا: ${capDormFilter === '__none__' ? 'فاقد سرا' : dormsMap.get(capDormFilter) || capDormFilter}`);
+    }
+    if (capProvinceFilter !== 'all') activeFilterChips.push(`استان: ${capProvinceFilter}`);
+    if (capCityFilter !== 'all') activeFilterChips.push(`شهر: ${capCityFilter}`);
+    if (capFieldFilter !== 'all') activeFilterChips.push(`رشته: ${capFieldFilter}`);
+    if (capEntryTermFilter !== 'all') activeFilterChips.push(`ورودی: ${capEntryTermFilter}`);
+    if (capArtisticFilter !== 'all') activeFilterChips.push(`هنری: ${capArtisticFilter === '__any__' ? 'همه دارندگان' : capArtisticFilter}`);
+    if (capCulturalFilter !== 'all') activeFilterChips.push(`فرهنگی: ${capCulturalFilter === '__any__' ? 'همه دارندگان' : capCulturalFilter}`);
+    if (capSportsFilter !== 'all') activeFilterChips.push(`ورزشی: ${capSportsFilter === '__any__' ? 'همه دارندگان' : capSportsFilter}`);
+    if (capTechnicalFilter !== 'all') activeFilterChips.push(`فنی: ${capTechnicalFilter === '__any__' ? 'همه دارندگان' : capTechnicalFilter}`);
+    if (capMinActivityScore > 0) activeFilterChips.push(`حداقل امتیاز کارنامه: ${capMinActivityScore}`);
+    if (capFinancialFilter !== 'all') activeFilterChips.push(`مالی: ${FINANCIAL_STATUS_LABELS[capFinancialFilter]}`);
+
+    const headerCells = cols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join('');
+    const bodyRows = capabilitiesFilteredStudents
+      .map((s, idx) => {
+        const tds = cols
+          .map((c) => `<td>${escapeHtml(getCustomColumnValue(s, idx, c.key))}</td>`)
+          .join('');
+        return `<tr>${tds}</tr>`;
+      })
+      .join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <title>${escapeHtml(customReportTitle || 'گزارش سفارشی دانشجویان')}</title>
+  <style>
+    @page { size: A4 ${isLandscape ? 'landscape' : 'portrait'}; margin: 10mm; }
+    * { box-sizing: border-box; font-family: Tahoma, Vazirmatn, 'Segoe UI', sans-serif; }
+    body { margin: 0; color: #0f172a; font-size: ${cols.length > 10 ? '9.5px' : '11px'}; }
+    .top { border-bottom: 2px solid #0f766e; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+    .top h1 { margin: 0; font-size: 14px; color: #0f172a; }
+    .top p { margin: 2px 0 0; font-size: 10px; color: #475569; }
+    .filters { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; font-size: 10px; color: #334155; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #cbd5e1; padding: 5px 6px; text-align: right; vertical-align: top; word-break: break-word; }
+    th { background: #f1f5f9; font-weight: 800; color: #0f172a; }
+    tr:nth-child(even) td { background: #fafafa; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <h1>${escapeHtml(customReportTitle || 'گزارش سفارشی اطلاعات دانشجویان')}</h1>
+      <p>دانشگاه فرهنگیان استان اصفهان • سامانه جامع خدمات دانشجویی</p>
+    </div>
+    <div style="text-align:left;font-size:10px;color:#334155;">
+      <div>تاریخ چاپ: <strong>${escapeHtml(todayFa)}</strong></div>
+      <div>تعداد رکورد: <strong>${capabilitiesFilteredStudents.length.toLocaleString('fa-IR')} نفر</strong> • ستون‌ها: <strong>${cols.length}</strong></div>
+    </div>
+  </div>
+  ${
+    activeFilterChips.length > 0
+      ? `<div class="filters"><strong>فیلترهای اعمال‌شده:</strong> ${escapeHtml(activeFilterChips.join(' | '))}</div>`
+      : ''
+  }
+  <table>
+    <thead><tr>${headerCells}</tr></thead>
+    <tbody>${bodyRows}</tbody>
+  </table>
+</body>
+</html>`;
+
+    printHtmlInHiddenIframe(html);
+  };
 
   const capabilitiesStats = useMemo(() => {
     let dormCount = 0;
@@ -846,8 +1280,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
             }`}
           >
-            <Users className="w-3.5 h-3.5" />
-            <span>گزارش توانمندی‌ها، ترددی/خوابگاهی، خانواده و سلامت ({students.length})</span>
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span>گزارش‌ساز سفارشی (فیلتر جامع + انتخاب ستون چاپ/اکسل) ({students.length})</span>
           </button>
 
           <button
@@ -1804,59 +2238,57 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           )}
 
-          {/* تب گزارش جامع توانمندی‌ها، سکونت (ترددی/خوابگاهی)، خانواده و سلامت جسمی و روانی */}
+          {/* تب گزارش‌ساز جامع و سفارشی (فیلتر تمام فیلدها + انتخاب دقیق ستون‌های چاپ و اکسل) */}
           {tab === 'capabilities' && (
             <div className="space-y-5">
-              {/* پنل فیلترهای تخصصی */}
-              <div className="p-4 rounded-3xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
+              {/* پنل فیلترهای جامع روی تمام اطلاعات دانشجو */}
+              <div className="p-4 rounded-3xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200/70 dark:border-slate-700">
                   <div className="flex items-center gap-2 text-xs font-extrabold text-slate-800 dark:text-slate-100">
                     <Filter className="w-4 h-4 text-fuchsia-600" />
-                    <span>فیلترهای گزارش‌گیری تخصصی توانمندی‌ها، وضعیت سکونت، خانواده و سلامت</span>
+                    <span>فیلترهای جامع گزارش‌گیری (اسکان، هویتی، خانواده، توانمندی‌ها، سلامت، مالی و امتیاز فعالیت‌ها)</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setCapResidenceFilter('all');
-                        setCapCommuterReasonFilter('all');
-                        setCapArtisticFilter('all');
-                        setCapCulturalFilter('all');
-                        setCapSportsFilter('all');
-                        setCapTechnicalFilter('all');
-                        setCapPhysicalHealthFilter('all');
-                        setCapMentalHealthFilter('all');
-                        setCapCounselingOnly(false);
-                        setCapEconomicFilter('all');
-                        setCapSearchQuery('');
-                      }}
-                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 flex items-center gap-1 cursor-pointer"
+                      onClick={() => setIsColumnPickerOpen((prev) => !prev)}
+                      className={`px-3 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer transition ${
+                        isColumnPickerOpen
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                      }`}
                     >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>پاک کردن فیلترها</span>
+                      <Columns3 className="w-3.5 h-3.5" />
+                      <span>انتخاب ستون‌های چاپ و اکسل ({activeCustomColumnDefs.length} ستون)</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() =>
-                        exportStudentCapabilitiesReportToExcel(
-                          capabilitiesFilteredStudents,
-                          dormsMap,
-                          roomsMap,
-                          capResidenceFilter === 'commuter'
-                            ? 'ترددی'
-                            : capResidenceFilter === 'dormitory'
-                            ? 'خوابگاهی'
-                            : 'فیلترشده'
-                        )
-                      }
+                      onClick={handleResetAllCustomFilters}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 flex items-center gap-1 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>پاک کردن همه فیلترها</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePrintCustomColumnsReport}
+                      className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>چاپ با ستون‌های انتخاب‌شده ({capabilitiesFilteredStudents.length})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportCustomColumnsExcel}
                       className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-sm cursor-pointer"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5" />
-                      <span>خروجی اکسل این گزارش ({capabilitiesFilteredStudents.length})</span>
+                      <span>خروجی اکسل ستون‌های انتخاب‌شده</span>
                     </button>
                   </div>
                 </div>
 
+                {/* عنوان دلخواه گزارش برای سربرگ چاپ و نام فایل اکسل */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
                   <div className="relative">
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
@@ -1864,10 +2296,18 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       type="text"
                       value={capSearchQuery}
                       onChange={(e) => setCapSearchQuery(e.target.value)}
-                      placeholder="جستجو (نام، کد، شغل والدین، مهارت...)"
+                      placeholder="جستجوی آزاد (نام، نام پدر، کد، شغل، مهارت...)"
                       className="w-full pr-8 pl-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
                     />
                   </div>
+
+                  <input
+                    type="text"
+                    value={customReportTitle}
+                    onChange={(e) => setCustomReportTitle(e.target.value)}
+                    placeholder="عنوان چاپ و نام فایل گزارش..."
+                    className="px-3 py-2 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  />
 
                   <select
                     value={capResidenceFilter}
@@ -1893,16 +2333,140 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   </select>
 
                   <select
+                    value={capDormFilter}
+                    onChange={(e) => setCapDormFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-teal-200 dark:border-teal-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">سرای دانشجویی: همه سراها</option>
+                    <option value="__none__">فاقد سرای تخصیص‌یافته</option>
+                    {dorms.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capAssignmentFilter}
+                    onChange={(e) => setCapAssignmentFilter(e.target.value as any)}
+                    className="px-3 py-2 rounded-xl border border-teal-200 dark:border-teal-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">وضعیت اسکان: همه</option>
+                    <option value="confirmed">اسکان قطعی</option>
+                    <option value="temporary">اسکان موقت</option>
+                    <option value="unassigned">فاقد اتاق</option>
+                  </select>
+
+                  <select
+                    value={capProvinceFilter}
+                    onChange={(e) => {
+                      setCapProvinceFilter(e.target.value);
+                      setCapCityFilter('all');
+                    }}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">استان سکونت: همه استان‌ها</option>
+                    {uniqueProvinces.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capCityFilter}
+                    onChange={(e) => setCapCityFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">شهر سکونت: همه شهرها</option>
+                    {uniqueCities.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capFieldFilter}
+                    onChange={(e) => setCapFieldFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">رشته تحصیلی: همه رشته‌ها</option>
+                    {uniqueFields.map((f) => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capEntryTermFilter}
+                    onChange={(e) => setCapEntryTermFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">ترم ورود: همه ورودی‌ها</option>
+                    {uniqueEntryTerms.map((t) => (
+                      <option key={t} value={t}>ورودی {t}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capProfileFilter}
+                    onChange={(e) => setCapProfileFilter(e.target.value as any)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">وضعیت پرونده: همه</option>
+                    <option value="completed">پرونده تکمیل‌شده</option>
+                    <option value="incomplete">پرونده ناقص / در انتظار تکمیل</option>
+                  </select>
+
+                  <select
+                    value={capMaritalFilter}
+                    onChange={(e) => setCapMaritalFilter(e.target.value as any)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">وضعیت تأهل: همه</option>
+                    <option value="single">مجرد</option>
+                    <option value="married">متأهل</option>
+                  </select>
+
+                  <select
+                    value={capHousingFilter}
+                    onChange={(e) => setCapHousingFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">وضعیت مسکن خانواده: همه</option>
+                    {Object.entries(HOUSING_STATUS_LABELS).map(([k, label]) => (
+                      <option key={k} value={k}>{label}</option>
+                    ))}
+                  </select>
+
+                  <select
                     value={capEconomicFilter}
                     onChange={(e) => setCapEconomicFilter(e.target.value)}
                     className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
                   >
                     <option value="all">وضعیت معیشتی خانواده: همه</option>
                     {Object.entries(ECONOMIC_STATUS_LABELS).map(([k, label]) => (
-                      <option key={k} value={k}>
-                        {label}
-                      </option>
+                      <option key={k} value={k}>{label}</option>
                     ))}
+                  </select>
+
+                  <select
+                    value={capFinancialFilter}
+                    onChange={(e) => setCapFinancialFilter(e.target.value as 'all' | StudentFinancialStatus)}
+                    className="px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">وضعیت مالی و بدهی: همه</option>
+                    {Object.entries(FINANCIAL_STATUS_LABELS).map(([k, label]) => (
+                      <option key={k} value={k}>{label}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capMinActivityScore}
+                    onChange={(e) => setCapMinActivityScore(Number(e.target.value))}
+                    className="px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value={0}>امتیاز کارنامه فعالیت‌ها: همه</option>
+                    <option value={40}>۴۰ به بالا (قابل قبول و بالاتر)</option>
+                    <option value={55}>۵۵ به بالا (خوب و بالاتر)</option>
+                    <option value={70}>۷۰ به بالا (بسیار خوب و ممتاز)</option>
+                    <option value={85}>۸۵ به بالا (فقط ممتاز)</option>
                   </select>
 
                   <select
@@ -1913,9 +2477,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <option value="all">رشته هنری: همه</option>
                     <option value="__any__">دارای هرگونه مهارت هنری</option>
                     {ARTISTIC_SKILL_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
+                      <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>
 
@@ -1927,9 +2489,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <option value="all">فعالیت فرهنگی: همه</option>
                     <option value="__any__">دارای هرگونه فعالیت فرهنگی</option>
                     {CULTURAL_ACTIVITY_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
+                      <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>
 
@@ -1941,9 +2501,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <option value="all">رشته ورزشی: همه</option>
                     <option value="__any__">دارای هرگونه فعالیت ورزشی</option>
                     {SPORTS_ACTIVITY_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
+                      <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>
 
@@ -1955,9 +2513,18 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <option value="all">مهارت علمی و فنی: همه</option>
                     <option value="__any__">دارای هرگونه مهارت علمی/فنی</option>
                     {TECHNICAL_SKILL_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={capBloodFilter}
+                    onChange={(e) => setCapBloodFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900 bg-white dark:bg-slate-900 text-xs font-bold"
+                  >
+                    <option value="all">گروه خونی: همه</option>
+                    {BLOOD_TYPE_OPTIONS.map((bg) => (
+                      <option key={bg} value={bg}>{bg}</option>
                     ))}
                   </select>
 
@@ -1968,9 +2535,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   >
                     <option value="all">سلامت جسمی: همه</option>
                     {Object.entries(PHYSICAL_HEALTH_STATUS_LABELS).map(([k, label]) => (
-                      <option key={k} value={k}>
-                        {label}
-                      </option>
+                      <option key={k} value={k}>{label}</option>
                     ))}
                   </select>
 
@@ -1981,23 +2546,77 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   >
                     <option value="all">سلامت روان: همه</option>
                     {Object.entries(MENTAL_HEALTH_STATUS_LABELS).map(([k, label]) => (
-                      <option key={k} value={k}>
-                        {label}
-                      </option>
+                      <option key={k} value={k}>{label}</option>
                     ))}
                   </select>
 
-                  <label className="sm:col-span-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900 text-xs font-bold text-indigo-800 dark:text-indigo-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={capCounselingOnly}
-                      onChange={(e) => setCapCounselingOnly(e.target.checked)}
-                      className="rounded text-indigo-600"
-                    />
-                    <span>فقط دانشجویان متقاضی ارتباط محرمانه با مرکز مشاوره</span>
-                  </label>
+                  <div className="flex flex-col gap-1.5 justify-center">
+                    <label className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900 text-[11px] font-bold text-indigo-800 dark:text-indigo-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={capCounselingOnly}
+                        onChange={(e) => setCapCounselingOnly(e.target.checked)}
+                        className="rounded text-indigo-600"
+                      />
+                      <span>فقط متقاضی مرکز مشاوره</span>
+                    </label>
+                    <label className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-[11px] font-bold text-amber-900 dark:text-amber-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={capHeadHouseholdOnly}
+                        onChange={(e) => setCapHeadHouseholdOnly(e.target.checked)}
+                        className="rounded text-amber-600"
+                      />
+                      <span>فقط سرپرست خانوار</span>
+                    </label>
+                  </div>
                 </div>
               </div>
+
+              {/* پنل انتخاب دقیق ستون‌های نمایش، چاپ و خروجی اکسل */}
+              {isColumnPickerOpen && (
+                <div className="p-4 rounded-3xl bg-indigo-50/60 dark:bg-indigo-950/25 border border-indigo-200 dark:border-indigo-800/70 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-indigo-200/70 dark:border-indigo-800/50">
+                    <div className="flex items-center gap-2 text-xs font-black text-indigo-950 dark:text-indigo-100">
+                      <Columns3 className="w-4 h-4 text-indigo-600" />
+                      <span>انتخاب دقیق ستون‌های مورد نیاز برای جدول، چاپ و اکسل (مثلاً درج یا حذف نام پدر، کد ملی، شغل والدین و...)</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <button type="button" onClick={() => applyColumnPreset('basic')} className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-100 cursor-pointer">پایه</button>
+                      <button type="button" onClick={() => applyColumnPreset('housing')} className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-100 cursor-pointer">اسکان و اتاق</button>
+                      <button type="button" onClick={() => applyColumnPreset('family_skills')} className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-100 cursor-pointer">خانواده و توانمندی</button>
+                      <button type="button" onClick={() => applyColumnPreset('health')} className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-100 cursor-pointer">سلامت و مشاوره</button>
+                      <button type="button" onClick={() => applyColumnPreset('activities')} className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-100 cursor-pointer">کارنامه فعالیت‌ها</button>
+                      <button type="button" onClick={() => applyColumnPreset('all')} className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-bold hover:bg-indigo-700 cursor-pointer">همه ستون‌ها ({CUSTOM_REPORT_COLUMNS.length})</button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {CUSTOM_REPORT_COLUMNS.map((col) => {
+                      const checked = selectedCustomCols.includes(col.key);
+                      return (
+                        <label
+                          key={col.key}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition cursor-pointer select-none ${
+                            checked
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleCustomColumn(col.key)}
+                            className="sr-only"
+                          />
+                          <span>{checked ? '✓' : '+'}</span>
+                          <span>{col.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* کارت‌های شاخص آماری */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -2052,116 +2671,59 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               )}
 
-              {/* جدول دانشجویان */}
+              {/* جدول پویا دقیقاً مطابق ستون‌های انتخاب‌شده */}
               {capabilitiesFilteredStudents.length === 0 ? (
                 <div className="p-8 rounded-2xl bg-slate-50 dark:bg-slate-800/40 text-center text-xs text-slate-400">
                   هیچ دانشجویی مطابق فیلترهای انتخاب‌شده یافت نشد.
                 </div>
               ) : (
                 <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
-                  <table className="w-full text-right text-xs min-w-[920px]">
+                  <table className="w-full text-right text-xs">
                     <thead className="bg-slate-50 dark:bg-slate-800 font-bold text-slate-600 dark:text-slate-300">
                       <tr>
-                        <th className="p-2.5">دانشجو و رشته</th>
-                        <th className="p-2.5">وضعیت سکونت / علت ترددی</th>
-                        <th className="p-2.5">شغل والدین و مسکن</th>
-                        <th className="p-2.5">توانمندی‌ها و علایق (هنری / فرهنگی / ورزشی / فنی)</th>
-                        <th className="p-2.5">سلامت جسمی و روانی</th>
+                        {activeCustomColumnDefs.map((col) => (
+                          <th key={col.key} className="p-2.5 whitespace-nowrap">
+                            {col.label}
+                          </th>
+                        ))}
+                        <th className="p-2.5 text-center whitespace-nowrap">کارنامه فعالیت‌ها</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {capabilitiesFilteredStudents.slice(0, 150).map((s) => {
-                        const resType = getStudentResidenceType(s);
-                        const artistic = joinSkillList(s.artisticSkills, s.artisticOther);
-                        const cultural = joinSkillList(s.culturalActivities, s.culturalOther);
-                        const sports = joinSkillList(s.sportsActivities, s.sportsOther);
-                        const technical = joinSkillList(s.technicalSkills, s.technicalOther);
-                        return (
-                          <tr key={s.studentId} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 align-top">
-                            <td className="p-2.5">
-                              <div className="font-bold text-slate-900 dark:text-white">{s.fullName}</div>
-                              <div className="text-[11px] text-slate-500 font-mono">{s.studentId}</div>
-                              <div className="text-[11px] text-slate-500">
-                                {s.fieldOfStudy} ({s.entryTerm})
-                              </div>
+                      {capabilitiesFilteredStudents.slice(0, 150).map((s, idx) => (
+                        <tr key={s.studentId} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 align-top">
+                          {activeCustomColumnDefs.map((col) => (
+                            <td
+                              key={col.key}
+                              className={`p-2.5 text-[11px] ${
+                                col.key === 'fullName'
+                                  ? 'font-extrabold text-slate-900 dark:text-white whitespace-nowrap'
+                                  : col.key === 'studentId' || col.key === 'nationalId' || col.key === 'mobile'
+                                  ? 'font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap'
+                                  : 'text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              {getCustomColumnValue(s, idx, col.key)}
                             </td>
-                            <td className="p-2.5 space-y-1">
-                              <span
-                                className={`inline-block px-2 py-0.5 rounded-lg text-[10px] font-extrabold ${
-                                  resType === 'commuter'
-                                    ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-200'
-                                    : 'bg-teal-100 text-teal-900 dark:bg-teal-900/50 dark:text-teal-200'
-                                }`}
-                              >
-                                {resType === 'commuter' ? 'ترددی (غیرخوابگاهی)' : 'خوابگاهی'}
-                              </span>
-                              {resType === 'commuter' && s.commuterEligibilityReasons && s.commuterEligibilityReasons.length > 0 && (
-                                <div className="text-[11px] text-amber-800 dark:text-amber-300 font-semibold">
-                                  {formatCommuterReasons(s.commuterEligibilityReasons)}
-                                </div>
-                              )}
-                              {resType === 'commuter' && s.commuterRequestNotes && (
-                                <div className="text-[10px] text-slate-500">{s.commuterRequestNotes}</div>
-                              )}
-                            </td>
-                            <td className="p-2.5 space-y-0.5 text-[11px]">
-                              <div>پدر: <strong>{formatParentOccupation(s.fatherAlive, s.fatherOccupation)}</strong></div>
-                              <div>مادر: <strong>{formatParentOccupation(s.motherAlive, s.motherOccupation)}</strong></div>
-                              {(s.housingStatus || s.economicStatus) && (
-                                <div className="text-[10px] text-slate-500">
-                                  {s.housingStatus ? HOUSING_STATUS_LABELS[s.housingStatus] : ''}
-                                  {s.economicStatus ? ` • ${ECONOMIC_STATUS_LABELS[s.economicStatus]}` : ''}
-                                </div>
-                              )}
-                            </td>
-                            <td className="p-2.5 space-y-1 text-[11px] max-w-[260px]">
-                              {artistic && (
-                                <div><span className="text-pink-600 font-bold">هنری: </span>{artistic}</div>
-                              )}
-                              {cultural && (
-                                <div><span className="text-violet-600 font-bold">فرهنگی: </span>{cultural}</div>
-                              )}
-                              {sports && (
-                                <div><span className="text-emerald-600 font-bold">ورزشی: </span>{sports}</div>
-                              )}
-                              {technical && (
-                                <div><span className="text-sky-600 font-bold">فنی: </span>{technical}</div>
-                              )}
-                              {!artistic && !cultural && !sports && !technical && (
-                                <span className="text-slate-400">ثبت نشده</span>
-                              )}
-                            </td>
-                            <td className="p-2.5 space-y-1 text-[11px]">
-                              <div>
-                                <span className="text-slate-400">جسمی: </span>
-                                <strong>{PHYSICAL_HEALTH_STATUS_LABELS[s.physicalHealthStatus || 'healthy']}</strong>
-                                {' '}({getStudentBloodType(s)})
-                              </div>
-                              {getStudentSpecialConditionSummary(s) !== 'ندارد' && (
-                                <div className="text-rose-600 font-semibold">
-                                  {getStudentSpecialConditionSummary(s)}
-                                </div>
-                              )}
-                              <div>
-                                <span className="text-slate-400">روان: </span>
-                                <strong className="text-indigo-700 dark:text-indigo-300">
-                                  {MENTAL_HEALTH_STATUS_LABELS[s.mentalHealthStatus || 'good']}
-                                </strong>
-                              </div>
-                              {s.wantsCounselingContact && (
-                                <span className="inline-block px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 text-[10px] font-extrabold">
-                                  متقاضی ارتباط مشاور
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                          ))}
+                          <td className="p-2.5 text-center whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => setTranscriptStudent(s)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-900 dark:text-amber-200 text-[10px] font-black transition cursor-pointer"
+                              title="مشاهده و چاپ کارنامه جامع فعالیت‌های این دانشجو"
+                            >
+                              <Award className="w-3.5 h-3.5" />
+                              <span>کارنامه</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                   {capabilitiesFilteredStudents.length > 150 && (
                     <div className="p-2.5 text-center text-[11px] text-slate-500 bg-slate-50 dark:bg-slate-800/50">
-                      نمایش ۱۵۰ ردیف اول — برای مشاهده تمامی {capabilitiesFilteredStudents.length} دانشجو، خروجی اکسل را دریافت نمایید.
+                      نمایش ۱۵۰ ردیف اول — برای چاپ یا دریافت تمام {capabilitiesFilteredStudents.length} دانشجو، از دکمه‌های «چاپ با ستون‌های انتخاب‌شده» یا «خروجی اکسل» استفاده کنید.
                     </div>
                   )}
                 </div>
@@ -2186,6 +2748,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
       </div>
+
+      <StudentActivityTranscriptModal
+        isOpen={Boolean(transcriptStudent)}
+        onClose={() => setTranscriptStudent(null)}
+        initialStudent={transcriptStudent}
+        allowStudentPicker={false}
+        viewerRoleLabel="گزارش‌گیری جامع"
+      />
     </div>
   );
 };

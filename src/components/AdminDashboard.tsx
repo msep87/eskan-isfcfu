@@ -62,6 +62,7 @@ import {
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
 import { ExcelImportTab } from './ExcelImportModal';
+import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
 import {
   exportShiftScheduleToExcel,
   exportShiftTemplateToExcel,
@@ -261,8 +262,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   cloudSyncTick = 0,
   focusAboutEditorTick = 0,
 }) => {
-  // تب‌های اصلی داشبورد مدیر
-  const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'warehouse' | 'shifts' | 'counseling' | 'surveys' | 'clearance' | 'activity_log' | 'settings'>('cartable');
+  // تب‌های اصلی داشبورد مدیر (در بدو ورود هیچ بخشی باز نباشد تا صفحه سریع بارگذاری شود)
+  const [mainTab, setMainTab] = useState<'cartable' | 'users' | 'announcements' | 'requests' | 'maintenance' | 'warehouse' | 'shifts' | 'counseling' | 'surveys' | 'clearance' | 'activity_log' | 'settings' | null>(null);
+  const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
   const [usersCategory, setUsersCategory] = useState<UserCategoryKey>('students');
 
   // وضعیت مشاهده فقط-خواندنی انبار و کارپردازی برای مدیر کل
@@ -2517,58 +2519,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="flex flex-wrap gap-2.5">
             <button
               type="button"
-              onClick={handleToggleSelectionActive}
-              className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-md cursor-pointer border ${
-                settings.selectionActive
-                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-400/50 shadow-emerald-600/25'
-                  : 'bg-rose-600 hover:bg-rose-700 text-white border-rose-400/50 shadow-rose-600/25'
-              }`}
-              title="کلیک برای باز کردن یا بستن فوری امکان انتخاب اتاق و تخت توسط دانشجویان"
+              onClick={() => setIsTranscriptModalOpen(true)}
+              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-amber-500/25 cursor-pointer"
+              title="مشاهده و چاپ کارنامه جامع فعالیت‌های فرهنگی، اجتماعی، ورزشی و انضباطی هر دانشجو"
             >
-              {settings.selectionActive ? (
-                <Unlock className="w-4 h-4 shrink-0" />
-              ) : (
-                <Lock className="w-4 h-4 shrink-0" />
-              )}
-              <span>
-                {settings.selectionActive
-                  ? 'انتخاب اتاق و تخت: باز (کلیک برای بستن)'
-                  : 'انتخاب اتاق و تخت: بسته (کلیک برای باز کردن)'}
-              </span>
-            </button>
-
-            <button
-              onClick={onOpenAppearance}
-              className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-amber-600/20 cursor-pointer"
-              title="تغییر والپیپر، فونت و ظاهر سامانه"
-            >
-              <Palette className="w-4 h-4" />
-              <span>شخصی‌سازی ظاهر و فونت</span>
-            </button>
-
-            <button
-              onClick={onOpenChangePassword}
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-indigo-600/20 cursor-pointer"
-              title="تغییر کلمه عبور مدیر"
-            >
-              <KeyRound className="w-4 h-4" />
-              <span>تغییر رمز مدیر</span>
-            </button>
-
-            <button
-              onClick={() => onOpenExcelModal('students')}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
-            >
-              <FileSpreadsheet className="w-4 h-4" />
-              <span>ورود اکسل (دانشجویان، سراها و کاربران)</span>
-            </button>
-
-            <button
-              onClick={onOpenReports}
-              className="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-teal-600/20 cursor-pointer"
-            >
-              <Users className="w-4 h-4" />
-              <span>گزارش‌ها و خروجی اکسل</span>
+              <Award className="w-4 h-4" />
+              <span>کارنامه فعالیت‌های دانشجو</span>
             </button>
 
             <button
@@ -2813,6 +2769,83 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       </div>
 
+      {/* حالت پیش‌فرض در بدو ورود: بدون باز بودن بخش سنگین جهت سرعت بالای بارگذاری */}
+      {mainTab === null && (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5 animate-in fade-in duration-150">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <h2 className="font-black text-base sm:text-lg text-slate-900 dark:text-white">
+                خوش آمدید! برای شروع، بخش مورد نظر را از نوار بالا یا دسترسی سریع زیر انتخاب کنید
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                جهت افزایش سرعت بارگذاری صفحه اول پنل مدیریت، فهرست اتاق‌ها و دانشجویان تا پیش از انتخاب بخش مربوطه بارگذاری نمی‌شود.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs shrink-0">
+              <span className="px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-800 dark:text-teal-200 font-extrabold border border-teal-200 dark:border-teal-800">
+                {students.length.toLocaleString('fa-IR')} دانشجو
+              </span>
+              <span className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-200 font-extrabold border border-indigo-200 dark:border-indigo-800">
+                {dorms.length.toLocaleString('fa-IR')} سرا ({rooms.length.toLocaleString('fa-IR')} اتاق)
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              {
+                tab: 'cartable' as const,
+                title: 'کارتابل و مدیریت جامع سراها',
+                desc: 'مدیریت اتاق‌ها و تخت‌ها، باز/بسته کردن انتخاب اتاق و ورود سراها (تکی و اکسل)',
+                icon: Building2,
+                tone: 'text-purple-600 bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-900',
+              },
+              {
+                tab: 'users' as const,
+                title: 'مدیریت کاربران سامانه',
+                desc: 'دانشجویان (خوابگاهی و ترددی)، سرپرستان، کارشناسان و واحدهای دانشگاهی',
+                icon: Users,
+                tone: 'text-teal-600 bg-teal-50 dark:bg-teal-950/40 border-teal-200 dark:border-teal-900',
+              },
+              {
+                tab: 'shifts' as const,
+                title: 'شیفت‌بندی ماهانه سرپرستان',
+                desc: 'برنامه نوبت‌کاری ماهانه، ورود تکی یا اکسل و گزارش تحویل شیفت',
+                icon: Calendar,
+                tone: 'text-amber-600 bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900',
+              },
+              {
+                tab: 'settings' as const,
+                title: 'تنظیمات و ظاهر سامانه',
+                desc: 'شخصی‌سازی ظاهر و فونت، سامانه‌های دانشجویان، پشتیبان‌گیری و سرور ابری',
+                icon: Settings,
+                tone: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-900',
+              },
+            ].map((card) => {
+              const IconComp = card.icon;
+              return (
+                <button
+                  key={card.tab}
+                  type="button"
+                  onClick={() => setMainTab(card.tab)}
+                  className="text-right p-4 rounded-2xl bg-slate-50/70 dark:bg-slate-800/50 hover:bg-white dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-teal-400 transition shadow-2xs hover:shadow-md cursor-pointer space-y-2"
+                >
+                  <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${card.tone}`}>
+                    <IconComp className="w-4 h-4" />
+                  </div>
+                  <div className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white">
+                    {card.title}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    {card.desc}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ========================================================= */}
       {/* بخش مجزا و منظم مدیریت کاربران سامانه */}
       {/* ========================================================= */}
@@ -2947,8 +2980,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 ))}
               </div>
 
-              {/* اکشن‌های سریع سرپرستی برای مدیر */}
+              {/* اکشن‌های سریع سرپرستی و مدیریت سراها برای مدیر */}
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleToggleSelectionActive}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-md cursor-pointer border ${
+                    settings.selectionActive
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-400/50 shadow-emerald-600/25'
+                      : 'bg-rose-600 hover:bg-rose-700 text-white border-rose-400/50 shadow-rose-600/25'
+                  }`}
+                  title="کلیک برای باز کردن یا بستن فوری امکان انتخاب اتاق و تخت توسط دانشجویان"
+                >
+                  {settings.selectionActive ? (
+                    <Unlock className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <Lock className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>
+                    {settings.selectionActive
+                      ? 'انتخاب اتاق و تخت: باز (کلیک برای بستن)'
+                      : 'انتخاب اتاق و تخت: بسته (کلیک برای باز کردن)'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsAddDormModalOpen(true)}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-indigo-600/25 cursor-pointer"
+                  title="ثبت تکی سرای دانشجویی جدید با تنظیمات طبقات و اتاق‌ها"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>افزودن سرا (تکی)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onOpenExcelModal('dorms')}
+                  className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-teal-600/25 cursor-pointer"
+                  title="ورود دسته‌جمعی سراها، اتاق‌ها و تخت‌ها از طریق فایل اکسل"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>ورود سراها از اکسل</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setIsAdminRoomPrintModalOpen(true)}
@@ -7588,16 +7663,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
 
-              {openSettingsSection && (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setOpenSettingsSection(null)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  onClick={onOpenAppearance}
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  title="تغییر والپیپر، تم رنگی، فونت و ظاهر سامانه"
                 >
-                  <X className="w-3.5 h-3.5" />
-                  <span>بستن بخش بازشده</span>
+                  <Palette className="w-3.5 h-3.5" />
+                  <span>شخصی‌سازی ظاهر و فونت</span>
                 </button>
-              )}
+
+                {openSettingsSection && (
+                  <button
+                    type="button"
+                    onClick={() => setOpenSettingsSection(null)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>بستن بخش بازشده</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
@@ -10964,6 +11051,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           onRefreshData();
           setActivityLogs(Storage.getActivityLogs());
         }}
+      />
+
+      <StudentActivityTranscriptModal
+        isOpen={isTranscriptModalOpen}
+        onClose={() => setIsTranscriptModalOpen(false)}
+        allowStudentPicker={true}
+        studentsList={students}
+        viewerRoleLabel="مدیریت کل سامانه"
       />
 
     </div>

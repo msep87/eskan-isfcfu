@@ -89,6 +89,8 @@ export const TECHNICAL_SKILL_OPTIONS: string[] = [
   'تولید محتوای آموزشی و الکترونیکی',
 ];
 
+export const BLOOD_TYPE_OPTIONS: string[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
 export const PHYSICAL_CONDITION_OPTIONS: string[] = [
   'آسم یا مشکلات تنفسی',
   'دیابت',

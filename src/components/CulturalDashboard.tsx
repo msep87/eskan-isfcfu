@@ -17,7 +17,9 @@ import {
 } from '../utils/excelUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
 import {
+  Award,
   Sparkles,
   Calendar,
   Clock,
@@ -100,6 +102,7 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
   }, [cloudSyncTick]);
 
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
   const [dormFilter, setDormFilter] = useState<string>('all');
   const [catFilter, setCatFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'approved' | 'draft'>('all');
@@ -475,6 +478,15 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
 
           <div className="flex flex-wrap items-center gap-2">
             <button
+              onClick={() => setIsTranscriptModalOpen(true)}
+              className="px-4 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-lg cursor-pointer"
+              title="مشاهده و چاپ کارنامه جامع فعالیت‌های فرهنگی، اجتماعی، ورزشی و انضباطی دانشجویان"
+            >
+              <Award className="w-4 h-4" />
+              <span>کارنامه فعالیت‌های دانشجو</span>
+            </button>
+
+            <button
               onClick={() => openAddProgramModal('saturday')}
               className="px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-lg cursor-pointer"
             >
@@ -515,13 +527,22 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
           <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
             مدیریت جدول زمانی هفتگی برنامه‌های فرهنگی، تشکل‌ها و انجمن‌ها
           </div>
-          <button
-            onClick={() => openAddProgramModal('saturday')}
-            className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>+ ثبت برنامه در جدول زمانی هفتگی</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setIsTranscriptModalOpen(true)}
+              className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <Award className="w-4 h-4" />
+              <span>کارنامه فعالیت‌های دانشجو</span>
+            </button>
+            <button
+              onClick={() => openAddProgramModal('saturday')}
+              className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ ثبت برنامه در جدول زمانی هفتگی</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -1549,6 +1570,13 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
           onDataChange={onRefreshData}
         />
       )}
+
+      <StudentActivityTranscriptModal
+        isOpen={isTranscriptModalOpen}
+        onClose={() => setIsTranscriptModalOpen(false)}
+        allowStudentPicker={true}
+        viewerRoleLabel="امور فرهنگی و اجتماعی"
+      />
     </div>
   );
 };
