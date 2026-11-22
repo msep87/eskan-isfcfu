@@ -192,8 +192,63 @@ input:-webkit-autofill:active {
   animation: chatSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@keyframes toastSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-28px) translateY(-10px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) translateY(0) scale(1);
+  }
+}
+
+@keyframes toastFadeOut {
+  0% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    max-height: 180px;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-32px) scale(0.94);
+    max-height: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
+@keyframes toastProgressShrink {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.toast-enter {
+  animation: toastSlideIn 0.36s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.toast-exit {
+  animation: toastFadeOut 0.32s cubic-bezier(0.4, 0, 1, 1) forwards;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.toast-progress {
+  transform-origin: right center;
+  animation: toastProgressShrink var(--toast-duration, 6800ms) linear forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .chat-slide-up {
+  .chat-slide-up,
+  .toast-enter,
+  .toast-exit,
+  .toast-progress {
     animation: none;
   }
 }

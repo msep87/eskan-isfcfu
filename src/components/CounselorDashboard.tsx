@@ -16,6 +16,7 @@ import {
 } from '../utils/excelUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   HeartHandshake,
   Calendar,
@@ -87,7 +88,7 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'requests' | 'shifts' | 'new_report' | 'reports_history' | 'clearance'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'shifts' | 'new_report' | 'reports_history' | 'clearance' | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // فیلتر درخواست‌های مشاوره
@@ -414,73 +415,73 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
         </div>
       </div>
 
-      {/* تب‌های اصلی */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
-        <button
-          onClick={() => setActiveTab('requests')}
-          className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'requests'
-              ? 'bg-teal-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span>درخواست‌های مشاوره دانشجوها ({filteredMessages.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('shifts')}
-          className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'shifts'
-              ? 'bg-teal-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <Calendar className="w-4 h-4" />
-          <span>برنامه شیفت‌های کاری من ({myShifts.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('new_report')}
-          className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'new_report'
-              ? 'bg-teal-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          <span>+ فرم ثبت گزارش شیفت</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('reports_history')}
-          className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'reports_history'
-              ? 'bg-teal-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <BookOpen className="w-4 h-4" />
-          <span>دفترچه گزارش‌های ثبت‌شده ({myReports.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('clearance')}
-          className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'clearance'
-              ? 'bg-sky-700 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4" />
-          <span>تسویه حساب فارغ‌التحصیلان</span>
-          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.counselor?.status || 'pending') === 'pending').length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.counselor?.status || 'pending') === 'pending').length}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* منوی دسته‌بندی‌شده و بازشونده کارتابل مرکز مشاوره */}
+      <CollapsibleMenuGrid<'requests' | 'shifts' | 'new_report' | 'reports_history' | 'clearance'>
+        activeKey={activeTab}
+        onToggle={(key) => setActiveTab((prev) => (prev === key ? null : key))}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های مرکز مشاوره و روانشناسی (برای باز یا بسته شدن کلیک کنید)"
+        emptyPrompt="برای مشاهده هر بخش، روی دکمه مربوطه کلیک کنید. با کلیک مجدد همان بخش بسته می‌شود."
+        categories={[
+          {
+            title: 'مشاوره و برنامه شیفت',
+            items: [
+              {
+                id: 'requests',
+                label: 'درخواست‌های مشاوره دانشجوها',
+                subtitle: 'بررسی و تعیین وقت جلسات مشاوره',
+                icon: <MessageSquare className="w-4 h-4" />,
+                badge: filteredMessages.length,
+                badgeTone: 'teal',
+                activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md',
+              },
+              {
+                id: 'shifts',
+                label: 'برنامه شیفت‌های کاری من',
+                subtitle: 'زمان‌بندی حضور در سراها و دفتر مشاوره',
+                icon: <Calendar className="w-4 h-4" />,
+                badge: myShifts.length,
+                badgeTone: 'sky',
+                activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md',
+              },
+            ],
+          },
+          {
+            title: 'گزارش‌نویسی و تسویه',
+            items: [
+              {
+                id: 'new_report',
+                label: 'فرم ثبت گزارش شیفت',
+                subtitle: 'ثبت آمار جلسات و موارد ارجاعی',
+                icon: <FileText className="w-4 h-4" />,
+                activeClass: 'bg-emerald-600 text-white border-emerald-600 shadow-md',
+              },
+              {
+                id: 'reports_history',
+                label: 'دفترچه گزارش‌های ثبت‌شده',
+                subtitle: 'سوابق و خروجی اکسل/چاپ گزارش‌ها',
+                icon: <BookOpen className="w-4 h-4" />,
+                badge: myReports.length,
+                badgeTone: 'indigo',
+                activeClass: 'bg-indigo-600 text-white border-indigo-600 shadow-md',
+              },
+              {
+                id: 'clearance',
+                label: 'تسویه حساب فارغ‌التحصیلان',
+                subtitle: 'تأییدیه تسویه مرکز مشاوره',
+                icon: <GraduationCap className="w-4 h-4" />,
+                badge: Storage.getGraduationClearances().filter(
+                  (c) =>
+                    c.educationGateStatus === 'approved' &&
+                    (c.units?.counselor?.status || 'pending') === 'pending'
+                ).length,
+                badgeTone: 'rose',
+                activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+              },
+            ],
+          },
+        ]}
+      />
 
       {/* 1. تب درخواست‌های مشاوره دانشجوها */}
       {activeTab === 'requests' && (

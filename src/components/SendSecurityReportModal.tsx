@@ -79,6 +79,7 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
   const dormMap = useMemo(() => new Map(allDorms.map((d) => [d.id, d.name])), [allDorms]);
   const roomMap = useMemo(() => new Map(allRooms.map((r) => [r.id, r.roomNumber])), [allRooms]);
 
+  const [reportScope, setReportScope] = useState<'student' | 'facility_campus'>('student');
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const deferredSearch = useDeferredValue(searchQuery);
@@ -98,6 +99,7 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
   useEffect(() => {
     if (!isOpen) return;
     const initIds = (initialStudents || []).map((s) => s.studentId);
+    setReportScope('student');
     setSelectedStudentIds(initIds);
     setSearchQuery('');
     setDormFilter(defaultDormId || 'all');
@@ -194,12 +196,36 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
     }
   };
 
+  const handleScopeChange = (nextScope: 'student' | 'facility_campus') => {
+    setReportScope(nextScope);
+    setErrorMsg('');
+    if (nextScope === 'facility_campus' && category === 'disciplinary_incident') {
+      const campusPreset = SECURITY_REPORT_PRESETS.find((p) => p.category === 'campus_dorm_environment');
+      if (campusPreset) {
+        setCategory(campusPreset.category);
+        setTitle(campusPreset.defaultTitle);
+        setDescription(campusPreset.defaultDescription);
+      }
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
-    if (selectedStudents.length === 0) {
-      setErrorMsg('لطفاً حداقل یک دانشجو را از لیست انتخاب کنید.');
+    if (reportScope === 'student' && selectedStudents.length === 0) {
+      setErrorMsg(
+        'لطفاً حداقل یک دانشجو را انتخاب کنید یا اگر گزارش مربوط به خود سرا یا محوطه است، گزینه «مربوط به سراها و محوطه (بدون دانشجو)» را انتخاب نمایید.'
+      );
+      return;
+    }
+    if (
+      reportScope === 'facility_campus' &&
+      !reportDormId &&
+      !locationDetails.trim() &&
+      !reportRoomNumber.trim()
+    ) {
+      setErrorMsg('برای گزارش سرا یا محوطه، لطفاً سرای محل وقوع یا محل دقیق در محوطه را مشخص کنید.');
       return;
     }
     if (!title.trim()) {
@@ -213,7 +239,8 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
 
     const dormObj = allDorms.find((d) => d.id === reportDormId);
     const res = Storage.createSecurityReport({
-      students: selectedStudents,
+      reportScope,
+      students: reportScope === 'facility_campus' ? [] : selectedStudents,
       title,
       category,
       severity,
@@ -254,7 +281,7 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
                 ارسال گزارش رسمی به واحد حراست و انتظامات
               </h3>
               <p className="text-[11px] text-slate-300 truncate">
-                ثبت‌کننده: {reporterName} ({ROLE_TITLES[reporterRole]}) — امکان انتخاب یک یا چند دانشجو
+                ثبت‌کننده: {reporterName} ({ROLE_TITLES[reporterRole]}) — گزارش دانشجویی یا گزارش سرا و محوطه
               </p>
             </div>
           </div>
@@ -277,7 +304,65 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
             </div>
           )}
 
-          {/* بخش ۱: انتخاب یک یا چند دانشجو */}
+          {/* انتخاب نوع گزارش: مرتبط با دانشجو یا مربوط به خود سراها و محوطه */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => handleScopeChange('student')}
+              className={`p-3.5 rounded-2xl border-2 text-right transition flex items-start gap-3 cursor-pointer ${
+                reportScope === 'student'
+                  ? 'bg-rose-50/80 dark:bg-rose-950/35 border-rose-500 text-rose-950 dark:text-rose-100 shadow-xs'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
+              }`}
+            >
+              <div
+                className={`p-2 rounded-xl shrink-0 ${
+                  reportScope === 'student'
+                    ? 'bg-rose-600 text-white'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-extrabold text-xs sm:text-sm">گزارش مرتبط با دانشجو(یان)</div>
+                <p className="text-[11px] opacity-80 mt-0.5 leading-relaxed">
+                  انتخاب یک یا چند دانشجو یا کل ساکنین یک اتاق برای پیگیری حراست
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleScopeChange('facility_campus')}
+              className={`p-3.5 rounded-2xl border-2 text-right transition flex items-start gap-3 cursor-pointer ${
+                reportScope === 'facility_campus'
+                  ? 'bg-amber-50/90 dark:bg-amber-950/35 border-amber-500 text-amber-950 dark:text-amber-100 shadow-xs'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
+              }`}
+            >
+              <div
+                className={`p-2 rounded-xl shrink-0 ${
+                  reportScope === 'facility_campus'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                }`}
+              >
+                <Building2 className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-extrabold text-xs sm:text-sm">
+                  مربوط به سراها، ساختمان یا محوطه (بدون دانشجو)
+                </div>
+                <p className="text-[11px] opacity-80 mt-0.5 leading-relaxed">
+                  گزارش مسائل حفاظتی، ایمنی، دوربین، ورودی، مشاعات یا محوطه بدون نیاز به انتخاب دانشجو
+                </p>
+              </div>
+            </button>
+          </div>
+
+          {/* بخش ۱: انتخاب یک یا چند دانشجو (فقط در حالت گزارش دانشجویی) */}
+          {reportScope === 'student' && (
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -430,6 +515,7 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
               )}
             </div>
           </div>
+          )}
 
           {/* بخش ۲: جزئیات و متن گزارش */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -493,14 +579,18 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
                 <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                <span>سرای محل وقوع</span>
+                <span>سرای محل وقوع {reportScope === 'facility_campus' ? '(یا محوطه کلی)' : ''}</span>
               </label>
               <select
                 value={reportDormId}
                 onChange={(e) => setReportDormId(e.target.value)}
                 className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
               >
-                <option value="">تشخیص خودکار از پرونده دانشجو / عمومی</option>
+                <option value="">
+                  {reportScope === 'facility_campus'
+                    ? 'محوطه عمومی / کل مجموعه سراها'
+                    : 'تشخیص خودکار از پرونده دانشجو / عمومی'}
+                </option>
                 {allDorms.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
@@ -540,15 +630,45 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
             <div className="sm:col-span-2">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
                 <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                <span>محل دقیق یا جزئیات مکانی (اختیاری)</span>
+                <span>
+                  محل دقیق یا جزئیات مکانی{' '}
+                  {reportScope === 'facility_campus' && !reportDormId ? '*' : '(اختیاری)'}
+                </span>
               </label>
               <input
                 type="text"
                 value={locationDetails}
                 onChange={(e) => setLocationDetails(e.target.value)}
-                placeholder="مثلاً ورودی اصلی سرا، راهروی طبقه دوم، نمازخانه، سلف، حیاط..."
+                placeholder="مثلاً ورودی اصلی سرا، محوطه و حیاط، راهروی طبقه دوم، نمازخانه، سلف، دوربین‌ها..."
                 className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
               />
+              {reportScope === 'facility_campus' && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {[
+                    'محوطه و حیاط',
+                    'ورودی اصلی و نگهبانی',
+                    'راهروها و مشاعات',
+                    'دوربین‌ها و روشنایی',
+                    'تأسیسات و موتورخانه',
+                    'سلف و آشپزخانه',
+                    'پارکینگ و اطراف سرا',
+                    'نمازخانه / سالن مطالعه',
+                  ].map((loc) => (
+                    <button
+                      key={loc}
+                      type="button"
+                      onClick={() => setLocationDetails(loc)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                        locationDetails === loc
+                          ? 'bg-amber-600 text-white border-amber-600'
+                          : 'bg-slate-100 hover:bg-amber-50 dark:bg-slate-800 dark:hover:bg-amber-950/40 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      {loc}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="sm:col-span-2">
@@ -581,7 +701,9 @@ export const SendSecurityReportModal: React.FC<SendSecurityReportModalProps> = (
             >
               <Send className="w-4 h-4 rotate-180" />
               <span>
-                ثبت و ارسال رسمی به حراست ({selectedStudents.length.toLocaleString('fa-IR')} دانشجو)
+                {reportScope === 'facility_campus'
+                  ? 'ثبت و ارسال گزارش سرا / محوطه به حراست'
+                  : `ثبت و ارسال رسمی به حراست (${selectedStudents.length.toLocaleString('fa-IR')} دانشجو)`}
               </span>
             </button>
           </div>

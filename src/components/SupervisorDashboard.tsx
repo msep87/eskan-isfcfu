@@ -38,6 +38,7 @@ import { ImageLightboxModal, AnnouncementImageBox } from './ImageLightboxModal';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { StudentReferralModal } from './StudentReferralModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -84,6 +85,8 @@ import {
   ArrowDown,
   Send,
   GraduationCap,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface SupervisorDashboardProps {
@@ -123,7 +126,8 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   onOpenUserGuide,
   embeddedMode = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'announcements' | 'students' | 'guest_requests' | 'maintenance' | 'warehouse' | 'shifts' | 'clearance'>('manager');
+  const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'announcements' | 'students' | 'guest_requests' | 'maintenance' | 'warehouse' | 'shifts' | 'clearance' | null>(null);
+  const [isPendingApprovalsOpen, setIsPendingApprovalsOpen] = useState(false);
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
   const [isStudentEvalModalOpen, setIsStudentEvalModalOpen] = useState(false);
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
@@ -846,240 +850,247 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
         </div>
       )}
 
-      {/* بخش درخواست‌های اسکان موقت در خوابگاه تحت نظارت */}
+      {/* بخش درخواست‌های اسکان موقت در خوابگاه تحت نظارت (به‌صورت دکمه بازشونده) */}
       {pendingStudentsInMyDorm.length > 0 && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-amber-300 dark:border-amber-800 shadow-xs animate-in slide-in-from-top-2">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-amber-300 dark:border-amber-800 shadow-xs overflow-hidden">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setIsPendingApprovalsOpen((p) => !p)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setIsPendingApprovalsOpen((p) => !p);
+              }
+            }}
+            className="w-full px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50/70 dark:bg-amber-950/30 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition cursor-pointer"
+          >
             <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs">
+              <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs shrink-0">
                 <Clock className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
-                  درخواست‌های انتخاب اتاق موقت نیازمند تأیید سرپرستی ({pendingStudentsInMyDorm.length} مورد)
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  این دانشجویان تختی را در سراهای تحت نظارت شما ({selectedDormId === 'all' ? 'همه سراها' : currentDorm?.name || 'سرا'}) انتخاب کرده‌اند و منتظر بررسی و تأیید نهایی شما هستند.
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white">
+                    درخواست‌های انتخاب اتاق موقت نیازمند تأیید سرپرستی
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black">
+                    {pendingStudentsInMyDorm.length.toLocaleString('fa-IR')} مورد
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {isPendingApprovalsOpen
+                    ? 'برای بستن فهرست درخواست‌ها دوباره کلیک کنید'
+                    : 'برای مشاهده و تأیید درخواست‌های اسکان موقت کلیک کنید'}
                 </p>
               </div>
             </div>
 
-            <button
-              onClick={handleBulkApprove}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer shrink-0"
-              title="تأیید قطعی همه درخواست‌های این سرا"
-            >
-              <CheckCheck className="w-4 h-4" />
-              <span>تأیید دسته‌جمعی همه ({pendingStudentsInMyDorm.length})</span>
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleBulkApprove();
+                }}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                title="تأیید قطعی همه درخواست‌های این سرا"
+              >
+                <CheckCheck className="w-4 h-4" />
+                <span>تأیید همه ({pendingStudentsInMyDorm.length})</span>
+              </button>
+              <span className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300">
+                {isPendingApprovalsOpen ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
+              </span>
+            </div>
           </div>
 
-          <div className="space-y-2.5">
-            {pendingStudentsInMyDorm.map((st) => {
-              const room = st.assignedRoomId ? roomLookupMap.get(st.assignedRoomId) : undefined;
-              const bed = st.assignedBedId ? bedLookupMap.get(st.assignedBedId) : undefined;
+          {isPendingApprovalsOpen && (
+            <div className="p-5 pt-4 space-y-2.5 border-t border-amber-200/70 dark:border-amber-800/70">
+              {pendingStudentsInMyDorm.map((st) => {
+                const room = st.assignedRoomId ? roomLookupMap.get(st.assignedRoomId) : undefined;
+                const bed = st.assignedBedId ? bedLookupMap.get(st.assignedBedId) : undefined;
 
-              return (
-                <div
-                  key={st.studentId}
-                  className="p-3 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                >
-                  <div className="flex items-center gap-3">
-                    {st.photoUrl ? (
-                      <img src={st.photoUrl} alt={st.fullName} loading="lazy" decoding="async" className="w-9 h-9 rounded-full object-cover" />
-                    ) : (
-                      <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-xs"
-                        style={{ backgroundColor: st.avatarColor || '#0d9488' }}
-                      >
-                        {st.fullName.slice(0, 1)}
+                return (
+                  <div
+                    key={st.studentId}
+                    className="p-3 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="flex items-center gap-3">
+                      {st.photoUrl ? (
+                        <img src={st.photoUrl} alt={st.fullName} loading="lazy" decoding="async" className="w-9 h-9 rounded-full object-cover" />
+                      ) : (
+                        <div
+                          className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-xs"
+                          style={{ backgroundColor: st.avatarColor || '#0d9488' }}
+                        >
+                          {st.fullName.slice(0, 1)}
+                        </div>
+                      )}
+                      <div>
+                        <div className="font-bold text-slate-900 dark:text-white">{st.fullName}</div>
+                        <div className="text-[10px] text-slate-500">
+                          کد دانشجویی: {st.studentId} • {st.fieldOfStudy} • ورودی {st.entryTerm} • {st.city}
+                        </div>
                       </div>
-                    )}
-                    <div>
-                      <div className="font-bold text-slate-900 dark:text-white">{st.fullName}</div>
-                      <div className="text-[10px] text-slate-500">
-                        کد دانشجویی: {st.studentId} • {st.fieldOfStudy} • ورودی {st.entryTerm} • {st.city}
+                    </div>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-amber-200/50">
+                      <div className="text-left sm:text-right">
+                        <span className="font-bold text-teal-700 dark:text-teal-300 block">
+                          اتاق {room?.roomNumber || '—'}
+                        </span>
+                        <span className="text-[10px] text-slate-400">{bed?.label || '—'}</span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleConfirmSingle(st.studentId)}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          <span>تأیید قطعی</span>
+                        </button>
+                        <button
+                          onClick={() => handleRejectSingle(st.studentId)}
+                          className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer border border-rose-200 dark:border-rose-900"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                          <span>رد</span>
+                        </button>
                       </div>
                     </div>
                   </div>
-
-                  <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-amber-200/50">
-                    <div className="text-left sm:text-right">
-                      <span className="font-bold text-teal-700 dark:text-teal-300 block">
-                        اتاق {room?.roomNumber || '—'}
-                      </span>
-                      <span className="text-[10px] text-slate-400">{bed?.label || '—'}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleConfirmSingle(st.studentId)}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
-                      >
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        <span>تأیید قطعی</span>
-                      </button>
-                      <button
-                        onClick={() => handleRejectSingle(st.studentId)}
-                        className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer border border-rose-200 dark:border-rose-900"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                        <span>رد</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {/* تب‌های مدیریت سرپرست */}
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setActiveTab('manager')}
-          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeTab === 'manager'
-              ? 'bg-teal-600 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          مدیریت اتاق‌ها، جابجایی و تعیین نماینده
-        </button>
+      {/* منوی دسته‌بندی‌شده و بازشونده بخش‌های کارتابل سرپرستی */}
+      {(() => {
+        const activeWarningsCount = warnings.filter((w) => !w.resolved).length;
+        const pendingGuestsCount = Storage.getGuestRequests().filter(
+          (g) => activeDormIds.includes(g.dormId) && g.status === 'pending_supervisor'
+        ).length;
+        const pendingWarehouseCount = Storage.getWarehouseRequests().filter(
+          (r) =>
+            (selectedDormId === 'all' || r.dormId === selectedDormId) &&
+            r.status === 'pending_supervisor'
+        ).length;
+        const shiftReportsCount = Storage.getShiftReports().length;
+        const pendingClearanceCount = Storage.getGraduationClearances().filter(
+          (c) => c.educationGateStatus === 'approved' && (c.units?.supervisor?.status || 'pending') === 'pending'
+        ).length;
 
-        <button
-          onClick={() => setActiveTab('visual_picker')}
-          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeTab === 'visual_picker'
-              ? 'bg-teal-600 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          نقشه بصری و تعاملی چیدمان تخت‌ها
-        </button>
-
-        <button
-          onClick={() => setActiveTab('announcements')}
-          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeTab === 'announcements'
-              ? 'bg-teal-600 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          اطلاعیه‌ها و اخطارهای انضباطی فعال ({warnings.filter((w) => !w.resolved).length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('students')}
-          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeTab === 'students'
-              ? 'bg-teal-600 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          فهرست دانشجویان و تماس ضروری ({students.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('guest_requests')}
-          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer flex items-center gap-2 ${
-            activeTab === 'guest_requests'
-              ? 'bg-indigo-600 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          <UserPlus className="w-4 h-4 text-indigo-500" />
-          <span>درخواست‌های مهمان</span>
-          {Storage.getGuestRequests().filter(
-            (g) => activeDormIds.includes(g.dormId) && g.status === 'pending_supervisor'
-          ).length > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-600 text-white font-black animate-pulse">
+        return (
+          <CollapsibleMenuGrid
+            title="منوی بخش‌های سرپرستی سراها (با کلیک باز و با کلیک مجدد بسته می‌شود)"
+            activeKey={activeTab}
+            onToggle={(tab) => setActiveTab((prev) => (prev === tab ? null : tab))}
+            onCloseActive={() => setActiveTab(null)}
+            categories={[
               {
-                Storage.getGuestRequests().filter(
-                  (g) => activeDormIds.includes(g.dormId) && g.status === 'pending_supervisor'
-                ).length
-              }
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('maintenance')}
-          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer flex items-center gap-2 ${
-            activeTab === 'maintenance'
-              ? 'bg-amber-600 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          <Wrench className="w-4 h-4 text-amber-500" />
-          <span>تأسیسات و تعمیرات سرا</span>
-          {activeMaintTasksCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-600 text-white font-black animate-pulse">
-              {activeMaintTasksCount}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('warehouse')}
-          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer flex items-center gap-2 ${
-            activeTab === 'warehouse'
-              ? 'bg-violet-600 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          <Boxes className="w-4 h-4 text-violet-500" />
-          <span>تأییدیه قطعات و حواله انبار</span>
-          {Storage.getWarehouseRequests().filter(
-            (r) =>
-              (selectedDormId === 'all' || r.dormId === selectedDormId) &&
-              r.status === 'pending_supervisor'
-          ).length > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-900 font-black animate-pulse">
+                title: 'امور اسکان، اتاق‌ها و مهمان',
+                items: [
+                  {
+                    id: 'manager',
+                    label: 'مدیریت اتاق‌ها، جابجایی و نماینده',
+                    subtitle: 'تخصیص تخت، انتقال دانشجو و تعیین نماینده اتاق',
+                    icon: <Building2 className="w-4 h-4" />,
+                    activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md',
+                  },
+                  {
+                    id: 'visual_picker',
+                    label: 'نقشه بصری چیدمان تخت‌ها',
+                    subtitle: 'نمای گرافیکی ظرفیت و اشغال تخت‌های سرا',
+                    icon: <BedIcon className="w-4 h-4" />,
+                    activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md',
+                  },
+                  {
+                    id: 'guest_requests',
+                    label: 'درخواست‌های مهمان',
+                    subtitle: 'بررسی و تأیید پذیرش مهمان در اتاق‌ها',
+                    icon: <UserPlus className="w-4 h-4" />,
+                    badge: pendingGuestsCount,
+                    badgeTone: 'rose',
+                    activeClass: 'bg-indigo-600 text-white border-indigo-600 shadow-md',
+                  },
+                ],
+              },
               {
-                Storage.getWarehouseRequests().filter(
-                  (r) =>
-                    (selectedDormId === 'all' || r.dormId === selectedDormId) &&
-                    r.status === 'pending_supervisor'
-                ).length
-              }
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('shifts')}
-          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer flex items-center gap-2 ${
-            activeTab === 'shifts'
-              ? 'bg-teal-700 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          <Clock className="w-4 h-4 text-teal-500" />
-          <span>دفتر وقایع و گزارش شیفت‌ها</span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 font-extrabold">
-            {Storage.getShiftReports().length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('clearance')}
-          className={`px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition cursor-pointer flex items-center gap-2 ${
-            activeTab === 'clearance'
-              ? 'bg-sky-700 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-          }`}
-        >
-          <GraduationCap className={`w-4 h-4 ${activeTab === 'clearance' ? 'text-white' : 'text-sky-600'}`} />
-          <span>تسویه حساب فارغ‌التحصیلان</span>
-          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.supervisor?.status || 'pending') === 'pending').length > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500 text-white font-black">
-              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.supervisor?.status || 'pending') === 'pending').length}
-            </span>
-          )}
-        </button>
-      </div>
+                title: 'دانشجویان، انضباط و تسویه حساب',
+                items: [
+                  {
+                    id: 'students',
+                    label: 'فهرست دانشجویان و تماس ضروری',
+                    subtitle: 'جستجوی پیشرفته و مشخصات ساکنین',
+                    icon: <Users className="w-4 h-4" />,
+                    badge: students.length,
+                    badgeTone: 'teal',
+                    activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md',
+                  },
+                  {
+                    id: 'announcements',
+                    label: 'اطلاعیه‌ها، اخطارها و ارزیابی‌ها',
+                    subtitle: 'مشاهده اخطارهای فعال اتاق‌ها و تذکرات فردی',
+                    icon: <ShieldAlert className="w-4 h-4" />,
+                    badge: activeWarningsCount,
+                    badgeTone: 'rose',
+                    activeClass: 'bg-rose-600 text-white border-rose-600 shadow-md',
+                  },
+                  {
+                    id: 'clearance',
+                    label: 'تسویه حساب فارغ‌التحصیلان',
+                    subtitle: 'بررسی و تأیید تسویه خوابگاهی دانشجویان',
+                    icon: <GraduationCap className="w-4 h-4" />,
+                    badge: pendingClearanceCount,
+                    badgeTone: 'rose',
+                    activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+                  },
+                ],
+              },
+              {
+                title: 'تأسیسات، انبار و گزارش شیفت‌ها',
+                items: [
+                  {
+                    id: 'maintenance',
+                    label: 'تأسیسات و تعمیرات سرا',
+                    subtitle: 'ثبت و پیگیری خرابی‌های فنی اتاق‌ها',
+                    icon: <Wrench className="w-4 h-4" />,
+                    badge: activeMaintTasksCount,
+                    badgeTone: 'rose',
+                    activeClass: 'bg-amber-600 text-white border-amber-600 shadow-md',
+                  },
+                  {
+                    id: 'warehouse',
+                    label: 'تأییدیه قطعات و حواله انبار',
+                    subtitle: 'بررسی درخواست‌های قطعات و تجهیزات انبار',
+                    icon: <Boxes className="w-4 h-4" />,
+                    badge: pendingWarehouseCount,
+                    badgeTone: 'amber',
+                    activeClass: 'bg-violet-600 text-white border-violet-600 shadow-md',
+                  },
+                  {
+                    id: 'shifts',
+                    label: 'دفتر وقایع و گزارش شیفت‌ها',
+                    subtitle: 'ثبت گزارش تحویل شیفت و سوابق روزانه',
+                    icon: <Clock className="w-4 h-4" />,
+                    badge: shiftReportsCount,
+                    badgeTone: 'teal',
+                    activeClass: 'bg-teal-700 text-white border-teal-700 shadow-md',
+                  },
+                ],
+              },
+            ]}
+          />
+        );
+      })()}
 
       {/* محتوای تب‌ها */}
       {activeTab === 'manager' && (
@@ -1131,7 +1142,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
             {announcements.length === 0 ? (
               <div className="p-4 text-center text-xs text-slate-400">هیچ اطلاعیه‌ای ثبت نشده است.</div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3 max-h-[460px] overflow-y-auto pl-1">
                 {announcements.map((ann) => (
                   <div
                     key={ann.id}

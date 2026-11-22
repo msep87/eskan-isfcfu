@@ -17,6 +17,7 @@ import {
 } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   AlertTriangle,
   BookOpen,
@@ -56,7 +57,7 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'messages' | 'notices' | 'clearance'>('messages');
+  const [activeTab, setActiveTab] = useState<'messages' | 'notices' | 'clearance' | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // پیام‌رسانی کارشناس آموزش (فقط پیام‌های مرتبط با کارشناس آموزش و غیرمحرمانه)
@@ -521,57 +522,41 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
         </div>
       )}
 
-      {/* تب‌های دوگانه کارشناس آموزش */}
-      <div className="flex flex-wrap gap-2 bg-slate-200/70 dark:bg-slate-800/70 p-1.5 rounded-2xl">
-        <button
-          type="button"
-          onClick={() => setActiveTab('messages')}
-          className={`flex-1 min-w-[220px] py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'messages'
-              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Mail className="w-4 h-4 text-sky-600" />
-          <span>پیام‌های دانشجویان و ارسال تکی / گروهی</span>
-          {pendingMessagesCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black">
-              {pendingMessagesCount}
-            </span>
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('notices')}
-          className={`flex-1 min-w-[220px] py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'notices'
-              ? 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <FileWarning className="w-4 h-4 text-rose-600" />
-          <span>اعلام مرخصی تحصیلی یا اخراج به مدیر</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('clearance')}
-          className={`flex-1 min-w-[220px] py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'clearance'
-              ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-md'
-              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4 text-teal-600" />
-          <span>تسویه حساب فارغ‌التحصیلان (دروازه مرحله اول)</span>
-          {pendingClearanceGateCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black">
-              {pendingClearanceGateCount}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* منوی بازشونده بخش‌های کارشناس آموزش */}
+      <CollapsibleMenuGrid<'messages' | 'notices' | 'clearance'>
+        activeKey={activeTab}
+        onToggle={(key) => setActiveTab((prev) => (prev === key ? null : key))}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های کارشناس آموزش (برای باز یا بسته شدن کلیک کنید)"
+        emptyPrompt="برای مشاهده هر بخش، روی دکمه مربوطه کلیک کنید. با کلیک مجدد همان بخش بسته می‌شود."
+        items={[
+          {
+            id: 'messages',
+            label: 'پیام‌های دانشجویان و ارسال تکی/گروهی',
+            subtitle: 'ارسال پیام بر اساس دانشجو، رشته یا ورودی',
+            icon: <Mail className="w-4 h-4" />,
+            badge: pendingMessagesCount,
+            badgeTone: 'amber',
+            activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+          },
+          {
+            id: 'notices',
+            label: 'اعلام مرخصی تحصیلی یا اخراج',
+            subtitle: 'ارسال گزارش رسمی وضعیت تحصیلی به مدیر',
+            icon: <FileWarning className="w-4 h-4" />,
+            activeClass: 'bg-rose-600 text-white border-rose-600 shadow-md',
+          },
+          {
+            id: 'clearance',
+            label: 'تسویه حساب فارغ‌التحصیلان (دروازه اول)',
+            subtitle: 'تأیید آغاز فرآیند تسویه حساب دانشجو',
+            icon: <GraduationCap className="w-4 h-4" />,
+            badge: pendingClearanceGateCount,
+            badgeTone: 'rose',
+            activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md',
+          },
+        ]}
+      />
 
       {/* بخش ۱: پیام‌رسانی آموزشی (تکی، رشته، ورودی + صندوق پیام‌های آموزشی) */}
       {activeTab === 'messages' && (

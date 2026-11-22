@@ -8,6 +8,7 @@ import {
   Vote,
   Bell,
   Smartphone,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   AppNotificationItem,
@@ -106,63 +107,182 @@ interface LiveNotificationToastsProps {
   toasts: AppNotificationItem[];
   onDismiss: (id: string) => void;
   onClickToast: (item: AppNotificationItem) => void;
+  autoDismissMs?: number;
 }
+
+interface ToastItemCardProps {
+  toast: AppNotificationItem;
+  autoDismissMs: number;
+  onDismiss: (id: string) => void;
+  onClickToast: (item: AppNotificationItem) => void;
+}
+
+const ToastItemCard: React.FC<ToastItemCardProps> = ({
+  toast,
+  autoDismissMs,
+  onDismiss,
+  onClickToast,
+}) => {
+  const [isExiting, setIsExiting] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const remainingRef = React.useRef(autoDismissMs);
+  const startedAtRef = React.useRef(Date.now());
+  const exitTimerRef = React.useRef<number | null>(null);
+
+  const triggerExit = React.useCallback(() => {
+    if (isExiting) return;
+    setIsExiting(true);
+    exitTimerRef.current = window.setTimeout(() => {
+      onDismiss(toast.id);
+    }, 320);
+  }, [isExiting, onDismiss, toast.id]);
+
+  React.useEffect(() => {
+    if (isExiting || isPaused) return;
+    startedAtRef.current = Date.now();
+    const timer = window.setTimeout(() => {
+      triggerExit();
+    }, Math.max(200, remainingRef.current));
+
+    return () => {
+      window.clearTimeout(timer);
+      const elapsed = Date.now() - startedAtRef.current;
+      remainingRef.current = Math.max(0, remainingRef.current - elapsed);
+    };
+  }, [isExiting, isPaused, triggerExit]);
+
+  React.useEffect(() => {
+    return () => {
+      if (exitTimerRef.current !== null) {
+        window.clearTimeout(exitTimerRef.current);
+      }
+    };
+  }, []);
+
+  const getVisuals = (category: AppNotificationItem['category']) => {
+    switch (category) {
+      case 'message':
+        return {
+          icon: <MessageSquare className="w-4 h-4 text-teal-600 dark:text-teal-300" />,
+          iconBg: 'bg-teal-50 dark:bg-teal-950/60',
+          border: 'border-teal-200/90 dark:border-teal-800/80',
+          bar: 'bg-teal-500',
+        };
+      case 'announcement':
+        return {
+          icon: <Megaphone className="w-4 h-4 text-amber-600 dark:text-amber-300" />,
+          iconBg: 'bg-amber-50 dark:bg-amber-950/60',
+          border: 'border-amber-200/90 dark:border-amber-800/80',
+          bar: 'bg-amber-500',
+        };
+      case 'warning':
+        return {
+          icon: <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-300" />,
+          iconBg: 'bg-rose-50 dark:bg-rose-950/60',
+          border: 'border-rose-200/90 dark:border-rose-800/80',
+          bar: 'bg-rose-500',
+        };
+      case 'survey':
+        return {
+          icon: <ClipboardList className="w-4 h-4 text-indigo-600 dark:text-indigo-300" />,
+          iconBg: 'bg-indigo-50 dark:bg-indigo-950/60',
+          border: 'border-indigo-200/90 dark:border-indigo-800/80',
+          bar: 'bg-indigo-500',
+        };
+      case 'election':
+        return {
+          icon: <Vote className="w-4 h-4 text-emerald-600 dark:text-emerald-300" />,
+          iconBg: 'bg-emerald-50 dark:bg-emerald-950/60',
+          border: 'border-emerald-200/90 dark:border-emerald-800/80',
+          bar: 'bg-emerald-500',
+        };
+      default:
+        return {
+          icon: <Bell className="w-4 h-4 text-slate-600 dark:text-slate-300" />,
+          iconBg: 'bg-slate-100 dark:bg-slate-800',
+          border: 'border-slate-200/90 dark:border-slate-700',
+          bar: 'bg-teal-500',
+        };
+    }
+  };
+
+  const visuals = getVisuals(toast.category);
+
+  return (
+    <div
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      className={`pointer-events-auto relative overflow-hidden rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border ${visuals.border} shadow-2xl transition-shadow hover:shadow-teal-900/15 ${
+        isExiting ? 'toast-exit' : 'toast-enter'
+      }`}
+    >
+      <div className="p-3.5 flex items-start gap-2.5">
+        <button
+          type="button"
+          onClick={() => {
+            onClickToast(toast);
+            triggerExit();
+          }}
+          className="flex items-start gap-2.5 text-right flex-1 min-w-0 cursor-pointer"
+        >
+          <div className={`p-2 rounded-xl shrink-0 ${visuals.iconBg}`}>{visuals.icon}</div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+              {toast.title}
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2 mt-0.5 leading-relaxed">
+              {toast.body}
+            </p>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={triggerExit}
+          className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
+          aria-label="بستن اعلان"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* نوار پیشرفت محو شدن خودکار */}
+      <div className="h-[3px] w-full bg-slate-100 dark:bg-slate-800/80">
+        <div
+          className={`h-full w-full ${visuals.bar} toast-progress`}
+          style={
+            {
+              '--toast-duration': `${autoDismissMs}ms`,
+              animationPlayState: isPaused ? 'paused' : 'running',
+            } as React.CSSProperties
+          }
+        />
+      </div>
+    </div>
+  );
+};
 
 export const LiveNotificationToasts: React.FC<LiveNotificationToastsProps> = ({
   toasts,
   onDismiss,
   onClickToast,
+  autoDismissMs = 6800,
 }) => {
   if (toasts.length === 0) return null;
 
-  const getIcon = (category: AppNotificationItem['category']) => {
-    switch (category) {
-      case 'message':
-        return <MessageSquare className="w-4 h-4 text-teal-600 dark:text-teal-300" />;
-      case 'announcement':
-        return <Megaphone className="w-4 h-4 text-amber-600 dark:text-amber-300" />;
-      case 'survey':
-        return <ClipboardList className="w-4 h-4 text-indigo-600 dark:text-indigo-300" />;
-      case 'election':
-        return <Vote className="w-4 h-4 text-emerald-600 dark:text-emerald-300" />;
-      default:
-        return <Bell className="w-4 h-4 text-slate-600 dark:text-slate-300" />;
-    }
-  };
-
   return (
-    <div className="fixed top-16 sm:top-24 left-3 sm:left-5 z-50 w-[min(92vw,360px)] space-y-2 pointer-events-none">
+    <div
+      className="fixed top-16 sm:top-24 left-3 sm:left-5 z-50 w-[min(92vw,370px)] space-y-2.5 pointer-events-none"
+      aria-live="polite"
+      aria-atomic="false"
+    >
       {toasts.map((toast) => (
-        <div
+        <ToastItemCard
           key={toast.id}
-          className="pointer-events-auto rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-teal-200 dark:border-teal-800 shadow-2xl p-3.5 flex items-start gap-2.5 animate-in slide-in-from-top-3 duration-200"
-        >
-          <button
-            type="button"
-            onClick={() => onClickToast(toast)}
-            className="flex items-start gap-2.5 text-right flex-1 min-w-0 cursor-pointer"
-          >
-            <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/60 shrink-0">
-              {getIcon(toast.category)}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
-                {toast.title}
-              </div>
-              <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2 mt-0.5 leading-relaxed">
-                {toast.body}
-              </p>
-            </div>
-          </button>
-          <button
-            type="button"
-            onClick={() => onDismiss(toast.id)}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
-            aria-label="بستن اعلان"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
+          toast={toast}
+          autoDismissMs={autoDismissMs}
+          onDismiss={onDismiss}
+          onClickToast={onClickToast}
+        />
       ))}
     </div>
   );

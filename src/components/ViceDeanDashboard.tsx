@@ -26,6 +26,7 @@ import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { StudentReferralModal } from './StudentReferralModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { CommunityChatHub } from './CommunityChatHub';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
 import {
   StudentListPaginationBar,
@@ -160,7 +161,7 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
   onOpenChangePassword,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<ViceDeanTab>('supervisor');
+  const [activeTab, setActiveTab] = useState<ViceDeanTab | null>(null);
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
   const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
   const [securityBanner, setSecurityBanner] = useState<string | null>(null);
@@ -876,109 +877,87 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
         </div>
       )}
 
-      {/* تب‌های پنج‌گانه کارتابل معاونت دانشجویی */}
-      <div className="flex flex-wrap gap-2 bg-white dark:bg-slate-900 p-2.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
-        <button
-          type="button"
-          onClick={() => setActiveTab('supervisor')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'supervisor'
-              ? 'bg-teal-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4" />
-          <span>امور سرپرستی سراها</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('student_affairs')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'student_affairs'
-              ? 'bg-indigo-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <Award className="w-4 h-4" />
-          <span>امور دانشجویی، ورزش و شوراها</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('cultural')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'cultural'
-              ? 'bg-fuchsia-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <Sparkles className="w-4 h-4" />
-          <span>امور فرهنگی و تشکل‌ها</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('detailed_reports')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'detailed_reports'
-              ? 'bg-cyan-700 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          <span>گزارش‌های جامع و تحلیلی ({filteredReportStudents.length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('messages_monitor')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'messages_monitor'
-              ? 'bg-slate-900 dark:bg-indigo-700 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <Eye className="w-4 h-4" />
-          <span>پایش پیام‌های تمام حوزه‌ها ({crossDomainData.messages.length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('clearance')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'clearance'
-              ? 'bg-sky-700 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4" />
-          <span>تسویه حساب فارغ‌التحصیلان</span>
-          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.vice_dean?.status || 'pending') === 'pending').length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.vice_dean?.status || 'pending') === 'pending').length}
-            </span>
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('community_chat')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'community_chat'
-              ? 'bg-emerald-700 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <MessagesSquare className="w-4 h-4" />
-          <span>نظارت بر تالارها و پیام‌رسان</span>
-          {Storage.getCommunityChatReports().filter((r) => r.status === 'pending').length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-              {Storage.getCommunityChatReports().filter((r) => r.status === 'pending').length}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* منوی دسته‌بندی‌شده و بازشونده کارتابل معاونت دانشجویی */}
+      <CollapsibleMenuGrid<ViceDeanTab>
+        activeKey={activeTab}
+        onToggle={(key) => setActiveTab((prev) => (prev === key ? null : key))}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های کارتابل معاونت دانشجویی (برای باز یا بسته شدن روی هر گزینه کلیک کنید)"
+        emptyPrompt="تمامی بخش‌ها در وضعیت بسته هستند. برای مشاهده هر زیربخش معاونت، روی دکمه مربوطه کلیک کنید."
+        categories={[
+          {
+            title: 'نظارت بر حوزه‌های تابعه',
+            items: [
+              {
+                id: 'supervisor',
+                label: 'امور سرپرستی سراها',
+                subtitle: 'اسکان، اتاق‌ها، تردد و ارزیابی سراها',
+                icon: <ShieldCheck className="w-4 h-4" />,
+                activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md',
+              },
+              {
+                id: 'student_affairs',
+                label: 'امور دانشجویی، ورزش و شوراها',
+                subtitle: 'تربیت بدنی، انتخابات صنفی و انضباطی',
+                icon: <Award className="w-4 h-4" />,
+                activeClass: 'bg-indigo-600 text-white border-indigo-600 shadow-md',
+              },
+              {
+                id: 'cultural',
+                label: 'امور فرهنگی و تشکل‌ها',
+                subtitle: 'برنامه‌های فرهنگی و انجمن‌های دانشجویی',
+                icon: <Sparkles className="w-4 h-4" />,
+                activeClass: 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-md',
+              },
+            ],
+          },
+          {
+            title: 'گزارش‌گیری، پایش و تسویه',
+            items: [
+              {
+                id: 'detailed_reports',
+                label: 'گزارش‌های جامع و تحلیلی',
+                subtitle: 'فیلتر پیشرفته و خروجی اکسل دانشجویان',
+                icon: <BarChart3 className="w-4 h-4" />,
+                badge: filteredReportStudents.length,
+                badgeTone: 'teal',
+                activeClass: 'bg-cyan-700 text-white border-cyan-700 shadow-md',
+              },
+              {
+                id: 'messages_monitor',
+                label: 'پایش پیام‌های تمام حوزه‌ها',
+                subtitle: 'مشاهده و نظارت بر کل مکاتبات سامانه',
+                icon: <Eye className="w-4 h-4" />,
+                badge: crossDomainData.messages.length,
+                badgeTone: 'indigo',
+                activeClass: 'bg-slate-900 dark:bg-indigo-700 text-white border-slate-900 shadow-md',
+              },
+              {
+                id: 'clearance',
+                label: 'تسویه حساب فارغ‌التحصیلان',
+                subtitle: 'بررسی و تأیید نهایی واحد معاونت',
+                icon: <GraduationCap className="w-4 h-4" />,
+                badge: Storage.getGraduationClearances().filter(
+                  (c) =>
+                    c.educationGateStatus === 'approved' &&
+                    (c.units?.vice_dean?.status || 'pending') === 'pending'
+                ).length,
+                badgeTone: 'rose',
+                activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+              },
+              {
+                id: 'community_chat',
+                label: 'نظارت بر تالارها و پیام‌رسان',
+                subtitle: 'گفتگوی همکاران، تالارها و گزارش‌ها',
+                icon: <MessagesSquare className="w-4 h-4" />,
+                badge: Storage.getCommunityChatReports().filter((r) => r.status === 'pending').length,
+                badgeTone: 'rose',
+                activeClass: 'bg-emerald-700 text-white border-emerald-700 shadow-md',
+              },
+            ],
+          },
+        ]}
+      />
 
       {/* تب ۱: تمامی امکانات سرپرستی */}
       {activeTab === 'supervisor' && (

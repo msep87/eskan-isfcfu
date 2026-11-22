@@ -9,6 +9,7 @@ import {
 import { Storage } from '../utils/storage';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   Wrench,
   CheckCircle2,
@@ -61,7 +62,7 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'tasks' | 'clearance'>('tasks');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'clearance' | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [filterDorm, setFilterDorm] = useState<string>('all');
@@ -392,41 +393,40 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
         </div>
       </div>
 
-      {/* تب‌های تأسیسات و تسویه حساب فارغ‌التحصیلان */}
-      <div className="flex flex-wrap gap-2 bg-slate-200/70 dark:bg-slate-800/70 p-1.5 rounded-2xl">
-        <button
-          type="button"
-          onClick={() => setActiveTab('tasks')}
-          className={`flex-1 min-w-[200px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'tasks'
-              ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <Wrench className="w-4 h-4" />
-          <span>مأموریت‌های فنی و تعمیرات ({myTasks.length})</span>
-        </button>
+      {/* منوی بازشونده کارتابل تأسیسات و فنی */}
+      <CollapsibleMenuGrid<'tasks' | 'clearance'>
+        activeKey={activeTab}
+        onToggle={(key) => setActiveTab((prev) => (prev === key ? null : key))}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های واحد تأسیسات و فنی (برای باز یا بسته شدن کلیک کنید)"
+        emptyPrompt="برای مشاهده هر بخش، روی دکمه مربوطه کلیک کنید. با کلیک مجدد همان بخش بسته می‌شود."
+        items={[
+          {
+            id: 'tasks',
+            label: 'مأموریت‌های فنی و تعمیرات',
+            subtitle: 'گزارش‌های خرابی، درخواست قطعه و اتمام کار',
+            icon: <Wrench className="w-4 h-4" />,
+            badge: myTasks.length,
+            badgeTone: 'amber',
+            activeClass: 'bg-amber-600 text-white border-amber-600 shadow-md',
+          },
+          {
+            id: 'clearance',
+            label: 'تسویه حساب فارغ‌التحصیلان',
+            subtitle: 'بررسی عدم خسارت تأسیساتی و تأیید تسویه',
+            icon: <GraduationCap className="w-4 h-4" />,
+            badge: Storage.getGraduationClearances().filter(
+              (c) =>
+                c.educationGateStatus === 'approved' &&
+                (c.units?.maintenance?.status || 'pending') === 'pending'
+            ).length,
+            badgeTone: 'rose',
+            activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+          },
+        ]}
+      />
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('clearance')}
-          className={`flex-1 min-w-[200px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'clearance'
-              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4" />
-          <span>تسویه حساب فارغ‌التحصیلان</span>
-          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.maintenance?.status || 'pending') === 'pending').length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.maintenance?.status || 'pending') === 'pending').length}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {activeTab === 'clearance' ? (
+      {activeTab === 'clearance' && (
         <GraduationClearanceReviewPanel
           unitRole="maintenance"
           reviewerId={technician.id}
@@ -434,7 +434,9 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
           settings={Storage.getSettings()}
           onDataChange={onRefreshData}
         />
-      ) : (
+      )}
+
+      {activeTab === 'tasks' && (
         <>
       {/* کارت‌های آماری */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

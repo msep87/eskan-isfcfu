@@ -18,6 +18,7 @@ import {
 import { escapeHtml } from '../utils/sanitizeHtml';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   Award,
   Sparkles,
@@ -84,7 +85,7 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
   onOpenUserGuide,
   embeddedMode = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'timetable' | 'associations' | 'reports' | 'messages' | 'clearance'>('timetable');
+  const [activeTab, setActiveTab] = useState<'timetable' | 'associations' | 'reports' | 'messages' | 'clearance' | null>(null);
   const [programs, setPrograms] = useState<CulturalProgram[]>(() => Storage.getCulturalPrograms());
   const [associations, setAssociations] = useState<CulturalAssociation[]>(() =>
     Storage.getCulturalAssociations()
@@ -603,83 +604,73 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
         </div>
       )}
 
-      {/* تب‌های امور فرهنگی */}
-      <div className="flex flex-wrap gap-2 p-1.5 bg-slate-200/70 dark:bg-slate-800/80 rounded-2xl">
-        <button
-          onClick={() => setActiveTab('timetable')}
-          className={`flex-1 min-w-[180px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'timetable'
-              ? 'bg-white dark:bg-slate-900 text-fuchsia-700 dark:text-fuchsia-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <Calendar className="w-4 h-4" />
-          <span>جدول زمانی هفتگی (برنامه کلاسی)</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('associations')}
-          className={`flex-1 min-w-[180px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'associations'
-              ? 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>تشکل‌ها و انجمن‌های دانشجویی</span>
-          {pendingMemberships.length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black">
-              {pendingMemberships.length}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('reports')}
-          className={`flex-1 min-w-[160px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'reports'
-              ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          <span>گزارش‌گیری و اکسل</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('messages')}
-          className={`flex-1 min-w-[160px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'messages'
-              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span>پیام‌های دانشجویان</span>
-          {unreadCulturalMessagesCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-sky-600 text-white text-[10px] font-black">
-              {unreadCulturalMessagesCount}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('clearance')}
-          className={`flex-1 min-w-[170px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'clearance'
-              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4" />
-          <span>تسویه حساب فارغ‌التحصیلان</span>
-          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.cultural?.status || 'pending') === 'pending').length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.cultural?.status || 'pending') === 'pending').length}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* منوی دسته‌بندی‌شده و بازشونده کارتابل امور فرهنگی */}
+      <CollapsibleMenuGrid<'timetable' | 'associations' | 'reports' | 'messages' | 'clearance'>
+        activeKey={activeTab}
+        onToggle={(key) => setActiveTab((prev) => (prev === key ? null : key))}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های امور فرهنگی و تشکل‌ها (برای باز یا بسته شدن کلیک کنید)"
+        emptyPrompt="برای مشاهده هر بخش، روی دکمه مربوطه کلیک کنید. با کلیک مجدد همان بخش بسته می‌شود."
+        categories={[
+          {
+            title: 'برنامه‌ها و تشکل‌های فرهنگی',
+            items: [
+              {
+                id: 'timetable',
+                label: 'جدول زمانی هفتگی',
+                subtitle: 'ثبت و مدیریت برنامه‌های فرهنگی سراها',
+                icon: <Calendar className="w-4 h-4" />,
+                badge: programs.length,
+                badgeTone: 'indigo',
+                activeClass: 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-md',
+              },
+              {
+                id: 'associations',
+                label: 'تشکل‌ها و انجمن‌های دانشجویی',
+                subtitle: 'مدیریت انجمن‌ها و درخواست‌های عضویت',
+                icon: <Users className="w-4 h-4" />,
+                badge: pendingMemberships.length,
+                badgeTone: 'amber',
+                activeClass: 'bg-purple-600 text-white border-purple-600 shadow-md',
+              },
+            ],
+          },
+          {
+            title: 'گزارش‌گیری، پیام و تسویه',
+            items: [
+              {
+                id: 'reports',
+                label: 'گزارش‌گیری و خروجی اکسل',
+                subtitle: 'آمار برنامه‌ها و اعضای تشکل‌ها',
+                icon: <BarChart3 className="w-4 h-4" />,
+                activeClass: 'bg-emerald-600 text-white border-emerald-600 shadow-md',
+              },
+              {
+                id: 'messages',
+                label: 'پیام‌های دانشجویان',
+                subtitle: 'پاسخ‌گویی به درخواست‌های فرهنگی',
+                icon: <MessageSquare className="w-4 h-4" />,
+                badge: unreadCulturalMessagesCount,
+                badgeTone: 'sky',
+                activeClass: 'bg-sky-600 text-white border-sky-600 shadow-md',
+              },
+              {
+                id: 'clearance',
+                label: 'تسویه حساب فارغ‌التحصیلان',
+                subtitle: 'تأییدیه تسویه واحد امور فرهنگی',
+                icon: <GraduationCap className="w-4 h-4" />,
+                badge: Storage.getGraduationClearances().filter(
+                  (c) =>
+                    c.educationGateStatus === 'approved' &&
+                    (c.units?.cultural?.status || 'pending') === 'pending'
+                ).length,
+                badgeTone: 'rose',
+                activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+              },
+            ],
+          },
+        ]}
+      />
 
       {/* تب ۱: جدول زمانی هفتگی شبیه برنامه کلاسی */}
       {activeTab === 'timetable' && (

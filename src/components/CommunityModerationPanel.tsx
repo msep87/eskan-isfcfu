@@ -36,6 +36,9 @@ import {
   FileWarning,
   Database,
   Eraser,
+  Briefcase,
+  Mic,
+  PhoneCall,
 } from 'lucide-react';
 
 interface CommunityModerationPanelProps {
@@ -200,7 +203,11 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
 
   const quickToggle = (key: keyof CommunityChatSettings) => {
     if (!isAdmin) return;
-    const updated = { ...draftSettings, [key]: !draftSettings[key] };
+    const defaultTrue =
+      key === 'isStaffChatEnabled' || key === 'allowVoiceMessages' || key === 'allowLiveVoiceCall';
+    const currentVal =
+      draftSettings[key] === undefined ? defaultTrue : Boolean(draftSettings[key]);
+    const updated = { ...draftSettings, [key]: !currentVal };
     setDraftSettings(updated);
     handleSaveSettings(updated);
   };
@@ -487,6 +494,33 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
                   offLabel: 'اختیاری',
                 },
                 {
+                  key: 'isStaffChatEnabled' as const,
+                  title: 'چت خصوصی و گروه‌های داخلی کارکنان',
+                  desc: 'امکان انتخاب همکار از فهرست کارکنان برای گفتگوی خصوصی و ایجاد گروه/تالار داخلی ویژه کارکنان دانشگاه.',
+                  icon: <Briefcase className="w-4 h-4 text-violet-600" />,
+                  onLabel: 'فعال برای کارکنان',
+                  offLabel: 'بسته (غیرفعال)',
+                  defaultTrue: true,
+                },
+                {
+                  key: 'allowVoiceMessages' as const,
+                  title: 'ضبط و ارسال پیام صوتی (ویس) در گفتگوها',
+                  desc: 'امکان ضبط مستقیم صدا با میکروفون و ارسال پیام صوتی (مشابه واتساپ/تلگرام) در چت‌ها و تالارها.',
+                  icon: <Mic className="w-4 h-4 text-teal-600" />,
+                  onLabel: 'پیام صوتی مجاز',
+                  offLabel: 'پیام صوتی بسته',
+                  defaultTrue: true,
+                },
+                {
+                  key: 'allowLiveVoiceCall' as const,
+                  title: 'گفتگوی صوتی مستقیم زنده (تماس صوتی)',
+                  desc: 'امکان برقراری تماس صوتی مستقیم دونفره در چت خصوصی و اتاق گفتگوی صوتی زنده در گروه‌ها و تالارها.',
+                  icon: <PhoneCall className="w-4 h-4 text-emerald-600" />,
+                  onLabel: 'تماس زنده مجاز',
+                  offLabel: 'تماس زنده بسته',
+                  defaultTrue: true,
+                },
+                {
                   key: 'onlyAdmittedStudentsCanChat' as const,
                   title: 'محدودسازی گفتگو به دانشجویان پذیرش‌شده',
                   desc: 'در صورت فعال بودن، دانشجویان دارای برچسب «پذیرش نشده» تا تکمیل پذیرش امکان ارسال پیام نخواهند داشت.',
@@ -495,7 +529,9 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
                   offLabel: 'همه دانشجویان',
                 },
               ].map((item) => {
-                const active = Boolean(draftSettings[item.key]);
+                const rawVal = draftSettings[item.key];
+                const active =
+                  rawVal === undefined ? Boolean('defaultTrue' in item && item.defaultTrue) : Boolean(rawVal);
                 return (
                   <div
                     key={item.key}

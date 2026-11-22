@@ -8,9 +8,10 @@ import {
   CommunityForum,
   CurrentUser,
   PublicStudentChatProfile,
+  StaffChatDirectoryItem,
   Student,
 } from '../types';
-import { Storage, normalizePersianSearch } from '../utils/storage';
+import { Storage, normalizePersianSearch, supabase } from '../utils/storage';
 import { getStudentAdmissionStatus, isStudentDormResident } from '../utils/financeUtils';
 import {
   COMMUNITY_STICKERS,
@@ -19,12 +20,17 @@ import {
   compressChatImageFile,
   getRoleDisplayLabel,
   getStickerById,
+  isStaffDmRoomId,
+  isStaffEligibleForForum,
   isStudentEligibleForForum,
   isSupervisorModeratorRole,
   makeDmRoomId,
+  makeStaffDmRoomId,
 } from '../utils/communityStickers';
 import { CommunityForumRequestModal } from './CommunityForumRequestModal';
 import { CommunityModerationPanel } from './CommunityModerationPanel';
+import { VoiceMessagePlayer } from './VoiceMessagePlayer';
+import { LiveVoiceCallModal, LiveVoiceCallTarget } from './LiveVoiceCallModal';
 import {
   X,
   Send,
@@ -56,6 +62,12 @@ import {
   UserX,
   Pencil,
   Eraser,
+  Mic,
+  Square,
+  PhoneCall,
+  PhoneIncoming,
+  PhoneOff,
+  Briefcase,
 } from 'lucide-react';
 
 interface CommunityChatHubProps {
@@ -210,6 +222,30 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     confirmLabel: string;
     onConfirm: () => void;
   } | null>(null);
+  // شروع گفتگوی خصوصی کارکنان از لیست کشویی
+  const [selectedStaffDmId, setSelectedStaffDmId] = useState('');
+
+  // ضبط و ارسال پیام صوتی (ویس)
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingSec, setRecordingSec] = useState(0);
+  const [draftAudio, setDraftAudio] = useState<{ dataUrl: string; durationSec: number } | null>(
+    null
+  );
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingDurationRef = useRef<number>(0);
+
+  // تماس صوتی مستقیم زنده (WebRTC) + اعلان تماس ورودی
+  const [activeVoiceCall, setActiveVoiceCall] = useState<LiveVoiceCallTarget | null>(null);
+  const [incomingVoiceCall, setIncomingVoiceCall] = useState<{
+    roomId: string;
+    callerId: string;
+    callerName: string;
+    callerRole: string;
+  } | null>(null);
+
   const [toast, setToast] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -248,6 +284,41 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     });
     setReplyTo(null);
   }, [selectedRoomId]);
+
+  // دریافت اعلان تماس صوتی ورودی مستقیم از طریق Supabase Realtime
+  useEffect(() => {
+    const safeId = me.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+    const ch = supabase.channel(`cfuis_call_invite_${safeId}`);
+    ch.on('broadcast', { event: 'incoming_voice_call' }, ({ payload }) => {
+      if (!payload || payload.callerId === me.id) return;
+      setIncomingVoiceCall({
+        roomId: String(payload.roomId || ''),
+        callerId: String(payload.callerId || ''),
+        callerName: String(payload.callerName || 'کاربر سامانه'),
+        callerRole: String(payload.callerRole || ''),
+      });
+    });
+    ch.subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [me.id]);
+
+  // پاکسازی ضبط صوت هنگام بسته شدن کامپوننت
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  // فهرست کامل کارکنان برای لیست کشویی چت خصوصی همکاران
+  const staffDirectory = useMemo<StaffChatDirectoryItem[]>(() => {
+    if (isStudent) return [];
+    return Storage.getAllStaffChatDirectory().filter(
+      (s) => !(s.id === me.id && s.role === me.role)
+    );
+  }, [isStudent, me.id, me.role, cloudSyncTick, messages.length]);
 
   // همگام‌سازی خودکار با ابر هر ۱۲ ثانیه در زمان باز بودن پیام‌رسان
   useEffect(() => {
@@ -312,6 +383,13 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     return forums
       .filter((f) => !f.isPublicForum && f.id !== PUBLIC_FORUM_ID)
       .filter((f) => {
+        // تالارهای ویژه کارکنان هرگز برای دانشجویان نمایش داده نمی‌شوند
+        if (f.audienceType === 'staff_only') {
+          if (isStudent) return false;
+          if (isModerator) return true;
+          if (f.status === 'active') return isStaffEligibleForForum(me.role, me.id, f);
+          return f.creatorId === me.id;
+        }
         if (isModerator) return true;
         if (f.status === 'active') {
           if (isStudent) {
@@ -319,7 +397,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
           }
           return true;
         }
-        // دانشجو درخواست‌های در انتظار یا ردشده خودش را نیز می‌بیند
+        // کاربر درخواست‌های در انتظار یا ردشده خودش را نیز می‌بیند
         return f.creatorId === me.id;
       })
       .filter((f) => {
@@ -329,32 +407,40 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
         );
         return hay.includes(q);
       });
-  }, [forums, sidebarSearch, isModerator, isStudent, currentUser, me.id]);
+  }, [forums, sidebarSearch, isModerator, isStudent, currentUser, me.id, me.role]);
 
-  // فهرست گفتگوهای خصوصی (برای دانشجو: گفتگوهای خودش؛ برای ناظران: همه چت‌های خصوصی دانشجویان!)
+  // فهرست گفتگوهای خصوصی (دانشجو: گفتگوهای خودش | کارکنان: گفتگوهای خصوصی پرسنلی خودشان | ناظران: چت‌های شخصی همکاران + نظارت بر چت‌های دانشجویی)
   const dmRooms = useMemo<DmRoomSummary[]>(() => {
     const map = new Map<string, DmRoomSummary>();
     messages.forEach((m) => {
       if (m.roomType !== 'dm') return;
+      const staffDm = isStaffDmRoomId(m.roomId);
       const parts: [string, string] = m.dmParticipants || [m.senderId, m.roomId];
-      const names: [string, string] = m.dmParticipantNames || [m.senderName, 'دانشجو'];
+      const names: [string, string] = m.dmParticipantNames || [
+        m.senderName,
+        staffDm ? 'همکار' : 'دانشجو',
+      ];
 
-      if (!isModerator && isStudent) {
-        if (!parts.includes(me.id)) return;
-      } else if (!isModerator && !isStudent) {
-        // سایر کارشناسان غیرناظر چت خصوصی دانشجویان را نمی‌بینند
-        return;
+      if (isStudent) {
+        if (staffDm || !parts.includes(me.id)) return;
+      } else if (!isModerator) {
+        // کارکنان عادی فقط گفتگوهای خصوصی پرسنلی خودشان را می‌بینند
+        if (!staffDm || !parts.includes(me.id)) return;
+      } else {
+        // ناظران (مدیر، حراست، معاونت): چت‌های پرسنلی خودشان + تمام چت‌های دانشجویی جهت نظارت (و مدیر کل بر همه)
+        if (staffDm && !isAdmin && !parts.includes(me.id)) return;
       }
 
       const existing = map.get(m.roomId);
+      const iAmParticipant = parts.includes(me.id);
       const otherIdx = parts[0] === me.id ? 1 : 0;
       if (!existing) {
         map.set(m.roomId, {
           roomId: m.roomId,
           participants: parts,
           participantNames: names,
-          otherStudentId: isStudent ? parts[otherIdx] : undefined,
-          otherStudentName: isStudent ? names[otherIdx] : undefined,
+          otherStudentId: iAmParticipant ? parts[otherIdx] : undefined,
+          otherStudentName: iAmParticipant ? names[otherIdx] : undefined,
           lastMessage: m,
           messageCount: 1,
         });
@@ -370,13 +456,14 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
       activeDmParticipants &&
       !map.has(selectedRoomId)
     ) {
+      const iAmParticipant = activeDmParticipants.ids.includes(me.id);
       const otherIdx = activeDmParticipants.ids[0] === me.id ? 1 : 0;
       map.set(selectedRoomId, {
         roomId: selectedRoomId,
         participants: activeDmParticipants.ids,
         participantNames: activeDmParticipants.names,
-        otherStudentId: isStudent ? activeDmParticipants.ids[otherIdx] : undefined,
-        otherStudentName: isStudent ? activeDmParticipants.names[otherIdx] : undefined,
+        otherStudentId: iAmParticipant ? activeDmParticipants.ids[otherIdx] : undefined,
+        otherStudentName: iAmParticipant ? activeDmParticipants.names[otherIdx] : undefined,
         messageCount: 0,
       });
     }
@@ -398,6 +485,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
   }, [
     messages,
     isModerator,
+    isAdmin,
     isStudent,
     me.id,
     selectedRoomType,
@@ -440,13 +528,17 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     if (selectedRoomType === 'public') return publicForum?.title || 'تالار گفتگوی عمومی دانشگاه';
     if (selectedRoomType === 'forum') return activeForum?.title || 'تالار تخصصی';
     if (activeDmRoom) {
-      if (isModerator) {
-        return `چت خصوصی: ${activeDmRoom.participantNames[0]} ↔ ${activeDmRoom.participantNames[1]}`;
+      const staffDm = isStaffDmRoomId(activeDmRoom.roomId);
+      const iAmParticipant = activeDmRoom.participants.includes(me.id);
+      if (iAmParticipant && activeDmRoom.otherStudentName) {
+        return staffDm
+          ? `همکار: ${activeDmRoom.otherStudentName}`
+          : `${activeDmRoom.otherStudentName} (${activeDmRoom.otherStudentId || ''})`;
       }
-      return `${activeDmRoom.otherStudentName || 'دانشجو'} (${activeDmRoom.otherStudentId || ''})`;
+      return `${staffDm ? 'چت همکاران' : 'چت خصوصی'}: ${activeDmRoom.participantNames[0]} ↔ ${activeDmRoom.participantNames[1]}`;
     }
     return 'گفتگو';
-  }, [selectedRoomType, publicForum, activeForum, activeDmRoom, isModerator]);
+  }, [selectedRoomType, publicForum, activeForum, activeDmRoom, me.id]);
 
   // بررسی اینکه آیا کاربر فعلی مجاز به ارسال پیام در اتاق انتخابی هست یا خیر
   const composerBlockReason = useMemo<string | null>(() => {
@@ -494,11 +586,21 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     }
 
     if (selectedRoomType === 'dm') {
-      if (!chatSettings.isPrivateChatEnabled) {
-        return 'امکان ارسال پیام خصوصی بین دانشجویان هم‌اکنون توسط مدیر سامانه بسته شده است.';
-      }
-      if (activeDmRoom && Storage.isStudentBlockedBetween(activeDmRoom.participants[0], activeDmRoom.participants[1])) {
-        return 'ارسال پیام در این گفتگو به دلیل مسدودسازی شخصی غیرفعال است.';
+      const staffDm = isStaffDmRoomId(selectedRoomId);
+      if (staffDm) {
+        if (chatSettings.isStaffChatEnabled === false) {
+          return 'امکان گفتگوی خصوصی کارکنان هم‌اکنون توسط مدیر سامانه بسته شده است.';
+        }
+      } else {
+        if (!chatSettings.isPrivateChatEnabled) {
+          return 'امکان ارسال پیام خصوصی بین دانشجویان هم‌اکنون توسط مدیر سامانه بسته شده است.';
+        }
+        if (
+          activeDmRoom &&
+          Storage.isStudentBlockedBetween(activeDmRoom.participants[0], activeDmRoom.participants[1])
+        ) {
+          return 'ارسال پیام در این گفتگو به دلیل مسدودسازی شخصی غیرفعال است.';
+        }
       }
     }
 
@@ -509,6 +611,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     blockedByAdmissionPolicy,
     myActiveBan,
     selectedRoomType,
+    selectedRoomId,
     publicForum,
     activeForum,
     isStudent,
@@ -518,15 +621,28 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
 
   const canAttachPhoto = useMemo(() => {
     if (isModerator) return true;
+    if (selectedRoomType === 'dm' && isStaffDmRoomId(selectedRoomId)) return true;
     return selectedRoomType === 'dm'
       ? chatSettings.allowPhotosInPrivateChat
       : chatSettings.allowPhotosInForums;
-  }, [isModerator, selectedRoomType, chatSettings]);
+  }, [isModerator, selectedRoomType, selectedRoomId, chatSettings]);
 
   const canUseStickers = useMemo(() => {
     if (isModerator) return true;
+    if (selectedRoomType === 'dm' && isStaffDmRoomId(selectedRoomId)) return true;
     return chatSettings.allowStickers;
-  }, [isModerator, chatSettings.allowStickers]);
+  }, [isModerator, selectedRoomType, selectedRoomId, chatSettings.allowStickers]);
+
+  const canSendVoice = useMemo(() => {
+    if (isModerator) return true;
+    return chatSettings.allowVoiceMessages !== false;
+  }, [isModerator, chatSettings.allowVoiceMessages]);
+
+  const canStartLiveVoiceCall = useMemo(() => {
+    if (composerBlockReason && !isModerator) return false;
+    if (isModerator) return true;
+    return chatSettings.allowLiveVoiceCall !== false;
+  }, [composerBlockReason, isModerator, chatSettings.allowLiveVoiceCall]);
 
   // جستجوی شماره دانشجویی برای شروع گفتگوی خصوصی جدید
   const handleLookupStudentForDm = async (e: React.FormEvent) => {
@@ -598,6 +714,114 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     setDmLookupInput('');
   };
 
+  const handleOpenStaffDm = (staff: StaffChatDirectoryItem) => {
+    const roomId = makeStaffDmRoomId(me.id, staff.id);
+    const pair: [string, string] =
+      me.id.localeCompare(staff.id) <= 0 ? [me.id, staff.id] : [staff.id, me.id];
+    const myLabel = `${me.name} (${getRoleDisplayLabel(me.role)})`;
+    const targetLabel = `${staff.fullName} (${staff.roleLabel})`;
+    const names: [string, string] =
+      me.id.localeCompare(staff.id) <= 0 ? [myLabel, targetLabel] : [targetLabel, myLabel];
+
+    setActiveDmParticipants({ ids: pair, names });
+    setSelectedRoomId(roomId);
+    setSelectedRoomType('dm');
+    setActiveView('chat');
+    setMobileShowChat(true);
+  };
+
+  // شروع و پایان ضبط پیام صوتی (ویس)
+  const stopVoiceRecording = (cancel = false) => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      if (cancel) {
+        recorder.onstop = () => {
+          recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+          recordingStreamRef.current = null;
+        };
+      }
+      recorder.stop();
+    } else {
+      recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+      recordingStreamRef.current = null;
+    }
+    setIsRecordingVoice(false);
+    if (cancel) {
+      recordingChunksRef.current = [];
+      setRecordingSec(0);
+    }
+  };
+
+  const startVoiceRecording = async () => {
+    if (!canSendVoice) {
+      showToast('ارسال پیام صوتی توسط مدیر سامانه غیرفعال است.', 'error');
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+      showToast('مرورگر شما از ضبط صوت پشتیبانی نمی‌کند یا صفحه در بستر امن HTTPS نیست.', 'error');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      recordingChunksRef.current = [];
+      recordingDurationRef.current = 0;
+      setRecordingSec(0);
+      setDraftAudio(null);
+
+      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+      const chosenMime = candidates.find((m) => MediaRecorder.isTypeSupported(m));
+      const recorder = new MediaRecorder(
+        stream,
+        chosenMime
+          ? { mimeType: chosenMime, audioBitsPerSecond: 16000 }
+          : { audioBitsPerSecond: 16000 }
+      );
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) {
+          recordingChunksRef.current.push(ev.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const mime = recorder.mimeType || chosenMime || 'audio/webm';
+        const blob = new Blob(recordingChunksRef.current, { type: mime });
+        recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+        recordingStreamRef.current = null;
+        if (blob.size < 200) return;
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = String(reader.result || '');
+          if (dataUrl.startsWith('data:audio')) {
+            setDraftAudio({
+              dataUrl,
+              durationSec: Math.max(1, recordingDurationRef.current),
+            });
+          }
+        };
+        reader.readAsDataURL(blob);
+      };
+
+      recorder.start(250);
+      setIsRecordingVoice(true);
+      recordingTimerRef.current = setInterval(() => {
+        recordingDurationRef.current += 1;
+        setRecordingSec(recordingDurationRef.current);
+        if (recordingDurationRef.current >= 60) {
+          stopVoiceRecording(false);
+        }
+      }, 1000);
+    } catch {
+      showToast('دسترسی به میکروفون رد شد. لطفاً مجوز میکروفون مرورگر را فعال کنید.', 'error');
+    }
+  };
+
   const handleSelectPhotoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -656,11 +880,20 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
       senderAvatarUrl: me.avatarUrl,
       text: overrideStickerId ? '' : draftText,
       imageUrl: overrideStickerId ? undefined : draftImage || undefined,
+      audioUrl: overrideStickerId ? undefined : draftAudio?.dataUrl,
+      audioDurationSec: overrideStickerId ? undefined : draftAudio?.durationSec,
       stickerId: overrideStickerId,
       replyToId: replyTo?.id,
       replyToSenderName: replyTo?.senderName,
       replyToText:
-        replyTo?.text || (replyTo?.imageUrl ? '[تصویر]' : replyTo?.stickerId ? '[استیکر]' : undefined),
+        replyTo?.text ||
+        (replyTo?.audioUrl
+          ? '[پیام صوتی]'
+          : replyTo?.imageUrl
+          ? '[تصویر]'
+          : replyTo?.stickerId
+          ? '[استیکر]'
+          : undefined),
       isModeratorMessage: isModerator && moderatorPostMode === 'moderator',
       isWarningMessage: isModerator && moderatorPostMode === 'warning',
     });
@@ -673,6 +906,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     if (!overrideStickerId) {
       setDraftText('');
       setDraftImage(null);
+      setDraftAudio(null);
     }
     setReplyTo(null);
     setIsStickerPickerOpen(false);
@@ -836,6 +1070,49 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
           >
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* بنر تماس صوتی ورودی مستقیم */}
+      {incomingVoiceCall && !activeVoiceCall && (
+        <div className="px-4 py-2.5 bg-gradient-to-l from-emerald-600 via-teal-600 to-emerald-700 text-white flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-md animate-pulse">
+          <div className="flex items-center gap-2.5 text-xs font-extrabold">
+            <PhoneIncoming className="w-4 h-4 shrink-0" />
+            <span>
+              تماس صوتی مستقیم ورودی از <strong>{incomingVoiceCall.callerName}</strong>
+              {incomingVoiceCall.callerRole
+                ? ` (${getRoleDisplayLabel(incomingVoiceCall.callerRole)})`
+                : ''}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveVoiceCall({
+                  roomId: incomingVoiceCall.roomId,
+                  roomTitle: incomingVoiceCall.callerName,
+                  roomType: 'dm',
+                  targetPeerId: incomingVoiceCall.callerId,
+                  targetPeerName: incomingVoiceCall.callerName,
+                  isInitiator: false,
+                });
+                setIncomingVoiceCall(null);
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-white text-emerald-700 hover:bg-emerald-50 text-xs font-black flex items-center gap-1 cursor-pointer shadow-xs"
+            >
+              <PhoneCall className="w-3.5 h-3.5" />
+              <span>پاسخ به تماس</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIncomingVoiceCall(null)}
+              className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold flex items-center gap-1 cursor-pointer"
+            >
+              <PhoneOff className="w-3.5 h-3.5" />
+              <span>رد تماس</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -1014,21 +1291,33 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                 </div>
               )}
 
-              {/* ۲. تالارها و گروه‌های تخصصی */}
+              {/* ۲. تالارها و گروه‌های تخصصی و کارکنان */}
               {sidebarSection !== 'dms' && (
                 <div className="space-y-1.5">
                   <div className="px-2 flex items-center justify-between">
                     <span className="text-[10px] font-extrabold text-slate-400">
-                      تالارها، گروه‌ها و انجمن‌های تخصصی ({visibleSpecializedForums.length.toLocaleString('fa-IR')})
+                      تالارها و گروه‌ها ({visibleSpecializedForums.length.toLocaleString('fa-IR')})
                     </span>
-                    {(isAdmin || (chatSettings.isGroupCreationEnabled && chatSettings.isChatSystemEnabled)) && (
+                    {(isAdmin ||
+                      (!isStudent &&
+                        chatSettings.isChatSystemEnabled &&
+                        chatSettings.isStaffChatEnabled !== false) ||
+                      (isStudent &&
+                        chatSettings.isGroupCreationEnabled &&
+                        chatSettings.isChatSystemEnabled)) && (
                       <button
                         type="button"
                         onClick={() => setIsCreateForumOpen(true)}
                         className="text-[10px] font-extrabold text-teal-700 dark:text-teal-300 hover:underline flex items-center gap-0.5 cursor-pointer"
                       >
                         <Plus className="w-3 h-3" />
-                        <span>{isAdmin ? 'ایجاد تالار' : 'درخواست تالار'}</span>
+                        <span>
+                          {isAdmin
+                            ? 'ایجاد تالار / گروه'
+                            : !isStudent
+                            ? 'ایجاد گروه کارکنان'
+                            : 'درخواست تالار'}
+                        </span>
                       </button>
                     )}
                   </div>
@@ -1036,16 +1325,24 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                   {visibleSpecializedForums.length === 0 ? (
                     <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 text-center space-y-2">
                       <p className="text-[11px] text-slate-500">
-                        هنوز تالار تخصصی فعالی برای شرایط شما ثبت نشده است.
+                        هنوز تالار یا گروهی برای شما ثبت نشده است.
                       </p>
-                      {(isAdmin || (chatSettings.isGroupCreationEnabled && chatSettings.isChatSystemEnabled)) && (
+                      {(isAdmin ||
+                        (!isStudent &&
+                          chatSettings.isChatSystemEnabled &&
+                          chatSettings.isStaffChatEnabled !== false) ||
+                        (isStudent &&
+                          chatSettings.isGroupCreationEnabled &&
+                          chatSettings.isChatSystemEnabled)) && (
                         <button
                           type="button"
                           onClick={() => setIsCreateForumOpen(true)}
                           className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
                         >
                           <Sparkles className="w-3.5 h-3.5" />
-                          <span>درخواست ایجاد تالار تخصصی</span>
+                          <span>
+                            {!isStudent ? 'ایجاد گروه / تالار جدید' : 'درخواست ایجاد تالار تخصصی'}
+                          </span>
                         </button>
                       )}
                     </div>
@@ -1055,6 +1352,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                         const cat = FORUM_CATEGORIES_META[forum.category] || FORUM_CATEGORIES_META.other;
                         const active = selectedRoomId === forum.id;
                         const count = messages.filter((m) => m.roomId === forum.id).length;
+                        const isStaffOnlyForum = forum.audienceType === 'staff_only';
                         return (
                           <button
                             key={forum.id}
@@ -1071,9 +1369,15 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                             }`}
                           >
                             <div
-                              className={`w-10 h-10 rounded-2xl bg-gradient-to-br ${cat.gradient} text-white flex items-center justify-center shrink-0 font-black text-xs`}
+                              className={`w-10 h-10 rounded-2xl bg-gradient-to-br ${
+                                isStaffOnlyForum ? 'from-violet-600 to-indigo-700' : cat.gradient
+                              } text-white flex items-center justify-center shrink-0 font-black text-xs`}
                             >
-                              {forum.title.slice(0, 1)}
+                              {isStaffOnlyForum ? (
+                                <Briefcase className="w-4 h-4" />
+                              ) : (
+                                forum.title.slice(0, 1)
+                              )}
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-1">
@@ -1097,6 +1401,11 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                                 )}
                               </div>
                               <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
+                                {isStaffOnlyForum && (
+                                  <span className="px-1.5 py-0.2 rounded-md bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300 text-[9px] font-black shrink-0">
+                                    ویژه کارکنان
+                                  </span>
+                                )}
                                 <span className="text-[10px] text-slate-500 truncate">
                                   {cat.label}
                                   {forum.tags.length > 0 ? ` • #${forum.tags[0]}` : ''}
@@ -1111,25 +1420,81 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                 </div>
               )}
 
-              {/* ۳. گفتگوی خصوصی با شماره دانشجویی (برای دانشجویان + نظارت همه چت‌های خصوصی برای مدیر/حراست/معاونت) */}
-              {sidebarSection !== 'forums' && (isStudent || isModerator) && (
+              {/* ۳. گفتگوی خصوصی (دانشجویان با شماره دانشجویی + کارکنان از لیست کشویی همکاران + نظارت ناظران) */}
+              {sidebarSection !== 'forums' && (
                 <div className="space-y-2 pt-1 border-t border-slate-200 dark:border-slate-800">
                   <div className="px-2 flex items-center justify-between">
                     <span className="text-[10px] font-extrabold text-slate-400">
-                      {isModerator
-                        ? `نظارت بر گفتگوهای خصوصی دانشجویان (${dmRooms.length.toLocaleString('fa-IR')})`
+                      {!isStudent
+                        ? `گفتگوی خصوصی همکاران ${isModerator ? 'و نظارت' : ''} (${dmRooms.length.toLocaleString('fa-IR')})`
                         : 'گفتگوی خصوصی (با شماره دانشجویی)'}
                     </span>
                     <span
                       className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
-                        chatSettings.isPrivateChatEnabled
+                        (!isStudent
+                          ? chatSettings.isStaffChatEnabled !== false
+                          : chatSettings.isPrivateChatEnabled)
                           ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
                           : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
                       }`}
                     >
-                      {chatSettings.isPrivateChatEnabled ? 'باز' : 'بسته'}
+                      {(!isStudent
+                        ? chatSettings.isStaffChatEnabled !== false
+                        : chatSettings.isPrivateChatEnabled)
+                        ? 'باز'
+                        : 'بسته'}
                     </span>
                   </div>
+
+                  {/* باکس انتخاب همکار از لیست کشویی برای چت خصوصی کارکنان */}
+                  {!isStudent && (
+                    <div className="p-2.5 rounded-2xl bg-violet-50/70 dark:bg-violet-950/25 border border-violet-200 dark:border-violet-800/80 space-y-2">
+                      {chatSettings.isStaffChatEnabled !== false &&
+                      (chatSettings.isChatSystemEnabled || isModerator) ? (
+                        <>
+                          <div className="text-[11px] font-extrabold text-violet-900 dark:text-violet-200 flex items-center gap-1.5">
+                            <Briefcase className="w-3.5 h-3.5 text-violet-600" />
+                            <span>انتخاب همکار برای گفتگوی خصوصی</span>
+                          </div>
+                          <div className="flex gap-1.5">
+                            <select
+                              value={selectedStaffDmId}
+                              onChange={(e) => setSelectedStaffDmId(e.target.value)}
+                              className="flex-1 min-w-0 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-violet-200 dark:border-violet-700 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                            >
+                              <option value="">-- انتخاب کاربر از کارکنان --</option>
+                              {staffDirectory.map((st) => (
+                                <option key={`${st.role}:${st.id}`} value={`${st.role}:${st.id}`}>
+                                  {st.fullName} — {st.roleLabel}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              disabled={!selectedStaffDmId}
+                              onClick={() => {
+                                const found = staffDirectory.find(
+                                  (st) => `${st.role}:${st.id}` === selectedStaffDmId
+                                );
+                                if (found) {
+                                  handleOpenStaffDm(found);
+                                  setSelectedStaffDmId('');
+                                }
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-45 text-white text-[11px] font-extrabold cursor-pointer shrink-0"
+                            >
+                              شروع چت
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>گفتگوی خصوصی کارکنان هم‌اکنون توسط مدیر سامانه بسته است.</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* باکس شروع گفتگوی جدید با شماره دانشجویی برای دانشجو */}
                   {isStudent && (
@@ -1193,20 +1558,24 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                   {/* لیست رشته‌گفتگوهای خصوصی */}
                   {dmRooms.length === 0 ? (
                     <div className="px-3 py-4 text-center text-[11px] text-slate-400">
-                      {isModerator
-                        ? 'هنوز گفتگوی خصوصی بین دانشجویان ثبت نشده است.'
+                      {!isStudent
+                        ? 'همکاری را از لیست کشویی بالا انتخاب کنید تا گفتگو آغاز شود.'
                         : 'هنوز گفتگوی خصوصی ندارید.'}
                     </div>
                   ) : (
                     <div className="space-y-1.5">
                       {dmRooms.map((dm) => {
                         const active = selectedRoomId === dm.roomId;
-                        const label = isModerator
-                          ? `${dm.participantNames[0]} ↔ ${dm.participantNames[1]}`
-                          : dm.otherStudentName || 'دانشجو';
-                        const subLabel = isModerator
-                          ? `${dm.participants[0]} • ${dm.participants[1]}`
-                          : `کد دانشجویی: ${dm.otherStudentId}`;
+                        const staffDm = isStaffDmRoomId(dm.roomId);
+                        const iAmParticipant = dm.participants.includes(me.id);
+                        const label = iAmParticipant
+                          ? dm.otherStudentName || (staffDm ? 'همکار' : 'دانشجو')
+                          : `${dm.participantNames[0]} ↔ ${dm.participantNames[1]}`;
+                        const subLabel = staffDm
+                          ? 'چت خصوصی کارکنان'
+                          : iAmParticipant
+                          ? `کد دانشجویی: ${dm.otherStudentId}`
+                          : `دانشجویی • ${dm.participants[0]} ↔ ${dm.participants[1]}`;
                         return (
                           <button
                             key={dm.roomId}
@@ -1226,8 +1595,14 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                                 : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800 hover:border-violet-300'
                             }`}
                           >
-                            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white flex items-center justify-center text-xs font-black shrink-0">
-                              {label.slice(0, 1)}
+                            <div
+                              className={`w-9 h-9 rounded-full bg-gradient-to-br ${
+                                staffDm
+                                  ? 'from-indigo-500 to-violet-600'
+                                  : 'from-violet-500 to-fuchsia-600'
+                              } text-white flex items-center justify-center text-xs font-black shrink-0`}
+                            >
+                              {staffDm ? <Briefcase className="w-4 h-4" /> : label.slice(0, 1)}
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-1">
@@ -1310,6 +1685,42 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
 
               {/* دکمه‌های سریع هدر */}
               <div className="flex items-center gap-1.5 shrink-0">
+                {/* دکمه تماس صوتی مستقیم / اتاق گفتگوی صوتی زنده */}
+                {canStartLiveVoiceCall && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const peerId =
+                        selectedRoomType === 'dm' && activeDmRoom?.participants.includes(me.id)
+                          ? activeDmRoom.otherStudentId
+                          : undefined;
+                      const peerName =
+                        selectedRoomType === 'dm' && activeDmRoom?.participants.includes(me.id)
+                          ? activeDmRoom.otherStudentName
+                          : undefined;
+                      setActiveVoiceCall({
+                        roomId: selectedRoomId,
+                        roomTitle: activeRoomTitle,
+                        roomType: selectedRoomType,
+                        targetPeerId: peerId,
+                        targetPeerName: peerName,
+                        isInitiator: true,
+                      });
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                    title={
+                      selectedRoomType === 'dm'
+                        ? 'برقراری تماس صوتی مستقیم با مخاطب'
+                        : 'ورود به اتاق گفتگوی صوتی زنده گروهی'
+                    }
+                  >
+                    <PhoneCall className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">
+                      {selectedRoomType === 'dm' ? 'تماس صوتی' : 'گفتگوی صوتی زنده'}
+                    </span>
+                  </button>
+                )}
+
                 {/* عضویت / خروج دانشجو در تالار تخصصی */}
                 {isStudent &&
                   selectedRoomType === 'forum' &&
@@ -1632,6 +2043,13 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                               {msg.text}
                             </p>
                           )}
+                          {msg.audioUrl && (
+                            <VoiceMessagePlayer
+                              src={msg.audioUrl}
+                              durationSec={msg.audioDurationSec}
+                              isMine={false}
+                            />
+                          )}
                           {msg.imageUrl && (
                             <img
                               src={msg.imageUrl}
@@ -1765,6 +2183,15 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                               {sticker.label}
                             </span>
                           </div>
+                        )}
+
+                        {/* پیام صوتی (ویس) */}
+                        {msg.audioUrl && (
+                          <VoiceMessagePlayer
+                            src={msg.audioUrl}
+                            durationSec={msg.audioDurationSec}
+                            isMine={isMine}
+                          />
                         )}
 
                         {/* تصویر پیوست */}
@@ -2014,6 +2441,69 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                 </div>
               )}
 
+              {/* نوار پیش‌نمایش پیام صوتی ضبط‌شده */}
+              {draftAudio && !isRecordingVoice && (
+                <div className="p-2.5 rounded-xl bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <VoiceMessagePlayer
+                      src={draftAudio.dataUrl}
+                      durationSec={draftAudio.durationSec}
+                      isMine={false}
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setDraftAudio(null)}
+                      className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-300 text-[11px] font-bold cursor-pointer"
+                    >
+                      حذف صوت
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSendMessage()}
+                      className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-extrabold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>ارسال صوت</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* نوار در حال ضبط صدا (مشابه واتساپ/تلگرام) */}
+              {isRecordingVoice && (
+                <div className="p-2.5 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border-2 border-rose-300 dark:border-rose-700 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-extrabold text-rose-700 dark:text-rose-300">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping" />
+                    <span>در حال ضبط پیام صوتی...</span>
+                    <span className="px-2 py-0.5 rounded-lg bg-white dark:bg-slate-900 font-mono text-rose-700 dark:text-rose-300">
+                      {`${Math.floor(recordingSec / 60)}:${recordingSec % 60 < 10 ? '0' : ''}${
+                        recordingSec % 60
+                      }`.replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)])}{' '}
+                      / ۱:۰۰
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => stopVoiceRecording(true)}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
+                    >
+                      لغو
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => stopVoiceRecording(false)}
+                      className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Square className="w-3.5 h-3.5 fill-current" />
+                      <span>پایان و پیش‌نمایش</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* انتخاب نوع پیام برای ناظران (عادی / پیام رسمی ناظر / اخطار رسمی) */}
               {isModerator && (
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -2058,7 +2548,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                   {/* دکمه استیکر */}
                   <button
                     type="button"
-                    disabled={!canUseStickers}
+                    disabled={!canUseStickers || isRecordingVoice}
                     onClick={() => setIsStickerPickerOpen((p) => !p)}
                     title={
                       canUseStickers
@@ -2066,7 +2556,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                         : 'ارسال استیکر توسط مدیر غیرفعال است'
                     }
                     className={`p-2.5 rounded-xl border transition shrink-0 ${
-                      canUseStickers
+                      canUseStickers && !isRecordingVoice
                         ? 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-amber-600 hover:bg-amber-50 cursor-pointer'
                         : 'bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 text-slate-400 opacity-50 cursor-not-allowed'
                     }`}
@@ -2077,7 +2567,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                   {/* دکمه عکس */}
                   <button
                     type="button"
-                    disabled={!canAttachPhoto}
+                    disabled={!canAttachPhoto || isRecordingVoice}
                     onClick={() => fileInputRef.current?.click()}
                     title={
                       canAttachPhoto
@@ -2085,12 +2575,41 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                         : 'ارسال عکس نیازمند فعال‌سازی و مجوز مدیر سامانه است'
                     }
                     className={`p-2.5 rounded-xl border transition shrink-0 ${
-                      canAttachPhoto
+                      canAttachPhoto && !isRecordingVoice
                         ? 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-sky-600 hover:bg-sky-50 cursor-pointer'
                         : 'bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 text-slate-400 opacity-50 cursor-not-allowed'
                     }`}
                   >
                     <ImageIcon className="w-4 h-4" />
+                  </button>
+
+                  {/* دکمه ضبط پیام صوتی (ویس) */}
+                  <button
+                    type="button"
+                    disabled={!canSendVoice || Boolean(editingMessage)}
+                    onClick={() =>
+                      isRecordingVoice ? stopVoiceRecording(false) : startVoiceRecording()
+                    }
+                    title={
+                      !canSendVoice
+                        ? 'ارسال پیام صوتی توسط مدیر غیرفعال است'
+                        : isRecordingVoice
+                        ? 'توقف ضبط صوت'
+                        : 'ضبط و ارسال پیام صوتی (ویس)'
+                    }
+                    className={`p-2.5 rounded-xl border transition shrink-0 ${
+                      isRecordingVoice
+                        ? 'bg-rose-600 border-rose-600 text-white animate-pulse cursor-pointer'
+                        : canSendVoice && !editingMessage
+                        ? 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-teal-600 hover:bg-teal-50 cursor-pointer'
+                        : 'bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 text-slate-400 opacity-50 cursor-not-allowed'
+                    }`}
+                  >
+                    {isRecordingVoice ? (
+                      <Square className="w-4 h-4 fill-current" />
+                    ) : (
+                      <Mic className="w-4 h-4" />
+                    )}
                   </button>
 
                   {/* ورودی متن */}
@@ -2115,8 +2634,9 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                   {/* دکمه ارسال / ذخیره ویرایش */}
                   <button
                     type="button"
+                    disabled={isRecordingVoice}
                     onClick={() => handleSendMessage()}
-                    className={`px-4 py-2.5 rounded-2xl text-white text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition cursor-pointer shrink-0 ${
+                    className={`px-4 py-2.5 rounded-2xl text-white text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition cursor-pointer shrink-0 disabled:opacity-50 ${
                       editingMessage
                         ? 'bg-indigo-600 hover:bg-indigo-700'
                         : isModerator && moderatorPostMode === 'warning'
@@ -2143,6 +2663,17 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
             </div>
           </main>
         </div>
+      )}
+
+      {/* ================= مودال تماس صوتی مستقیم زنده ================= */}
+      {activeVoiceCall && (
+        <LiveVoiceCallModal
+          call={activeVoiceCall}
+          currentUserId={me.id}
+          currentUserName={me.name}
+          currentUserRole={me.role}
+          onClose={() => setActiveVoiceCall(null)}
+        />
       )}
 
       {/* ================= مودال درخواست ایجاد تالار تخصصی ================= */}

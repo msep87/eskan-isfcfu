@@ -16,6 +16,9 @@ import {
   ShieldAlert,
   CheckCircle2,
   Send,
+  AlertTriangle,
+  ArrowRight,
+  Archive,
 } from 'lucide-react';
 import {
   AppNotificationCategory,
@@ -33,6 +36,8 @@ interface NotificationCenterModalProps {
   permission: NotificationPermission | 'unsupported';
   prefs: NotificationPreferences;
   notifications: AppNotificationItem[];
+  selectedItem?: AppNotificationItem | null;
+  onClearSelectedItem?: () => void;
   onRequestPermission: () => Promise<NotificationPermission | 'unsupported'>;
   onUpdatePrefs: (next: NotificationPreferences) => void;
   onMarkAllRead: () => void;
@@ -53,6 +58,11 @@ const CATEGORY_META: Record<
     label: 'اطلاعیه',
     colorClass: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300',
     Icon: Megaphone,
+  },
+  warning: {
+    label: 'تذکر و اخطار',
+    colorClass: 'bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300',
+    Icon: AlertTriangle,
   },
   survey: {
     label: 'نظرسنجی',
@@ -91,6 +101,8 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
   permission,
   prefs,
   notifications,
+  selectedItem = null,
+  onClearSelectedItem,
   onRequestPermission,
   onUpdatePrefs,
   onMarkAllRead,
@@ -100,13 +112,24 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
   const [activeTab, setActiveTab] = useState<'feed' | 'settings'>('feed');
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
   const [requesting, setRequesting] = useState(false);
+  const [viewingItem, setViewingItem] = useState<AppNotificationItem | null>(selectedItem);
+  const [showReadArchive, setShowReadArchive] = useState(false);
+
+  React.useEffect(() => {
+    if (selectedItem) {
+      setViewingItem(selectedItem);
+      setActiveTab('feed');
+    }
+  }, [selectedItem]);
 
   if (!isOpen) return null;
 
   const isIOS = isIOSDevice();
   const isStandalone = isRunningStandalonePWA();
   const needsIOSInstall = isIOS && !isStandalone && permission === 'unsupported';
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadNotifications = notifications.filter((n) => !n.read);
+  const readNotifications = notifications.filter((n) => n.read);
+  const unreadCount = unreadNotifications.length;
 
   const handleEnableClick = async () => {
     setRequesting(true);
@@ -294,20 +317,81 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
         {/* بدنه اسکرول‌شونده */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
           {activeTab === 'feed' ? (
+            viewingItem ? (
+              (() => {
+                const meta = CATEGORY_META[viewingItem.category] || CATEGORY_META.system;
+                const IconComp = meta.Icon;
+                return (
+                  <div className="space-y-3.5 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setViewingItem(null);
+                          onClearSelectedItem?.();
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
+                      >
+                        <ArrowRight className="w-3.5 h-3.5" />
+                        <span>بازگشت به اعلان‌ها</span>
+                      </button>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 px-2.5 py-1 rounded-full">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>خوانده شد و از اعلان‌های جدید خارج گردید</span>
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                      <div className="flex items-start gap-3">
+                        <div className={`p-2.5 rounded-xl shrink-0 ${meta.colorClass}`}>
+                          <IconComp className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${meta.colorClass}`}>
+                              {meta.label}
+                            </span>
+                            <span className="text-[11px] text-slate-400">
+                              {formatShortFaTime(viewingItem.createdAt)}
+                            </span>
+                          </div>
+                          <h4 className="font-extrabold text-sm text-slate-900 dark:text-white mt-1.5 leading-snug">
+                            {viewingItem.title}
+                          </h4>
+                        </div>
+                      </div>
+
+                      <p className="text-xs sm:text-[13px] text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-800">
+                        {viewingItem.fullBody || viewingItem.body}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : (
             <>
-              {notifications.length > 0 && (
+              {(unreadNotifications.length > 0 || readNotifications.length > 0) && (
                 <div className="flex items-center justify-between gap-2 pb-1">
+                  {unreadNotifications.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={onMarkAllRead}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-teal-700 dark:text-teal-300 hover:underline cursor-pointer"
+                    >
+                      <CheckCheck className="w-3.5 h-3.5" />
+                      <span>خوانده‌شده کردن و خروج همه ({unreadNotifications.length.toLocaleString('fa-IR')})</span>
+                    </button>
+                  ) : (
+                    <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                      همه اعلان‌ها خوانده شده‌اند
+                    </span>
+                  )}
                   <button
                     type="button"
-                    onClick={onMarkAllRead}
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-teal-700 dark:text-teal-300 hover:underline cursor-pointer"
-                  >
-                    <CheckCheck className="w-3.5 h-3.5" />
-                    <span>خوانده‌شده کردن همه</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onClearAll}
+                    onClick={() => {
+                      setShowReadArchive(false);
+                      onClearAll();
+                    }}
                     className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -316,34 +400,35 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                 </div>
               )}
 
-              {notifications.length === 0 ? (
-                <div className="py-10 text-center space-y-2">
+              {unreadNotifications.length === 0 ? (
+                <div className="py-8 text-center space-y-2">
                   <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
                     <Bell className="w-6 h-6" />
                   </div>
                   <p className="text-xs font-extrabold text-slate-700 dark:text-slate-200">
-                    هنوز اعلان جدیدی ثبت نشده است
+                    اعلان خوانده‌نشده‌ای وجود ندارد
                   </p>
                   <p className="text-[11px] text-slate-400 max-w-xs mx-auto leading-relaxed">
-                    به محض انتشار اطلاعیه، ارسال پیام، ایجاد نظرسنجی یا شروع انتخابات جدید، اعلان آن
-                    اینجا و روی نوار اعلان گوشی شما نمایش داده می‌شود.
+                    به محض انتشار اطلاعیه، پیام، تذکر، نظرسنجی یا انتخابات جدید، اعلان آن اینجا
+                    ظاهر می‌شود و با مشاهده، به‌صورت خودکار خوانده‌شده و از لیست خارج می‌گردد.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {notifications.map((item) => {
+                  {unreadNotifications.map((item) => {
                     const meta = CATEGORY_META[item.category] || CATEGORY_META.system;
                     const IconComp = meta.Icon;
                     return (
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => onNotificationClick(item)}
-                        className={`w-full text-right p-3 rounded-2xl border transition cursor-pointer flex items-start gap-3 ${
-                          item.read
-                            ? 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60'
-                            : 'bg-teal-50/60 dark:bg-teal-950/30 border-teal-200 dark:border-teal-800/80 hover:bg-teal-50 dark:hover:bg-teal-950/50'
-                        }`}
+                        onClick={() => {
+                          onNotificationClick(item);
+                          if (item.category !== 'message') {
+                            setViewingItem(item);
+                          }
+                        }}
+                        className="w-full text-right p-3 rounded-2xl border transition cursor-pointer flex items-start gap-3 bg-teal-50/60 dark:bg-teal-950/30 border-teal-200 dark:border-teal-800/80 hover:bg-teal-50 dark:hover:bg-teal-950/50"
                       >
                         <div className={`p-2 rounded-xl shrink-0 ${meta.colorClass}`}>
                           <IconComp className="w-4 h-4" />
@@ -353,9 +438,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                             <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
                               {item.title}
                             </span>
-                            {!item.read && (
-                              <span className="w-2 h-2 rounded-full bg-teal-600 shrink-0" />
-                            )}
+                            <span className="w-2 h-2 rounded-full bg-teal-600 shrink-0" />
                           </div>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2 leading-relaxed">
                             {item.body}
@@ -364,7 +447,10 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                             <span className={`px-1.5 py-0.5 rounded-md font-bold ${meta.colorClass}`}>
                               {meta.label}
                             </span>
-                            <span>{formatShortFaTime(item.createdAt)}</span>
+                            <span className="flex items-center gap-1.5">
+                              <span className="text-teal-600 dark:text-teal-400 font-bold">مشاهده ←</span>
+                              <span>{formatShortFaTime(item.createdAt)}</span>
+                            </span>
                           </div>
                         </div>
                       </button>
@@ -372,7 +458,61 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                   })}
                 </div>
               )}
+
+              {/* آرشیو اختیاری اعلان‌های خوانده‌شده (جمع‌شده به‌صورت پیش‌فرض) */}
+              {readNotifications.length > 0 && (
+                <div className="pt-2 border-t border-slate-200/70 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowReadArchive((prev) => !prev)}
+                    className="w-full py-2 px-3 rounded-xl bg-slate-100/80 hover:bg-slate-200/70 dark:bg-slate-800/60 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-bold flex items-center justify-between cursor-pointer transition"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Archive className="w-3.5 h-3.5 text-slate-400" />
+                      <span>آرشیو اعلان‌های خوانده‌شده ({readNotifications.length.toLocaleString('fa-IR')})</span>
+                    </span>
+                    <span>{showReadArchive ? 'بستن' : 'نمایش'}</span>
+                  </button>
+
+                  {showReadArchive && (
+                    <div className="mt-2 space-y-1.5">
+                      {readNotifications.map((item) => {
+                        const meta = CATEGORY_META[item.category] || CATEGORY_META.system;
+                        const IconComp = meta.Icon;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              if (item.category === 'message') {
+                                onNotificationClick(item);
+                              } else {
+                                setViewingItem(item);
+                              }
+                            }}
+                            className="w-full text-right p-2.5 rounded-xl border bg-white dark:bg-slate-900 border-slate-200/70 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition cursor-pointer flex items-start gap-2.5 opacity-80 hover:opacity-100"
+                          >
+                            <div className={`p-1.5 rounded-lg shrink-0 ${meta.colorClass}`}>
+                              <IconComp className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[11px] font-bold text-slate-700 dark:text-slate-200 truncate">
+                                {item.title}
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5 flex items-center justify-between">
+                                <span>{meta.label} · خوانده‌شده</span>
+                                <span>{formatShortFaTime(item.createdAt)}</span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </>
+            )
           ) : (
             <div className="space-y-2.5">
               {(

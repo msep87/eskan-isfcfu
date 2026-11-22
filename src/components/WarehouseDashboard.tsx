@@ -14,6 +14,7 @@ import {
   exportInventoryToExcel,
 } from '../utils/excelUtils';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   Package,
   Boxes,
@@ -89,7 +90,7 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'requests' | 'procurement' | 'inventory' | 'transactions' | 'clearance'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'procurement' | 'inventory' | 'transactions' | 'clearance' | null>(null);
 
   // داده‌های زنده انبار و کارپردازی
   const inventoryItems = Storage.getInventoryItems();
@@ -941,86 +942,78 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
         </div>
       </div>
 
-      {/* تب‌های اصلی کارتابل انبار */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
-        <button
-          onClick={() => setActiveTab('requests')}
-          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'requests'
-              ? 'bg-violet-600 text-white shadow-md shadow-violet-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-          }`}
-        >
-          <ClipboardList className="w-4 h-4" />
-          <span>درخواست‌ها و حواله‌ها ({warehouseRequests.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('procurement')}
-          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'procurement'
-              ? 'bg-orange-600 text-white shadow-md shadow-orange-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-          }`}
-        >
-          <ShoppingBag className="w-4 h-4" />
-          <span>ارجاعات به کارپرداز و تأیید تحویل ({procurementRequests.length})</span>
-          {awaitingWarehouseConfirmCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
-              {awaitingWarehouseConfirmCount}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => {
-            setActiveTab('inventory');
-            setOnlyLowStock(false);
-          }}
-          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'inventory'
-              ? 'bg-violet-600 text-white shadow-md shadow-violet-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-          }`}
-        >
-          <Boxes className="w-4 h-4" />
-          <span>لیست و موجودی کالاهای انبار ({inventoryItems.length})</span>
-          {lowStockCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black">
-              {lowStockCount}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('transactions')}
-          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'transactions'
-              ? 'bg-violet-600 text-white shadow-md shadow-violet-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-          }`}
-        >
-          <History className="w-4 h-4" />
-          <span>کاردکس ورودی و خروجی ({inventoryTransactions.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('clearance')}
-          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-            activeTab === 'clearance'
-              ? 'bg-sky-700 text-white shadow-md shadow-sky-700/20'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4" />
-          <span>تسویه حساب فارغ‌التحصیلان</span>
-          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.warehouse?.status || 'pending') === 'pending').length > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.warehouse?.status || 'pending') === 'pending').length}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* منوی دسته‌بندی‌شده و بازشونده کارتابل انبار */}
+      <CollapsibleMenuGrid<'requests' | 'procurement' | 'inventory' | 'transactions' | 'clearance'>
+        activeKey={activeTab}
+        onToggle={(key) => {
+          if (key === 'inventory') setOnlyLowStock(false);
+          setActiveTab((prev) => (prev === key ? null : key));
+        }}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های کارتابل انبار و تجهیزات (برای باز یا بسته شدن کلیک کنید)"
+        emptyPrompt="برای مشاهده هر بخش، روی دکمه مربوطه کلیک کنید. با کلیک مجدد همان بخش بسته می‌شود."
+        categories={[
+          {
+            title: 'حواله‌ها و کارپردازی',
+            items: [
+              {
+                id: 'requests',
+                label: 'درخواست‌ها و حواله‌ها',
+                subtitle: 'تأیید و صدور حواله کالا و تجهیزات',
+                icon: <ClipboardList className="w-4 h-4" />,
+                badge: warehouseRequests.length,
+                badgeTone: 'indigo',
+                activeClass: 'bg-violet-600 text-white border-violet-600 shadow-md',
+              },
+              {
+                id: 'procurement',
+                label: 'ارجاعات کارپرداز و تأیید تحویل',
+                subtitle: 'پیگیری خریدها و ورود به انبار',
+                icon: <ShoppingBag className="w-4 h-4" />,
+                badge: awaitingWarehouseConfirmCount > 0 ? awaitingWarehouseConfirmCount : procurementRequests.length,
+                badgeTone: awaitingWarehouseConfirmCount > 0 ? 'amber' : 'teal',
+                activeClass: 'bg-orange-600 text-white border-orange-600 shadow-md',
+              },
+            ],
+          },
+          {
+            title: 'موجودی، کاردکس و تسویه',
+            items: [
+              {
+                id: 'inventory',
+                label: 'لیست و موجودی کالاهای انبار',
+                subtitle: 'مدیریت کالاها، نقطه سفارش و اکسل',
+                icon: <Boxes className="w-4 h-4" />,
+                badge: lowStockCount > 0 ? lowStockCount : inventoryItems.length,
+                badgeTone: lowStockCount > 0 ? 'rose' : 'teal',
+                activeClass: 'bg-violet-600 text-white border-violet-600 shadow-md',
+              },
+              {
+                id: 'transactions',
+                label: 'کاردکس ورودی و خروجی',
+                subtitle: 'سوابق تمام تراکنش‌های انبار',
+                icon: <History className="w-4 h-4" />,
+                badge: inventoryTransactions.length,
+                badgeTone: 'sky',
+                activeClass: 'bg-violet-600 text-white border-violet-600 shadow-md',
+              },
+              {
+                id: 'clearance',
+                label: 'تسویه حساب فارغ‌التحصیلان',
+                subtitle: 'بررسی اموال تحویلی و تأییدیه انبار',
+                icon: <GraduationCap className="w-4 h-4" />,
+                badge: Storage.getGraduationClearances().filter(
+                  (c) =>
+                    c.educationGateStatus === 'approved' &&
+                    (c.units?.warehouse?.status || 'pending') === 'pending'
+                ).length,
+                badgeTone: 'rose',
+                activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+              },
+            ],
+          },
+        ]}
+      />
 
       {/* ========================================================= */}
       {/* تب ۱: کارتابل درخواست‌ها و حواله‌ها */}

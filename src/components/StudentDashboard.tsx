@@ -36,8 +36,7 @@ import { StudentSurveyPanel } from './StudentSurveyPanel';
 import { StudentLibraryPanel } from './StudentLibraryPanel';
 import { StudentGraduationClearancePanel } from './StudentGraduationClearancePanel';
 import { CommunityChatHub } from './CommunityChatHub';
-import { RichTextDisplay } from './RichTextEditor';
-import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
+import { ImportantAnnouncementsWidget } from './ImportantAnnouncementsWidget';
 import {
   User,
   Bed as BedIcon,
@@ -46,7 +45,6 @@ import {
   Sparkles,
   Calendar,
   AlertTriangle,
-  Bell,
   Clock,
   ShieldCheck,
   Building,
@@ -120,7 +118,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isIdCardModalOpen, setIsIdCardModalOpen] = useState(false);
   const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
-  const [previewAnnImage, setPreviewAnnImage] = useState<string | null>(null);
 
   // وضعیت تعاملات فرهنگی، برنامه‌های ورزشی و انتخابات شورای صنفی
   const [assocNotes, setAssocNotes] = useState<Record<string, string>>({});
@@ -784,67 +781,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </button>
       </div>
 
-      {/* اطلاعیه‌های دانشگاه و سرا در صفحه اول داشبورد */}
-      {announcements.length > 0 && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900 dark:text-white mb-4">
-            <Bell className="w-5 h-5 text-teal-600" />
-            <span>اطلاعیه‌های مهم سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان</span>
-          </div>
-
-          <div className="space-y-3">
-            {announcements.map((ann) => (
-              <div
-                key={ann.id}
-                className={`p-4 rounded-2xl border transition ${
-                  ann.priority === 'urgent'
-                    ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/60'
-                    : ann.priority === 'important'
-                    ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/60'
-                    : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200/70 dark:border-slate-800'
-                }`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-                  <div className="flex items-center gap-2">
-                    {ann.priority === 'urgent' && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-600 text-white font-extrabold">
-                        فوری و مهم
-                      </span>
-                    )}
-                    {ann.priority === 'important' && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-white font-extrabold">
-                        اطلاعیه مهم
-                      </span>
-                    )}
-                    <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white">
-                      {ann.title}
-                    </h4>
-                  </div>
-                  <span className="text-[11px] text-slate-400">{ann.date}</span>
-                </div>
-                <RichTextDisplay
-                  html={ann.contentHtml}
-                  fallbackText={ann.content}
-                  className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed"
-                  onImageClick={(src) => setPreviewAnnImage(src)}
-                />
-                {ann.imageUrl && (
-                  <AnnouncementImageBox
-                    src={ann.imageUrl}
-                    alt={ann.title}
-                    onClick={(src) => setPreviewAnnImage(src)}
-                    maxWidthClass="max-w-md"
-                    heightClass="h-48 sm:h-56"
-                  />
-                )}
-                <div className="text-[10px] text-slate-400 mt-2 font-medium">
-                  مرجع صدور: {ann.author}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* اطلاعیه‌های مهم دانشگاه و سرا بصورت دکمه بازشونده و پاپ‌آپ (جلوگیری از شلوغی صفحه) */}
+      <ImportantAnnouncementsWidget announcements={announcements} />
 
       {/* محتوای تب فعال */}
       {activeTab === 'overview' && (
@@ -2212,12 +2150,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         initialStudent={student}
         allowStudentPicker={false}
         viewerRoleLabel="دانشجو"
-      />
-
-      <ImageLightboxModal
-        src={previewAnnImage}
-        alt="تصویر اطلاعیه"
-        onClose={() => setPreviewAnnImage(null)}
       />
 
     </div>

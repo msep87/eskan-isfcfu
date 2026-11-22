@@ -4,6 +4,7 @@ import {
   GuildElection,
   Message,
   PeriodicSurvey,
+  RoomWarning,
 } from '../types';
 import {
   Storage,
@@ -12,13 +13,20 @@ import {
 } from './storage';
 import { getStudentResidenceType } from './financeUtils';
 
-export type AppNotificationCategory = 'message' | 'announcement' | 'survey' | 'election' | 'system';
+export type AppNotificationCategory =
+  | 'message'
+  | 'announcement'
+  | 'warning'
+  | 'survey'
+  | 'election'
+  | 'system';
 
 export interface AppNotificationItem {
   id: string;
   category: AppNotificationCategory;
   title: string;
   body: string;
+  fullBody?: string;
   createdAt: string;
   read: boolean;
   itemId?: string;
@@ -452,6 +460,7 @@ interface SeenBaselineSnapshot {
   replyCounts: Record<string, number>;
   surveyIds: string[];
   electionStates: Record<string, boolean>;
+  warningIds?: string[];
 }
 
 export function loadNotificationFeed(userKey: string): AppNotificationItem[] {
@@ -506,15 +515,28 @@ export function detectNewUserNotifications(params: {
   messages: Message[];
   surveys: PeriodicSurvey[];
   elections: GuildElection[];
+  warnings?: RoomWarning[];
   prefs: NotificationPreferences;
 }): AppNotificationItem[] {
-  const { user, announcements, messages, surveys, elections, prefs } = params;
+  const { user, announcements, messages, surveys, elections, warnings = [], prefs } = params;
   const userKey = getUserNotificationKey(user);
 
   const relevantAnnouncements = announcements.filter((a) => isAnnouncementRelevantToUser(user, a));
   const relevantMessages = user ? messages.filter((m) => isMessageRelevantToUser(user, m)) : [];
   const relevantSurveys = surveys.filter((s) => isSurveyRelevantToUser(user, s));
   const relevantElections = elections.filter((e) => isElectionRelevantToUser(user, e));
+  const relevantWarnings = user
+    ? warnings.filter((w) => {
+        if (w.resolved) return false;
+        if (user.role === 'student') {
+          return Boolean(user.student.assignedRoomId && w.roomId === user.student.assignedRoomId);
+        }
+        if (user.role === 'supervisor') {
+          return !user.supervisor.assignedDormIds?.length || user.supervisor.assignedDormIds.includes(w.dormId);
+        }
+        return user.role === 'admin' || user.role === 'vice_dean' || user.role === 'security';
+      })
+    : [];
 
   const nextBaseline: SeenBaselineSnapshot = {
     initialized: true,
@@ -525,6 +547,7 @@ export function detectNewUserNotifications(params: {
     electionStates: Object.fromEntries(
       relevantElections.map((e) => [e.id, Boolean(e.isActiveWindow)])
     ),
+    warningIds: relevantWarnings.map((w) => w.id),
   };
 
   const prev = loadBaseline(userKey);
@@ -538,6 +561,8 @@ export function detectNewUserNotifications(params: {
   const prevReplyCounts = prev.replyCounts || {};
   const prevSurveySet = new Set(prev.surveyIds || []);
   const prevElectionStates = prev.electionStates || {};
+  const hasPrevWarnings = Array.isArray(prev.warningIds);
+  const prevWarningSet = new Set(prev.warningIds || []);
 
   const nowIso = new Date().toISOString();
   const discovered: AppNotificationItem[] = [];
@@ -597,9 +622,29 @@ export function detectNewUserNotifications(params: {
           category: 'announcement',
           title: `${prefix}${truncateText(a.title, 55)}`,
           body: truncateText(a.content || 'جهت مشاهده جزئیات اطلاعیه وارد سامانه شوید.'),
+          fullBody: a.content || 'جهت مشاهده جزئیات اطلاعیه وارد سامانه شوید.',
           createdAt: nowIso,
           read: false,
           itemId: a.id,
+        });
+      }
+    }
+  }
+
+  // ۲-ب. تذکرات و اخطارهای جدید اتاق
+  if (hasPrevWarnings && relevantWarnings.length > 0) {
+    for (const w of relevantWarnings) {
+      if (!prevWarningSet.has(w.id)) {
+        const fullText = `${w.description || w.title}${w.supervisorName ? ` (صادرکننده: ${w.supervisorName})` : ''}`;
+        discovered.push({
+          id: `notif_warn_${w.id}_${Date.now()}`,
+          category: 'warning',
+          title: `تذکر جدید: ${truncateText(w.title || 'تذکر و اخطار اتاق', 50)}`,
+          body: truncateText(fullText),
+          fullBody: fullText,
+          createdAt: nowIso,
+          read: false,
+          itemId: w.id,
         });
       }
     }

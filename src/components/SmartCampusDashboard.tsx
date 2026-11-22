@@ -7,6 +7,7 @@ import {
 } from '../types';
 import { Storage } from '../utils/storage';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   DEFAULT_STUDENT_PAGE_SIZE,
   StudentListPaginationBar,
@@ -51,7 +52,7 @@ export const SmartCampusDashboard: React.FC<SmartCampusDashboardProps> = ({
   onDataChange,
   onOpenMessages,
 }) => {
-  const [activeTab, setActiveTab] = useState<'students' | 'warnings' | 'clearance' | 'messages'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'warnings' | 'clearance' | 'messages' | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -396,42 +397,50 @@ export const SmartCampusDashboard: React.FC<SmartCampusDashboardProps> = ({
         </div>
       )}
 
-      {/* تب‌ها */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
-        {[
-          { id: 'students', label: 'فهرست دانشجویان، پیام و اخطار', icon: Users, badge: 0 },
-          { id: 'warnings', label: 'اخطارها و تذکرات ثبت‌شده', icon: AlertTriangle, badge: activeWarningsCount },
-          { id: 'clearance', label: 'تسویه حساب فارغ‌التحصیلان', icon: FileCheck2, badge: pendingClearanceCount },
-          { id: 'messages', label: 'پیام‌های هوشمندسازی', icon: MessageSquare, badge: smartMessages.filter((m) => m.status === 'pending' && m.receiverType === 'smart_campus').length },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              className={`px-4 py-2.5 rounded-xl text-xs font-extrabold inline-flex items-center gap-2 transition cursor-pointer ${
-                active
-                  ? 'bg-cyan-700 text-white shadow-sm'
-                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
-              {tab.badge > 0 && (
-                <span
-                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-black tabular-nums ${
-                    active ? 'bg-white/20 text-white' : 'bg-cyan-100 dark:bg-cyan-950 text-cyan-800 dark:text-cyan-300'
-                  }`}
-                >
-                  {tab.badge.toLocaleString('fa-IR')}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {/* منوی دسته‌بندی‌شده و بازشونده واحد هوشمندسازی */}
+      <CollapsibleMenuGrid<'students' | 'warnings' | 'clearance' | 'messages'>
+        activeKey={activeTab}
+        onToggle={(key) => setActiveTab((prev) => (prev === key ? null : key))}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های واحد هوشمندسازی (برای باز یا بسته شدن کلیک کنید)"
+        emptyPrompt="برای مشاهده هر بخش، روی دکمه مربوطه کلیک کنید. با کلیک مجدد همان بخش بسته می‌شود."
+        items={[
+          {
+            id: 'students',
+            label: 'فهرست دانشجویان، پیام و اخطار',
+            subtitle: 'ارسال پیام یا تذکر فردی و گروهی',
+            icon: <Users className="w-4 h-4" />,
+            activeClass: 'bg-cyan-700 text-white border-cyan-700 shadow-md',
+          },
+          {
+            id: 'warnings',
+            label: 'اخطارها و تذکرات ثبت‌شده',
+            subtitle: 'پایش و رفع اخطارهای هوشمندسازی',
+            icon: <AlertTriangle className="w-4 h-4" />,
+            badge: activeWarningsCount,
+            badgeTone: 'amber',
+            activeClass: 'bg-amber-600 text-white border-amber-600 shadow-md',
+          },
+          {
+            id: 'messages',
+            label: 'پیام‌های هوشمندسازی',
+            subtitle: 'پاسخ‌گویی به درخواست‌های فنی دانشجویان',
+            icon: <MessageSquare className="w-4 h-4" />,
+            badge: smartMessages.filter((m) => m.status === 'pending' && m.receiverType === 'smart_campus').length,
+            badgeTone: 'sky',
+            activeClass: 'bg-sky-600 text-white border-sky-600 shadow-md',
+          },
+          {
+            id: 'clearance',
+            label: 'تسویه حساب فارغ‌التحصیلان',
+            subtitle: 'بررسی و تأییدیه تسویه هوشمندسازی',
+            icon: <FileCheck2 className="w-4 h-4" />,
+            badge: pendingClearanceCount,
+            badgeTone: 'rose',
+            activeClass: 'bg-teal-700 text-white border-teal-700 shadow-md',
+          },
+        ]}
+      />
 
       {/* تب ۱: فهرست دانشجویان با دسترسی محدود و صفحه‌بندی ۵۰تایی */}
       {activeTab === 'students' && (

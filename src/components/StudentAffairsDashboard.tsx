@@ -32,6 +32,7 @@ import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { StudentReferralModal } from './StudentReferralModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -188,7 +189,7 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
   onOpenUserGuide,
   embeddedMode = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'students' | 'sports' | 'elections' | 'disciplinary' | 'clearance'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'sports' | 'elections' | 'disciplinary' | 'clearance' | null>(null);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
   const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
@@ -948,78 +949,75 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
         </div>
       )}
 
-      {/* تب‌های اصلی */}
-      <div className="flex flex-wrap gap-2 p-1.5 bg-slate-200/70 dark:bg-slate-800/80 rounded-2xl">
-        <button
-          onClick={() => setActiveTab('students')}
-          className={`flex-1 min-w-[180px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'students'
-              ? 'bg-white dark:bg-slate-900 text-cyan-700 dark:text-cyan-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>دانشجویان خوابگاهی و ترددی ({students.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('sports')}
-          className={`flex-1 min-w-[190px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'sports'
-              ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <Dumbbell className="w-4 h-4" />
-          <span>برنامه‌ریزی ورزشی و تربیت بدنی ({sportsPrograms.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('elections')}
-          className={`flex-1 min-w-[180px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'elections'
-              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <Vote className="w-4 h-4" />
-          <span>انتخابات شورای صنفی ({elections.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('disciplinary')}
-          className={`flex-1 min-w-[180px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'disciplinary'
-              ? 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <ShieldAlert className="w-4 h-4" />
-          <span>پرونده‌های شورای انضباطی</span>
-          {pendingReferralsCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black animate-pulse">
-              {pendingReferralsCount}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('clearance')}
-          className={`flex-1 min-w-[180px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'clearance'
-              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4" />
-          <span>تسویه حساب فارغ‌التحصیلان</span>
-          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.student_affairs?.status || 'pending') === 'pending').length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.student_affairs?.status || 'pending') === 'pending').length}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* منوی دسته‌بندی‌شده و بازشونده کارتابل امور دانشجویی */}
+      <CollapsibleMenuGrid<'students' | 'sports' | 'elections' | 'disciplinary' | 'clearance'>
+        activeKey={activeTab}
+        onToggle={(key) => setActiveTab((prev) => (prev === key ? null : key))}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های امور دانشجویی و تربیت بدنی (برای باز یا بسته شدن کلیک کنید)"
+        emptyPrompt="برای مشاهده هر بخش، روی دکمه مربوطه کلیک کنید. با کلیک مجدد همان بخش بسته می‌شود."
+        categories={[
+          {
+            title: 'دانشجویان، ورزش و انتخابات',
+            items: [
+              {
+                id: 'students',
+                label: 'دانشجویان خوابگاهی و ترددی',
+                subtitle: 'جستجو، پرونده و ارجاع دانشجویان',
+                icon: <Users className="w-4 h-4" />,
+                badge: students.length,
+                badgeTone: 'teal',
+                activeClass: 'bg-cyan-700 text-white border-cyan-700 shadow-md',
+              },
+              {
+                id: 'sports',
+                label: 'برنامه‌ریزی ورزشی و تربیت بدنی',
+                subtitle: 'کلاس‌ها، مسابقات و ثبت‌نام‌های ورزشی',
+                icon: <Dumbbell className="w-4 h-4" />,
+                badge: sportsPrograms.length,
+                badgeTone: 'teal',
+                activeClass: 'bg-emerald-600 text-white border-emerald-600 shadow-md',
+              },
+              {
+                id: 'elections',
+                label: 'انتخابات شورای صنفی',
+                subtitle: 'نامزدها، رأی‌گیری و نتایج انتخابات',
+                icon: <Vote className="w-4 h-4" />,
+                badge: elections.length,
+                badgeTone: 'indigo',
+                activeClass: 'bg-indigo-600 text-white border-indigo-600 shadow-md',
+              },
+            ],
+          },
+          {
+            title: 'انضباطی و تسویه حساب',
+            items: [
+              {
+                id: 'disciplinary',
+                label: 'پرونده‌های شورای انضباطی',
+                subtitle: 'ارجاعات، جلسات شورا و صدور آرا',
+                icon: <ShieldAlert className="w-4 h-4" />,
+                badge: pendingReferralsCount,
+                badgeTone: 'rose',
+                activeClass: 'bg-rose-600 text-white border-rose-600 shadow-md',
+              },
+              {
+                id: 'clearance',
+                label: 'تسویه حساب فارغ‌التحصیلان',
+                subtitle: 'بررسی و تأیید واحد امور دانشجویی',
+                icon: <GraduationCap className="w-4 h-4" />,
+                badge: Storage.getGraduationClearances().filter(
+                  (c) =>
+                    c.educationGateStatus === 'approved' &&
+                    (c.units?.student_affairs?.status || 'pending') === 'pending'
+                ).length,
+                badgeTone: 'rose',
+                activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+              },
+            ],
+          },
+        ]}
+      />
 
       {/* تب ۱: دانشجویان خوابگاهی و ترددی + گزارش‌گیری */}
       {activeTab === 'students' && (

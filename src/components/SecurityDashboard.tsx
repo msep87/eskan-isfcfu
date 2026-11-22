@@ -46,6 +46,7 @@ import { isStudentDormResident } from '../utils/financeUtils';
 import { StudentReferralModal } from './StudentReferralModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { CommunityChatHub } from './CommunityChatHub';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -187,7 +188,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
   onRefreshData,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'reports' | 'student_records' | 'students' | 'clearance' | 'community_chat'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'student_records' | 'students' | 'clearance' | 'community_chat' | null>(null);
 
   // داده‌های زنده
   const securityReports = Storage.getSecurityReports();
@@ -416,9 +417,10 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
       'تاریخ ثبت': r.reportedAt,
       'تاریخ وقوع': r.incidentDate,
       'سرا و محل': `${r.dormName || '-'} ${r.roomNumber ? `اتاق ${r.roomNumber}` : ''} ${r.locationDetails || ''}`.trim(),
-      'دانشجویان مرتبط': r.studentsSnapshot
-        .map((s) => `${s.fullName} (${s.studentId})`)
-        .join(' | '),
+      'دانشجویان مرتبط':
+        r.studentsSnapshot.length > 0
+          ? r.studentsSnapshot.map((s) => `${s.fullName} (${s.studentId})`).join(' | ')
+          : 'مربوط به سرا / محوطه (بدون دانشجو)',
       'شرح گزارش': r.description,
       'نتیجه و اقدام حراست': [r.actionTaken, r.securityNotes].filter(Boolean).join(' - ') || '-',
     }));
@@ -506,13 +508,18 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
     <p>${escapeHtml(rep.description).replace(/\n/g, '<br/>')}</p>
   </div>
   <div class="box">
-    <strong>فهرست دانشجویان مرتبط (${rep.studentsSnapshot.length} نفر):</strong>
+    ${
+      rep.studentsSnapshot.length > 0
+        ? `<strong>فهرست دانشجویان مرتبط (${rep.studentsSnapshot.length} نفر):</strong>
     <table>
       <thead>
         <tr><th>#</th><th>نام و نام خانوادگی</th><th>شماره دانشجویی</th><th>کد ملی</th><th>رشته</th><th>سرا / اتاق</th><th>همراه</th></tr>
       </thead>
       <tbody>${studentsRows}</tbody>
-    </table>
+    </table>`
+        : `<strong>حوزه گزارش:</strong>
+    <p>گزارش مربوط به وضعیت سرا، ساختمان یا محوطه (بدون انتساب به دانشجوی خاص)</p>`
+    }
   </div>
   <div class="box">
     <strong>نتیجه بررسی و اقدامات حراست:</strong>
@@ -678,89 +685,78 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
         </div>
       </div>
 
-      {/* تب‌های اصلی */}
-      <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-        <button
-          type="button"
-          onClick={() => setActiveTab('reports')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer whitespace-nowrap ${
-            activeTab === 'reports'
-              ? 'bg-rose-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <ShieldAlert className="w-4 h-4" />
-          <span>گزارش‌های ارسالی به حراست ({securityReports.length.toLocaleString('fa-IR')})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('student_records')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer whitespace-nowrap ${
-            activeTab === 'student_records'
-              ? 'bg-amber-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <AlertTriangle className="w-4 h-4" />
-          <span>گزارش‌ها، امتیازات و اخطارهای دانشجویان ({totalStudentRecordsCount.toLocaleString('fa-IR')})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('students')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer whitespace-nowrap ${
-            activeTab === 'students'
-              ? 'bg-teal-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>مشاهده اطلاعات و پرونده دانشجویان ({students.length.toLocaleString('fa-IR')})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('clearance')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer whitespace-nowrap ${
-            activeTab === 'clearance'
-              ? 'bg-sky-700 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4" />
-          <span>تسویه حساب فارغ‌التحصیلان</span>
-          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.security?.status || 'pending') === 'pending').length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.security?.status || 'pending') === 'pending').length}
-            </span>
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('community_chat')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer whitespace-nowrap ${
-            activeTab === 'community_chat'
-              ? 'bg-emerald-700 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <MessagesSquare className="w-4 h-4" />
-          <span>نظارت چت و تأیید تالارهای گفتگو</span>
-          {(() => {
-            const pendingCount =
-              Storage.getCommunityForums().filter(
-                (f) => !f.isPublicForum && f.status === 'pending' && f.securityApproval.status === 'pending'
-              ).length + Storage.getCommunityChatReports().filter((r) => r.status === 'pending').length;
-            return pendingCount > 0 ? (
-              <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-                {pendingCount}
-              </span>
-            ) : null;
-          })()}
-        </button>
-      </div>
+      {/* منوی دسته‌بندی‌شده و بازشونده کارتابل حراست */}
+      <CollapsibleMenuGrid<'reports' | 'student_records' | 'students' | 'clearance' | 'community_chat'>
+        activeKey={activeTab}
+        onToggle={(key) => setActiveTab((prev) => (prev === key ? null : key))}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های کارتابل حراست و انتظامات (برای باز یا بسته شدن کلیک کنید)"
+        emptyPrompt="برای مشاهده هر بخش، روی دکمه مربوطه در منوی بالا کلیک کنید. با کلیک مجدد، همان بخش بسته می‌شود."
+        categories={[
+          {
+            title: 'گزارش‌ها و پرونده‌های حراستی',
+            items: [
+              {
+                id: 'reports',
+                label: 'گزارش‌های ارسالی به حراست',
+                subtitle: 'گزارش‌های دانشجویی، سراها و محوطه',
+                icon: <ShieldAlert className="w-4 h-4" />,
+                badge: securityReports.length,
+                badgeTone: 'rose',
+                activeClass: 'bg-rose-600 text-white border-rose-600 shadow-md',
+              },
+              {
+                id: 'student_records',
+                label: 'سوابق، امتیازات و اخطارها',
+                subtitle: 'ارزیابی‌ها، اخطار اتاق و ارجاعات انضباطی',
+                icon: <AlertTriangle className="w-4 h-4" />,
+                badge: totalStudentRecordsCount,
+                badgeTone: 'amber',
+                activeClass: 'bg-amber-600 text-white border-amber-600 shadow-md',
+              },
+              {
+                id: 'students',
+                label: 'پرونده و اطلاعات دانشجویان',
+                subtitle: 'جستجو و مشاهده سوابق کل دانشجویان',
+                icon: <Users className="w-4 h-4" />,
+                badge: students.length,
+                badgeTone: 'teal',
+                activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md',
+              },
+            ],
+          },
+          {
+            title: 'نظارت، تالارها و تسویه',
+            items: [
+              {
+                id: 'community_chat',
+                label: 'نظارت چت و تأیید تالارهای گفتگو',
+                subtitle: 'گفتگوی همکاران، تأیید تالار و تخلفات چت',
+                icon: <MessagesSquare className="w-4 h-4" />,
+                badge:
+                  Storage.getCommunityForums().filter(
+                    (f) => !f.isPublicForum && f.status === 'pending' && f.securityApproval.status === 'pending'
+                  ).length + Storage.getCommunityChatReports().filter((r) => r.status === 'pending').length,
+                badgeTone: 'rose',
+                activeClass: 'bg-emerald-700 text-white border-emerald-700 shadow-md',
+              },
+              {
+                id: 'clearance',
+                label: 'تسویه حساب فارغ‌التحصیلان',
+                subtitle: 'بررسی و صدور تأییدیه حراست',
+                icon: <GraduationCap className="w-4 h-4" />,
+                badge: Storage.getGraduationClearances().filter(
+                  (c) =>
+                    c.educationGateStatus === 'approved' &&
+                    (c.units?.security?.status || 'pending') === 'pending'
+                ).length,
+                badgeTone: 'rose',
+                activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+              },
+            ],
+          },
+        ]}
+      />
 
       {/* تب ۱: گزارش‌های ارسالی به حراست */}
       {activeTab === 'reports' && (
@@ -906,35 +902,42 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                       {rep.description}
                     </p>
 
-                    {/* دانشجویان مرتبط */}
-                    <div className="space-y-1.5">
-                      <div className="text-[11px] font-bold text-slate-500">
-                        دانشجویان مرتبط با این گزارش ({rep.studentsSnapshot.length.toLocaleString('fa-IR')} نفر — کلیک جهت مشاهده پرونده کامل):
+                    {/* دانشجویان مرتبط یا نشان گزارش سرایی/محوطه */}
+                    {rep.studentsSnapshot.length > 0 ? (
+                      <div className="space-y-1.5">
+                        <div className="text-[11px] font-bold text-slate-500">
+                          دانشجویان مرتبط با این گزارش ({rep.studentsSnapshot.length.toLocaleString('fa-IR')} نفر — کلیک جهت مشاهده پرونده کامل):
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {rep.studentsSnapshot.map((snap) => {
+                            const liveStudent = studentByIdMap.get(snap.studentId);
+                            return (
+                              <button
+                                key={snap.studentId}
+                                type="button"
+                                onClick={() => {
+                                  if (liveStudent) setDossierStudent(liveStudent);
+                                }}
+                                disabled={!liveStudent}
+                                className="px-2.5 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/40 dark:hover:bg-teal-900/50 border border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>{snap.fullName}</span>
+                                <span className="font-mono text-[10px] opacity-80">({snap.studentId})</span>
+                                {snap.roomNumber && snap.roomNumber !== '-' && (
+                                  <span className="text-[10px] opacity-75">· اتاق {snap.roomNumber}</span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {rep.studentsSnapshot.map((snap) => {
-                          const liveStudent = studentByIdMap.get(snap.studentId);
-                          return (
-                            <button
-                              key={snap.studentId}
-                              type="button"
-                              onClick={() => {
-                                if (liveStudent) setDossierStudent(liveStudent);
-                              }}
-                              disabled={!liveStudent}
-                              className="px-2.5 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/40 dark:hover:bg-teal-900/50 border border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>{snap.fullName}</span>
-                              <span className="font-mono text-[10px] opacity-80">({snap.studentId})</span>
-                              {snap.roomNumber && snap.roomNumber !== '-' && (
-                                <span className="text-[10px] opacity-75">· اتاق {snap.roomNumber}</span>
-                              )}
-                            </button>
-                          );
-                        })}
+                    ) : (
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-[11px] font-bold">
+                        <Building2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>گزارش مربوط به سرا / محوطه (بدون انتساب به دانشجوی خاص)</span>
                       </div>
-                    </div>
+                    )}
 
                     {(rep.actionTaken || rep.securityNotes) && (
                       <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 text-xs text-emerald-900 dark:text-emerald-200 space-y-1">

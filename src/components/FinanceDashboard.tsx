@@ -27,6 +27,7 @@ import {
 import { compareStudents, normSearchText, StudentSortKey } from '../utils/studentSearchSort';
 import { StudentReferralModal } from './StudentReferralModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -82,7 +83,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<'finance' | 'clearance'>('finance');
+  const [activeTab, setActiveTab] = useState<'finance' | 'clearance' | null>(null);
   // جستجو و فیلترهای پیشرفته کارتابل مالی
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -705,41 +706,38 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
         </div>
       )}
 
-      {/* تب‌های امور مالی و تسویه حساب فارغ‌التحصیلان */}
-      <div className="flex flex-wrap gap-2 bg-slate-200/70 dark:bg-slate-800/70 p-1.5 rounded-2xl">
-        <button
-          type="button"
-          onClick={() => setActiveTab('finance')}
-          className={`flex-1 min-w-[200px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'finance'
-              ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <Wallet className="w-4 h-4" />
-          <span>امور مالی، کسورات و بدهی دانشجویان</span>
-        </button>
+      {/* منوی بازشونده کارتابل امور مالی */}
+      <CollapsibleMenuGrid<'finance' | 'clearance'>
+        activeKey={activeTab}
+        onToggle={(key) => setActiveTab((prev) => (prev === key ? null : key))}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های امور مالی و حسابداری (برای باز یا بسته شدن کلیک کنید)"
+        emptyPrompt="برای مشاهده هر بخش، روی دکمه مربوطه کلیک کنید. با کلیک مجدد همان بخش بسته می‌شود."
+        items={[
+          {
+            id: 'finance',
+            label: 'امور مالی، کسورات و بدهی دانشجویان',
+            subtitle: 'کسورات خوابگاهی/ترددی، اکسل بدهی و پیام مالی',
+            icon: <Wallet className="w-4 h-4" />,
+            activeClass: 'bg-emerald-700 text-white border-emerald-700 shadow-md',
+          },
+          {
+            id: 'clearance',
+            label: 'تسویه حساب فارغ‌التحصیلان',
+            subtitle: 'بررسی عدم بدهی و صدور تأییدیه امور مالی',
+            icon: <GraduationCap className="w-4 h-4" />,
+            badge: Storage.getGraduationClearances().filter(
+              (c) =>
+                c.educationGateStatus === 'approved' &&
+                (c.units?.finance?.status || 'pending') === 'pending'
+            ).length,
+            badgeTone: 'rose',
+            activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+          },
+        ]}
+      />
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('clearance')}
-          className={`flex-1 min-w-[200px] py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === 'clearance'
-              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4" />
-          <span>تسویه حساب فارغ‌التحصیلان</span>
-          {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.finance?.status || 'pending') === 'pending').length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-              {Storage.getGraduationClearances().filter((c) => c.educationGateStatus === 'approved' && (c.units?.finance?.status || 'pending') === 'pending').length}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {activeTab === 'clearance' ? (
+      {activeTab === 'clearance' && (
         <GraduationClearanceReviewPanel
           unitRole="finance"
           reviewerId={staff.id}
@@ -747,7 +745,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
           settings={Storage.getSettings()}
           onDataChange={onRefreshData}
         />
-      ) : (
+      )}
+
+      {activeTab === 'finance' && (
         <>
       {/* کارت‌های شاخص خلاصه */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

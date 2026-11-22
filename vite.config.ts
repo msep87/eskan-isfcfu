@@ -224,6 +224,7 @@ export default defineConfig(({mode}) => {
         'recharts',
         'xlsx',
         'canvas-confetti',
+        '@supabase/supabase-js',
       ],
     },
     build: {

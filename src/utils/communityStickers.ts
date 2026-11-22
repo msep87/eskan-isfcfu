@@ -20,10 +20,13 @@ export const DEFAULT_COMMUNITY_CHAT_SETTINGS: CommunityChatSettings = {
   isChatSystemEnabled: true,
   isPublicForumOpen: true,
   isPrivateChatEnabled: false, // به‌صورت پیش‌فرض بسته تا مدیر در صورت صلاحدید باز کند
+  isStaffChatEnabled: true, // چت خصوصی و تالارهای داخلی کارکنان به‌صورت پیش‌فرض فعال
   isGroupCreationEnabled: true,
   allowPhotosInForums: false, // ارسال عکس صرفاً با تأیید مدیر
   allowPhotosInPrivateChat: false,
   allowStickers: false, // ارسال استیکر صرفاً با تأیید مدیر
+  allowVoiceMessages: true, // ضبط و ارسال پیام صوتی (ویس)
+  allowLiveVoiceCall: true, // گفتگوی صوتی مستقیم زنده
   requireRulesAcceptance: true,
   onlyAdmittedStudentsCanChat: false,
   privateChatScope: 'all',
@@ -244,10 +247,56 @@ export function makeDmRoomId(studentIdA: string, studentIdB: string): string {
   return `dm_${sorted[0]}_${sorted[1]}`;
 }
 
+export function makeStaffDmRoomId(staffIdA: string, staffIdB: string): string {
+  const sorted = [staffIdA.trim(), staffIdB.trim()].sort((a, b) => a.localeCompare(b));
+  return `staff_dm_${sorted[0]}_${sorted[1]}`;
+}
+
+export function isStaffDmRoomId(roomId?: string | null): boolean {
+  return Boolean(roomId && roomId.startsWith('staff_dm_'));
+}
+
+export const STAFF_ROLE_OPTIONS: { role: string; label: string }[] = [
+  { role: 'admin', label: 'مدیر کل سامانه' },
+  { role: 'vice_dean', label: 'معاونت دانشجویی' },
+  { role: 'security', label: 'حراست و انتظامات' },
+  { role: 'supervisor', label: 'سرپرستان سراها' },
+  { role: 'student_affairs', label: 'امور دانشجویی و تربیت بدنی' },
+  { role: 'cultural', label: 'امور فرهنگی' },
+  { role: 'education', label: 'واحد آموزش' },
+  { role: 'counselor', label: 'مرکز مشاوره' },
+  { role: 'finance', label: 'امور مالی و حسابداری' },
+  { role: 'library', label: 'کتابخانه و پژوهش' },
+  { role: 'smart_campus', label: 'واحد هوشمندسازی' },
+  { role: 'graduation', label: 'واحد فارغ‌التحصیلان' },
+  { role: 'maintenance', label: 'تأسیسات و فنی' },
+  { role: 'warehouse', label: 'انبار و تجهیزات' },
+  { role: 'procurement', label: 'کارپردازی و خرید' },
+];
+
+export function isStaffEligibleForForum(
+  staffRole: string,
+  staffId: string,
+  forum: CommunityForum
+): boolean {
+  if (staffRole === 'student') return false;
+  if (forum.audienceType !== 'staff_only') return true;
+  if (staffRole === 'admin' || staffRole === 'security' || staffRole === 'vice_dean') return true;
+  if (forum.creatorId === staffId) return true;
+  if (!Array.isArray(forum.allowedStaffRoles) || forum.allowedStaffRoles.length === 0) return true;
+  return forum.allowedStaffRoles.includes(staffRole);
+}
+
 export function isStudentEligibleForForum(
   student: Student,
   forum: CommunityForum
 ): { eligible: boolean; reason?: string } {
+  if (forum.audienceType === 'staff_only') {
+    return {
+      eligible: false,
+      reason: 'این تالار یا گروه ویژه کارکنان دانشگاه فرهنگیان است.',
+    };
+  }
   if (forum.isPublicForum || forum.id === PUBLIC_FORUM_ID) {
     return { eligible: true };
   }

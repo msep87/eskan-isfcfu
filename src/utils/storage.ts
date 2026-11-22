@@ -79,12 +79,14 @@ import {
   CommunityChatReport,
   CommunityUserChatPrefs,
   PublicStudentChatProfile,
+  StaffChatDirectoryItem,
 } from '../types';
 import {
   DEFAULT_COMMUNITY_CHAT_SETTINGS,
   INITIAL_PUBLIC_FORUM,
   PUBLIC_FORUM_ID,
   makeDmRoomId,
+  isStaffDmRoomId,
 } from './communityStickers';
 import { getStudentAdmissionStatus, isStudentDormResident } from './financeUtils';
 import {
@@ -322,6 +324,13 @@ export const SECURITY_REPORT_PRESETS: Array<{
     defaultTitle: 'گزارش ایمنی و حفاظتی تجهیزات / وسایل پرخطر',
     defaultDescription:
       'گزارش وجود مخاطره ایمنی، استفاده از وسایل برقی/گرمایشی غیرمجاز یا نقص حفاظتی در اتاق/بخش مرتبط جهت اقدام عاجل حراست ارسال می‌شود.',
+  },
+  {
+    category: 'campus_dorm_environment',
+    label: 'موارد مربوط به سراها، ساختمان، ورودی و محوطه (بدون نیاز به دانشجو)',
+    defaultTitle: 'گزارش وضعیت حفاظتی / ایمنی سرا یا محوطه',
+    defaultDescription:
+      'با احترام، به استحضار واحد محترم حراست و انتظامات می‌رساند مورد حفاظتی، ایمنی یا انتظاماتی در محدوده سرای دانشجویی / محوطه مشاهده گردیده است. خواهشمند است بررسی و اقدامات لازم معمول گردد.',
   },
   {
     category: 'suspicious_activity',
@@ -12101,7 +12110,8 @@ export const Storage = {
     set(STORAGE_KEYS.SECURITY_REPORTS, items),
 
   createSecurityReport: (payload: {
-    students: Student[];
+    students?: Student[];
+    reportScope?: 'student' | 'facility_campus';
     title: string;
     category: SecurityReportCategory;
     categoryLabel?: string;
@@ -12129,8 +12139,28 @@ export const Storage = {
       | 'smart_campus'
       | 'graduation';
   }): { success: boolean; message: string; report?: SecurityReport } => {
-    if (!payload.students || payload.students.length === 0) {
-      return { success: false, message: 'لطفاً حداقل یک دانشجو برای ارسال گزارش به حراست انتخاب نمایید.' };
+    const studentList = Array.isArray(payload.students) ? payload.students : [];
+    const resolvedScope: 'student' | 'facility_campus' =
+      payload.reportScope || (studentList.length > 0 ? 'student' : 'facility_campus');
+
+    if (resolvedScope === 'student' && studentList.length === 0) {
+      return {
+        success: false,
+        message:
+          'لطفاً حداقل یک دانشجو انتخاب کنید یا نوع گزارش را روی «مربوط به سراها و محوطه (بدون دانشجو)» قرار دهید.',
+      };
+    }
+    if (
+      resolvedScope === 'facility_campus' &&
+      !payload.dormId &&
+      !payload.dormName?.trim() &&
+      !payload.locationDetails?.trim() &&
+      !payload.roomNumber?.trim()
+    ) {
+      return {
+        success: false,
+        message: 'برای گزارش‌های مربوط به سرا یا محوطه، لطفاً سرای محل وقوع یا جزئیات مکانی را وارد نمایید.',
+      };
     }
     if (!payload.title.trim() || !payload.description.trim()) {
       return { success: false, message: 'عنوان و شرح کامل گزارش به حراست الزامی است.' };
@@ -12149,33 +12179,41 @@ export const Storage = {
       minute: '2-digit',
     })}`;
 
-    const snapshots: SecurityReportStudentSnapshot[] = payload.students.map((st) => ({
-      studentId: st.studentId,
-      fullName: st.fullName,
-      nationalId: st.nationalId,
-      mobile: st.mobile,
-      fieldOfStudy: st.fieldOfStudy,
-      entryTerm: st.entryTerm,
-      dormName: (st.assignedDormId ? dormMap.get(st.assignedDormId) : undefined) || st.assignedDormName || 'فاقد سرا',
-      roomNumber: (st.assignedRoomId ? roomMap.get(st.assignedRoomId) : undefined) || st.assignedRoomNumber || '-',
-    }));
+    const snapshots: SecurityReportStudentSnapshot[] =
+      resolvedScope === 'facility_campus'
+        ? []
+        : studentList.map((st) => ({
+            studentId: st.studentId,
+            fullName: st.fullName,
+            nationalId: st.nationalId,
+            mobile: st.mobile,
+            fieldOfStudy: st.fieldOfStudy,
+            entryTerm: st.entryTerm,
+            dormName: (st.assignedDormId ? dormMap.get(st.assignedDormId) : undefined) || st.assignedDormName || 'فاقد سرا',
+            roomNumber: (st.assignedRoomId ? roomMap.get(st.assignedRoomId) : undefined) || st.assignedRoomNumber || '-',
+          }));
 
     const firstSnap = snapshots[0];
     const resolvedDormName =
       payload.dormName?.trim() ||
       (payload.dormId ? dormMap.get(payload.dormId) : undefined) ||
-      (firstSnap?.dormName && firstSnap.dormName !== 'فاقد سرا' ? firstSnap.dormName : 'سراهای دانشجویی');
+      (firstSnap?.dormName && firstSnap.dormName !== 'فاقد سرا'
+        ? firstSnap.dormName
+        : resolvedScope === 'facility_campus'
+        ? 'محوطه / سراهای دانشجویی'
+        : 'سراهای دانشجویی');
 
     const newReport: SecurityReport = {
       id: makeUniqueId('secrep'),
       reportCode: `SEC-${101 + list.length}`,
+      reportScope: resolvedScope,
       title: payload.title.trim(),
       category: payload.category,
       categoryLabel: resolvedCategoryLabel,
       severity: payload.severity,
-      dormId: payload.dormId || payload.students[0]?.assignedDormId,
+      dormId: payload.dormId || (resolvedScope === 'student' ? studentList[0]?.assignedDormId : undefined),
       dormName: resolvedDormName,
-      roomNumber: payload.roomNumber?.trim() || (firstSnap?.roomNumber !== '-' ? firstSnap?.roomNumber : undefined),
+      roomNumber: payload.roomNumber?.trim() || (firstSnap?.roomNumber && firstSnap.roomNumber !== '-' ? firstSnap.roomNumber : undefined),
       locationDetails: payload.locationDetails?.trim() || undefined,
       incidentDate: payload.incidentDate?.trim() || new Date().toLocaleDateString('fa-IR'),
       description: payload.description.trim(),
@@ -12222,10 +12260,15 @@ export const Storage = {
       graduation: 'واحد فارغ‌التحصیلان',
     };
 
+    const targetDesc =
+      snapshots.length > 0
+        ? `برای ${snapshots.length} دانشجو (${snapshots.map((s) => s.fullName).slice(0, 4).join('، ')}${snapshots.length > 4 ? ' و...' : ''})`
+        : `مربوط به سرا / محوطه (${resolvedDormName}${newReport.locationDetails ? ` - ${newReport.locationDetails}` : ''})`;
+
     Storage.addActivityLog({
       category: 'security',
       action: 'ارسال گزارش جدید به واحد حراست و انتظامات',
-      details: `گزارش «${newReport.title}» (${newReport.reportCode}) برای ${snapshots.length} دانشجو (${snapshots.map((s) => s.fullName).slice(0, 4).join('، ')}${snapshots.length > 4 ? ' و...' : ''}) توسط ${payload.reportedByName} (${roleFa[payload.reportedByRole]}) به حراست ارسال شد.`,
+      details: `گزارش «${newReport.title}» (${newReport.reportCode}) ${targetDesc} توسط ${payload.reportedByName} (${roleFa[payload.reportedByRole]}) به حراست ارسال شد.`,
       targetName: newReport.reportCode,
       severity: payload.severity === 'urgent' ? 'critical' : 'warning',
       actorName: payload.reportedByName,
@@ -12234,7 +12277,10 @@ export const Storage = {
 
     return {
       success: true,
-      message: `گزارش با کد رهگیری «${newReport.reportCode}» برای ${snapshots.length} دانشجو با موفقیت به واحد حراست ارسال گردید.`,
+      message:
+        snapshots.length > 0
+          ? `گزارش با کد رهگیری «${newReport.reportCode}» برای ${snapshots.length} دانشجو با موفقیت به واحد حراست ارسال گردید.`
+          : `گزارش سرایی/محوطه با کد رهگیری «${newReport.reportCode}» با موفقیت به واحد حراست ارسال گردید.`,
       report: newReport,
     };
   },
@@ -14203,6 +14249,164 @@ export const Storage = {
     return set(STORAGE_KEYS.COMMUNITY_FORUMS, safeList);
   },
 
+  getAllStaffChatDirectory: (): StaffChatDirectoryItem[] => {
+    const items: StaffChatDirectoryItem[] = [
+      {
+        id: 'admin',
+        fullName: 'مدیر کل سامانه',
+        role: 'admin',
+        roleLabel: 'مدیر کل سامانه',
+        department: 'مدیریت کل پردیس',
+      },
+      ...Storage.getViceDeanStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'vice_dean',
+          roleLabel: 'معاونت دانشجویی',
+          department: s.department || 'معاونت دانشجویی',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getSecurityStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'security',
+          roleLabel: 'حراست و انتظامات',
+          department: s.department || 'حراست',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getSupervisors().map((s) => ({
+        id: s.id,
+        fullName: s.fullName,
+        role: 'supervisor',
+        roleLabel: 'سرپرست سرا',
+        department: 'سرپرستی سراهای دانشجویی',
+        photoUrl: s.photoUrl,
+      })),
+      ...Storage.getStudentAffairsStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'student_affairs',
+          roleLabel: 'امور دانشجویی و تربیت بدنی',
+          department: s.department || 'امور دانشجویی',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getCulturalStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'cultural',
+          roleLabel: 'کارشناس امور فرهنگی',
+          department: s.department || 'امور فرهنگی',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getEducationStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'education',
+          roleLabel: 'کارشناس آموزش',
+          department: s.department || 'واحد آموزش',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getCounselors()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'counselor',
+          roleLabel: 'مرکز مشاوره',
+          department: s.specialty || 'مرکز مشاوره',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getFinanceStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'finance',
+          roleLabel: 'امور مالی و حسابداری',
+          department: s.department || 'امور مالی',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getLibraryStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'library',
+          roleLabel: 'کتابخانه و پژوهش',
+          department: s.department || 'کتابخانه',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getSmartCampusStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'smart_campus',
+          roleLabel: 'واحد هوشمندسازی',
+          department: s.department || 'هوشمندسازی',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getGraduationStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'graduation',
+          roleLabel: 'واحد فارغ‌التحصیلان',
+          department: s.department || 'فارغ‌التحصیلان',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getMaintenanceStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'maintenance',
+          roleLabel: 'تأسیسات و فنی',
+          department: s.specialty || 'تأسیسات و فنی',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getWarehouseStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'warehouse',
+          roleLabel: 'انبار و تجهیزات',
+          department: 'انبار و تجهیزات',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getProcurementStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'procurement',
+          roleLabel: 'کارپردازی و خرید',
+          department: s.department || 'کارپردازی',
+          photoUrl: s.photoUrl,
+        })),
+    ];
+
+    const seen = new Set<string>();
+    return items.filter((item) => {
+      const key = `${item.role}:${item.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  },
+
   createCommunityForumRequest: (payload: {
     title: string;
     description: string;
@@ -14214,15 +14418,22 @@ export const Storage = {
     allowedFields: string[];
     allowedEntryTerms: string[];
     allowedResidence: CommunityResidenceScope;
+    audienceType?: 'students_all' | 'staff_only';
+    allowedStaffRoles?: string[];
     rulesAcceptedByCreator: boolean;
     directPublishByAdmin?: boolean;
   }): { success: boolean; message: string; forum?: CommunityForum } => {
     const settings = Storage.getCommunityChatSettings();
     const isAdmin = payload.creatorRole === 'admin';
+    const isStaffOnly = payload.audienceType === 'staff_only' && payload.creatorRole !== 'student';
+
     if (!isAdmin && !settings.isChatSystemEnabled) {
       return { success: false, message: 'سامانه پیام‌رسان و تالارهای گفتگو در حال حاضر توسط مدیر بسته شده است.' };
     }
-    if (!isAdmin && !settings.isGroupCreationEnabled) {
+    if (isStaffOnly && !isAdmin && settings.isStaffChatEnabled === false) {
+      return { success: false, message: 'ایجاد گروه و گفتگوی داخلی کارکنان در حال حاضر توسط مدیر غیرفعال شده است.' };
+    }
+    if (!isAdmin && !isStaffOnly && !settings.isGroupCreationEnabled) {
       return { success: false, message: 'ثبت درخواست ایجاد تالار تخصصی و گروه در حال حاضر توسط مدیر غیرفعال شده است.' };
     }
     if (!payload.rulesAcceptedByCreator) {
@@ -14265,13 +14476,13 @@ export const Storage = {
       minute: '2-digit',
     })}`;
 
-    const autoActive = Boolean(isAdmin && payload.directPublishByAdmin);
+    const autoActive = Boolean((isAdmin && payload.directPublishByAdmin) || isStaffOnly);
 
     const newForum: CommunityForum = {
       id: makeUniqueId('forum'),
       title,
       description,
-      category: payload.category || 'scientific',
+      category: payload.category || (isStaffOnly ? 'other' : 'scientific'),
       tags: cleanTags,
       creatorId: payload.creatorId,
       creatorName: payload.creatorName,
@@ -14279,15 +14490,23 @@ export const Storage = {
       status: autoActive ? 'active' : 'pending',
       isClosed: false,
       adminApproval: autoActive
-        ? { status: 'approved', byId: payload.creatorId, byName: payload.creatorName, at: nowStr }
+        ? { status: 'approved', byId: payload.creatorId, byName: isStaffOnly && !isAdmin ? 'تالار داخلی کارکنان (تأیید خودکار)' : payload.creatorName, at: nowStr }
         : { status: 'pending' },
       securityApproval: autoActive
-        ? { status: 'approved', byId: 'system', byName: 'ایجاد مستقیم توسط مدیر سامانه', at: nowStr }
+        ? { status: 'approved', byId: 'system', byName: isStaffOnly ? 'گروه داخلی همکاران (تحت نظارت)' : 'ایجاد مستقیم توسط مدیر سامانه', at: nowStr }
         : { status: 'pending' },
-      allowedFields: Array.from(new Set((payload.allowedFields || []).map((x) => x.trim()).filter(Boolean))),
-      allowedEntryTerms: Array.from(new Set((payload.allowedEntryTerms || []).map((x) => x.trim()).filter(Boolean))),
-      allowedResidence: payload.allowedResidence || 'all',
-      memberIds: payload.creatorRole === 'student' ? [payload.creatorId] : [],
+      allowedFields: isStaffOnly
+        ? []
+        : Array.from(new Set((payload.allowedFields || []).map((x) => x.trim()).filter(Boolean))),
+      allowedEntryTerms: isStaffOnly
+        ? []
+        : Array.from(new Set((payload.allowedEntryTerms || []).map((x) => x.trim()).filter(Boolean))),
+      allowedResidence: isStaffOnly ? 'all' : payload.allowedResidence || 'all',
+      audienceType: isStaffOnly ? 'staff_only' : 'students_all',
+      allowedStaffRoles: isStaffOnly
+        ? Array.from(new Set((payload.allowedStaffRoles || []).map((r) => r.trim()).filter(Boolean)))
+        : undefined,
+      memberIds: [payload.creatorId],
       rulesAcceptedByCreator: true,
       createdAt: nowStr,
       updatedAt: nowStr,
@@ -14298,8 +14517,12 @@ export const Storage = {
 
     Storage.addActivityLog({
       category: 'community_chat',
-      action: autoActive ? 'ایجاد تالار گفتگوی تخصصی توسط مدیر' : 'ثبت درخواست ایجاد تالار گفتگوی تخصصی',
-      details: `تالار «${title}» توسط ${payload.creatorName} ثبت شد (${
+      action: isStaffOnly
+        ? 'ایجاد گروه / تالار گفتگوی ویژه کارکنان'
+        : autoActive
+        ? 'ایجاد تالار گفتگوی تخصصی توسط مدیر'
+        : 'ثبت درخواست ایجاد تالار گفتگوی تخصصی',
+      details: `${isStaffOnly ? 'گروه ویژه کارکنان' : 'تالار'} «${title}» توسط ${payload.creatorName} ثبت شد (${
         autoActive ? 'فعال و منتشر شده' : 'در انتظار تأیید مدیر و حراست'
       }).`,
       targetName: title,
@@ -14309,7 +14532,9 @@ export const Storage = {
     return {
       success: true,
       forum: newForum,
-      message: autoActive
+      message: isStaffOnly
+        ? `گروه / تالار ویژه کارکنان «${title}» با موفقیت ایجاد و برای همکاران مجاز فعال شد.`
+        : autoActive
         ? `تالار تخصصی «${title}» با موفقیت ایجاد و برای دانشجویان واجد شرایط فعال شد.`
         : `درخواست ایجاد تالار «${title}» ثبت شد و پس از تأیید «مدیر سامانه» و «واحد حراست» به‌صورت رسمی فعال و قابل مشاهده خواهد شد.`,
     };
@@ -14560,6 +14785,8 @@ export const Storage = {
     senderAvatarUrl?: string;
     text: string;
     imageUrl?: string;
+    audioUrl?: string;
+    audioDurationSec?: number;
     stickerId?: string;
     replyToId?: string;
     replyToSenderName?: string;
@@ -14572,13 +14799,15 @@ export const Storage = {
       payload.senderRole === 'admin' ||
       payload.senderRole === 'security' ||
       payload.senderRole === 'vice_dean';
+    const isStaffDm = payload.roomType === 'dm' && isStaffDmRoomId(payload.roomId);
 
     const cleanText = (payload.text || '').trim();
     const hasImage = Boolean(payload.imageUrl);
+    const hasAudio = Boolean(payload.audioUrl);
     const hasSticker = Boolean(payload.stickerId);
 
-    if (!cleanText && !hasImage && !hasSticker) {
-      return { success: false, message: 'متن پیام، استیکر یا تصویر را وارد نمایید.' };
+    if (!cleanText && !hasImage && !hasSticker && !hasAudio) {
+      return { success: false, message: 'متن پیام، صوت، استیکر یا تصویر را وارد نمایید.' };
     }
     if (cleanText.length > 1500) {
       return { success: false, message: 'حداکثر طول مجاز هر پیام ۱۵۰۰ کاراکتر است.' };
@@ -14608,6 +14837,9 @@ export const Storage = {
         if (!forum || forum.status !== 'active') {
           return { success: false, message: 'این تالار فعال نیست یا به تأیید کامل نرسیده است.' };
         }
+        if (forum.audienceType === 'staff_only' && payload.senderRole === 'student') {
+          return { success: false, message: 'این تالار صرفاً ویژه کارکنان دانشگاه است.' };
+        }
         if (forum.isClosed) {
           return {
             success: false,
@@ -14617,19 +14849,31 @@ export const Storage = {
       }
 
       if (payload.roomType === 'dm') {
-        if (!settings.isPrivateChatEnabled) {
-          return {
-            success: false,
-            message: 'امکان ارسال پیام خصوصی بین دانشجویان هم‌اکنون توسط مدیر سامانه بسته شده است.',
-          };
-        }
-        if (payload.dmParticipants) {
-          const [p1, p2] = payload.dmParticipants;
-          if (Storage.isStudentBlockedBetween(p1, p2)) {
+        if (isStaffDm) {
+          if (payload.senderRole === 'student') {
+            return { success: false, message: 'این گفتگوی خصوصی ویژه کارکنان است.' };
+          }
+          if (settings.isStaffChatEnabled === false) {
             return {
               success: false,
-              message: 'امکان ارسال پیام در این گفتگوی خصوصی وجود ندارد (یکی از طرفین دیگری را مسدود کرده است).',
+              message: 'امکان گفتگوی خصوصی کارکنان هم‌اکنون توسط مدیر سامانه بسته شده است.',
             };
+          }
+        } else {
+          if (!settings.isPrivateChatEnabled) {
+            return {
+              success: false,
+              message: 'امکان ارسال پیام خصوصی بین دانشجویان هم‌اکنون توسط مدیر سامانه بسته شده است.',
+            };
+          }
+          if (payload.dmParticipants) {
+            const [p1, p2] = payload.dmParticipants;
+            if (Storage.isStudentBlockedBetween(p1, p2)) {
+              return {
+                success: false,
+                message: 'امکان ارسال پیام در این گفتگوی خصوصی وجود ندارد (یکی از طرفین دیگری را مسدود کرده است).',
+              };
+            }
           }
         }
       }
@@ -14651,8 +14895,8 @@ export const Storage = {
         }
       }
 
-      // بررسی مجوز ارسال تصویر و استیکر
-      if (hasImage) {
+      // بررسی مجوز ارسال تصویر، صوت و استیکر
+      if (hasImage && !isStaffDm) {
         if (payload.roomType === 'dm' && !settings.allowPhotosInPrivateChat) {
           return {
             success: false,
@@ -14667,7 +14911,14 @@ export const Storage = {
         }
       }
 
-      if (hasSticker && !settings.allowStickers) {
+      if (hasAudio && settings.allowVoiceMessages === false) {
+        return {
+          success: false,
+          message: 'ارسال پیام صوتی در حال حاضر توسط مدیر سامانه غیرفعال است.',
+        };
+      }
+
+      if (hasSticker && !settings.allowStickers && !isStaffDm) {
         return {
           success: false,
           message: 'ارسال استیکر در حال حاضر توسط مدیر سامانه غیرفعال است.',
@@ -14727,6 +14978,8 @@ export const Storage = {
       senderAvatarUrl: safeAvatar,
       text: cleanText,
       imageUrl: payload.imageUrl,
+      audioUrl: payload.audioUrl,
+      audioDurationSec: payload.audioDurationSec,
       stickerId: payload.stickerId,
       replyToId: payload.replyToId,
       replyToSenderName: payload.replyToSenderName,
@@ -14772,6 +15025,8 @@ export const Storage = {
       deleteReason: (payload.reason || '').trim() || 'حذف‌شده توسط ناظر سامانه به دلیل مغایرت با قوانین',
       text: '',
       imageUrl: undefined,
+      audioUrl: undefined,
+      audioDurationSec: undefined,
       stickerId: undefined,
     };
     Storage.setCommunityChatMessages(list);
@@ -14802,7 +15057,7 @@ export const Storage = {
     }
 
     const cleanText = (payload.newText || '').trim();
-    if (!cleanText && !target.imageUrl && !target.stickerId) {
+    if (!cleanText && !target.imageUrl && !target.stickerId && !target.audioUrl) {
       return { success: false, message: 'متن پیام نمی‌تواند خالی باشد.' };
     }
     if (cleanText.length > 1500) {

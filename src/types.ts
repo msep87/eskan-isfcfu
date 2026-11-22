@@ -401,6 +401,7 @@ export type SecurityReportCategory =
   | 'property_damage_safety'
   | 'conflict_harassment'
   | 'facility_security_hazard'
+  | 'campus_dorm_environment'
   | 'suspicious_activity'
   | 'other';
 
@@ -436,6 +437,7 @@ export type StaffReferralActorRole =
 export interface SecurityReport {
   id: string;
   reportCode: string; // مثلاً SEC-101
+  reportScope?: 'student' | 'facility_campus'; // گزارش مرتبط با دانشجو یا مربوط به خود سراها و محوطه بدون انتخاب دانشجو
   title: string;
   category: SecurityReportCategory;
   categoryLabel: string;
@@ -1519,10 +1521,13 @@ export interface CommunityChatSettings {
   isChatSystemEnabled: boolean; // کلید اصلی باز/بسته کردن کل سامانه چت و تالارها
   isPublicForumOpen: boolean; // باز یا بسته بودن ارسال پیام در تالار گفتگوی عمومی
   isPrivateChatEnabled: boolean; // باز یا بسته بودن چت خصوصی دانشجو به دانشجو (با شماره دانشجویی)
+  isStaffChatEnabled?: boolean; // باز یا بسته بودن چت خصوصی و تالارهای ویژه کارکنان
   isGroupCreationEnabled: boolean; // امکان ثبت درخواست ایجاد تالار تخصصی / گروه توسط دانشجویان
   allowPhotosInForums: boolean; // مجوز ارسال عکس در تالار عمومی و گروه‌های تخصصی
   allowPhotosInPrivateChat: boolean; // مجوز ارسال عکس در چت خصوصی دانشجویی
   allowStickers: boolean; // مجوز ارسال استیکر در تالارها و گفتگوها
+  allowVoiceMessages?: boolean; // مجوز ضبط و ارسال پیام صوتی (ویس) در گفتگوها
+  allowLiveVoiceCall?: boolean; // مجوز برقراری گفتگوی صوتی مستقیم زنده (تماس صوتی)
   requireRulesAcceptance: boolean; // الزام پذیرش تعهدنامه قوانین پیش از گفتگو
   onlyAdmittedStudentsCanChat: boolean; // محدودسازی گفتگو به دانشجویان پذیرش‌شده
   privateChatScope: CommunityPrivateChatScope; // دامنه مجاز چت خصوصی
@@ -1561,6 +1566,8 @@ export interface CommunityForum {
   allowedFields: string[]; // خالی = همه رشته‌ها
   allowedEntryTerms: string[]; // خالی = همه ورودی‌ها
   allowedResidence: CommunityResidenceScope; // همه / خوابگاهی / ترددی
+  audienceType?: 'students_all' | 'staff_only'; // تالار دانشجویی یا تالار/گروه ویژه کارکنان
+  allowedStaffRoles?: string[]; // در حالت staff_only: خالی = همه کارکنان، در غیر این صورت نقش‌های مجاز
   memberIds: string[];
   rulesAcceptedByCreator: boolean;
   createdAt: string;
@@ -1580,6 +1587,8 @@ export interface CommunityChatMessage {
   senderAvatarUrl?: string;
   text: string;
   imageUrl?: string;
+  audioUrl?: string;
+  audioDurationSec?: number;
   stickerId?: string;
   replyToId?: string;
   replyToSenderName?: string;
@@ -1647,6 +1656,16 @@ export interface PublicStudentChatProfile {
   photoUrl?: string;
   admissionStatus: 'admitted' | 'not_admitted';
 }
+
+export interface StaffChatDirectoryItem {
+  id: string;
+  fullName: string;
+  role: string;
+  roleLabel: string;
+  department?: string;
+  photoUrl?: string;
+}
+
 
 
 

@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { Storage } from '../utils/storage';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import {
   DEFAULT_STUDENT_PAGE_SIZE,
   StudentListPaginationBar,
@@ -63,7 +64,7 @@ export const LibraryDashboard: React.FC<LibraryDashboardProps> = ({
   onDataChange,
   onOpenMessages,
 }) => {
-  const [activeTab, setActiveTab] = useState<'loans' | 'catalog' | 'students' | 'clearance' | 'messages'>('loans');
+  const [activeTab, setActiveTab] = useState<'loans' | 'catalog' | 'students' | 'clearance' | 'messages' | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -705,43 +706,69 @@ export const LibraryDashboard: React.FC<LibraryDashboardProps> = ({
         </div>
       )}
 
-      {/* تب‌های اصلی */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
-        {[
-          { id: 'loans', label: 'درخواست‌ها و امانات کتاب', icon: BookMarked, badge: pendingRequestsCount },
-          { id: 'catalog', label: 'فهرست و ورود اکسل کتب', icon: BookOpen, badge: books.length },
-          { id: 'students', label: 'دانشجویان و ارسال پیام', icon: Users, badge: 0 },
-          { id: 'clearance', label: 'تسویه حساب فارغ‌التحصیلان', icon: FileCheck2, badge: pendingClearanceCount },
-          { id: 'messages', label: 'پیام‌های کتابخانه', icon: MessageSquare, badge: libraryMessages.filter((m) => m.status === 'pending' && m.receiverType === 'library').length },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              className={`px-4 py-2.5 rounded-xl text-xs font-extrabold inline-flex items-center gap-2 transition cursor-pointer ${
-                active
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
-              {tab.badge > 0 && (
-                <span
-                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-black tabular-nums ${
-                    active ? 'bg-white/20 text-white' : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300'
-                  }`}
-                >
-                  {tab.badge.toLocaleString('fa-IR')}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {/* منوی دسته‌بندی‌شده و بازشونده کارتابل کتابخانه */}
+      <CollapsibleMenuGrid<'loans' | 'catalog' | 'students' | 'clearance' | 'messages'>
+        activeKey={activeTab}
+        onToggle={(key) => setActiveTab((prev) => (prev === key ? null : key))}
+        onCloseActive={() => setActiveTab(null)}
+        title="منوی بخش‌های کتابخانه و پژوهش (برای باز یا بسته شدن کلیک کنید)"
+        emptyPrompt="برای مشاهده هر بخش، روی دکمه مربوطه کلیک کنید. با کلیک مجدد همان بخش بسته می‌شود."
+        categories={[
+          {
+            title: 'امانات و فهرست کتب',
+            items: [
+              {
+                id: 'loans',
+                label: 'درخواست‌ها و امانات کتاب',
+                subtitle: 'تأیید امانت، تمدید و بازگشت کتب',
+                icon: <BookMarked className="w-4 h-4" />,
+                badge: pendingRequestsCount,
+                badgeTone: 'amber',
+                activeClass: 'bg-indigo-600 text-white border-indigo-600 shadow-md',
+              },
+              {
+                id: 'catalog',
+                label: 'فهرست و ورود اکسل کتب',
+                subtitle: 'افزودن، ویرایش و مدیریت منابع کتابخانه',
+                icon: <BookOpen className="w-4 h-4" />,
+                badge: books.length,
+                badgeTone: 'indigo',
+                activeClass: 'bg-indigo-600 text-white border-indigo-600 shadow-md',
+              },
+            ],
+          },
+          {
+            title: 'دانشجویان، پیام و تسویه',
+            items: [
+              {
+                id: 'students',
+                label: 'دانشجویان و ارسال پیام',
+                subtitle: 'مشاهده اطلاعات و ارسال یادآوری کتابخانه',
+                icon: <Users className="w-4 h-4" />,
+                activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md',
+              },
+              {
+                id: 'messages',
+                label: 'پیام‌های کتابخانه',
+                subtitle: 'صندوق پیام‌ها و مکاتبات دانشجویان',
+                icon: <MessageSquare className="w-4 h-4" />,
+                badge: libraryMessages.filter((m) => m.status === 'pending' && m.receiverType === 'library').length,
+                badgeTone: 'sky',
+                activeClass: 'bg-sky-600 text-white border-sky-600 shadow-md',
+              },
+              {
+                id: 'clearance',
+                label: 'تسویه حساب فارغ‌التحصیلان',
+                subtitle: 'بررسی عدم بدهی کتاب و تأیید تسویه',
+                icon: <FileCheck2 className="w-4 h-4" />,
+                badge: pendingClearanceCount,
+                badgeTone: 'rose',
+                activeClass: 'bg-sky-700 text-white border-sky-700 shadow-md',
+              },
+            ],
+          },
+        ]}
+      />
 
       {/* تب ۱: درخواست‌ها و امانات کتاب */}
       {activeTab === 'loans' && (

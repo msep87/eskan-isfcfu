@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { lazyWithRetry, ChunkErrorBoundary } from './utils/lazyWithRetry';
 import {
   Student,
   Dormitory,
@@ -52,35 +53,36 @@ import {
 import type { ExcelImportTab } from './components/ExcelImportModal';
 import { RichTextDisplay } from './components/RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './components/ImageLightboxModal';
+import { ImportantAnnouncementsWidget } from './components/ImportantAnnouncementsWidget';
 
-// بارگذاری تنبل (Code-Splitting) داشبوردها و مودال‌های سنگین برای افزایش چشمگیر سرعت لود اولیه سایت
-const LoginModal = lazy(() => import('./components/LoginModal').then((m) => ({ default: m.LoginModal })));
-const AppearanceModal = lazy(() => import('./components/AppearanceModal').then((m) => ({ default: m.AppearanceModal })));
-const ReportsView = lazy(() => import('./components/ReportsView').then((m) => ({ default: m.ReportsView })));
-const ExcelImportModal = lazy(() => import('./components/ExcelImportModal').then((m) => ({ default: m.ExcelImportModal })));
-const MessagingPanel = lazy(() => import('./components/MessagingPanel').then((m) => ({ default: m.MessagingPanel })));
-const ChangePasswordModal = lazy(() => import('./components/ChangePasswordModal').then((m) => ({ default: m.ChangePasswordModal })));
-const AboutModal = lazy(() => import('./components/AboutModal').then((m) => ({ default: m.AboutModal })));
-const UserGuideModal = lazy(() => import('./components/UserGuideModal').then((m) => ({ default: m.UserGuideModal })));
-const AiDormAssistant = lazy(() => import('./components/AiDormAssistant').then((m) => ({ default: m.AiDormAssistant })));
-const CommunityChatHub = lazy(() => import('./components/CommunityChatHub').then((m) => ({ default: m.CommunityChatHub })));
+// بارگذاری تنبل (Code-Splitting) با تلاش مجدد خودکار برای افزایش سرعت و پایداری لود
+const LoginModal = lazyWithRetry(() => import('./components/LoginModal').then((m) => ({ default: m.LoginModal })));
+const AppearanceModal = lazyWithRetry(() => import('./components/AppearanceModal').then((m) => ({ default: m.AppearanceModal })));
+const ReportsView = lazyWithRetry(() => import('./components/ReportsView').then((m) => ({ default: m.ReportsView })));
+const ExcelImportModal = lazyWithRetry(() => import('./components/ExcelImportModal').then((m) => ({ default: m.ExcelImportModal })));
+const MessagingPanel = lazyWithRetry(() => import('./components/MessagingPanel').then((m) => ({ default: m.MessagingPanel })));
+const ChangePasswordModal = lazyWithRetry(() => import('./components/ChangePasswordModal').then((m) => ({ default: m.ChangePasswordModal })));
+const AboutModal = lazyWithRetry(() => import('./components/AboutModal').then((m) => ({ default: m.AboutModal })));
+const UserGuideModal = lazyWithRetry(() => import('./components/UserGuideModal').then((m) => ({ default: m.UserGuideModal })));
+const AiDormAssistant = lazyWithRetry(() => import('./components/AiDormAssistant').then((m) => ({ default: m.AiDormAssistant })));
+const CommunityChatHub = lazyWithRetry(() => import('./components/CommunityChatHub').then((m) => ({ default: m.CommunityChatHub })));
 
-const StudentDashboard = lazy(() => import('./components/StudentDashboard').then((m) => ({ default: m.StudentDashboard })));
-const SupervisorDashboard = lazy(() => import('./components/SupervisorDashboard').then((m) => ({ default: m.SupervisorDashboard })));
-const AdminDashboard = lazy(() => import('./components/AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
-const MaintenanceDashboard = lazy(() => import('./components/MaintenanceDashboard').then((m) => ({ default: m.MaintenanceDashboard })));
-const WarehouseDashboard = lazy(() => import('./components/WarehouseDashboard').then((m) => ({ default: m.WarehouseDashboard })));
-const ProcurementDashboard = lazy(() => import('./components/ProcurementDashboard').then((m) => ({ default: m.ProcurementDashboard })));
-const CounselorDashboard = lazy(() => import('./components/CounselorDashboard').then((m) => ({ default: m.CounselorDashboard })));
-const FinanceDashboard = lazy(() => import('./components/FinanceDashboard').then((m) => ({ default: m.FinanceDashboard })));
-const EducationDashboard = lazy(() => import('./components/EducationDashboard').then((m) => ({ default: m.EducationDashboard })));
-const CulturalDashboard = lazy(() => import('./components/CulturalDashboard').then((m) => ({ default: m.CulturalDashboard })));
-const StudentAffairsDashboard = lazy(() => import('./components/StudentAffairsDashboard').then((m) => ({ default: m.StudentAffairsDashboard })));
-const SecurityDashboard = lazy(() => import('./components/SecurityDashboard').then((m) => ({ default: m.SecurityDashboard })));
-const ViceDeanDashboard = lazy(() => import('./components/ViceDeanDashboard').then((m) => ({ default: m.ViceDeanDashboard })));
-const LibraryDashboard = lazy(() => import('./components/LibraryDashboard').then((m) => ({ default: m.LibraryDashboard })));
-const SmartCampusDashboard = lazy(() => import('./components/SmartCampusDashboard').then((m) => ({ default: m.SmartCampusDashboard })));
-const GraduationDashboard = lazy(() => import('./components/GraduationDashboard').then((m) => ({ default: m.GraduationDashboard })));
+const StudentDashboard = lazyWithRetry(() => import('./components/StudentDashboard').then((m) => ({ default: m.StudentDashboard })));
+const SupervisorDashboard = lazyWithRetry(() => import('./components/SupervisorDashboard').then((m) => ({ default: m.SupervisorDashboard })));
+const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
+const MaintenanceDashboard = lazyWithRetry(() => import('./components/MaintenanceDashboard').then((m) => ({ default: m.MaintenanceDashboard })));
+const WarehouseDashboard = lazyWithRetry(() => import('./components/WarehouseDashboard').then((m) => ({ default: m.WarehouseDashboard })));
+const ProcurementDashboard = lazyWithRetry(() => import('./components/ProcurementDashboard').then((m) => ({ default: m.ProcurementDashboard })));
+const CounselorDashboard = lazyWithRetry(() => import('./components/CounselorDashboard').then((m) => ({ default: m.CounselorDashboard })));
+const FinanceDashboard = lazyWithRetry(() => import('./components/FinanceDashboard').then((m) => ({ default: m.FinanceDashboard })));
+const EducationDashboard = lazyWithRetry(() => import('./components/EducationDashboard').then((m) => ({ default: m.EducationDashboard })));
+const CulturalDashboard = lazyWithRetry(() => import('./components/CulturalDashboard').then((m) => ({ default: m.CulturalDashboard })));
+const StudentAffairsDashboard = lazyWithRetry(() => import('./components/StudentAffairsDashboard').then((m) => ({ default: m.StudentAffairsDashboard })));
+const SecurityDashboard = lazyWithRetry(() => import('./components/SecurityDashboard').then((m) => ({ default: m.SecurityDashboard })));
+const ViceDeanDashboard = lazyWithRetry(() => import('./components/ViceDeanDashboard').then((m) => ({ default: m.ViceDeanDashboard })));
+const LibraryDashboard = lazyWithRetry(() => import('./components/LibraryDashboard').then((m) => ({ default: m.LibraryDashboard })));
+const SmartCampusDashboard = lazyWithRetry(() => import('./components/SmartCampusDashboard').then((m) => ({ default: m.SmartCampusDashboard })));
+const GraduationDashboard = lazyWithRetry(() => import('./components/GraduationDashboard').then((m) => ({ default: m.GraduationDashboard })));
 import { resolveFontCssFamily } from './utils/fonts';
 import {
   DEFAULT_HOME_NOTES_TITLE,
@@ -259,6 +261,8 @@ export default function App() {
   );
   const [liveToasts, setLiveToasts] = useState<AppNotificationItem[]>([]);
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
+  const [selectedNotificationItem, setSelectedNotificationItem] =
+    useState<AppNotificationItem | null>(null);
   const [isCommunityChatOpen, setIsCommunityChatOpen] = useState(false);
   const [isNotifPromptSnoozed, setIsNotifPromptSnoozed] = useState<boolean>(() =>
     isNotificationPromptSnoozed()
@@ -428,7 +432,7 @@ export default function App() {
     setNotificationPermission(getNotificationPermissionState());
   }, [currentUser?.role, currentUser]);
 
-  // تشخیص پیام‌ها، اطلاعیه‌ها، نظرسنجی‌ها و انتخابات جدید و ارسال نوتیفیکیشن گوشی + توست زنده
+  // تشخیص پیام‌ها، اطلاعیه‌ها، تذکرات، نظرسنجی‌ها و انتخابات جدید و ارسال نوتیفیکیشن گوشی + توست زنده
   useEffect(() => {
     const newItems = detectNewUserNotifications({
       user: currentUser,
@@ -436,6 +440,7 @@ export default function App() {
       messages,
       surveys,
       elections: guildElections,
+      warnings,
       prefs: notificationPrefs,
     });
 
@@ -455,11 +460,10 @@ export default function App() {
     }
 
     const visibleBatch = newItems.slice(0, 3);
-    setLiveToasts((prev) => [...visibleBatch, ...prev].slice(0, 4));
-    visibleBatch.forEach((item) => {
-      window.setTimeout(() => {
-        setLiveToasts((prev) => prev.filter((t) => t.id !== item.id));
-      }, 7500);
+    setLiveToasts((prev) => {
+      const existingIds = new Set(prev.map((t) => t.id));
+      const fresh = visibleBatch.filter((i) => !existingIds.has(i.id));
+      return [...fresh, ...prev].slice(0, 4);
     });
 
     // ارسال نوتیفیکیشن سیستمی روی گوشی / مرورگر (در صورت مجوز فعال)
@@ -491,6 +495,7 @@ export default function App() {
     messages,
     surveys,
     guildElections,
+    warnings,
     notificationPrefs,
     notificationPermission,
   ]);
@@ -566,7 +571,7 @@ export default function App() {
   }, [currentUser]);
 
   const handleNotificationItemClick = useCallback(
-    (item: AppNotificationItem) => {
+    (item: AppNotificationItem, fromToast = false) => {
       const userKey = getUserNotificationKey(currentUser);
       setNotificationFeed((prev) => {
         const next = prev.map((n) => (n.id === item.id ? { ...n, read: true } : n));
@@ -574,9 +579,13 @@ export default function App() {
         return next;
       });
       setLiveToasts((prev) => prev.filter((t) => t.id !== item.id));
-      setIsNotificationModalOpen(false);
       if (item.category === 'message' && currentUser) {
+        setSelectedNotificationItem(null);
+        setIsNotificationModalOpen(false);
         setIsMessagesModalOpen(true);
+      } else if (fromToast) {
+        setSelectedNotificationItem(item);
+        setIsNotificationModalOpen(true);
       }
     },
     [currentUser]
@@ -1131,6 +1140,15 @@ export default function App() {
           );
         })()}
 
+        {/* نوار فشرده و پاپ‌آپ اطلاعیه‌های مهم برای تمامی کاربری‌های غیر از دانشجو (کاربری دانشجو درون داشبورد خودش دارد) */}
+        {currentUser && currentUser.role !== 'student' && (
+          <ImportantAnnouncementsWidget
+            announcements={announcements}
+            className="mb-5"
+          />
+        )}
+
+        <ChunkErrorBoundary resetKey={currentUser?.role || 'guest'}>
         <Suspense
           fallback={
             currentUser ? (
@@ -1400,6 +1418,7 @@ export default function App() {
           />
         )}
         </Suspense>
+        </ChunkErrorBoundary>
 
       </main>
 
@@ -1455,6 +1474,7 @@ export default function App() {
       </footer>
 
       {/* مودال‌های مشترک با بارگذاری تنبل (تنها هنگام باز شدن) */}
+      <ChunkErrorBoundary resetKey={`modals_${currentUser?.role || 'guest'}`}>
       <Suspense fallback={null}>
         {isAboutModalOpen && (
           <AboutModal
@@ -1585,28 +1605,34 @@ export default function App() {
             />
           )}
       </Suspense>
+      </ChunkErrorBoundary>
 
       <OfflineIndicator />
 
-      {/* اعلان‌های زنده داخل برنامه (Toast) */}
+      {/* اعلان‌های زنده داخل برنامه (Toast) با انیمیشن نرم ورود و محو شدن خودکار */}
       <LiveNotificationToasts
         toasts={liveToasts}
         onDismiss={(id) => setLiveToasts((prev) => prev.filter((t) => t.id !== id))}
-        onClickToast={handleNotificationItemClick}
+        onClickToast={(item) => handleNotificationItemClick(item, true)}
       />
 
       {/* مدال مرکز اعلان‌ها و تنظیمات نوتیفیکیشن گوشی */}
       <NotificationCenterModal
         isOpen={isNotificationModalOpen}
-        onClose={() => setIsNotificationModalOpen(false)}
+        onClose={() => {
+          setIsNotificationModalOpen(false);
+          setSelectedNotificationItem(null);
+        }}
         permission={notificationPermission}
         prefs={notificationPrefs}
         notifications={notificationFeed}
+        selectedItem={selectedNotificationItem}
+        onClearSelectedItem={() => setSelectedNotificationItem(null)}
         onRequestPermission={handleRequestNotifications}
         onUpdatePrefs={handleUpdateNotificationPrefs}
         onMarkAllRead={handleMarkAllNotificationsRead}
         onClearAll={handleClearNotifications}
-        onNotificationClick={handleNotificationItemClick}
+        onNotificationClick={(item) => handleNotificationItemClick(item, false)}
       />
 
       {/* مدال بزرگ‌نمایی و نمایش در ابعاد واقعی تصویر اطلاعیه */}
