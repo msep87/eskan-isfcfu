@@ -25,6 +25,7 @@ import { CulturalDashboard } from './CulturalDashboard';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { StudentReferralModal } from './StudentReferralModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { CommunityChatHub } from './CommunityChatHub';
 import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
 import {
   StudentListPaginationBar,
@@ -61,6 +62,7 @@ import {
   ClipboardCheck,
   Send,
   GraduationCap,
+  MessagesSquare,
 } from 'lucide-react';
 
 interface ViceDeanDashboardProps {
@@ -89,7 +91,8 @@ type ViceDeanTab =
   | 'cultural'
   | 'detailed_reports'
   | 'messages_monitor'
-  | 'clearance';
+  | 'clearance'
+  | 'community_chat';
 
 type ReportSortKey =
   | 'fullName'
@@ -957,6 +960,24 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
             </span>
           )}
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('community_chat')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
+            activeTab === 'community_chat'
+              ? 'bg-emerald-700 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <MessagesSquare className="w-4 h-4" />
+          <span>نظارت بر تالارها و پیام‌رسان</span>
+          {Storage.getCommunityChatReports().filter((r) => r.status === 'pending').length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
+              {Storage.getCommunityChatReports().filter((r) => r.status === 'pending').length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* تب ۱: تمامی امکانات سرپرستی */}
@@ -1748,6 +1769,18 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
           reviewerName={staff.fullName}
           settings={settings}
           onDataChange={onRefreshData}
+        />
+      )}
+
+      {/* تب ۷: نظارت بر تالارهای گفتگو و پیام‌رسان دانشجویی */}
+      {activeTab === 'community_chat' && (
+        <CommunityChatHub
+          currentUser={{ role: 'vice_dean', staff }}
+          students={students}
+          mode="embedded"
+          initialView="chat"
+          cloudSyncTick={cloudSyncTick}
+          onRefreshGlobalData={onRefreshData}
         />
       )}
 

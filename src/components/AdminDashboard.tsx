@@ -94,6 +94,7 @@ import { AdminSurveyManager } from './AdminSurveyManager';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { CloudConnectionDiagnosticsPanel } from './CloudConnectionDiagnosticsPanel';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
+import { CommunityChatHub } from './CommunityChatHub';
 import { AdminStudentPortalsEditor } from './AdminStudentPortalsEditor';
 import { getStudentResidenceType, getStudentAdmissionStatus } from '../utils/financeUtils';
 import {
@@ -207,6 +208,7 @@ import {
   PanelTop,
   PinOff,
   Menu,
+  MessagesSquare,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -281,6 +283,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'counseling'
     | 'surveys'
     | 'clearance'
+    | 'community_chat'
     | 'activity_log'
     | 'settings';
   type AdminMenuLayoutMode = 'top_cards' | 'sidebar_right' | 'sidebar_left';
@@ -2909,6 +2912,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             badgeClass: 'bg-sky-100 text-sky-800 dark:bg-sky-900/70 dark:text-sky-200',
           },
           {
+            key: 'community_chat',
+            title: 'پیام‌رسان و تالارهای گفتگو',
+            desc: 'تنظیمات کامل چت، باز/بسته کردن تالار عمومی، تأیید گروه‌ها، مسدودسازی و نظارت',
+            icon: MessagesSquare,
+            iconTone: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800',
+            activeRing: 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 shadow-md shadow-emerald-500/10',
+            badge: (() => {
+              const p =
+                Storage.getCommunityForums().filter(
+                  (f) => !f.isPublicForum && f.status === 'pending' && f.adminApproval.status === 'pending'
+                ).length + Storage.getCommunityChatReports().filter((r) => r.status === 'pending').length;
+              return p > 0 ? `${p} منتظر بررسی` : undefined;
+            })(),
+            badgeClass: 'bg-rose-100 text-rose-800 dark:bg-rose-900/70 dark:text-rose-200',
+          },
+          {
             key: 'activity_log',
             title: 'لاگ فعالیت‌ها و دسترسی‌ها',
             desc: 'تاریخچه عملیات کاربران، رخدادهای سیستمی و پایش امنیتی',
@@ -3407,6 +3426,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       activeRing: 'border-sky-500 bg-sky-50/70 dark:bg-sky-950/40',
                     },
                     {
+                      key: 'community_chat' as const,
+                      title: 'پیام‌رسان و تالارهای گفتگو',
+                      desc: 'تنظیمات کامل چت، تالار عمومی، تأیید گروه‌ها و نظارت',
+                      icon: MessagesSquare,
+                      iconTone: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800',
+                      activeRing: 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40',
+                    },
+                    {
                       key: 'activity_log' as const,
                       title: 'لاگ فعالیت‌ها و دسترسی‌ها',
                       desc: 'تاریخچه عملیات و پایش امنیتی سامانه',
@@ -3558,6 +3585,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           reviewerName="مدیر کل سامانه"
           settings={localSettings}
           onDataChange={onRefreshData}
+        />
+      )}
+
+      {/* بخش مدیریت کامل پیام‌رسان دانشجویی، تالار گفتگوی عمومی و گروه‌های تخصصی */}
+      {mainTab === 'community_chat' && (
+        <CommunityChatHub
+          currentUser={{ role: 'admin', name: 'مدیر کل سامانه', username: 'admin' }}
+          students={students}
+          mode="embedded"
+          initialView="moderation"
+          cloudSyncTick={cloudSyncTick}
+          onRefreshGlobalData={onRefreshData}
         />
       )}
 

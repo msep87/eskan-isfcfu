@@ -17,6 +17,9 @@ import {
   RefreshCw,
   Menu,
   X,
+  Bell,
+  BellRing,
+  MessagesSquare,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -35,6 +38,11 @@ interface NavbarProps {
   onOpenUserGuide: () => void;
   onRefreshCloud?: () => void;
   isRefreshingCloud?: boolean;
+  onOpenNotifications?: () => void;
+  unreadNotificationsCount?: number;
+  notificationPermission?: NotificationPermission | 'unsupported';
+  onOpenCommunityChat?: () => void;
+  communityModerationBadge?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -53,6 +61,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenUserGuide,
   onRefreshCloud,
   isRefreshingCloud = false,
+  onOpenNotifications,
+  unreadNotificationsCount = 0,
+  notificationPermission = 'default',
+  onOpenCommunityChat,
+  communityModerationBadge = 0,
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -239,6 +252,56 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
+            {onOpenNotifications && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenNotifications();
+                }}
+                className={`relative p-2 rounded-xl transition cursor-pointer ${
+                  notificationPermission === 'granted'
+                    ? 'text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 border border-teal-200/80 dark:border-teal-800'
+                    : 'text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200/80 dark:border-amber-800'
+                }`}
+                title="اعلان‌ها و نوتیفیکیشن گوشی"
+                aria-label="اعلان‌ها و نوتیفیکیشن گوشی"
+              >
+                {notificationPermission === 'granted' ? (
+                  <Bell className="w-4 h-4" />
+                ) : (
+                  <BellRing className="w-4 h-4" />
+                )}
+                {unreadNotificationsCount > 0 ? (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center shadow-xs">
+                    {unreadNotificationsCount > 9 ? '9+' : unreadNotificationsCount}
+                  </span>
+                ) : notificationPermission === 'default' ? (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                ) : null}
+              </button>
+            )}
+
+            {currentUser && onOpenCommunityChat && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenCommunityChat();
+                }}
+                className="relative p-2 rounded-xl text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 border border-teal-200/80 dark:border-teal-800 transition cursor-pointer"
+                title="تالار گفتگوی عمومی و پیام‌رسان دانشجویی"
+                aria-label="تالار گفتگوی عمومی و پیام‌رسان دانشجویی"
+              >
+                <MessagesSquare className="w-4 h-4" />
+                {communityModerationBadge > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center shadow-xs">
+                    {communityModerationBadge > 9 ? '9+' : communityModerationBadge}
+                  </span>
+                )}
+              </button>
+            )}
+
             {currentUser && (
               <button
                 type="button"
@@ -347,6 +410,55 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
+
+            {/* دکمه اعلان‌ها و نوتیفیکیشن فوری */}
+            {onOpenNotifications && (
+              <button
+                type="button"
+                onClick={onOpenNotifications}
+                className={`relative p-2 rounded-xl transition cursor-pointer ${
+                  notificationPermission === 'granted'
+                    ? 'text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-950/60'
+                    : 'text-amber-700 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 border border-amber-200/80 dark:border-amber-800'
+                }`}
+                title={
+                  notificationPermission === 'granted'
+                    ? 'مرکز اعلان‌ها و تنظیمات نوتیفیکیشن (فعال)'
+                    : 'روشن کردن نوتیفیکیشن فوری گوشی و مرورگر'
+                }
+              >
+                {notificationPermission === 'granted' ? (
+                  <Bell className="w-4 h-4" />
+                ) : (
+                  <BellRing className="w-4 h-4" />
+                )}
+                {unreadNotificationsCount > 0 ? (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center shadow-xs">
+                    {unreadNotificationsCount > 9 ? '9+' : unreadNotificationsCount}
+                  </span>
+                ) : notificationPermission === 'default' ? (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                ) : null}
+              </button>
+            )}
+
+            {/* تالار گفتگوی عمومی و پیام‌رسان دانشجویی - برای تمام کاربران واردشده */}
+            {currentUser && onOpenCommunityChat && (
+              <button
+                type="button"
+                onClick={onOpenCommunityChat}
+                className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-gradient-to-l from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white text-[11px] font-extrabold shadow-xs transition cursor-pointer"
+                title="تالار گفتگوی عمومی، گروه‌های تخصصی و پیام‌رسان دانشجویی"
+              >
+                <MessagesSquare className="w-3.5 h-3.5" />
+                <span className="hidden lg:inline">تالار گفتگو</span>
+                {communityModerationBadge > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
+                    {communityModerationBadge > 9 ? '9+' : communityModerationBadge}
+                  </span>
+                )}
+              </button>
+            )}
 
             {/* صندوق پیام‌ها - فقط برای کاربران لاگین شده */}
             {currentUser && (
@@ -629,6 +741,25 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="col-span-2 flex items-center justify-start">
                 <PWAInstallButton variant="navbar" />
               </div>
+
+              {currentUser && onOpenCommunityChat && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    onOpenCommunityChat();
+                  }}
+                  className="col-span-2 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-gradient-to-l from-teal-600 to-emerald-600 text-white text-xs font-extrabold shadow-xs cursor-pointer"
+                >
+                  <MessagesSquare className="w-4 h-4" />
+                  <span>تالار گفتگوی عمومی و پیام‌رسان دانشجویی</span>
+                  {communityModerationBadge > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
+                      {communityModerationBadge}
+                    </span>
+                  )}
+                </button>
+              )}
 
               {canViewReports && (
                 <button

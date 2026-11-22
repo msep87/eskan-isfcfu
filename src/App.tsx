@@ -18,11 +18,37 @@ import {
   FinanceStaff,
   StudentFinancialRecord,
   EducationStaff,
+  PeriodicSurvey,
+  GuildElection,
 } from './types';
 import { Storage, initializeStorageIfNeeded } from './utils/storage';
+import {
+  AppNotificationItem,
+  NotificationPreferences,
+  detectNewUserNotifications,
+  dispatchOSNotification,
+  getNotificationPermissionState,
+  getUserNotificationKey,
+  isIOSDevice,
+  isNotificationPromptSnoozed,
+  isRunningStandalonePWA,
+  loadNotificationFeed,
+  loadNotificationPrefs,
+  playNotificationChime,
+  requestSystemNotificationPermission,
+  saveNotificationFeed,
+  saveNotificationPrefs,
+  snoozeNotificationPrompt,
+  updateAppIconBadge,
+} from './utils/notificationManager';
 import { Navbar } from './components/Navbar';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { NotificationCenterModal } from './components/NotificationCenterModal';
+import {
+  NotificationPromptBanner,
+  LiveNotificationToasts,
+} from './components/NotificationPromptBanner';
 import type { ExcelImportTab } from './components/ExcelImportModal';
 import { RichTextDisplay } from './components/RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './components/ImageLightboxModal';
@@ -37,6 +63,7 @@ const ChangePasswordModal = lazy(() => import('./components/ChangePasswordModal'
 const AboutModal = lazy(() => import('./components/AboutModal').then((m) => ({ default: m.AboutModal })));
 const UserGuideModal = lazy(() => import('./components/UserGuideModal').then((m) => ({ default: m.UserGuideModal })));
 const AiDormAssistant = lazy(() => import('./components/AiDormAssistant').then((m) => ({ default: m.AiDormAssistant })));
+const CommunityChatHub = lazy(() => import('./components/CommunityChatHub').then((m) => ({ default: m.CommunityChatHub })));
 
 const StudentDashboard = lazy(() => import('./components/StudentDashboard').then((m) => ({ default: m.StudentDashboard })));
 const SupervisorDashboard = lazy(() => import('./components/SupervisorDashboard').then((m) => ({ default: m.SupervisorDashboard })));
@@ -213,10 +240,29 @@ export default function App() {
   const [studentFinances, setStudentFinances] = useState<StudentFinancialRecord[]>(Storage.getStudentFinances());
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(Storage.getInventoryItems());
   const [warehouseRequests, setWarehouseRequests] = useState<WarehouseRequest[]>(Storage.getWarehouseRequests());
+  const [surveys, setSurveys] = useState<PeriodicSurvey[]>(Storage.getSurveys());
+  const [guildElections, setGuildElections] = useState<GuildElection[]>(Storage.getGuildElections());
 
   const [cloudSyncTick, setCloudSyncTick] = useState<number>(0);
   const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false);
   const lastSyncCheckRef = useRef<number>(0);
+
+  // وضعیت سامانه نوتیفیکیشن گوشی و اپلیکیشن (PWA)
+  const [notificationPermission, setNotificationPermission] = useState<
+    NotificationPermission | 'unsupported'
+  >(() => getNotificationPermissionState());
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(() =>
+    loadNotificationPrefs()
+  );
+  const [notificationFeed, setNotificationFeed] = useState<AppNotificationItem[]>(() =>
+    loadNotificationFeed(getUserNotificationKey(Storage.getCurrentUser()))
+  );
+  const [liveToasts, setLiveToasts] = useState<AppNotificationItem[]>([]);
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
+  const [isCommunityChatOpen, setIsCommunityChatOpen] = useState(false);
+  const [isNotifPromptSnoozed, setIsNotifPromptSnoozed] = useState<boolean>(() =>
+    isNotificationPromptSnoozed()
+  );
 
   // بروزرسانی داده‌ها از storage
   const refreshAllData = useCallback(() => {
@@ -238,6 +284,8 @@ export default function App() {
     setStudentFinances(Storage.getStudentFinances());
     setInventoryItems(Storage.getInventoryItems());
     setWarehouseRequests(Storage.getWarehouseRequests());
+    setSurveys(Storage.getSurveys());
+    setGuildElections(Storage.getGuildElections());
 
     const user = Storage.getCurrentUser();
     if (user && user.role === 'student') {
@@ -353,16 +401,192 @@ export default function App() {
       }
     };
 
+    const handleVisibilityResume = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        setNotificationPermission(getNotificationPermissionState());
+        void handleBackgroundSync();
+      }
+    };
+
     window.addEventListener('focus', handleBackgroundSync);
-    const intervalId = window.setInterval(handleBackgroundSync, 60000);
+    document.addEventListener('visibilitychange', handleVisibilityResume);
+    const intervalId = window.setInterval(handleBackgroundSync, 45000);
 
     return () => {
       isMounted = false;
       unsubscribeCloudUpdates();
       window.removeEventListener('focus', handleBackgroundSync);
+      document.removeEventListener('visibilitychange', handleVisibilityResume);
       window.clearInterval(intervalId);
     };
   }, [refreshAllData]);
+
+  // بارگذاری تاریخچه اعلان‌های کاربر فعلی هنگام تغییر حساب کاربری
+  useEffect(() => {
+    const userKey = getUserNotificationKey(currentUser);
+    setNotificationFeed(loadNotificationFeed(userKey));
+    setNotificationPermission(getNotificationPermissionState());
+  }, [currentUser?.role, currentUser]);
+
+  // تشخیص پیام‌ها، اطلاعیه‌ها، نظرسنجی‌ها و انتخابات جدید و ارسال نوتیفیکیشن گوشی + توست زنده
+  useEffect(() => {
+    const newItems = detectNewUserNotifications({
+      user: currentUser,
+      announcements,
+      messages,
+      surveys,
+      elections: guildElections,
+      prefs: notificationPrefs,
+    });
+
+    if (newItems.length === 0) return;
+
+    const userKey = getUserNotificationKey(currentUser);
+    setNotificationFeed((prev) => {
+      const merged = [...newItems, ...prev].slice(0, 40);
+      saveNotificationFeed(userKey, merged);
+      return merged;
+    });
+
+    if (!notificationPrefs.enabled) return;
+
+    if (notificationPrefs.soundEnabled) {
+      playNotificationChime();
+    }
+
+    const visibleBatch = newItems.slice(0, 3);
+    setLiveToasts((prev) => [...visibleBatch, ...prev].slice(0, 4));
+    visibleBatch.forEach((item) => {
+      window.setTimeout(() => {
+        setLiveToasts((prev) => prev.filter((t) => t.id !== item.id));
+      }, 7500);
+    });
+
+    // ارسال نوتیفیکیشن سیستمی روی گوشی / مرورگر (در صورت مجوز فعال)
+    if (notificationPermission === 'granted') {
+      if (newItems.length <= 2) {
+        newItems.forEach((item) => {
+          void dispatchOSNotification({
+            title: item.title,
+            body: item.body,
+            tag: item.id,
+            category: item.category,
+            itemId: item.itemId,
+          });
+        });
+      } else {
+        const first = newItems[0];
+        void dispatchOSNotification({
+          title: `${newItems.length} اعلان جدید در سامانه خدمات دانشجویی`,
+          body: `${first.title} و ${newItems.length - 1} مورد جدید دیگر`,
+          tag: 'cfuis-batch-alert',
+          category: first.category,
+          itemId: first.itemId,
+        });
+      }
+    }
+  }, [
+    currentUser,
+    announcements,
+    messages,
+    surveys,
+    guildElections,
+    notificationPrefs,
+    notificationPermission,
+  ]);
+
+  // بروزرسانی عدد نشانگر روی آیکون اپلیکیشن نصب‌شده (App Badging API)
+  const unreadNotificationsCount = notificationFeed.filter((n) => !n.read).length;
+  useEffect(() => {
+    updateAppIconBadge(unreadNotificationsCount);
+  }, [unreadNotificationsCount]);
+
+  // مدیریت کلیک روی نوتیفیکیشن سیستمی از طریق Service Worker یا پنجره
+  useEffect(() => {
+    const handleNotifOpen = (category?: string) => {
+      if (category === 'message' && currentUser) {
+        setIsMessagesModalOpen(true);
+      } else {
+        setIsNotificationModalOpen(true);
+      }
+    };
+
+    const onWindowClick = (e: Event) => {
+      const detail = (e as CustomEvent<{ category?: string }>).detail;
+      handleNotifOpen(detail?.category);
+    };
+
+    const onSwMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'APP_NOTIFICATION_CLICK') {
+        handleNotifOpen(event.data.category);
+      }
+    };
+
+    window.addEventListener('app-notification-click', onWindowClick);
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', onSwMessage);
+    }
+
+    return () => {
+      window.removeEventListener('app-notification-click', onWindowClick);
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', onSwMessage);
+      }
+    };
+  }, [currentUser]);
+
+  const handleRequestNotifications = useCallback(async () => {
+    const res = await requestSystemNotificationPermission();
+    setNotificationPermission(res);
+    if (res === 'granted') {
+      setNotificationPrefs(loadNotificationPrefs());
+      setIsNotifPromptSnoozed(false);
+    }
+    return res;
+  }, []);
+
+  const handleUpdateNotificationPrefs = useCallback((next: NotificationPreferences) => {
+    setNotificationPrefs(next);
+    saveNotificationPrefs(next);
+  }, []);
+
+  const handleMarkAllNotificationsRead = useCallback(() => {
+    const userKey = getUserNotificationKey(currentUser);
+    setNotificationFeed((prev) => {
+      const next = prev.map((n) => ({ ...n, read: true }));
+      saveNotificationFeed(userKey, next);
+      return next;
+    });
+  }, [currentUser]);
+
+  const handleClearNotifications = useCallback(() => {
+    const userKey = getUserNotificationKey(currentUser);
+    setNotificationFeed([]);
+    saveNotificationFeed(userKey, []);
+  }, [currentUser]);
+
+  const handleNotificationItemClick = useCallback(
+    (item: AppNotificationItem) => {
+      const userKey = getUserNotificationKey(currentUser);
+      setNotificationFeed((prev) => {
+        const next = prev.map((n) => (n.id === item.id ? { ...n, read: true } : n));
+        saveNotificationFeed(userKey, next);
+        return next;
+      });
+      setLiveToasts((prev) => prev.filter((t) => t.id !== item.id));
+      setIsNotificationModalOpen(false);
+      if (item.category === 'message' && currentUser) {
+        setIsMessagesModalOpen(true);
+      }
+    },
+    [currentUser]
+  );
+
+  const shouldShowNotifPromptBanner =
+    !isNotifPromptSnoozed &&
+    (Boolean(currentUser) || isRunningStandalonePWA()) &&
+    (notificationPermission === 'default' ||
+      (isIOSDevice() && !isRunningStandalonePWA() && notificationPermission === 'unsupported'));
 
   // بروزرسانی دستی اطلاعات (باطل‌سازی فوری کش ۵ دقیقه‌ای sessionStorage و دریافت تازه از Supabase)
   const handleManualCloudRefresh = useCallback(async () => {
@@ -617,6 +841,32 @@ export default function App() {
         onOpenUserGuide={() => handleOpenUserGuide()}
         onRefreshCloud={() => void handleManualCloudRefresh()}
         isRefreshingCloud={isManualRefreshing}
+        onOpenNotifications={() => setIsNotificationModalOpen(true)}
+        unreadNotificationsCount={unreadNotificationsCount}
+        notificationPermission={notificationPermission}
+        onOpenCommunityChat={() => setIsCommunityChatOpen(true)}
+        communityModerationBadge={
+          currentUser && (currentUser.role === 'admin' || currentUser.role === 'security' || currentUser.role === 'vice_dean')
+            ? Storage.getCommunityForums().filter((f) => {
+                if (f.isPublicForum || f.status !== 'pending') return false;
+                if (currentUser.role === 'admin') return f.adminApproval.status === 'pending';
+                if (currentUser.role === 'security') return f.securityApproval.status === 'pending';
+                return true;
+              }).length + Storage.getCommunityChatReports().filter((r) => r.status === 'pending').length
+            : 0
+        }
+      />
+
+      {/* بنر دعوت به فعال‌سازی نوتیفیکیشن فوری گوشی و اپلیکیشن */}
+      <NotificationPromptBanner
+        visible={shouldShowNotifPromptBanner}
+        permission={notificationPermission}
+        onEnable={handleRequestNotifications}
+        onSnooze={() => {
+          snoozeNotificationPrompt(2);
+          setIsNotifPromptSnoozed(true);
+        }}
+        onOpenSettings={() => setIsNotificationModalOpen(true)}
       />
 
       {/* نوار هشدار و بازگشت سریع هنگام ورود مستقیم مدیر کل به کارتابل کاربر */}
@@ -1294,6 +1544,17 @@ export default function App() {
           />
         )}
 
+        {currentUser && isCommunityChatOpen && (
+          <CommunityChatHub
+            currentUser={currentUser}
+            students={students}
+            mode="modal"
+            cloudSyncTick={cloudSyncTick}
+            onClose={() => setIsCommunityChatOpen(false)}
+            onRefreshGlobalData={refreshAllData}
+          />
+        )}
+
         {currentUser && isChangePasswordModalOpen && (
           <ChangePasswordModal
             isOpen={isChangePasswordModalOpen}
@@ -1326,6 +1587,27 @@ export default function App() {
       </Suspense>
 
       <OfflineIndicator />
+
+      {/* اعلان‌های زنده داخل برنامه (Toast) */}
+      <LiveNotificationToasts
+        toasts={liveToasts}
+        onDismiss={(id) => setLiveToasts((prev) => prev.filter((t) => t.id !== id))}
+        onClickToast={handleNotificationItemClick}
+      />
+
+      {/* مدال مرکز اعلان‌ها و تنظیمات نوتیفیکیشن گوشی */}
+      <NotificationCenterModal
+        isOpen={isNotificationModalOpen}
+        onClose={() => setIsNotificationModalOpen(false)}
+        permission={notificationPermission}
+        prefs={notificationPrefs}
+        notifications={notificationFeed}
+        onRequestPermission={handleRequestNotifications}
+        onUpdatePrefs={handleUpdateNotificationPrefs}
+        onMarkAllRead={handleMarkAllNotificationsRead}
+        onClearAll={handleClearNotifications}
+        onNotificationClick={handleNotificationItemClick}
+      />
 
       {/* مدال بزرگ‌نمایی و نمایش در ابعاد واقعی تصویر اطلاعیه */}
       <ImageLightboxModal

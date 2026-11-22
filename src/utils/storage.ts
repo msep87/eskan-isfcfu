@@ -69,7 +69,24 @@ import {
   ClearanceUnitRole,
   ClearanceUnitApproval,
   GraduationClearanceRequest,
+  CommunityChatSettings,
+  CommunityForum,
+  CommunityForumCategory,
+  CommunityResidenceScope,
+  CommunityChatMessage,
+  CommunityChatRoomType,
+  CommunityChatBan,
+  CommunityChatReport,
+  CommunityUserChatPrefs,
+  PublicStudentChatProfile,
 } from '../types';
+import {
+  DEFAULT_COMMUNITY_CHAT_SETTINGS,
+  INITIAL_PUBLIC_FORUM,
+  PUBLIC_FORUM_ID,
+  makeDmRoomId,
+} from './communityStickers';
+import { getStudentAdmissionStatus, isStudentDormResident } from './financeUtils';
 import {
   INITIAL_SETTINGS,
   INITIAL_DORMITORIES,
@@ -250,6 +267,12 @@ const STORAGE_KEYS = {
   LIBRARY_BOOKS: 'farhangian_dorm_library_books_prod',
   LIBRARY_BOOK_REQUESTS: 'farhangian_dorm_library_book_requests_prod',
   GRADUATION_CLEARANCES: 'farhangian_dorm_graduation_clearances_prod',
+  COMMUNITY_CHAT_SETTINGS: 'farhangian_dorm_community_chat_settings_prod',
+  COMMUNITY_FORUMS: 'farhangian_dorm_community_forums_prod',
+  COMMUNITY_CHAT_MESSAGES: 'farhangian_dorm_community_chat_messages_prod',
+  COMMUNITY_CHAT_BANS: 'farhangian_dorm_community_chat_bans_prod',
+  COMMUNITY_CHAT_REPORTS: 'farhangian_dorm_community_chat_reports_prod',
+  COMMUNITY_USER_PREFS: 'farhangian_dorm_community_user_prefs_prod',
 };
 
 export const SECURITY_REPORT_PRESETS: Array<{
@@ -495,6 +518,12 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOKS, INITIAL_LIBRARY_BOOKS);
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, INITIAL_LIBRARY_BOOK_REQUESTS);
   setIfMissing(STORAGE_KEYS.GRADUATION_CLEARANCES, INITIAL_GRADUATION_CLEARANCES);
+  setIfMissing(STORAGE_KEYS.COMMUNITY_CHAT_SETTINGS, DEFAULT_COMMUNITY_CHAT_SETTINGS);
+  setIfMissing(STORAGE_KEYS.COMMUNITY_FORUMS, [INITIAL_PUBLIC_FORUM]);
+  setIfMissing(STORAGE_KEYS.COMMUNITY_CHAT_MESSAGES, []);
+  setIfMissing(STORAGE_KEYS.COMMUNITY_CHAT_BANS, []);
+  setIfMissing(STORAGE_KEYS.COMMUNITY_CHAT_REPORTS, []);
+  setIfMissing(STORAGE_KEYS.COMMUNITY_USER_PREFS, { rulesAcceptedUserIds: [], blockedByUser: {} });
 
   try {
     if (!localStorage.getItem(STORAGE_KEYS.ROOMS) || !localStorage.getItem(STORAGE_KEYS.BEDS)) {
@@ -745,6 +774,12 @@ const IMMEDIATE_CLOUD_KEYS = new Set<string>([
   ...STAFF_AUTH_KEYS,
   STORAGE_KEYS.STUDENTS,
   STORAGE_KEYS.SETTINGS,
+  STORAGE_KEYS.COMMUNITY_CHAT_SETTINGS,
+  STORAGE_KEYS.COMMUNITY_FORUMS,
+  STORAGE_KEYS.COMMUNITY_CHAT_MESSAGES,
+  STORAGE_KEYS.COMMUNITY_CHAT_BANS,
+  STORAGE_KEYS.COMMUNITY_CHAT_REPORTS,
+  STORAGE_KEYS.COMMUNITY_USER_PREFS,
 ]);
 
 // کلیدهای عمومی قابل کش در sessionStorage به مدت ۵ دقیقه (جلوگیری از فراخوانی تکراری Supabase در هر رفرش)
@@ -782,12 +817,19 @@ const STUDENT_OPERATIONAL_KEYS: string[] = [
   STORAGE_KEYS.SHIFT_SCHEDULES,
   STORAGE_KEYS.COUNSELOR_SHIFTS,
   STORAGE_KEYS.COUNSELORS,
+  STORAGE_KEYS.COMMUNITY_CHAT_SETTINGS,
+  STORAGE_KEYS.COMMUNITY_FORUMS,
+  STORAGE_KEYS.COMMUNITY_CHAT_MESSAGES,
+  STORAGE_KEYS.COMMUNITY_CHAT_BANS,
+  STORAGE_KEYS.COMMUNITY_CHAT_REPORTS,
+  STORAGE_KEYS.COMMUNITY_USER_PREFS,
 ];
 
 // کلیدهای app_storage که هرگز نباید رشته تصویری Base64 (data:image) در آن‌ها ذخیره شود
 const MEDIA_ALLOWED_APP_STORAGE_KEYS = new Set<string>([
   STORAGE_KEYS.SETTINGS,
   STORAGE_KEYS.ANNOUNCEMENTS,
+  STORAGE_KEYS.COMMUNITY_CHAT_MESSAGES,
 ]);
 
 interface PublicSessionCacheMeta {
@@ -1078,6 +1120,12 @@ const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.SURVEY_RESPONSES]: 'پاسخ‌های نظرسنجی',
   [STORAGE_KEYS.GUILD_ELECTIONS]: 'انتخابات شورای صنفی',
   [STORAGE_KEYS.GUILD_ELECTION_VOTES]: 'آرای انتخابات شورای صنفی',
+  [STORAGE_KEYS.COMMUNITY_CHAT_SETTINGS]: 'تنظیمات تالارهای گفتگو و پیام‌رسان دانشجویی',
+  [STORAGE_KEYS.COMMUNITY_FORUMS]: 'تالارها و گروه‌های گفتگوی تخصصی',
+  [STORAGE_KEYS.COMMUNITY_CHAT_MESSAGES]: 'پیام‌های تالارها و پیام‌رسان دانشجویی',
+  [STORAGE_KEYS.COMMUNITY_CHAT_BANS]: 'فهرست مسدودشدگان پیام‌رسان دانشجویی',
+  [STORAGE_KEYS.COMMUNITY_CHAT_REPORTS]: 'گزارش‌های تخلف پیام‌رسان دانشجویی',
+  [STORAGE_KEYS.COMMUNITY_USER_PREFS]: 'تنظیمات و تعهدنامه‌های کاربران در پیام‌رسان',
 };
 
 const cloudTelemetryState = {
@@ -14086,6 +14134,935 @@ export const Storage = {
       recommendations,
     };
   },
+
+  // -------------------------------------------------------------
+  // تالار گفتگوی عمومی، پیام‌رسان دانشجویی و تالارها/گروه‌های تخصصی تحت نظارت
+  // -------------------------------------------------------------
+  getCommunityChatSettings: (): CommunityChatSettings => {
+    const raw = get<Partial<CommunityChatSettings>>(
+      STORAGE_KEYS.COMMUNITY_CHAT_SETTINGS,
+      DEFAULT_COMMUNITY_CHAT_SETTINGS
+    );
+    return {
+      ...DEFAULT_COMMUNITY_CHAT_SETTINGS,
+      ...raw,
+      bannedKeywords: Array.isArray(raw?.bannedKeywords)
+        ? raw.bannedKeywords
+        : DEFAULT_COMMUNITY_CHAT_SETTINGS.bannedKeywords,
+      rulesText:
+        typeof raw?.rulesText === 'string' && raw.rulesText.trim()
+          ? raw.rulesText
+          : DEFAULT_COMMUNITY_CHAT_SETTINGS.rulesText,
+    };
+  },
+
+  setCommunityChatSettings: (
+    next: CommunityChatSettings,
+    actorName = 'مدیر کل سامانه'
+  ): boolean => {
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const payload: CommunityChatSettings = {
+      ...DEFAULT_COMMUNITY_CHAT_SETTINGS,
+      ...next,
+      updatedAt: nowStr,
+      updatedBy: actorName,
+    };
+    const ok = set(STORAGE_KEYS.COMMUNITY_CHAT_SETTINGS, payload);
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action: 'بروزرسانی تنظیمات پیام‌رسان و تالارهای گفتگو',
+      details: `تنظیمات سامانه چت (کل سامانه: ${payload.isChatSystemEnabled ? 'باز' : 'بسته'} | تالار عمومی: ${
+        payload.isPublicForumOpen ? 'باز' : 'بسته'
+      } | چت خصوصی: ${payload.isPrivateChatEnabled ? 'باز' : 'بسته'} | عکس تالار: ${
+        payload.allowPhotosInForums ? 'مجاز' : 'ممنوع'
+      } | استیکر: ${payload.allowStickers ? 'مجاز' : 'ممنوع'}) توسط ${actorName} ذخیره شد.`,
+      targetName: 'تنظیمات پیام‌رسان',
+      severity: 'info',
+    });
+    return ok;
+  },
+
+  getCommunityForums: (): CommunityForum[] => {
+    const list = get<CommunityForum[]>(STORAGE_KEYS.COMMUNITY_FORUMS, [INITIAL_PUBLIC_FORUM]);
+    const safeList = Array.isArray(list) ? [...list] : [];
+    const hasPublic = safeList.some((f) => f.id === PUBLIC_FORUM_ID || f.isPublicForum);
+    if (!hasPublic) {
+      safeList.unshift({ ...INITIAL_PUBLIC_FORUM });
+    }
+    return safeList;
+  },
+
+  setCommunityForums: (forums: CommunityForum[]): boolean => {
+    const safeList = Array.isArray(forums) ? [...forums] : [];
+    if (!safeList.some((f) => f.id === PUBLIC_FORUM_ID || f.isPublicForum)) {
+      safeList.unshift({ ...INITIAL_PUBLIC_FORUM });
+    }
+    return set(STORAGE_KEYS.COMMUNITY_FORUMS, safeList);
+  },
+
+  createCommunityForumRequest: (payload: {
+    title: string;
+    description: string;
+    category: CommunityForumCategory;
+    tags: string[];
+    creatorId: string;
+    creatorName: string;
+    creatorRole: string;
+    allowedFields: string[];
+    allowedEntryTerms: string[];
+    allowedResidence: CommunityResidenceScope;
+    rulesAcceptedByCreator: boolean;
+    directPublishByAdmin?: boolean;
+  }): { success: boolean; message: string; forum?: CommunityForum } => {
+    const settings = Storage.getCommunityChatSettings();
+    const isAdmin = payload.creatorRole === 'admin';
+    if (!isAdmin && !settings.isChatSystemEnabled) {
+      return { success: false, message: 'سامانه پیام‌رسان و تالارهای گفتگو در حال حاضر توسط مدیر بسته شده است.' };
+    }
+    if (!isAdmin && !settings.isGroupCreationEnabled) {
+      return { success: false, message: 'ثبت درخواست ایجاد تالار تخصصی و گروه در حال حاضر توسط مدیر غیرفعال شده است.' };
+    }
+    if (!payload.rulesAcceptedByCreator) {
+      return {
+        success: false,
+        message: 'مطالعه و پذیرش تعهدنامه قوانین (ممنوعیت مباحث سیاسی، توهین و تخلفات) الزامی است.',
+      };
+    }
+
+    const title = payload.title.trim();
+    const description = payload.description.trim();
+    if (title.length < 3) {
+      return { success: false, message: 'عنوان تالار یا گروه باید حداقل ۳ کاراکتر باشد.' };
+    }
+    if (description.length < 10) {
+      return { success: false, message: 'توضیحات و هدف تشکیل تالار باید حداقل ۱۰ کاراکتر باشد.' };
+    }
+
+    if (payload.creatorRole === 'student') {
+      const ban = Storage.getActiveStudentChatBan(payload.creatorId);
+      if (ban) {
+        return {
+          success: false,
+          message: `دسترسی شما به پیام‌رسان توسط ${ban.bannedByName} مسدود شده است. علت: ${ban.reason}`,
+        };
+      }
+    }
+
+    const cleanTags = Array.from(
+      new Set(
+        (payload.tags || [])
+          .map((t) => t.replace(/^#+/, '').trim())
+          .filter(Boolean)
+          .slice(0, 8)
+      )
+    );
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const autoActive = Boolean(isAdmin && payload.directPublishByAdmin);
+
+    const newForum: CommunityForum = {
+      id: makeUniqueId('forum'),
+      title,
+      description,
+      category: payload.category || 'scientific',
+      tags: cleanTags,
+      creatorId: payload.creatorId,
+      creatorName: payload.creatorName,
+      creatorRole: payload.creatorRole,
+      status: autoActive ? 'active' : 'pending',
+      isClosed: false,
+      adminApproval: autoActive
+        ? { status: 'approved', byId: payload.creatorId, byName: payload.creatorName, at: nowStr }
+        : { status: 'pending' },
+      securityApproval: autoActive
+        ? { status: 'approved', byId: 'system', byName: 'ایجاد مستقیم توسط مدیر سامانه', at: nowStr }
+        : { status: 'pending' },
+      allowedFields: Array.from(new Set((payload.allowedFields || []).map((x) => x.trim()).filter(Boolean))),
+      allowedEntryTerms: Array.from(new Set((payload.allowedEntryTerms || []).map((x) => x.trim()).filter(Boolean))),
+      allowedResidence: payload.allowedResidence || 'all',
+      memberIds: payload.creatorRole === 'student' ? [payload.creatorId] : [],
+      rulesAcceptedByCreator: true,
+      createdAt: nowStr,
+      updatedAt: nowStr,
+    };
+
+    const list = Storage.getCommunityForums();
+    Storage.setCommunityForums([list[0], newForum, ...list.slice(1)]);
+
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action: autoActive ? 'ایجاد تالار گفتگوی تخصصی توسط مدیر' : 'ثبت درخواست ایجاد تالار گفتگوی تخصصی',
+      details: `تالار «${title}» توسط ${payload.creatorName} ثبت شد (${
+        autoActive ? 'فعال و منتشر شده' : 'در انتظار تأیید مدیر و حراست'
+      }).`,
+      targetName: title,
+      severity: 'info',
+    });
+
+    return {
+      success: true,
+      forum: newForum,
+      message: autoActive
+        ? `تالار تخصصی «${title}» با موفقیت ایجاد و برای دانشجویان واجد شرایط فعال شد.`
+        : `درخواست ایجاد تالار «${title}» ثبت شد و پس از تأیید «مدیر سامانه» و «واحد حراست» به‌صورت رسمی فعال و قابل مشاهده خواهد شد.`,
+    };
+  },
+
+  reviewCommunityForumRequest: (
+    forumId: string,
+    payload: {
+      reviewerRole: 'admin' | 'security';
+      reviewerId: string;
+      reviewerName: string;
+      decision: 'approved' | 'rejected';
+      note?: string;
+    }
+  ): { success: boolean; message: string; forum?: CommunityForum } => {
+    const list = Storage.getCommunityForums();
+    const idx = list.findIndex((f) => f.id === forumId);
+    if (idx === -1) return { success: false, message: 'تالار مورد نظر یافت نشد.' };
+
+    const cur = list[idx];
+    if (cur.isPublicForum || cur.id === PUBLIC_FORUM_ID) {
+      return { success: false, message: 'تالار گفتگوی عمومی نیازی به بررسی تأیید ندارد.' };
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const note = (payload.note || '').trim();
+    if (payload.decision === 'rejected' && !note) {
+      return { success: false, message: 'در صورت رد درخواست تالار، وارد کردن علت الزامی است.' };
+    }
+
+    const nextAdmin =
+      payload.reviewerRole === 'admin'
+        ? {
+            status: payload.decision,
+            byId: payload.reviewerId,
+            byName: payload.reviewerName,
+            at: nowStr,
+            note: note || undefined,
+          }
+        : cur.adminApproval;
+
+    const nextSecurity =
+      payload.reviewerRole === 'security'
+        ? {
+            status: payload.decision,
+            byId: payload.reviewerId,
+            byName: payload.reviewerName,
+            at: nowStr,
+            note: note || undefined,
+          }
+        : cur.securityApproval;
+
+    let nextStatus: CommunityForum['status'] = 'pending';
+    if (nextAdmin.status === 'rejected' || nextSecurity.status === 'rejected') {
+      nextStatus = 'rejected';
+    } else if (nextAdmin.status === 'approved' && nextSecurity.status === 'approved') {
+      nextStatus = 'active';
+    } else {
+      nextStatus = 'pending';
+    }
+
+    const updated: CommunityForum = {
+      ...cur,
+      adminApproval: nextAdmin,
+      securityApproval: nextSecurity,
+      status: nextStatus,
+      updatedAt: nowStr,
+    };
+
+    list[idx] = updated;
+    Storage.setCommunityForums(list);
+
+    const roleTitle = payload.reviewerRole === 'admin' ? 'مدیر سامانه' : 'واحد حراست';
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action:
+        payload.decision === 'approved'
+          ? `تأیید تالار تخصصی توسط ${roleTitle}`
+          : `رد درخواست تالار تخصصی توسط ${roleTitle}`,
+      details: `تالار «${cur.title}» توسط ${payload.reviewerName} (${roleTitle}) ${
+        payload.decision === 'approved' ? 'تأیید' : 'رد'
+      } شد. وضعیت فعلی: ${
+        nextStatus === 'active'
+          ? 'فعال و منتشر شده'
+          : nextStatus === 'rejected'
+          ? 'رد شده'
+          : 'در انتظار تأیید مرجع دوم'
+      }.${note ? ` (${note})` : ''}`,
+      targetName: cur.title,
+      severity: payload.decision === 'rejected' ? 'warning' : 'info',
+    });
+
+    return {
+      success: true,
+      forum: updated,
+      message:
+        nextStatus === 'active'
+          ? `تالار «${cur.title}» با تأیید هر دو مرجع (مدیر و حراست) اکنون فعال و برای دانشجویان واجد شرایط قابل ورود است.`
+          : nextStatus === 'rejected'
+          ? `درخواست تالار «${cur.title}» رد شد.`
+          : `تأیید ${roleTitle} ثبت شد. پس از تأیید ${
+              payload.reviewerRole === 'admin' ? 'واحد حراست' : 'مدیر سامانه'
+            }، تالار فعال خواهد شد.`,
+    };
+  },
+
+  toggleCommunityForumLock: (
+    forumId: string,
+    payload: { isClosed: boolean; actorName: string; reason?: string }
+  ): { success: boolean; message: string } => {
+    const list = Storage.getCommunityForums();
+    const idx = list.findIndex((f) => f.id === forumId);
+    if (idx === -1) return { success: false, message: 'تالار یافت نشد.' };
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    list[idx] = {
+      ...list[idx],
+      isClosed: payload.isClosed,
+      closedBy: payload.isClosed ? payload.actorName : undefined,
+      closedReason: payload.isClosed ? (payload.reason || '').trim() || undefined : undefined,
+      updatedAt: nowStr,
+    };
+    Storage.setCommunityForums(list);
+
+    // همگام‌سازی خودکار با تنظیم تالار گفتگوی عمومی
+    if (forumId === PUBLIC_FORUM_ID) {
+      const curSettings = Storage.getCommunityChatSettings();
+      if (curSettings.isPublicForumOpen === payload.isClosed) {
+        Storage.setCommunityChatSettings(
+          { ...curSettings, isPublicForumOpen: !payload.isClosed },
+          payload.actorName
+        );
+      }
+    }
+
+    return {
+      success: true,
+      message: payload.isClosed
+        ? `ارسال پیام در «${list[idx].title}» بسته شد.`
+        : `ارسال پیام در «${list[idx].title}» مجدداً باز شد.`,
+    };
+  },
+
+  updateCommunityForumStatus: (
+    forumId: string,
+    status: 'active' | 'suspended' | 'rejected',
+    actorName: string
+  ): { success: boolean; message: string } => {
+    if (forumId === PUBLIC_FORUM_ID) {
+      return { success: false, message: 'تالار عمومی قابل تعلیق نیست؛ می‌توانید ارسال پیام آن را ببندید.' };
+    }
+    const list = Storage.getCommunityForums();
+    const idx = list.findIndex((f) => f.id === forumId);
+    if (idx === -1) return { success: false, message: 'تالار یافت نشد.' };
+    list[idx] = {
+      ...list[idx],
+      status,
+      updatedAt: new Date().toLocaleDateString('fa-IR'),
+    };
+    Storage.setCommunityForums(list);
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action: `تغییر وضعیت تالار «${list[idx].title}»`,
+      details: `وضعیت تالار به ${status === 'active' ? 'فعال' : status === 'suspended' ? 'معلق/مسدود' : 'رد شده'} توسط ${actorName} تغییر یافت.`,
+      targetName: list[idx].title,
+      severity: status === 'suspended' ? 'warning' : 'info',
+    });
+    return {
+      success: true,
+      message: `وضعیت تالار «${list[idx].title}» بروزرسانی شد.`,
+    };
+  },
+
+  joinCommunityForum: (forumId: string, studentId: string): { success: boolean; message: string } => {
+    const list = Storage.getCommunityForums();
+    const idx = list.findIndex((f) => f.id === forumId);
+    if (idx === -1) return { success: false, message: 'تالار یافت نشد.' };
+    if (list[idx].status !== 'active') {
+      return { success: false, message: 'این تالار هنوز فعال نشده است.' };
+    }
+    const members = Array.isArray(list[idx].memberIds) ? list[idx].memberIds : [];
+    if (!members.includes(studentId)) {
+      list[idx] = { ...list[idx], memberIds: [...members, studentId] };
+      Storage.setCommunityForums(list);
+    }
+    return { success: true, message: `عضویت شما در «${list[idx].title}» ثبت شد.` };
+  },
+
+  leaveCommunityForum: (forumId: string, studentId: string): { success: boolean; message: string } => {
+    const list = Storage.getCommunityForums();
+    const idx = list.findIndex((f) => f.id === forumId);
+    if (idx === -1) return { success: false, message: 'تالار یافت نشد.' };
+    list[idx] = {
+      ...list[idx],
+      memberIds: (list[idx].memberIds || []).filter((id) => id !== studentId),
+    };
+    Storage.setCommunityForums(list);
+    return { success: true, message: `از تالار «${list[idx].title}» خارج شدید.` };
+  },
+
+  deleteCommunityForum: (forumId: string, actorName: string): { success: boolean; message: string } => {
+    if (forumId === PUBLIC_FORUM_ID) {
+      return { success: false, message: 'تالار گفتگوی عمومی قابل حذف نیست.' };
+    }
+    const list = Storage.getCommunityForums();
+    const target = list.find((f) => f.id === forumId);
+    if (!target) return { success: false, message: 'تالار یافت نشد.' };
+    Storage.setCommunityForums(list.filter((f) => f.id !== forumId));
+    const msgs = Storage.getCommunityChatMessages();
+    Storage.setCommunityChatMessages(msgs.filter((m) => m.roomId !== forumId));
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action: 'حذف تالار گفتگوی تخصصی',
+      details: `تالار «${target.title}» و پیام‌های آن توسط ${actorName} حذف شد.`,
+      targetName: target.title,
+      severity: 'warning',
+    });
+    return { success: true, message: `تالار «${target.title}» با موفقیت حذف شد.` };
+  },
+
+  getCommunityChatMessages: (): CommunityChatMessage[] => {
+    const list = get<CommunityChatMessage[]>(STORAGE_KEYS.COMMUNITY_CHAT_MESSAGES, []);
+    return Array.isArray(list) ? list : [];
+  },
+
+  setCommunityChatMessages: (messages: CommunityChatMessage[]): boolean => {
+    // نگهداری حداکثر 1200 پیام آخر برای حفظ سرعت و حجم بهینه
+    const trimmed = Array.isArray(messages) ? messages.slice(-1200) : [];
+    return set(STORAGE_KEYS.COMMUNITY_CHAT_MESSAGES, trimmed);
+  },
+
+  sendCommunityChatMessage: (payload: {
+    id?: string;
+    roomType: CommunityChatRoomType;
+    roomId: string;
+    dmParticipants?: [string, string];
+    dmParticipantNames?: [string, string];
+    senderId: string;
+    senderName: string;
+    senderRole: string;
+    senderFieldOfStudy?: string;
+    senderAvatarUrl?: string;
+    text: string;
+    imageUrl?: string;
+    stickerId?: string;
+    replyToId?: string;
+    replyToSenderName?: string;
+    replyToText?: string;
+    isModeratorMessage?: boolean;
+    isWarningMessage?: boolean;
+  }): { success: boolean; message: string; chatMessage?: CommunityChatMessage } => {
+    const settings = Storage.getCommunityChatSettings();
+    const isMod =
+      payload.senderRole === 'admin' ||
+      payload.senderRole === 'security' ||
+      payload.senderRole === 'vice_dean';
+
+    const cleanText = (payload.text || '').trim();
+    const hasImage = Boolean(payload.imageUrl);
+    const hasSticker = Boolean(payload.stickerId);
+
+    if (!cleanText && !hasImage && !hasSticker) {
+      return { success: false, message: 'متن پیام، استیکر یا تصویر را وارد نمایید.' };
+    }
+    if (cleanText.length > 1500) {
+      return { success: false, message: 'حداکثر طول مجاز هر پیام ۱۵۰۰ کاراکتر است.' };
+    }
+
+    // بررسی قوانین سراسری برای کاربران غیرناظر
+    if (!isMod) {
+      if (!settings.isChatSystemEnabled) {
+        return {
+          success: false,
+          message: 'سامانه پیام‌رسان و تالارهای گفتگو هم‌اکنون توسط مدیر سامانه بسته شده است.',
+        };
+      }
+
+      if (payload.roomType === 'public') {
+        const pubForum = Storage.getCommunityForums().find((f) => f.id === PUBLIC_FORUM_ID);
+        if (!settings.isPublicForumOpen || pubForum?.isClosed) {
+          return {
+            success: false,
+            message: 'ارسال پیام در تالار گفتگوی عمومی توسط مدیر سامانه بسته شده است.',
+          };
+        }
+      }
+
+      if (payload.roomType === 'forum') {
+        const forum = Storage.getCommunityForums().find((f) => f.id === payload.roomId);
+        if (!forum || forum.status !== 'active') {
+          return { success: false, message: 'این تالار فعال نیست یا به تأیید کامل نرسیده است.' };
+        }
+        if (forum.isClosed) {
+          return {
+            success: false,
+            message: `ارسال پیام در این تالار توسط ${forum.closedBy || 'مدیریت'} موقتاً بسته شده است.`,
+          };
+        }
+      }
+
+      if (payload.roomType === 'dm') {
+        if (!settings.isPrivateChatEnabled) {
+          return {
+            success: false,
+            message: 'امکان ارسال پیام خصوصی بین دانشجویان هم‌اکنون توسط مدیر سامانه بسته شده است.',
+          };
+        }
+        if (payload.dmParticipants) {
+          const [p1, p2] = payload.dmParticipants;
+          if (Storage.isStudentBlockedBetween(p1, p2)) {
+            return {
+              success: false,
+              message: 'امکان ارسال پیام در این گفتگوی خصوصی وجود ندارد (یکی از طرفین دیگری را مسدود کرده است).',
+            };
+          }
+        }
+      }
+
+      // بررسی مسدودیت دانشجو توسط مدیر/حراست
+      if (payload.senderRole === 'student') {
+        const ban = Storage.getActiveStudentChatBan(payload.senderId);
+        if (ban) {
+          const blockedHere =
+            ban.scope === 'all' ||
+            (ban.scope === 'private_only' && payload.roomType === 'dm') ||
+            (ban.scope === 'forums_only' && payload.roomType !== 'dm');
+          if (blockedHere) {
+            return {
+              success: false,
+              message: `امکان ارسال پیام برای شما توسط ${ban.bannedByName} مسدود شده است. علت: ${ban.reason}`,
+            };
+          }
+        }
+      }
+
+      // بررسی مجوز ارسال تصویر و استیکر
+      if (hasImage) {
+        if (payload.roomType === 'dm' && !settings.allowPhotosInPrivateChat) {
+          return {
+            success: false,
+            message: 'ارسال عکس در گفتگوی خصوصی توسط مدیر سامانه غیرفعال است.',
+          };
+        }
+        if (payload.roomType !== 'dm' && !settings.allowPhotosInForums) {
+          return {
+            success: false,
+            message: 'ارسال عکس در تالارها و گروه‌ها صرفاً با فعال‌سازی و مجوز مدیر سامانه امکان‌پذیر است.',
+          };
+        }
+      }
+
+      if (hasSticker && !settings.allowStickers) {
+        return {
+          success: false,
+          message: 'ارسال استیکر در حال حاضر توسط مدیر سامانه غیرفعال است.',
+        };
+      }
+
+      // فیلتر هوشمند کلمات ممنوعه
+      if (cleanText && settings.bannedKeywords.length > 0) {
+        const normalizedText = normalizePersianSearch(cleanText);
+        const hitWord = settings.bannedKeywords.find((kw) => {
+          const cleanKw = normalizePersianSearch(kw);
+          return cleanKw.length >= 2 && normalizedText.includes(cleanKw);
+        });
+        if (hitWord) {
+          Storage.addActivityLog({
+            category: 'community_chat',
+            action: 'مسدودسازی خودکار پیام حاوی واژه غیرمجاز',
+            details: `تلاش کاربر ${payload.senderName} (${payload.senderId}) برای ارسال پیام حاوی واژه فیلترشده در اتاق ${payload.roomId} مسدود شد.`,
+            targetName: payload.senderName,
+            severity: 'warning',
+          });
+          return {
+            success: false,
+            message: 'پیام شما به دلیل مغایرت با فیلتر واژگان مجاز و ضوابط اخلاقی سامانه ارسال نشد.',
+          };
+        }
+      }
+    }
+
+    const existingList = Storage.getCommunityChatMessages();
+    const msgId = payload.id || makeUniqueId('cmsg');
+    if (existingList.some((m) => m.id === msgId)) {
+      return { success: true, message: 'پیام ثبت شده است.' };
+    }
+
+    const nowDate = new Date();
+    const nowStr = `${nowDate.toLocaleDateString('fa-IR')} - ${nowDate.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const safeAvatar =
+      payload.senderAvatarUrl && !isBase64ImageDataUrl(payload.senderAvatarUrl)
+        ? payload.senderAvatarUrl
+        : undefined;
+
+    const newMsg: CommunityChatMessage = {
+      id: msgId,
+      roomType: payload.roomType,
+      roomId: payload.roomId,
+      dmParticipants: payload.dmParticipants,
+      dmParticipantNames: payload.dmParticipantNames,
+      senderId: payload.senderId,
+      senderName: payload.senderName,
+      senderRole: payload.senderRole,
+      senderFieldOfStudy: payload.senderFieldOfStudy,
+      senderAvatarUrl: safeAvatar,
+      text: cleanText,
+      imageUrl: payload.imageUrl,
+      stickerId: payload.stickerId,
+      replyToId: payload.replyToId,
+      replyToSenderName: payload.replyToSenderName,
+      replyToText: payload.replyToText ? payload.replyToText.slice(0, 140) : undefined,
+      isModeratorMessage: Boolean(isMod && (payload.isModeratorMessage || payload.isWarningMessage)),
+      isWarningMessage: Boolean(isMod && payload.isWarningMessage),
+      createdAt: nowStr,
+      createdAtIso: nowDate.toISOString(),
+    };
+
+    Storage.setCommunityChatMessages([...existingList, newMsg]);
+
+    if (newMsg.isWarningMessage) {
+      Storage.addActivityLog({
+        category: 'community_chat',
+        action: 'ثبت اخطار رسمی ناظر در گفتگو',
+        details: `${payload.senderName} در اتاق ${payload.roomId} اخطار رسمی ثبت کرد: «${cleanText.slice(0, 120)}»`,
+        targetName: payload.roomId,
+        severity: 'warning',
+      });
+    }
+
+    return { success: true, message: 'پیام ارسال شد.', chatMessage: newMsg };
+  },
+
+  deleteCommunityChatMessage: (
+    messageId: string,
+    payload: { actorName: string; reason?: string }
+  ): { success: boolean; message: string } => {
+    const list = Storage.getCommunityChatMessages();
+    const idx = list.findIndex((m) => m.id === messageId);
+    if (idx === -1) return { success: false, message: 'پیام یافت نشد.' };
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    list[idx] = {
+      ...list[idx],
+      isDeleted: true,
+      deletedBy: payload.actorName,
+      deletedAt: nowStr,
+      deleteReason: (payload.reason || '').trim() || 'حذف‌شده توسط ناظر سامانه به دلیل مغایرت با قوانین',
+      text: '',
+      imageUrl: undefined,
+      stickerId: undefined,
+    };
+    Storage.setCommunityChatMessages(list);
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action: 'حذف پیام توسط ناظر پیام‌رسان',
+      details: `پیام کاربر ${list[idx].senderName} توسط ${payload.actorName} حذف شد.`,
+      targetName: list[idx].senderName,
+      severity: 'warning',
+    });
+    return { success: true, message: 'پیام با موفقیت حذف و از دید کاربران مخفی شد.' };
+  },
+
+  getCommunityChatBans: (): CommunityChatBan[] => {
+    const list = get<CommunityChatBan[]>(STORAGE_KEYS.COMMUNITY_CHAT_BANS, []);
+    return Array.isArray(list) ? list : [];
+  },
+
+  setCommunityChatBans: (bans: CommunityChatBan[]): boolean =>
+    set(STORAGE_KEYS.COMMUNITY_CHAT_BANS, Array.isArray(bans) ? bans : []),
+
+  getActiveStudentChatBan: (studentId: string): CommunityChatBan | undefined => {
+    const clean = normalizeAsciiDigits(studentId).trim();
+    return Storage.getCommunityChatBans().find(
+      (b) => b.isActive && normalizeAsciiDigits(b.studentId).trim() === clean
+    );
+  },
+
+  banStudentFromChat: (payload: {
+    studentId: string;
+    studentName: string;
+    studentFieldOfStudy?: string;
+    reason: string;
+    scope: 'all' | 'private_only' | 'forums_only';
+    bannedById: string;
+    bannedByName: string;
+    bannedByRole: 'admin' | 'security' | 'vice_dean';
+  }): { success: boolean; message: string } => {
+    const reason = (payload.reason || '').trim();
+    if (!reason) {
+      return { success: false, message: 'لطفاً علت مسدودسازی دانشجو را وارد کنید.' };
+    }
+    const cleanId = normalizeAsciiDigits(payload.studentId).trim();
+    const list = Storage.getCommunityChatBans().map((b) =>
+      normalizeAsciiDigits(b.studentId).trim() === cleanId && b.isActive
+        ? { ...b, isActive: false }
+        : b
+    );
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const ban: CommunityChatBan = {
+      id: makeUniqueId('cban'),
+      studentId: cleanId,
+      studentName: payload.studentName,
+      studentFieldOfStudy: payload.studentFieldOfStudy,
+      reason,
+      scope: payload.scope || 'all',
+      bannedById: payload.bannedById,
+      bannedByName: payload.bannedByName,
+      bannedByRole: payload.bannedByRole,
+      createdAt: nowStr,
+      isActive: true,
+    };
+    Storage.setCommunityChatBans([ban, ...list]);
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action: 'مسدودسازی دانشجو در پیام‌رسان و تالارها',
+      details: `دسترسی ${payload.studentName} (${cleanId}) توسط ${payload.bannedByName} مسدود شد. علت: ${reason}`,
+      targetName: payload.studentName,
+      severity: 'critical',
+    });
+    return {
+      success: true,
+      message: `دسترسی «${payload.studentName}» در پیام‌رسان با موفقیت مسدود شد.`,
+    };
+  },
+
+  unbanStudentFromChat: (banId: string, actorName: string): { success: boolean; message: string } => {
+    const list = Storage.getCommunityChatBans();
+    const idx = list.findIndex((b) => b.id === banId);
+    if (idx === -1) return { success: false, message: 'رکورد مسدودیت یافت نشد.' };
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    list[idx] = {
+      ...list[idx],
+      isActive: false,
+      unbannedAt: nowStr,
+      unbannedBy: actorName,
+    };
+    Storage.setCommunityChatBans(list);
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action: 'رفع مسدودیت دانشجو در پیام‌رسان',
+      details: `مسدودیت ${list[idx].studentName} (${list[idx].studentId}) توسط ${actorName} رفع شد.`,
+      targetName: list[idx].studentName,
+      severity: 'info',
+    });
+    return {
+      success: true,
+      message: `مسدودیت «${list[idx].studentName}» با موفقیت رفع شد.`,
+    };
+  },
+
+  getCommunityChatReports: (): CommunityChatReport[] => {
+    const list = get<CommunityChatReport[]>(STORAGE_KEYS.COMMUNITY_CHAT_REPORTS, []);
+    return Array.isArray(list) ? list : [];
+  },
+
+  setCommunityChatReports: (reports: CommunityChatReport[]): boolean =>
+    set(STORAGE_KEYS.COMMUNITY_CHAT_REPORTS, Array.isArray(reports) ? reports : []),
+
+  reportCommunityChatMessage: (payload: {
+    message: CommunityChatMessage;
+    roomTitle: string;
+    reportedById: string;
+    reportedByName: string;
+    reason: string;
+  }): { success: boolean; message: string } => {
+    const reason = (payload.reason || '').trim();
+    if (!reason) return { success: false, message: 'لطفاً علت گزارش تخلف را وارد کنید.' };
+    const list = Storage.getCommunityChatReports();
+    const duplicate = list.some(
+      (r) =>
+        r.messageId === payload.message.id &&
+        r.reportedById === payload.reportedById &&
+        r.status === 'pending'
+    );
+    if (duplicate) {
+      return { success: false, message: 'شما قبلاً این پیام را گزارش کرده‌اید و در دست بررسی است.' };
+    }
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const report: CommunityChatReport = {
+      id: makeUniqueId('crep'),
+      messageId: payload.message.id,
+      roomId: payload.message.roomId,
+      roomType: payload.message.roomType,
+      roomTitle: payload.roomTitle,
+      offenderId: payload.message.senderId,
+      offenderName: payload.message.senderName,
+      messageText: payload.message.text || (payload.message.imageUrl ? '[تصویر پیوست]' : '[استیکر]'),
+      messageImageUrl: payload.message.imageUrl,
+      reportedById: payload.reportedById,
+      reportedByName: payload.reportedByName,
+      reason,
+      status: 'pending',
+      createdAt: nowStr,
+    };
+    Storage.setCommunityChatReports([report, ...list]);
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action: 'ثبت گزارش تخلف در پیام‌رسان دانشجویی',
+      details: `${payload.reportedByName} پیام ${payload.message.senderName} در «${payload.roomTitle}» را گزارش کرد: ${reason}`,
+      targetName: payload.message.senderName,
+      severity: 'warning',
+    });
+    return {
+      success: true,
+      message: 'گزارش تخلف با موفقیت برای مدیر سامانه، معاونت دانشجویی و واحد حراست ارسال شد.',
+    };
+  },
+
+  resolveCommunityChatReport: (
+    reportId: string,
+    payload: { status: 'reviewed' | 'dismissed'; reviewerName: string; reviewNote?: string }
+  ): { success: boolean; message: string } => {
+    const list = Storage.getCommunityChatReports();
+    const idx = list.findIndex((r) => r.id === reportId);
+    if (idx === -1) return { success: false, message: 'گزارش یافت نشد.' };
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    list[idx] = {
+      ...list[idx],
+      status: payload.status,
+      reviewedBy: payload.reviewerName,
+      reviewedAt: nowStr,
+      reviewNote: (payload.reviewNote || '').trim() || undefined,
+    };
+    Storage.setCommunityChatReports(list);
+    return { success: true, message: 'وضعیت گزارش تخلف بروزرسانی شد.' };
+  },
+
+  getCommunityUserPrefs: (): CommunityUserChatPrefs => {
+    const raw = get<Partial<CommunityUserChatPrefs>>(STORAGE_KEYS.COMMUNITY_USER_PREFS, {
+      rulesAcceptedUserIds: [],
+      blockedByUser: {},
+    });
+    return {
+      rulesAcceptedUserIds: Array.isArray(raw?.rulesAcceptedUserIds) ? raw.rulesAcceptedUserIds : [],
+      blockedByUser:
+        raw?.blockedByUser && typeof raw.blockedByUser === 'object' ? raw.blockedByUser : {},
+    };
+  },
+
+  acceptCommunityChatRules: (userId: string): boolean => {
+    const prefs = Storage.getCommunityUserPrefs();
+    if (!prefs.rulesAcceptedUserIds.includes(userId)) {
+      prefs.rulesAcceptedUserIds = [...prefs.rulesAcceptedUserIds, userId];
+      return set(STORAGE_KEYS.COMMUNITY_USER_PREFS, prefs);
+    }
+    return true;
+  },
+
+  hasAcceptedCommunityChatRules: (userId: string): boolean => {
+    const prefs = Storage.getCommunityUserPrefs();
+    return prefs.rulesAcceptedUserIds.includes(userId);
+  },
+
+  toggleBlockStudentInChat: (
+    myStudentId: string,
+    targetStudentId: string
+  ): { blocked: boolean; message: string } => {
+    const prefs = Storage.getCommunityUserPrefs();
+    const myList = Array.isArray(prefs.blockedByUser[myStudentId])
+      ? [...prefs.blockedByUser[myStudentId]]
+      : [];
+    const exists = myList.includes(targetStudentId);
+    const nextList = exists
+      ? myList.filter((id) => id !== targetStudentId)
+      : [...myList, targetStudentId];
+    prefs.blockedByUser = { ...prefs.blockedByUser, [myStudentId]: nextList };
+    set(STORAGE_KEYS.COMMUNITY_USER_PREFS, prefs);
+    return {
+      blocked: !exists,
+      message: !exists
+        ? 'این دانشجو مسدود شد و دیگر امکان ارسال پیام خصوصی به شما را نخواهد داشت.'
+        : 'مسدودیت شخصی این دانشجو برداشته شد.',
+    };
+  },
+
+  isStudentBlockedBetween: (studentIdA: string, studentIdB: string): boolean => {
+    const prefs = Storage.getCommunityUserPrefs();
+    const aBlocked = prefs.blockedByUser[studentIdA] || [];
+    const bBlocked = prefs.blockedByUser[studentIdB] || [];
+    return aBlocked.includes(studentIdB) || bBlocked.includes(studentIdA);
+  },
+
+  /**
+   * جستجوی امن و حریم‌خصوصی‌محور دانشجو صرفاً بر اساس «شماره دانشجویی» جهت شروع چت خصوصی
+   * (هرگز شماره تماس، کد ملی یا اطلاعات محرمانه بازگردانده نمی‌شود)
+   */
+  lookupStudentPublicProfileById: async (
+    rawStudentId: string
+  ): Promise<{ found: boolean; profile?: PublicStudentChatProfile; error?: string }> => {
+    const cleanId = normalizeAsciiDigits(rawStudentId).trim();
+    if (!cleanId || cleanId.length < 4) {
+      return { found: false, error: 'لطفاً شماره دانشجویی معتبر وارد کنید.' };
+    }
+
+    const toPublicProfile = (st: Student): PublicStudentChatProfile => ({
+      studentId: st.studentId,
+      fullName: st.fullName,
+      fieldOfStudy: st.fieldOfStudy || 'نامشخص',
+      entryTerm: st.entryTerm || 'نامشخص',
+      isDormResident: isStudentDormResident(st),
+      dormId: st.assignedDormId,
+      photoUrl: st.photoUrl && !isBase64ImageDataUrl(st.photoUrl) ? st.photoUrl : undefined,
+      admissionStatus: getStudentAdmissionStatus(st),
+    });
+
+    const localMatch = Storage.getStudents().find(
+      (s) => normalizeAsciiDigits(s.studentId).trim() === cleanId
+    );
+    if (localMatch) {
+      return { found: true, profile: toPublicProfile(localMatch) };
+    }
+
+    try {
+      const remoteRes = await Storage.fetchSingleStudentFromDB({ studentId: cleanId });
+      if (remoteRes.ok && remoteRes.student) {
+        return { found: true, profile: toPublicProfile(remoteRes.student) };
+      }
+      if (!remoteRes.ok) {
+        return { found: false, error: 'خطا در برقراری ارتباط با سرور برای استعلام شماره دانشجویی.' };
+      }
+      return { found: false, error: 'دانشجویی با این شماره دانشجویی در سامانه یافت نشد.' };
+    } catch {
+      return { found: false, error: 'خطای شبکه در استعلام شماره دانشجویی.' };
+    }
+  },
+
+  makeCommunityDmRoomId: (studentIdA: string, studentIdB: string): string =>
+    makeDmRoomId(studentIdA, studentIdB),
 };
 
 

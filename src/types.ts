@@ -935,7 +935,8 @@ export type ActivityLogCategory =
   | 'counseling'
   | 'library'
   | 'smart_campus'
-  | 'graduation_clearance';
+  | 'graduation_clearance'
+  | 'community_chat';
 
 export type GuestEligibilityType =
   | 'first_degree_relative'
@@ -1492,6 +1493,159 @@ export interface GraduationClearanceRequest {
   graduationFinalNote?: string;
   graduationArchiveNumber?: string;
 }
+
+// -------------------------------------------------------------
+// تالار گفتگوی عمومی، پیام‌رسان دانشجویی و تالارها/گروه‌های تخصصی تحت نظارت
+// -------------------------------------------------------------
+export type CommunityForumCategory =
+  | 'public'
+  | 'scientific'
+  | 'cultural'
+  | 'sports'
+  | 'association'
+  | 'guild'
+  | 'dormitory'
+  | 'other';
+
+export type CommunityResidenceScope = 'all' | 'dormitory' | 'commuter';
+
+export type CommunityPrivateChatScope = 'all' | 'same_field' | 'same_entry' | 'same_dorm';
+
+export type CommunityChatRoomType = 'public' | 'forum' | 'dm';
+
+export type CommunityApprovalState = 'pending' | 'approved' | 'rejected';
+
+export interface CommunityChatSettings {
+  isChatSystemEnabled: boolean; // کلید اصلی باز/بسته کردن کل سامانه چت و تالارها
+  isPublicForumOpen: boolean; // باز یا بسته بودن ارسال پیام در تالار گفتگوی عمومی
+  isPrivateChatEnabled: boolean; // باز یا بسته بودن چت خصوصی دانشجو به دانشجو (با شماره دانشجویی)
+  isGroupCreationEnabled: boolean; // امکان ثبت درخواست ایجاد تالار تخصصی / گروه توسط دانشجویان
+  allowPhotosInForums: boolean; // مجوز ارسال عکس در تالار عمومی و گروه‌های تخصصی
+  allowPhotosInPrivateChat: boolean; // مجوز ارسال عکس در چت خصوصی دانشجویی
+  allowStickers: boolean; // مجوز ارسال استیکر در تالارها و گفتگوها
+  requireRulesAcceptance: boolean; // الزام پذیرش تعهدنامه قوانین پیش از گفتگو
+  onlyAdmittedStudentsCanChat: boolean; // محدودسازی گفتگو به دانشجویان پذیرش‌شده
+  privateChatScope: CommunityPrivateChatScope; // دامنه مجاز چت خصوصی
+  bannedKeywords: string[]; // کلمات ممنوعه (فیلتر خودکار)
+  rulesText: string; // متن کامل قوانین و تعهدنامه اخلاقی-قانونی
+  publicForumNotice?: string; // پیام پین‌شده مدیر در بالای تالار گفتگوی عمومی
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface CommunityForumApprovalRecord {
+  status: CommunityApprovalState;
+  byId?: string;
+  byName?: string;
+  at?: string;
+  note?: string;
+}
+
+export interface CommunityForum {
+  id: string;
+  isPublicForum?: boolean;
+  title: string;
+  description: string;
+  category: CommunityForumCategory;
+  tags: string[];
+  avatarColor?: string;
+  creatorId: string;
+  creatorName: string;
+  creatorRole: string;
+  status: 'pending' | 'active' | 'rejected' | 'suspended';
+  isClosed?: boolean; // قفل کردن موقت ارسال پیام در این تالار توسط مدیر/حراست
+  closedBy?: string;
+  closedReason?: string;
+  adminApproval: CommunityForumApprovalRecord;
+  securityApproval: CommunityForumApprovalRecord;
+  allowedFields: string[]; // خالی = همه رشته‌ها
+  allowedEntryTerms: string[]; // خالی = همه ورودی‌ها
+  allowedResidence: CommunityResidenceScope; // همه / خوابگاهی / ترددی
+  memberIds: string[];
+  rulesAcceptedByCreator: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CommunityChatMessage {
+  id: string;
+  roomType: CommunityChatRoomType;
+  roomId: string; // 'public_forum' | forum.id | 'dm_<minId>_<maxId>'
+  dmParticipants?: [string, string];
+  dmParticipantNames?: [string, string];
+  senderId: string;
+  senderName: string;
+  senderRole: string;
+  senderFieldOfStudy?: string;
+  senderAvatarUrl?: string;
+  text: string;
+  imageUrl?: string;
+  stickerId?: string;
+  replyToId?: string;
+  replyToSenderName?: string;
+  replyToText?: string;
+  isModeratorMessage?: boolean; // پیام رسمی ناظر (مدیر، معاون، حراست)
+  isWarningMessage?: boolean; // اخطار رسمی ثبت‌شده در گفتگو
+  isDeleted?: boolean;
+  deletedBy?: string;
+  deletedAt?: string;
+  deleteReason?: string;
+  createdAt: string;
+  createdAtIso: string;
+}
+
+export interface CommunityChatBan {
+  id: string;
+  studentId: string;
+  studentName: string;
+  studentFieldOfStudy?: string;
+  reason: string;
+  scope: 'all' | 'private_only' | 'forums_only';
+  bannedById: string;
+  bannedByName: string;
+  bannedByRole: 'admin' | 'security' | 'vice_dean';
+  createdAt: string;
+  isActive: boolean;
+  unbannedAt?: string;
+  unbannedBy?: string;
+}
+
+export interface CommunityChatReport {
+  id: string;
+  messageId: string;
+  roomId: string;
+  roomType: CommunityChatRoomType;
+  roomTitle: string;
+  offenderId: string;
+  offenderName: string;
+  messageText: string;
+  messageImageUrl?: string;
+  reportedById: string;
+  reportedByName: string;
+  reason: string;
+  status: 'pending' | 'reviewed' | 'dismissed';
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
+  createdAt: string;
+}
+
+export interface CommunityUserChatPrefs {
+  rulesAcceptedUserIds: string[];
+  blockedByUser: Record<string, string[]>; // userId -> list of blocked studentIds
+}
+
+export interface PublicStudentChatProfile {
+  studentId: string;
+  fullName: string;
+  fieldOfStudy: string;
+  entryTerm: string;
+  isDormResident: boolean;
+  dormId?: string;
+  photoUrl?: string;
+  admissionStatus: 'admitted' | 'not_admitted';
+}
+
 
 
 

@@ -104,6 +104,7 @@ export default defineConfig(({mode}) => {
           'pwa-192x192.png',
           'pwa-512x512.png',
           'pwa-maskable-512x512.png',
+          'sw-notifications.js',
         ],
         manifest: {
           id: '/',
@@ -142,6 +143,7 @@ export default defineConfig(({mode}) => {
           ],
         },
         workbox: {
+          importScripts: ['/sw-notifications.js'],
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,

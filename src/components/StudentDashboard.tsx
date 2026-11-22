@@ -35,6 +35,7 @@ import { StudentGuestRequestPanel } from './StudentGuestRequestPanel';
 import { StudentSurveyPanel } from './StudentSurveyPanel';
 import { StudentLibraryPanel } from './StudentLibraryPanel';
 import { StudentGraduationClearancePanel } from './StudentGraduationClearancePanel';
+import { CommunityChatHub } from './CommunityChatHub';
 import { RichTextDisplay } from './RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './ImageLightboxModal';
 import {
@@ -73,6 +74,7 @@ import {
   ExternalLink,
   UtensilsCrossed,
   Megaphone,
+  MessagesSquare,
   Cpu,
   Landmark,
 } from 'lucide-react';
@@ -111,7 +113,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onOpenUserGuide,
 }) => {
   // تب‌های داشبورد
-  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections' | 'library' | 'clearance' | 'portals'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections' | 'library' | 'clearance' | 'community_chat' | 'portals'>('overview');
   const activeStudentPortals = resolveStudentPortals(settings.studentPortals).filter(
     (p) => p.isActive !== false
   );
@@ -703,6 +705,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               {myClearance.status === 'completed' ? 'تکمیل (آماده چاپ)' : myClearance.status === 'rejected_education' ? 'نیازمند اصلاح' : 'در جریان'}
             </span>
           )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('community_chat')}
+          className={`flex-1 min-w-[200px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+            activeTab === 'community_chat'
+              ? 'bg-gradient-to-l from-teal-600 to-emerald-600 text-white shadow-teal-600/20'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <MessagesSquare className={`w-4 h-4 ${activeTab === 'community_chat' ? 'text-white' : 'text-teal-600'}`} />
+          <span>تالار گفتگو و پیام‌رسان دانشجویی</span>
         </button>
 
         <button
@@ -2082,6 +2096,16 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           roomNumber={studentRoom?.roomNumber || student.assignedRoomNumber}
           settings={settings}
           onDataChange={onRefreshData}
+        />
+      )}
+
+      {/* تب تالار گفتگوی عمومی، گروه‌های تخصصی و پیام‌رسان دانشجویی */}
+      {activeTab === 'community_chat' && (
+        <CommunityChatHub
+          currentUser={{ role: 'student', student }}
+          students={students}
+          mode="embedded"
+          onRefreshGlobalData={onRefreshData}
         />
       )}
 
