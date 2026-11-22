@@ -9,7 +9,11 @@ import {
   Student,
 } from '../types';
 import { Storage, normalizePersianSearch } from '../utils/storage';
-import { FORUM_CATEGORIES_META, PUBLIC_FORUM_ID } from '../utils/communityStickers';
+import {
+  ALL_VOICE_CALL_ROLE_OPTIONS,
+  FORUM_CATEGORIES_META,
+  PUBLIC_FORUM_ID,
+} from '../utils/communityStickers';
 import {
   Settings,
   ShieldCheck,
@@ -39,6 +43,7 @@ import {
   Briefcase,
   Mic,
   PhoneCall,
+  PhoneOff,
 } from 'lucide-react';
 
 interface CommunityModerationPanelProps {
@@ -575,6 +580,165 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
                   </div>
                 );
               })}
+            </div>
+
+            {/* کنترل دقیق دسترسی به تماس صوتی مستقیم (همه کاربران و تفکیک هر نوع کاربری) */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border-2 border-emerald-200/80 dark:border-emerald-900/60 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-start gap-2.5">
+                  <div
+                    className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
+                      draftSettings.allowLiveVoiceCall !== false
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300'
+                        : 'bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300'
+                    }`}
+                  >
+                    {draftSettings.allowLiveVoiceCall !== false ? (
+                      <PhoneCall className="w-5 h-5" />
+                    ) : (
+                      <PhoneOff className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
+                      کنترل دسترسی به تماس صوتی مستقیم (همه کاربران و به تفکیک هر نوع کاربری)
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-5">
+                      می‌توانید تماس صوتی را به‌صورت کلی برای همه باز یا بسته کنید، یا برای هر نقش کاربری (دانشجویان و هریک از واحدهای کارکنان) به‌صورت جداگانه مجوز تماس صوتی را کنترل نمایید.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next: CommunityChatSettings = {
+                        ...draftSettings,
+                        allowLiveVoiceCall: true,
+                        voiceCallBlockedRoles: [],
+                      };
+                      setDraftSettings(next);
+                      Storage.saveCommunityChatSettings(next, actorMeta.name);
+                      onRefresh();
+                      onNotify('دسترسی تماس صوتی برای همه کاربران و تمام نقش‌ها باز شد.', 'success');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold cursor-pointer transition"
+                  >
+                    باز برای همه
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next: CommunityChatSettings = {
+                        ...draftSettings,
+                        allowLiveVoiceCall: false,
+                      };
+                      setDraftSettings(next);
+                      Storage.saveCommunityChatSettings(next, actorMeta.name);
+                      onRefresh();
+                      onNotify('تماس صوتی مستقیم برای تمامی کاربران بسته شد.', 'success');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-extrabold cursor-pointer transition"
+                  >
+                    بستن برای همه
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next: CommunityChatSettings = {
+                        ...draftSettings,
+                        allowLiveVoiceCall: true,
+                        voiceCallBlockedRoles: ['student'],
+                      };
+                      setDraftSettings(next);
+                      Storage.saveCommunityChatSettings(next, actorMeta.name);
+                      onRefresh();
+                      onNotify('تماس صوتی فقط برای کارکنان باز و برای دانشجویان بسته شد.', 'success');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[11px] font-extrabold cursor-pointer transition"
+                  >
+                    فقط کارکنان (بستن دانشجویان)
+                  </button>
+                </div>
+              </div>
+
+              {draftSettings.allowLiveVoiceCall === false && (
+                <div className="px-3.5 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[11px] font-bold text-rose-800 dark:text-rose-200 flex items-center gap-2">
+                  <PhoneOff className="w-4 h-4 shrink-0" />
+                  <span>
+                    کلید سراسری تماس صوتی در وضعیت «بسته» است و هیچ کاربری امکان برقراری تماس صوتی ندارد. برای تنظیم تفکیکی نقش‌ها، ابتدا کلید سراسری را باز کنید یا روی هر نقش زیر کلیک نمایید.
+                  </span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                {ALL_VOICE_CALL_ROLE_OPTIONS.map((opt) => {
+                  const blockedList = draftSettings.voiceCallBlockedRoles || [];
+                  const isGlobalOpen = draftSettings.allowLiveVoiceCall !== false;
+                  const isRoleAllowed = isGlobalOpen && !blockedList.includes(opt.role);
+
+                  return (
+                    <button
+                      key={opt.role}
+                      type="button"
+                      onClick={() => {
+                        const prevBlocked = draftSettings.voiceCallBlockedRoles || [];
+                        let nextBlocked: string[];
+                        let nextGlobal = draftSettings.allowLiveVoiceCall !== false;
+
+                        if (!nextGlobal) {
+                          // اگر سراسری بسته بود و مدیر یک نقش را باز کرد، سراسری را باز و بقیه نقش‌ها را مسدود می‌کنیم
+                          nextGlobal = true;
+                          nextBlocked = ALL_VOICE_CALL_ROLE_OPTIONS.map((r) => r.role).filter(
+                            (r) => r !== opt.role
+                          );
+                        } else if (prevBlocked.includes(opt.role)) {
+                          nextBlocked = prevBlocked.filter((r) => r !== opt.role);
+                        } else {
+                          nextBlocked = [...prevBlocked, opt.role];
+                        }
+
+                        const next: CommunityChatSettings = {
+                          ...draftSettings,
+                          allowLiveVoiceCall: nextGlobal,
+                          voiceCallBlockedRoles: nextBlocked,
+                        };
+                        setDraftSettings(next);
+                        Storage.saveCommunityChatSettings(next, actorMeta.name);
+                        onRefresh();
+                        onNotify(
+                          nextBlocked.includes(opt.role)
+                            ? `دسترسی تماس صوتی برای «${opt.label}» بسته شد.`
+                            : `دسترسی تماس صوتی برای «${opt.label}» باز شد.`,
+                          'success'
+                        );
+                      }}
+                      className={`p-2.5 rounded-xl border text-right transition flex items-center justify-between gap-2 cursor-pointer ${
+                        isRoleAllowed
+                          ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-200 hover:bg-emerald-100/70'
+                          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-rose-300'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-extrabold truncate">{opt.label}</div>
+                        <div className="text-[10px] opacity-80">
+                          {isRoleAllowed ? 'تماس صوتی باز' : 'تماس صوتی بسته'}
+                        </div>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-black shrink-0 ${
+                          isRoleAllowed
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300'
+                        }`}
+                      >
+                        {isRoleAllowed ? 'باز' : 'بسته'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* دامنه چت خصوصی، پیام پین‌شده، کلمات ممنوعه و متن قوانین */}

@@ -22,6 +22,7 @@ import {
   getStickerById,
   isStaffDmRoomId,
   isStaffEligibleForForum,
+  canRoleUseLiveVoiceCall,
   isStudentEligibleForForum,
   isSupervisorModeratorRole,
   makeDmRoomId,
@@ -291,6 +292,8 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     const ch = supabase.channel(`cfuis_call_invite_${safeId}`);
     ch.on('broadcast', { event: 'incoming_voice_call' }, ({ payload }) => {
       if (!payload || payload.callerId === me.id) return;
+      const liveSettings = Storage.getCommunityChatSettings();
+      if (!canRoleUseLiveVoiceCall(liveSettings, me.role).allowed) return;
       setIncomingVoiceCall({
         roomId: String(payload.roomId || ''),
         callerId: String(payload.callerId || ''),
@@ -302,7 +305,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [me.id]);
+  }, [me.id, me.role]);
 
   // پاکسازی ضبط صوت هنگام بسته شدن کامپوننت
   useEffect(() => {
@@ -638,11 +641,16 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     return chatSettings.allowVoiceMessages !== false;
   }, [isModerator, chatSettings.allowVoiceMessages]);
 
+  const voiceCallAccess = useMemo(
+    () => canRoleUseLiveVoiceCall(chatSettings, me.role),
+    [chatSettings, me.role]
+  );
+
   const canStartLiveVoiceCall = useMemo(() => {
+    if (!voiceCallAccess.allowed) return false;
     if (composerBlockReason && !isModerator) return false;
-    if (isModerator) return true;
-    return chatSettings.allowLiveVoiceCall !== false;
-  }, [composerBlockReason, isModerator, chatSettings.allowLiveVoiceCall]);
+    return true;
+  }, [voiceCallAccess.allowed, composerBlockReason, isModerator]);
 
   // جستجوی شماره دانشجویی برای شروع گفتگوی خصوصی جدید
   const handleLookupStudentForDm = async (e: React.FormEvent) => {
@@ -1718,6 +1726,23 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                     <span className="hidden sm:inline">
                       {selectedRoomType === 'dm' ? 'تماس صوتی' : 'گفتگوی صوتی زنده'}
                     </span>
+                  </button>
+                )}
+
+                {!canStartLiveVoiceCall && !voiceCallAccess.allowed && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      showToast(
+                        voiceCallAccess.reason || 'امکان تماس صوتی توسط مدیر بسته شده است.',
+                        'error'
+                      )
+                    }
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 text-[11px] font-bold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 cursor-not-allowed"
+                    title={voiceCallAccess.reason}
+                  >
+                    <PhoneOff className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">تماس صوتی بسته</span>
                   </button>
                 )}
 

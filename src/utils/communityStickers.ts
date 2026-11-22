@@ -26,7 +26,8 @@ export const DEFAULT_COMMUNITY_CHAT_SETTINGS: CommunityChatSettings = {
   allowPhotosInPrivateChat: false,
   allowStickers: false, // ارسال استیکر صرفاً با تأیید مدیر
   allowVoiceMessages: true, // ضبط و ارسال پیام صوتی (ویس)
-  allowLiveVoiceCall: true, // گفتگوی صوتی مستقیم زنده
+  allowLiveVoiceCall: true, // گفتگوی صوتی مستقیم زنده (کلید سراسری)
+  voiceCallBlockedRoles: [], // نقش‌هایی که دسترسی تماس صوتی آن‌ها مسدود است
   requireRulesAcceptance: true,
   onlyAdmittedStudentsCanChat: false,
   privateChatScope: 'all',
@@ -273,6 +274,41 @@ export const STAFF_ROLE_OPTIONS: { role: string; label: string }[] = [
   { role: 'warehouse', label: 'انبار و تجهیزات' },
   { role: 'procurement', label: 'کارپردازی و خرید' },
 ];
+
+export const ALL_VOICE_CALL_ROLE_OPTIONS: { role: string; label: string; group: 'student' | 'staff' }[] = [
+  { role: 'student', label: 'دانشجویان', group: 'student' },
+  ...STAFF_ROLE_OPTIONS.map((item) => ({ ...item, group: 'staff' as const })),
+];
+
+export function canRoleUseLiveVoiceCall(
+  settings: CommunityChatSettings,
+  role?: string | null
+): { allowed: boolean; reason?: string } {
+  if (!settings.isChatSystemEnabled) {
+    return {
+      allowed: false,
+      reason: 'کل سامانه گفتگو و تماس صوتی توسط مدیر کل بسته شده است.',
+    };
+  }
+  if (settings.allowLiveVoiceCall === false) {
+    return {
+      allowed: false,
+      reason: 'امکان برقراری تماس صوتی مستقیم برای همه کاربران توسط مدیر کل بسته شده است.',
+    };
+  }
+  const normalizedRole = (role || '').trim();
+  if (
+    normalizedRole &&
+    Array.isArray(settings.voiceCallBlockedRoles) &&
+    settings.voiceCallBlockedRoles.includes(normalizedRole)
+  ) {
+    return {
+      allowed: false,
+      reason: `دسترسی به تماس صوتی مستقیم برای کاربری «${getRoleDisplayLabel(normalizedRole)}» توسط مدیر کل بسته شده است.`,
+    };
+  }
+  return { allowed: true };
+}
 
 export function isStaffEligibleForForum(
   staffRole: string,

@@ -1527,7 +1527,8 @@ export interface CommunityChatSettings {
   allowPhotosInPrivateChat: boolean; // مجوز ارسال عکس در چت خصوصی دانشجویی
   allowStickers: boolean; // مجوز ارسال استیکر در تالارها و گفتگوها
   allowVoiceMessages?: boolean; // مجوز ضبط و ارسال پیام صوتی (ویس) در گفتگوها
-  allowLiveVoiceCall?: boolean; // مجوز برقراری گفتگوی صوتی مستقیم زنده (تماس صوتی)
+  allowLiveVoiceCall?: boolean; // مجوز برقراری گفتگوی صوتی مستقیم زنده (تماس صوتی) برای همه کاربران
+  voiceCallBlockedRoles?: string[]; // فهرست نقش‌های کاربری که دسترسی آن‌ها به تماس صوتی مستقیم توسط مدیر بسته شده است
   requireRulesAcceptance: boolean; // الزام پذیرش تعهدنامه قوانین پیش از گفتگو
   onlyAdmittedStudentsCanChat: boolean; // محدودسازی گفتگو به دانشجویان پذیرش‌شده
   privateChatScope: CommunityPrivateChatScope; // دامنه مجاز چت خصوصی

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Message, CurrentUser, MaintenanceStaff, Dormitory, Student } from '../types';
 import {
   Storage,
@@ -29,6 +29,7 @@ import {
   Search,
   Users,
   GraduationCap,
+  ArrowRight,
 } from 'lucide-react';
 
 interface MessagingPanelProps {
@@ -37,6 +38,8 @@ interface MessagingPanelProps {
   currentUser: NonNullable<CurrentUser>;
   messages: Message[];
   onMessagesUpdated: () => void;
+  initialMessageId?: string | null;
+  returnLabel?: string;
 }
 
 export const MessagingPanel: React.FC<MessagingPanelProps> = ({
@@ -45,6 +48,8 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   currentUser,
   messages,
   onMessagesUpdated,
+  initialMessageId = null,
+  returnLabel = 'بازگشت',
 }) => {
   const [activeTab, setActiveTab] = useState<'inbox' | 'compose'>('inbox');
 
@@ -69,8 +74,15 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const [inboxRoleFilter, setInboxRoleFilter] = useState<string>('all');
 
   // پاسخ‌دهی به تیکت
-  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(initialMessageId);
   const [replyText, setReplyText] = useState('');
+
+  useEffect(() => {
+    if (isOpen && initialMessageId) {
+      setActiveTab('inbox');
+      setSelectedMessageId(initialMessageId);
+    }
+  }, [isOpen, initialMessageId]);
 
   // مودال ارجاع به واحد تأسیسات
   const [isReferModalOpen, setIsReferModalOpen] = useState(false);
@@ -657,12 +669,24 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
               <p className="text-xs text-slate-500">ارتباط مستقیم دانشجومعلمان با سرپرستان و مدیر سامانه</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-extrabold transition cursor-pointer"
+            >
+              <ArrowRight className="w-4 h-4" />
+              <span>{returnLabel}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              aria-label="بستن"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* تب‌ها */}

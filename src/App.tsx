@@ -582,10 +582,14 @@ export default function App() {
       if (item.category === 'message' && currentUser) {
         setSelectedNotificationItem(null);
         setIsNotificationModalOpen(false);
+        setFocusedMessageId(item.itemId || null);
+        setOpenedMessagesFromNotif(true);
         setIsMessagesModalOpen(true);
-      } else if (fromToast) {
+      } else {
         setSelectedNotificationItem(item);
-        setIsNotificationModalOpen(true);
+        if (fromToast) {
+          setIsNotificationModalOpen(true);
+        }
       }
     },
     [currentUser]
@@ -653,6 +657,8 @@ export default function App() {
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [excelModalInitialTab, setExcelModalInitialTab] = useState<ExcelImportTab>('students');
   const [isMessagesModalOpen, setIsMessagesModalOpen] = useState(false);
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
+  const [openedMessagesFromNotif, setOpenedMessagesFromNotif] = useState(false);
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [focusAboutEditorTick, setFocusAboutEditorTick] = useState(0);
@@ -1557,10 +1563,16 @@ export default function App() {
         {currentUser && isMessagesModalOpen && (
           <MessagingPanel
             isOpen={isMessagesModalOpen}
-            onClose={() => setIsMessagesModalOpen(false)}
+            onClose={() => {
+              setIsMessagesModalOpen(false);
+              setFocusedMessageId(null);
+              setOpenedMessagesFromNotif(false);
+            }}
             currentUser={currentUser}
             messages={messages}
             onMessagesUpdated={refreshAllData}
+            initialMessageId={focusedMessageId}
+            returnLabel={openedMessagesFromNotif ? 'بستن و بازگشت' : 'بازگشت'}
           />
         )}
 
@@ -1626,6 +1638,9 @@ export default function App() {
         permission={notificationPermission}
         prefs={notificationPrefs}
         notifications={notificationFeed}
+        announcements={announcements}
+        warnings={warnings}
+        onOpenImagePreview={(src) => setPreviewImage(src)}
         selectedItem={selectedNotificationItem}
         onClearSelectedItem={() => setSelectedNotificationItem(null)}
         onRequestPermission={handleRequestNotifications}

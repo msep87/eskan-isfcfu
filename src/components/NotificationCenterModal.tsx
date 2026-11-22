@@ -29,6 +29,9 @@ import {
   isRunningStandalonePWA,
   playNotificationChime,
 } from '../utils/notificationManager';
+import { Announcement, RoomWarning } from '../types';
+import { RichTextDisplay } from './RichTextEditor';
+import { AnnouncementImageBox } from './ImageLightboxModal';
 
 interface NotificationCenterModalProps {
   isOpen: boolean;
@@ -36,6 +39,9 @@ interface NotificationCenterModalProps {
   permission: NotificationPermission | 'unsupported';
   prefs: NotificationPreferences;
   notifications: AppNotificationItem[];
+  announcements?: Announcement[];
+  warnings?: RoomWarning[];
+  onOpenImagePreview?: (src: string) => void;
   selectedItem?: AppNotificationItem | null;
   onClearSelectedItem?: () => void;
   onRequestPermission: () => Promise<NotificationPermission | 'unsupported'>;
@@ -101,6 +107,9 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
   permission,
   prefs,
   notifications,
+  announcements = [],
+  warnings = [],
+  onOpenImagePreview,
   selectedItem = null,
   onClearSelectedItem,
   onRequestPermission,
@@ -119,8 +128,10 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
     if (selectedItem) {
       setViewingItem(selectedItem);
       setActiveTab('feed');
+    } else if (!isOpen) {
+      setViewingItem(null);
     }
-  }, [selectedItem]);
+  }, [selectedItem, isOpen]);
 
   if (!isOpen) return null;
 
@@ -321,16 +332,33 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
               (() => {
                 const meta = CATEGORY_META[viewingItem.category] || CATEGORY_META.system;
                 const IconComp = meta.Icon;
+                const matchedAnnouncement =
+                  viewingItem.category === 'announcement' && viewingItem.itemId
+                    ? announcements.find((a) => a.id === viewingItem.itemId)
+                    : undefined;
+                const matchedWarning =
+                  viewingItem.category === 'warning' && viewingItem.itemId
+                    ? warnings.find((w) => w.id === viewingItem.itemId)
+                    : undefined;
+
+                const handleBackToList = () => {
+                  setViewingItem(null);
+                  onClearSelectedItem?.();
+                };
+
+                const handleCloseAndReturn = () => {
+                  setViewingItem(null);
+                  onClearSelectedItem?.();
+                  onClose();
+                };
+
                 return (
                   <div className="space-y-3.5 animate-in fade-in duration-150">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <button
                         type="button"
-                        onClick={() => {
-                          setViewingItem(null);
-                          onClearSelectedItem?.();
-                        }}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
+                        onClick={handleBackToList}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-extrabold transition cursor-pointer"
                       >
                         <ArrowRight className="w-3.5 h-3.5" />
                         <span>بازگشت به اعلان‌ها</span>
@@ -351,19 +379,95 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                             <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${meta.colorClass}`}>
                               {meta.label}
                             </span>
+                            {matchedAnnouncement?.priority === 'urgent' && (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-rose-600 text-white">
+                                فوری
+                              </span>
+                            )}
+                            {matchedAnnouncement?.priority === 'important' && (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-500 text-slate-950">
+                                مهم
+                              </span>
+                            )}
+                            {matchedWarning && (
+                              <span
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+                                  matchedWarning.severity === 'critical'
+                                    ? 'bg-rose-600 text-white'
+                                    : matchedWarning.severity === 'warning'
+                                    ? 'bg-amber-500 text-slate-950'
+                                    : 'bg-sky-600 text-white'
+                                }`}
+                              >
+                                {matchedWarning.severity === 'critical'
+                                  ? 'اخطار فوری'
+                                  : matchedWarning.severity === 'warning'
+                                  ? 'اخطار'
+                                  : 'تذکر'}
+                              </span>
+                            )}
                             <span className="text-[11px] text-slate-400">
-                              {formatShortFaTime(viewingItem.createdAt)}
+                              {matchedAnnouncement?.date ||
+                                matchedWarning?.date ||
+                                formatShortFaTime(viewingItem.createdAt)}
                             </span>
                           </div>
-                          <h4 className="font-extrabold text-sm text-slate-900 dark:text-white mt-1.5 leading-snug">
-                            {viewingItem.title}
+                          <h4 className="font-extrabold text-sm sm:text-[15px] text-slate-900 dark:text-white mt-1.5 leading-snug">
+                            {matchedAnnouncement?.title || matchedWarning?.title || viewingItem.title}
                           </h4>
+                          {(matchedAnnouncement?.author || matchedWarning?.supervisorName) && (
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                              صادرکننده: {matchedAnnouncement?.author || matchedWarning?.supervisorName}
+                            </p>
+                          )}
                         </div>
                       </div>
 
-                      <p className="text-xs sm:text-[13px] text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-800">
-                        {viewingItem.fullBody || viewingItem.body}
-                      </p>
+                      {matchedAnnouncement?.imageUrl && (
+                        <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                          <AnnouncementImageBox
+                            src={matchedAnnouncement.imageUrl}
+                            alt={matchedAnnouncement.title}
+                            onZoom={() => onOpenImagePreview?.(matchedAnnouncement.imageUrl!)}
+                          />
+                        </div>
+                      )}
+
+                      <div className="text-xs sm:text-[13px] text-slate-700 dark:text-slate-200 leading-relaxed bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-800">
+                        {matchedAnnouncement?.contentHtml ? (
+                          <RichTextDisplay
+                            html={matchedAnnouncement.contentHtml}
+                            fallbackText={matchedAnnouncement.content}
+                          />
+                        ) : (
+                          <p className="whitespace-pre-wrap">
+                            {matchedAnnouncement?.content ||
+                              matchedWarning?.description ||
+                              viewingItem.fullBody ||
+                              viewingItem.body}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* نوار دکمه‌های بازگشت و بستن در پایین صفحه اعلان */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleBackToList}
+                        className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-extrabold transition cursor-pointer"
+                      >
+                        <ArrowRight className="w-4 h-4" />
+                        <span>بازگشت به فهرست اعلان‌ها</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCloseAndReturn}
+                        className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold shadow-xs transition cursor-pointer"
+                      >
+                        <ArrowRight className="w-4 h-4" />
+                        <span>بستن و بازگشت به صفحه</span>
+                      </button>
                     </div>
                   </div>
                 );
