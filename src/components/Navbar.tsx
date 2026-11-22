@@ -12,7 +12,6 @@ import {
   MessageSquare,
   KeyRound,
   School,
-  Info,
   BookOpen,
   RefreshCw,
   Menu,
@@ -34,7 +33,7 @@ interface NavbarProps {
   onLogout: () => void;
   onNavigateHome: () => void;
   onOpenLogin: () => void;
-  onOpenAbout: () => void;
+  onOpenAbout?: () => void;
   onOpenUserGuide: () => void;
   onRefreshCloud?: () => void;
   isRefreshingCloud?: boolean;
@@ -57,7 +56,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   onNavigateHome,
   onOpenLogin,
-  onOpenAbout,
   onOpenUserGuide,
   onRefreshCloud,
   isRefreshingCloud = false,
@@ -356,16 +354,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* دکمه نصب نسخه اپلیکیشن موبایل (PWA) */}
             <PWAInstallButton variant="navbar" />
-
-            {/* دکمه خیلی کوچک درباره ما */}
-            <button
-              onClick={onOpenAbout}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 border border-teal-200 dark:border-teal-800 text-[11px] font-bold transition cursor-pointer shadow-xs"
-              title="درباره سامانه جامع خدمات دانشجویی و سازنده سایت دکتر محمد سپیانی"
-            >
-              <Info className="w-3.5 h-3.5" />
-              <span>درباره ما</span>
-            </button>
 
             {/* دکمه بروزرسانی فوری اطلاعات (تازه‌سازی کش ۵ دقیقه‌ای و دریافت آخرین تغییرات) */}
             {onRefreshCloud && (
@@ -785,18 +773,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <BookOpen className="w-4 h-4" />
                 <span>راهنمای کاربری</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  onOpenAbout();
-                }}
-                className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
-              >
-                <Info className="w-4 h-4 text-teal-600" />
-                <span>درباره ما</span>
               </button>
 
               {currentUser && (

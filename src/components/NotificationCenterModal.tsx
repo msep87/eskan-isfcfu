@@ -428,7 +428,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                           <AnnouncementImageBox
                             src={matchedAnnouncement.imageUrl}
                             alt={matchedAnnouncement.title}
-                            onZoom={() => onOpenImagePreview?.(matchedAnnouncement.imageUrl!)}
+                            onClick={(src) => onOpenImagePreview?.(src)}
                           />
                         </div>
                       )}

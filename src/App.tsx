@@ -43,6 +43,7 @@ import {
   updateAppIconBadge,
 } from './utils/notificationManager';
 import { Navbar } from './components/Navbar';
+import { JalaliLiveClockBar } from './components/JalaliLiveClockBar';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { NotificationCenterModal } from './components/NotificationCenterModal';
@@ -943,7 +944,13 @@ export default function App() {
               : 'grid-cols-1 sm:grid-cols-3';
 
           return (
-          <div className="space-y-8 animate-in fade-in duration-300">
+          <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-300">
+            {/* نوار تاریخ شمسی و ساعت زنده در بالای صفحه اول */}
+            <JalaliLiveClockBar
+              academicYear={settings.currentAcademicYear}
+              semester={settings.currentSemester}
+            />
+
             {/* هیرو بنر رسمی با آرم دانشگاه فرهنگیان */}
             <div
               className={`relative rounded-3xl overflow-hidden ${heroBanner.bgClassName} text-white p-8 sm:p-12 shadow-2xl transition-all duration-300`}
@@ -1429,52 +1436,58 @@ export default function App() {
       </main>
 
       {/* فوتر سایت */}
-      <footer className="mt-auto py-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] border-t border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm text-center text-xs text-slate-500 dark:text-slate-400">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            {settings.customLogoUrl && (
-              <div className="bg-white p-1 rounded-lg border border-slate-200 shrink-0">
-                <FarhangianEmblem size={24} customLogoUrl={settings.customLogoUrl} />
-              </div>
-            )}
-            <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع خدمات دانشجویی</span>
+      <footer className="mt-auto py-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] border-t border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm text-center text-xs text-slate-500 dark:text-slate-400">
+        <div className="max-w-7xl mx-auto px-4 space-y-3">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {settings.customLogoUrl && (
+                <div className="bg-white p-1 rounded-lg border border-slate-200 shrink-0">
+                  <FarhangianEmblem size={24} customLogoUrl={settings.customLogoUrl} />
+                </div>
+              )}
+              <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع خدمات دانشجویی</span>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-3 text-[11px]">
+              {currentUser &&
+                currentUser.role !== 'education' &&
+                currentUser.role !== 'cultural' &&
+                currentUser.role !== 'library' &&
+                currentUser.role !== 'smart_campus' &&
+                currentUser.role !== 'graduation' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsAiChatOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-l from-teal-700 to-cyan-700 hover:from-teal-800 hover:to-cyan-800 text-white font-extrabold text-xs shadow-xs transition cursor-pointer"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>دستیار هوشمند سامانه (چت‌بات)</span>
+                  </button>
+                  <span className="hidden sm:inline">•</span>
+                </>
+              )}
+              <button
+                onClick={() => setIsAboutModalOpen(true)}
+                className="text-teal-600 dark:text-teal-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <Info className="w-3.5 h-3.5" />
+                <span>درباره ما</span>
+              </button>
+              <span>•</span>
+              <button
+                onClick={() => handleOpenUserGuide()}
+                className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>راهنمای کاربری و دانلود PDF</span>
+              </button>
+              <span>•</span>
+              <span>سال تحصیلی {settings.currentAcademicYear || '۱۴۰۵-۱۴۰۶'} ({settings.currentSemester})</span>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-3 text-[11px]">
-            {currentUser &&
-              currentUser.role !== 'education' &&
-              currentUser.role !== 'cultural' &&
-              currentUser.role !== 'library' &&
-              currentUser.role !== 'smart_campus' &&
-              currentUser.role !== 'graduation' && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setIsAiChatOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-l from-teal-700 to-cyan-700 hover:from-teal-800 hover:to-cyan-800 text-white font-extrabold text-xs shadow-xs transition cursor-pointer"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  <span>دستیار هوشمند سامانه (چت‌بات)</span>
-                </button>
-                <span className="hidden sm:inline">•</span>
-              </>
-            )}
-            <button
-              onClick={() => setIsAboutModalOpen(true)}
-              className="text-teal-600 dark:text-teal-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
-            >
-              <Info className="w-3.5 h-3.5" />
-              <span>درباره ما (طراحی: دکتر محمد سپیانی)</span>
-            </button>
-            <span>•</span>
-            <button
-              onClick={() => handleOpenUserGuide()}
-              className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>راهنمای کاربری و دانلود PDF</span>
-            </button>
-            <span>•</span>
-            <span>سال تحصیلی {settings.currentAcademicYear || '۱۴۰۵-۱۴۰۶'} ({settings.currentSemester})</span>
+
+          <div className="pt-2.5 border-t border-slate-200/70 dark:border-slate-800/80 text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">
+            کلیه حقوق مادی و معنوی این سامانه متعلق به طراح و معمار سامانه بوده و فعالیت آن منطبق با قوانین و مقررات جمهوری اسلامی ایران می‌باشد.
           </div>
         </div>
       </footer>

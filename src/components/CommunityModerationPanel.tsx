@@ -619,7 +619,7 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
                         voiceCallBlockedRoles: [],
                       };
                       setDraftSettings(next);
-                      Storage.saveCommunityChatSettings(next, actorMeta.name);
+                      Storage.setCommunityChatSettings(next, actorMeta.name);
                       onRefresh();
                       onNotify('دسترسی تماس صوتی برای همه کاربران و تمام نقش‌ها باز شد.', 'success');
                     }}
@@ -635,7 +635,7 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
                         allowLiveVoiceCall: false,
                       };
                       setDraftSettings(next);
-                      Storage.saveCommunityChatSettings(next, actorMeta.name);
+                      Storage.setCommunityChatSettings(next, actorMeta.name);
                       onRefresh();
                       onNotify('تماس صوتی مستقیم برای تمامی کاربران بسته شد.', 'success');
                     }}
@@ -652,7 +652,7 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
                         voiceCallBlockedRoles: ['student'],
                       };
                       setDraftSettings(next);
-                      Storage.saveCommunityChatSettings(next, actorMeta.name);
+                      Storage.setCommunityChatSettings(next, actorMeta.name);
                       onRefresh();
                       onNotify('تماس صوتی فقط برای کارکنان باز و برای دانشجویان بسته شد.', 'success');
                     }}
@@ -705,7 +705,7 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
                           voiceCallBlockedRoles: nextBlocked,
                         };
                         setDraftSettings(next);
-                        Storage.saveCommunityChatSettings(next, actorMeta.name);
+                        Storage.setCommunityChatSettings(next, actorMeta.name);
                         onRefresh();
                         onNotify(
                           nextBlocked.includes(opt.role)

@@ -340,42 +340,48 @@ export const AboutModal: React.FC<AboutModalProps> = ({
           </div>
 
           {/* نوار پایین مودال */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
-            <div className="text-[11px] text-slate-400">
-              سال تحصیلی فعال: {academicYear} • {resolved.footerNote}
-            </div>
+          <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 space-y-2.5">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                سال تحصیلی فعال: {academicYear} • {resolved.footerNote}
+              </div>
 
-            <div className="flex items-center gap-2">
-              {isAdmin && onOpenAdminEdit && (
+              <div className="flex items-center gap-2">
+                {isAdmin && onOpenAdminEdit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenAdminEdit();
+                    }}
+                    className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>ویرایش</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
-                  onClick={() => {
-                    onClose();
-                    onOpenAdminEdit();
-                  }}
-                  className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  onClick={downloadSystemPdfDocument}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>ویرایش</span>
+                  <FileDown className="w-3.5 h-3.5" />
+                  <span>دریافت مستندات (PDF)</span>
                 </button>
-              )}
 
-              <button
-                type="button"
-                onClick={downloadSystemPdfDocument}
-                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <FileDown className="w-3.5 h-3.5" />
-                <span>دریافت مستندات (PDF)</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  بستن
+                </button>
+              </div>
+            </div>
 
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition cursor-pointer"
-              >
-                بستن
-              </button>
+            <div className="pt-2 border-t border-slate-200/70 dark:border-slate-700/70 text-center text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">
+              کلیه حقوق مادی و معنوی این سامانه متعلق به طراح و معمار سامانه بوده و فعالیت آن منطبق با قوانین و مقررات جمهوری اسلامی ایران می‌باشد.
             </div>
           </div>
 
