@@ -1590,6 +1590,8 @@ export interface CommunityChatMessage {
   deletedBy?: string;
   deletedAt?: string;
   deleteReason?: string;
+  isEdited?: boolean;
+  editedAt?: string;
   createdAt: string;
   createdAtIso: string;
 }

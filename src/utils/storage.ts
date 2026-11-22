@@ -14785,6 +14785,240 @@ export const Storage = {
     return { success: true, message: 'پیام با موفقیت حذف و از دید کاربران مخفی شد.' };
   },
 
+  editCommunityChatMessage: (
+    messageId: string,
+    payload: { editorId: string; editorRole: string; editorName: string; newText: string }
+  ): { success: boolean; message: string; chatMessage?: CommunityChatMessage } => {
+    const list = Storage.getCommunityChatMessages();
+    const idx = list.findIndex((m) => m.id === messageId);
+    if (idx === -1) return { success: false, message: 'پیام مورد نظر یافت نشد.' };
+
+    const target = list[idx];
+    if (target.isDeleted) {
+      return { success: false, message: 'پیام حذف‌شده قابل ویرایش نیست.' };
+    }
+    if (target.senderId !== payload.editorId || target.senderRole !== payload.editorRole) {
+      return { success: false, message: 'فقط فرستنده پیام مجاز به ویرایش پیام خود است.' };
+    }
+
+    const cleanText = (payload.newText || '').trim();
+    if (!cleanText && !target.imageUrl && !target.stickerId) {
+      return { success: false, message: 'متن پیام نمی‌تواند خالی باشد.' };
+    }
+    if (cleanText.length > 1500) {
+      return { success: false, message: 'حداکثر طول مجاز پیام ۱۵۰۰ کاراکتر است.' };
+    }
+
+    const isMod =
+      payload.editorRole === 'admin' ||
+      payload.editorRole === 'security' ||
+      payload.editorRole === 'vice_dean';
+    const settings = Storage.getCommunityChatSettings();
+
+    if (!isMod) {
+      if (!settings.isChatSystemEnabled) {
+        return { success: false, message: 'سامانه پیام‌رسان هم‌اکنون توسط مدیر بسته شده است.' };
+      }
+      if (payload.editorRole === 'student') {
+        const ban = Storage.getActiveStudentChatBan(payload.editorId);
+        if (ban) {
+          return {
+            success: false,
+            message: `به دلیل مسدودیت فعال، امکان ویرایش پیام ندارید. علت: ${ban.reason}`,
+          };
+        }
+      }
+      if (cleanText && settings.bannedKeywords.length > 0) {
+        const normalizedText = normalizePersianSearch(cleanText);
+        const hitWord = settings.bannedKeywords.find((kw) => {
+          const cleanKw = normalizePersianSearch(kw);
+          return cleanKw.length >= 2 && normalizedText.includes(cleanKw);
+        });
+        if (hitWord) {
+          return {
+            success: false,
+            message: 'متن ویرایش‌شده حاوی واژه غیرمجاز است و ثبت نشد.',
+          };
+        }
+      }
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const updated: CommunityChatMessage = {
+      ...target,
+      text: cleanText,
+      isEdited: true,
+      editedAt: nowStr,
+    };
+    list[idx] = updated;
+    Storage.setCommunityChatMessages(list);
+    return { success: true, message: 'پیام با موفقیت ویرایش شد.', chatMessage: updated };
+  },
+
+  deleteOwnCommunityChatMessage: (
+    messageId: string,
+    payload: { actorId: string; actorRole: string }
+  ): { success: boolean; message: string } => {
+    const list = Storage.getCommunityChatMessages();
+    const target = list.find((m) => m.id === messageId);
+    if (!target) return { success: false, message: 'پیام یافت نشد.' };
+
+    const isAdmin = payload.actorRole === 'admin';
+    const isOwner = target.senderId === payload.actorId && target.senderRole === payload.actorRole;
+    if (!isOwner && !isAdmin) {
+      return { success: false, message: 'شما فقط مجاز به حذف پیام‌های خود هستید.' };
+    }
+
+    // حذف فیزیکی کامل از حافظه و دیتابیس برای جلوگیری از ایجاد بار اضافی
+    Storage.setCommunityChatMessages(list.filter((m) => m.id !== messageId));
+    return { success: true, message: 'پیام به‌طور کامل حذف شد.' };
+  },
+
+  clearCommunityRoomMessages: (
+    roomId: string,
+    payload: { actorName: string; roomTitle?: string }
+  ): { success: boolean; removedCount: number; message: string } => {
+    const list = Storage.getCommunityChatMessages();
+    const remaining = list.filter((m) => m.roomId !== roomId);
+    const removedCount = list.length - remaining.length;
+    Storage.setCommunityChatMessages(remaining);
+
+    // پاکسازی گزارش‌های مرتبط با پیام‌های حذف‌شده این اتاق
+    const reports = Storage.getCommunityChatReports();
+    const remainingReports = reports.filter((r) => r.roomId !== roomId);
+    if (remainingReports.length !== reports.length) {
+      Storage.setCommunityChatReports(remainingReports);
+    }
+
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action: 'پاکسازی کامل پیام‌های گفتگو/تالار توسط مدیر',
+      details: `${removedCount.toLocaleString('fa-IR')} پیام از «${payload.roomTitle || roomId}» توسط ${payload.actorName} پاکسازی شد.`,
+      targetName: payload.roomTitle || roomId,
+      severity: 'warning',
+    });
+
+    return {
+      success: true,
+      removedCount,
+      message:
+        removedCount > 0
+          ? `${removedCount.toLocaleString('fa-IR')} پیام از «${payload.roomTitle || 'این گفتگو'}» به‌طور کامل پاکسازی شد.`
+          : 'این گفتگو پیامی برای پاکسازی نداشت.',
+    };
+  },
+
+  purgeCommunityChatData: (
+    scope:
+      | 'public_messages'
+      | 'all_dm_messages'
+      | 'all_messages'
+      | 'all_specialized_forums'
+      | 'all_chat_and_forums',
+    actorName: string
+  ): { success: boolean; message: string } => {
+    const msgs = Storage.getCommunityChatMessages();
+    const forums = Storage.getCommunityForums();
+    const reports = Storage.getCommunityChatReports();
+
+    if (scope === 'public_messages') {
+      const remaining = msgs.filter((m) => m.roomId !== PUBLIC_FORUM_ID && m.roomType !== 'public');
+      const count = msgs.length - remaining.length;
+      Storage.setCommunityChatMessages(remaining);
+      Storage.setCommunityChatReports(reports.filter((r) => r.roomId !== PUBLIC_FORUM_ID));
+      Storage.addActivityLog({
+        category: 'community_chat',
+        action: 'پاکسازی پیام‌های تالار گفتگوی عمومی',
+        details: `${count.toLocaleString('fa-IR')} پیام تالار عمومی توسط ${actorName} پاکسازی شد.`,
+        targetName: 'تالار گفتگوی عمومی',
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `${count.toLocaleString('fa-IR')} پیام از تالار گفتگوی عمومی به‌طور کامل پاک شد.`,
+      };
+    }
+
+    if (scope === 'all_dm_messages') {
+      const remaining = msgs.filter((m) => m.roomType !== 'dm');
+      const count = msgs.length - remaining.length;
+      Storage.setCommunityChatMessages(remaining);
+      Storage.setCommunityChatReports(reports.filter((r) => r.roomType !== 'dm'));
+      Storage.addActivityLog({
+        category: 'community_chat',
+        action: 'پاکسازی کامل تمام چت‌های خصوصی دانشجویان',
+        details: `${count.toLocaleString('fa-IR')} پیام از چت‌های خصوصی توسط ${actorName} حذف شد.`,
+        targetName: 'چت‌های خصوصی',
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `کل چت‌های خصوصی دانشجویان (${count.toLocaleString('fa-IR')} پیام) به‌طور کامل حذف شد.`,
+      };
+    }
+
+    if (scope === 'all_messages') {
+      const count = msgs.length;
+      Storage.setCommunityChatMessages([]);
+      Storage.setCommunityChatReports([]);
+      Storage.addActivityLog({
+        category: 'community_chat',
+        action: 'پاکسازی تمام پیام‌های همه چت‌ها و تالارها',
+        details: `تمامی ${count.toLocaleString('fa-IR')} پیام پیام‌رسان و تالارها توسط ${actorName} پاکسازی شد.`,
+        targetName: 'کل پیام‌های چت',
+        severity: 'critical',
+      });
+      return {
+        success: true,
+        message: `تمامی ${count.toLocaleString('fa-IR')} پیام در کل تالارها و چت‌های خصوصی با موفقیت پاکسازی شد.`,
+      };
+    }
+
+    if (scope === 'all_specialized_forums') {
+      const specializedCount = forums.filter((f) => !f.isPublicForum && f.id !== PUBLIC_FORUM_ID).length;
+      const publicOnly = forums.filter((f) => f.isPublicForum || f.id === PUBLIC_FORUM_ID);
+      Storage.setCommunityForums(publicOnly.length > 0 ? publicOnly : [{ ...INITIAL_PUBLIC_FORUM }]);
+      const remainingMsgs = msgs.filter((m) => m.roomType !== 'forum');
+      const removedMsgs = msgs.length - remainingMsgs.length;
+      Storage.setCommunityChatMessages(remainingMsgs);
+      Storage.setCommunityChatReports(reports.filter((r) => r.roomType !== 'forum'));
+      Storage.addActivityLog({
+        category: 'community_chat',
+        action: 'حذف کامل تمام تالارها و گروه‌های تخصصی',
+        details: `${specializedCount.toLocaleString('fa-IR')} تالار تخصصی و ${removedMsgs.toLocaleString('fa-IR')} پیام مرتبط توسط ${actorName} حذف شد.`,
+        targetName: 'تالارهای تخصصی',
+        severity: 'critical',
+      });
+      return {
+        success: true,
+        message: `${specializedCount.toLocaleString('fa-IR')} تالار/گروه تخصصی همراه با ${removedMsgs.toLocaleString('fa-IR')} پیام مرتبط به‌طور کامل حذف شد.`,
+      };
+    }
+
+    // all_chat_and_forums: پاکسازی کامل کل پیام‌ها، کل تالارهای تخصصی و گزارش‌ها
+    const specializedCount = forums.filter((f) => !f.isPublicForum && f.id !== PUBLIC_FORUM_ID).length;
+    const totalMsgs = msgs.length;
+    const publicOnly = forums.filter((f) => f.isPublicForum || f.id === PUBLIC_FORUM_ID);
+    Storage.setCommunityForums(publicOnly.length > 0 ? publicOnly : [{ ...INITIAL_PUBLIC_FORUM }]);
+    Storage.setCommunityChatMessages([]);
+    Storage.setCommunityChatReports([]);
+    Storage.addActivityLog({
+      category: 'community_chat',
+      action: 'پاکسازی و تخلیه کامل دیتابیس پیام‌رسان و تالارها',
+      details: `${totalMsgs.toLocaleString('fa-IR')} پیام و ${specializedCount.toLocaleString('fa-IR')} تالار تخصصی توسط ${actorName} برای آزادسازی فضای سرور پاکسازی شد.`,
+      targetName: 'کل فضای پیام‌رسان',
+      severity: 'critical',
+    });
+    return {
+      success: true,
+      message: `پاکسازی کامل انجام شد: ${totalMsgs.toLocaleString('fa-IR')} پیام و ${specializedCount.toLocaleString('fa-IR')} تالار تخصصی حذف و فضای دیتابیس آزاد گردید.`,
+    };
+  },
+
   getCommunityChatBans: (): CommunityChatBan[] => {
     const list = get<CommunityChatBan[]>(STORAGE_KEYS.COMMUNITY_CHAT_BANS, []);
     return Array.isArray(list) ? list : [];

@@ -34,6 +34,8 @@ import {
   UserCheck,
   Hash,
   FileWarning,
+  Database,
+  Eraser,
 } from 'lucide-react';
 
 interface CommunityModerationPanelProps {
@@ -111,6 +113,36 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
   const [banScope, setBanScope] = useState<'all' | 'private_only' | 'forums_only'>('all');
   const [banReason, setBanReason] = useState('');
   const [isLookingUpStudent, setIsLookingUpStudent] = useState(false);
+
+  // مودال تأیید عملیات پاکسازی و حذف (بدون استفاده از window.confirm)
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    description: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const [statsRefreshTick, setStatsRefreshTick] = useState(0);
+
+  const storageStats = useMemo(() => {
+    const allMsgs = Storage.getCommunityChatMessages();
+    const publicMsgs = allMsgs.filter((m) => m.roomId === PUBLIC_FORUM_ID || m.roomType === 'public').length;
+    const dmMsgs = allMsgs.filter((m) => m.roomType === 'dm').length;
+    const forumMsgs = allMsgs.filter((m) => m.roomType === 'forum').length;
+    const specializedForums = forums.filter((f) => !f.isPublicForum && f.id !== PUBLIC_FORUM_ID).length;
+    const approxKb = Math.max(
+      1,
+      Math.round((JSON.stringify(allMsgs).length + JSON.stringify(forums).length) / 1024)
+    );
+    return {
+      totalMsgs: allMsgs.length,
+      publicMsgs,
+      dmMsgs,
+      forumMsgs,
+      specializedForums,
+      approxKb,
+    };
+  }, [forums, reports, chatSettings, statsRefreshTick]);
 
   // همگام‌سازی draftSettings وقتی chatSettings تغییر می‌کند
   React.useEffect(() => {
@@ -629,6 +661,162 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
                 </button>
               </div>
             </div>
+
+            {/* مدیریت حجم و پاکسازی سرور و دیتابیس پیام‌رسان (ویژه مدیر) */}
+            <div className="p-5 rounded-2xl bg-rose-50/70 dark:bg-rose-950/25 border-2 border-rose-200 dark:border-rose-900/70 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-600 text-white flex items-center justify-center shrink-0">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-sm text-rose-900 dark:text-rose-200">
+                      پاکسازی و بهینه‌سازی فضای سرور و دیتابیس پیام‌رسان
+                    </h4>
+                    <p className="text-[11px] text-rose-700/90 dark:text-rose-300/90 mt-0.5">
+                      برای جلوگیری از بار اضافی روی سرور و پایگاه داده، می‌توانید پیام‌ها، چت‌ها یا کل تالارهای تخصصی را به‌صورت کامل پاکسازی کنید.
+                    </p>
+                  </div>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 text-[11px] font-extrabold text-rose-700 dark:text-rose-300 shrink-0">
+                  حجم تقریبی فعلی: ~{storageStats.approxKb.toLocaleString('fa-IR')} کیلوبایت
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-100 dark:border-slate-800">
+                  <div className="text-[10px] text-slate-500">کل پیام‌ها</div>
+                  <div className="text-sm font-black text-slate-900 dark:text-white mt-0.5">
+                    {storageStats.totalMsgs.toLocaleString('fa-IR')}
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-100 dark:border-slate-800">
+                  <div className="text-[10px] text-slate-500">پیام تالار عمومی</div>
+                  <div className="text-sm font-black text-teal-700 dark:text-teal-300 mt-0.5">
+                    {storageStats.publicMsgs.toLocaleString('fa-IR')}
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-100 dark:border-slate-800">
+                  <div className="text-[10px] text-slate-500">پیام چت خصوصی</div>
+                  <div className="text-sm font-black text-violet-700 dark:text-violet-300 mt-0.5">
+                    {storageStats.dmMsgs.toLocaleString('fa-IR')}
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-100 dark:border-slate-800">
+                  <div className="text-[10px] text-slate-500">تالارهای تخصصی</div>
+                  <div className="text-sm font-black text-indigo-700 dark:text-indigo-300 mt-0.5">
+                    {storageStats.specializedForums.toLocaleString('fa-IR')} تالار
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfirmDialog({
+                      title: 'پاکسازی پیام‌های تالار گفتگوی عمومی',
+                      description:
+                        'تمام پیام‌های ثبت‌شده در تالار گفتگوی عمومی به‌طور کامل از دیتابیس حذف می‌شوند. خود تالار عمومی باقی می‌ماند. ادامه می‌دهید؟',
+                      confirmLabel: 'پاکسازی پیام‌های تالار عمومی',
+                      onConfirm: () => {
+                        const res = Storage.purgeCommunityChatData('public_messages', actorMeta.name);
+                        onRefresh();
+                        onNotify(res.message, 'success');
+                      },
+                    })
+                  }
+                  className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Eraser className="w-3.5 h-3.5" />
+                  <span>پاکسازی پیام‌های تالار عمومی</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfirmDialog({
+                      title: 'پاکسازی کامل همه چت‌های خصوصی دانشجویان',
+                      description:
+                        'تمام گفتگوهای خصوصی بین دانشجویان به‌صورت فیزیکی و غیرقابل بازگشت از سرور و دیتابیس پاک می‌شوند. ادامه می‌دهید؟',
+                      confirmLabel: 'حذف کل چت‌های خصوصی',
+                      onConfirm: () => {
+                        const res = Storage.purgeCommunityChatData('all_dm_messages', actorMeta.name);
+                        onRefresh();
+                        onNotify(res.message, 'success');
+                      },
+                    })
+                  }
+                  className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-violet-50 dark:hover:bg-violet-950/40 text-violet-800 dark:text-violet-300 border border-violet-200 dark:border-violet-800 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Eraser className="w-3.5 h-3.5" />
+                  <span>حذف کل چت‌های خصوصی</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfirmDialog({
+                      title: 'پاکسازی تمام پیام‌های کل تالارها و چت‌ها',
+                      description:
+                        'تمامی پیام‌ها در تالار عمومی، تالارهای تخصصی و چت‌های خصوصی پاک می‌شوند ولی ساختار تالارها حفظ می‌گردد. ادامه می‌دهید؟',
+                      confirmLabel: 'پاکسازی تمام پیام‌ها',
+                      onConfirm: () => {
+                        const res = Storage.purgeCommunityChatData('all_messages', actorMeta.name);
+                        onRefresh();
+                        onNotify(res.message, 'success');
+                      },
+                    })
+                  }
+                  className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>پاکسازی همه پیام‌ها</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfirmDialog({
+                      title: 'حذف کامل تمام تالارها و گروه‌های تخصصی',
+                      description:
+                        'تمامی تالارها، گروه‌ها و انجمن‌های تخصصی به همراه کل پیام‌های آن‌ها به‌طور دائم حذف می‌شوند (فقط تالار گفتگوی عمومی باقی می‌ماند).',
+                      confirmLabel: 'حذف کل تالارهای تخصصی',
+                      onConfirm: () => {
+                        const res = Storage.purgeCommunityChatData('all_specialized_forums', actorMeta.name);
+                        onRefresh();
+                        onNotify(res.message, 'success');
+                      },
+                    })
+                  }
+                  className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>حذف کل تالارهای تخصصی</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfirmDialog({
+                      title: 'تخلیه کامل کل چت‌ها و تالارها (آزادسازی کامل دیتابیس)',
+                      description:
+                        'هشدار: تمامی پیام‌های تالار عمومی، همه چت‌های خصوصی، همه تالارهای تخصصی و گزارش‌ها به‌طور کامل حذف می‌شوند تا هیچ بار اضافی روی سرور باقی نماند. آیا مطمئن هستید؟',
+                      confirmLabel: 'پاکسازی کامل کل فضا',
+                      onConfirm: () => {
+                        const res = Storage.purgeCommunityChatData('all_chat_and_forums', actorMeta.name);
+                        onRefresh();
+                        onNotify(res.message, 'success');
+                      },
+                    })
+                  }
+                  className="sm:col-span-2 px-3.5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>پاکسازی کامل کل چت‌ها، پیام‌ها و تالارهای تخصصی (آزادسازی دیتابیس)</span>
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -915,18 +1103,51 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
                         )}
 
                         {isAdmin && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const res = Storage.deleteCommunityForum(forum.id, actorMeta.name);
-                              onRefresh();
-                              onNotify(res.message, res.success ? 'success' : 'error');
-                            }}
-                            className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300 text-xs font-bold flex items-center gap-1 cursor-pointer mr-auto"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>حذف تالار</span>
-                          </button>
+                          <div className="flex items-center gap-1.5 mr-auto">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setConfirmDialog({
+                                  title: `پاکسازی پیام‌های «${forum.title}»`,
+                                  description:
+                                    'تمام پیام‌های ارسال‌شده در این تالار برای سبک شدن دیتابیس حذف می‌شوند اما خود تالار حفظ می‌گردد.',
+                                  confirmLabel: 'پاکسازی پیام‌ها',
+                                  onConfirm: () => {
+                                    const res = Storage.clearCommunityRoomMessages(forum.id, {
+                                      actorName: actorMeta.name,
+                                      roomTitle: forum.title,
+                                    });
+                                    onRefresh();
+                                    onNotify(res.message, 'success');
+                                  },
+                                })
+                              }
+                              className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Eraser className="w-3.5 h-3.5" />
+                              <span>پاکسازی پیام‌ها</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setConfirmDialog({
+                                  title: `حذف کامل تالار «${forum.title}»`,
+                                  description:
+                                    'این تالار و تمامی پیام‌های ثبت‌شده در آن به‌طور دائم از دیتابیس حذف خواهند شد. ادامه می‌دهید؟',
+                                  confirmLabel: 'حذف کامل تالار',
+                                  onConfirm: () => {
+                                    const res = Storage.deleteCommunityForum(forum.id, actorMeta.name);
+                                    onRefresh();
+                                    onNotify(res.message, res.success ? 'success' : 'error');
+                                  },
+                                })
+                              }
+                              className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>حذف تالار</span>
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1275,6 +1496,51 @@ export const CommunityModerationPanel: React.FC<CommunityModerationPanelProps> =
           </div>
         )}
       </div>
+
+      {/* مودال تأیید پاکسازی و حذف (درون‌برنامه‌ای) */}
+      {confirmDialog && (
+        <div
+          className="fixed inset-0 z-[80] bg-slate-950/65 backdrop-blur-xs flex items-center justify-center p-4"
+          dir="rtl"
+        >
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-rose-200 dark:border-rose-900/70 p-5 space-y-4 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                  {confirmDialog.title}
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-6 mt-1">
+                  {confirmDialog.description}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const fn = confirmDialog.onConfirm;
+                  setConfirmDialog(null);
+                  fn();
+                  setStatsRefreshTick((t) => t + 1);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold cursor-pointer"
+              >
+                {confirmDialog.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

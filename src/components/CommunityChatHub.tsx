@@ -54,6 +54,8 @@ import {
   Sparkles,
   Megaphone,
   UserX,
+  Pencil,
+  Eraser,
 } from 'lucide-react';
 
 interface CommunityChatHubProps {
@@ -187,6 +189,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
   const [draftImage, setDraftImage] = useState<string | null>(null);
   const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<CommunityChatMessage | null>(null);
+  const [editingMessage, setEditingMessage] = useState<CommunityChatMessage | null>(null);
   const [moderatorPostMode, setModeratorPostMode] = useState<'normal' | 'moderator' | 'warning'>(
     'normal'
   );
@@ -201,6 +204,12 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     studentName: string;
   } | null>(null);
   const [quickBanReason, setQuickBanReason] = useState('');
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    description: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
   const [toast, setToast] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -230,6 +239,15 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
   useEffect(() => {
     reloadLocal();
   }, [cloudSyncTick, reloadLocal]);
+
+  // پاکسازی وضعیت ویرایش و پاسخ هنگام جابه‌جایی بین تالارها و چت‌ها
+  useEffect(() => {
+    setEditingMessage((prev) => {
+      if (prev) setDraftText('');
+      return null;
+    });
+    setReplyTo(null);
+  }, [selectedRoomId]);
 
   // همگام‌سازی خودکار با ابر هر ۱۲ ثانیه در زمان باز بودن پیام‌رسان
   useEffect(() => {
@@ -593,6 +611,25 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
   };
 
   const handleSendMessage = (overrideStickerId?: string) => {
+    // حالت ویرایش پیام خود کاربر
+    if (editingMessage && !overrideStickerId) {
+      const editRes = Storage.editCommunityChatMessage(editingMessage.id, {
+        editorId: me.id,
+        editorRole: me.role,
+        editorName: me.name,
+        newText: draftText,
+      });
+      if (!editRes.success) {
+        showToast(editRes.message, 'error');
+        return;
+      }
+      setEditingMessage(null);
+      setDraftText('');
+      reloadLocal();
+      showToast(editRes.message, 'success');
+      return;
+    }
+
     if (composerBlockReason) {
       showToast(composerBlockReason, 'error');
       return;
@@ -1369,6 +1406,78 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                       )}
                     </button>
                   )}
+
+                {/* ابزار پاکسازی پیام‌ها یا حذف کامل تالار / چت برای مدیر کل */}
+                {isAdmin && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfirmModal({
+                          title: `پاکسازی همه پیام‌های «${activeRoomTitle}»`,
+                          description:
+                            selectedRoomType === 'dm'
+                              ? 'تمام پیام‌های این گفتگوی خصوصی از سرور و دیتابیس پاک می‌شوند و گفتگو حذف می‌گردد. ادامه می‌دهید؟'
+                              : 'تمام پیام‌های این تالار به‌طور کامل از دیتابیس پاک می‌شوند تا بار اضافی روی سرور ایجاد نکند. ادامه می‌دهید؟',
+                          confirmLabel:
+                            selectedRoomType === 'dm' ? 'حذف کامل این چت خصوصی' : 'پاکسازی همه پیام‌ها',
+                          onConfirm: () => {
+                            const res = Storage.clearCommunityRoomMessages(selectedRoomId, {
+                              actorName: me.name,
+                              roomTitle: activeRoomTitle,
+                            });
+                            if (selectedRoomType === 'dm') {
+                              setActiveDmParticipants(null);
+                              setSelectedRoomId(PUBLIC_FORUM_ID);
+                              setSelectedRoomType('public');
+                            }
+                            reloadLocal();
+                            onRefreshGlobalData?.();
+                            showToast(res.message, 'success');
+                          },
+                        })
+                      }
+                      className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                      title={
+                        selectedRoomType === 'dm'
+                          ? 'حذف کامل این چت خصوصی از دیتابیس'
+                          : 'پاکسازی تمام پیام‌های این تالار'
+                      }
+                    >
+                      <Eraser className="w-3.5 h-3.5" />
+                      <span className="hidden lg:inline">
+                        {selectedRoomType === 'dm' ? 'حذف چت' : 'پاکسازی پیام‌ها'}
+                      </span>
+                    </button>
+
+                    {selectedRoomType === 'forum' && activeForum && !activeForum.isPublicForum && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConfirmModal({
+                            title: `حذف کامل تالار «${activeForum.title}»`,
+                            description:
+                              'این تالار به همراه تمامی پیام‌های آن به‌طور کامل از دیتابیس حذف می‌شود. آیا مطمئن هستید؟',
+                            confirmLabel: 'حذف کامل تالار',
+                            onConfirm: () => {
+                              const res = Storage.deleteCommunityForum(activeForum.id, me.name);
+                              setSelectedRoomId(PUBLIC_FORUM_ID);
+                              setSelectedRoomType('public');
+                              reloadLocal();
+                              onRefreshGlobalData?.();
+                              showToast(res.message, res.success ? 'success' : 'error');
+                            },
+                          })
+                        }
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        title="حذف کامل این تالار تخصصی و پیام‌های آن"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span className="hidden lg:inline">حذف تالار</span>
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 
@@ -1439,19 +1548,66 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                   // اخطار رسمی ناظر (کارت متمایز تمام‌عرض)
                   if (msg.isWarningMessage) {
                     return (
-                      <div key={msg.id} className="flex justify-center my-2">
+                      <div key={msg.id} className="flex flex-col items-center my-2 group">
                         <div className="w-full max-w-xl p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-300 dark:border-rose-700 shadow-xs space-y-1.5">
                           <div className="flex items-center justify-between gap-2 text-[11px] font-extrabold text-rose-700 dark:text-rose-300">
                             <span className="flex items-center gap-1.5">
                               <ShieldAlert className="w-4 h-4" />
                               اخطار رسمی {getRoleDisplayLabel(msg.senderRole)} ({msg.senderName})
                             </span>
-                            <span className="text-[10px] opacity-80">{msg.createdAt}</span>
+                            <span className="text-[10px] opacity-80">
+                              {msg.createdAt}
+                              {msg.isEdited ? ' • ویرایش‌شده' : ''}
+                            </span>
                           </div>
                           <p className="text-xs font-bold text-rose-950 dark:text-rose-100 leading-6 whitespace-pre-wrap">
                             {msg.text}
                           </p>
                         </div>
+                        {(isMine || isAdmin) && (
+                          <div className="flex items-center gap-1.5 mt-1 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 transition">
+                            {isMine && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMessage(msg);
+                                  setReplyTo(null);
+                                  setDraftText(msg.text || '');
+                                }}
+                                className="px-2 py-0.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-white dark:hover:bg-slate-800 text-[10px] font-bold flex items-center gap-0.5 cursor-pointer"
+                              >
+                                <Pencil className="w-3 h-3" />
+                                <span>ویرایش</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setConfirmModal({
+                                  title: 'حذف اخطار رسمی',
+                                  description: 'این اخطار به‌طور کامل از گفتگو و دیتابیس حذف شود؟',
+                                  confirmLabel: 'حذف کامل',
+                                  onConfirm: () => {
+                                    const res = Storage.deleteOwnCommunityChatMessage(msg.id, {
+                                      actorId: me.id,
+                                      actorRole: me.role,
+                                    });
+                                    if (editingMessage?.id === msg.id) {
+                                      setEditingMessage(null);
+                                      setDraftText('');
+                                    }
+                                    reloadLocal();
+                                    showToast(res.message, res.success ? 'success' : 'error');
+                                  },
+                                })
+                              }
+                              className="px-2 py-0.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-white dark:hover:bg-slate-800 text-[10px] font-bold flex items-center gap-0.5 cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>حذف</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   }
@@ -1459,14 +1615,17 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                   // پیام رسمی ناظر
                   if (msg.isModeratorMessage) {
                     return (
-                      <div key={msg.id} className="flex justify-center my-2">
+                      <div key={msg.id} className="flex flex-col items-center my-2 group">
                         <div className="w-full max-w-xl p-3.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-300 dark:border-indigo-700 shadow-xs space-y-1.5">
                           <div className="flex items-center justify-between gap-2 text-[11px] font-extrabold text-indigo-700 dark:text-indigo-300">
                             <span className="flex items-center gap-1.5">
                               <ShieldCheck className="w-4 h-4" />
                               پیام رسمی ناظر • {msg.senderName} ({getRoleDisplayLabel(msg.senderRole)})
                             </span>
-                            <span className="text-[10px] opacity-80">{msg.createdAt}</span>
+                            <span className="text-[10px] opacity-80">
+                              {msg.createdAt}
+                              {msg.isEdited ? ' • ویرایش‌شده' : ''}
+                            </span>
                           </div>
                           {msg.text && (
                             <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 leading-6 whitespace-pre-wrap">
@@ -1482,6 +1641,50 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                             />
                           )}
                         </div>
+                        {(isMine || isAdmin) && (
+                          <div className="flex items-center gap-1.5 mt-1 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 transition">
+                            {isMine && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMessage(msg);
+                                  setReplyTo(null);
+                                  setDraftText(msg.text || '');
+                                }}
+                                className="px-2 py-0.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-white dark:hover:bg-slate-800 text-[10px] font-bold flex items-center gap-0.5 cursor-pointer"
+                              >
+                                <Pencil className="w-3 h-3" />
+                                <span>ویرایش</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setConfirmModal({
+                                  title: 'حذف پیام رسمی ناظر',
+                                  description: 'این پیام به‌طور کامل از گفتگو و دیتابیس حذف شود؟',
+                                  confirmLabel: 'حذف کامل',
+                                  onConfirm: () => {
+                                    const res = Storage.deleteOwnCommunityChatMessage(msg.id, {
+                                      actorId: me.id,
+                                      actorRole: me.role,
+                                    });
+                                    if (editingMessage?.id === msg.id) {
+                                      setEditingMessage(null);
+                                      setDraftText('');
+                                    }
+                                    reloadLocal();
+                                    showToast(res.message, res.success ? 'success' : 'error');
+                                  },
+                                })
+                              }
+                              className="px-2 py-0.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-white dark:hover:bg-slate-800 text-[10px] font-bold flex items-center gap-0.5 cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>حذف</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   }
@@ -1534,6 +1737,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                             }`}
                           >
                             {msg.createdAt}
+                            {msg.isEdited ? ' • ویرایش‌شده' : ''}
                           </span>
                         </div>
 
@@ -1582,16 +1786,68 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                       </div>
 
                       {/* اکشن‌های سریع زیر هر پیام */}
-                      <div className="flex items-center gap-1 mt-1 px-1 opacity-85 sm:opacity-0 sm:group-hover:opacity-100 transition">
+                      <div className="flex items-center gap-1 mt-1 px-1 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition">
                         <button
                           type="button"
-                          onClick={() => setReplyTo(msg)}
+                          onClick={() => {
+                            setEditingMessage(null);
+                            setReplyTo(msg);
+                          }}
                           className="p-1 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-white dark:hover:bg-slate-800 text-[10px] flex items-center gap-0.5 cursor-pointer"
                           title="پاسخ به این پیام"
                         >
                           <Reply className="w-3 h-3" />
                           <span>پاسخ</span>
                         </button>
+
+                        {/* ویرایش و حذف پیام توسط خود فرستنده در چت خصوصی، تالار عمومی و گروه‌های تخصصی */}
+                        {isMine && (
+                          <>
+                            {!msg.stickerId && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMessage(msg);
+                                  setReplyTo(null);
+                                  setDraftImage(null);
+                                  setDraftText(msg.text || '');
+                                }}
+                                className="p-1 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-white dark:hover:bg-slate-800 text-[10px] flex items-center gap-0.5 cursor-pointer"
+                                title="ویرایش پیام خود"
+                              >
+                                <Pencil className="w-3 h-3" />
+                                <span>ویرایش</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setConfirmModal({
+                                  title: 'حذف پیام',
+                                  description: 'آیا مطمئن هستید که می‌خواهید این پیام خود را به‌طور کامل حذف کنید؟',
+                                  confirmLabel: 'حذف پیام',
+                                  onConfirm: () => {
+                                    const res = Storage.deleteOwnCommunityChatMessage(msg.id, {
+                                      actorId: me.id,
+                                      actorRole: me.role,
+                                    });
+                                    if (editingMessage?.id === msg.id) {
+                                      setEditingMessage(null);
+                                      setDraftText('');
+                                    }
+                                    reloadLocal();
+                                    showToast(res.message, res.success ? 'success' : 'error');
+                                  },
+                                })
+                              }
+                              className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-white dark:hover:bg-slate-800 text-[10px] flex items-center gap-0.5 cursor-pointer"
+                              title="حذف کامل پیام خود"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>حذف</span>
+                            </button>
+                          </>
+                        )}
 
                         {!isMine && !isModerator && (
                           <button
@@ -1605,19 +1861,24 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                           </button>
                         )}
 
-                        {isModerator && (
+                        {isModerator && !isMine && (
                           <>
                             <button
                               type="button"
                               onClick={() => {
-                                const res = Storage.deleteCommunityChatMessage(msg.id, {
-                                  actorName: me.name,
-                                });
+                                const res = isAdmin
+                                  ? Storage.deleteOwnCommunityChatMessage(msg.id, {
+                                      actorId: me.id,
+                                      actorRole: me.role,
+                                    })
+                                  : Storage.deleteCommunityChatMessage(msg.id, {
+                                      actorName: me.name,
+                                    });
                                 reloadLocal();
                                 showToast(res.message, 'success');
                               }}
                               className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-white dark:hover:bg-slate-800 text-[10px] flex items-center gap-0.5 cursor-pointer"
-                              title="حذف پیام"
+                              title={isAdmin ? 'حذف کامل پیام از دیتابیس' : 'حذف پیام توسط ناظر'}
                             >
                               <Trash2 className="w-3 h-3" />
                               <span>حذف</span>
@@ -1683,8 +1944,34 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                 </div>
               )}
 
+              {/* نوار حالت ویرایش پیام خود کاربر */}
+              {editingMessage && (
+                <div className="px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 flex items-center justify-between gap-2 text-xs">
+                  <div className="min-w-0 truncate flex items-center gap-1.5">
+                    <Pencil className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span className="font-extrabold text-indigo-700 dark:text-indigo-300">
+                      در حال ویرایش پیام:
+                    </span>
+                    <span className="text-slate-600 dark:text-slate-300 truncate">
+                      {editingMessage.text || '[پیوست]'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingMessage(null);
+                      setDraftText('');
+                    }}
+                    className="p-1 rounded-lg text-slate-400 hover:text-rose-500 cursor-pointer shrink-0"
+                    title="لغو ویرایش"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
               {/* نوار پیش‌نمایش پاسخ */}
-              {replyTo && (
+              {replyTo && !editingMessage && (
                 <div className="px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 flex items-center justify-between gap-2 text-xs">
                   <div className="min-w-0 truncate">
                     <span className="font-extrabold text-teal-700 dark:text-teal-300">
@@ -1825,20 +2112,31 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                     className="flex-1 px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white resize-none focus:outline-none focus:ring-2 focus:ring-teal-500 max-h-28"
                   />
 
-                  {/* دکمه ارسال */}
+                  {/* دکمه ارسال / ذخیره ویرایش */}
                   <button
                     type="button"
                     onClick={() => handleSendMessage()}
                     className={`px-4 py-2.5 rounded-2xl text-white text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition cursor-pointer shrink-0 ${
-                      isModerator && moderatorPostMode === 'warning'
+                      editingMessage
+                        ? 'bg-indigo-600 hover:bg-indigo-700'
+                        : isModerator && moderatorPostMode === 'warning'
                         ? 'bg-rose-600 hover:bg-rose-700'
                         : isModerator && moderatorPostMode === 'moderator'
                         ? 'bg-indigo-600 hover:bg-indigo-700'
                         : 'bg-teal-600 hover:bg-teal-700'
                     }`}
                   >
-                    <Send className="w-4 h-4" />
-                    <span className="hidden sm:inline">ارسال</span>
+                    {editingMessage ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span className="hidden sm:inline">ثبت ویرایش</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        <span className="hidden sm:inline">ارسال</span>
+                      </>
+                    )}
                   </button>
                 </div>
               )}
@@ -1985,6 +2283,50 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* ================= مودال تأیید حذف / پاکسازی درون‌برنامه‌ای ================= */}
+      {confirmModal && (
+        <div
+          className="fixed inset-0 z-[80] bg-slate-950/65 backdrop-blur-xs flex items-center justify-center p-4"
+          dir="rtl"
+        >
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-rose-200 dark:border-rose-900/70 p-5 space-y-4 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                  {confirmModal.title}
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-6 mt-1">
+                  {confirmModal.description}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setConfirmModal(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const fn = confirmModal.onConfirm;
+                  setConfirmModal(null);
+                  fn();
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold cursor-pointer"
+              >
+                {confirmModal.confirmLabel}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
