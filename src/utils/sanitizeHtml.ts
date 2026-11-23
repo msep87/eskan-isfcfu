@@ -79,8 +79,14 @@ function filterInlineStyle(styleValue: string): string {
     if (
       !val ||
       lowerVal.includes('javascript:') ||
+      lowerVal.includes('vbscript:') ||
+      lowerVal.includes('data:') ||
       lowerVal.includes('expression(') ||
-      lowerVal.includes('url(')
+      lowerVal.includes('url(') ||
+      lowerVal.includes('behavior:') ||
+      lowerVal.includes('-moz-binding') ||
+      lowerVal.includes('@import') ||
+      lowerVal.includes('\\')
     ) {
       continue;
     }
@@ -108,9 +114,19 @@ function sanitizeNode(node: Node, doc: Document): Node | null {
     tagName === 'IFRAME' ||
     tagName === 'OBJECT' ||
     tagName === 'EMBED' ||
+    tagName === 'APPLET' ||
     tagName === 'SVG' ||
     tagName === 'MATH' ||
-    tagName === 'FORM'
+    tagName === 'FORM' ||
+    tagName === 'INPUT' ||
+    tagName === 'BUTTON' ||
+    tagName === 'TEXTAREA' ||
+    tagName === 'SELECT' ||
+    tagName === 'BASE' ||
+    tagName === 'META' ||
+    tagName === 'LINK' ||
+    tagName === 'TEMPLATE' ||
+    tagName === 'NOSCRIPT'
   ) {
     return null;
   }
@@ -250,7 +266,9 @@ export function isSafeMediaUrl(url: string | undefined | null): boolean {
   if (!url || typeof url !== 'string') return false;
   const trimmed = url.trim();
   if (!trimmed) return false;
-  if (trimmed.startsWith('data:image/')) return true;
+  // فقط تصاویر پیکسلی امن مجاز هستند و data:image/svg+xml جهت جلوگیری از XSS مسدود می‌شود
+  if (/^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(trimmed)) return true;
+  if (trimmed.toLowerCase().startsWith('data:')) return false;
   if (trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) return true;
   try {
     const parsed = new URL(trimmed, 'https://example.invalid');

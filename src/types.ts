@@ -1015,6 +1015,7 @@ export interface ActivityLog {
   details: string;
   targetName?: string;
   severity?: 'info' | 'warning' | 'critical';
+  integrityHash?: string; // زنجیره اصالت رکورد ممیزی برای جلوگیری از دستکاری
 }
 
 export interface StudentEvaluation {

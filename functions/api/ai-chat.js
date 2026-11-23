@@ -1,14 +1,78 @@
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+const BASE_SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
 };
 
-const JSON_HEADERS = {
-  'Content-Type': 'application/json; charset=utf-8',
-  'Access-Control-Allow-Origin': '*',
-  'Cache-Control': 'no-store, no-cache, must-revalidate',
-};
+function resolveCorsOrigin(request) {
+  const origin = request?.headers?.get?.('Origin') || '';
+  if (!origin) return '*';
+  try {
+    const reqUrl = new URL(request.url);
+    const originUrl = new URL(origin);
+    if (originUrl.host === reqUrl.host) return origin;
+    if (
+      originUrl.hostname === 'localhost' ||
+      originUrl.hostname === '127.0.0.1' ||
+      originUrl.hostname.endsWith('.pages.dev') ||
+      originUrl.hostname.endsWith('.run.app')
+    ) {
+      return origin;
+    }
+  } catch {
+    // ignore malformed origin
+  }
+  return origin;
+}
+
+function getCorsHeaders(request) {
+  return {
+    ...BASE_SECURITY_HEADERS,
+    'Access-Control-Allow-Origin': resolveCorsOrigin(request),
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    Vary: 'Origin',
+  };
+}
+
+function getJsonHeaders(request) {
+  return {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    ...getCorsHeaders(request),
+  };
+}
+
+// محدودساز نرخ درخواست بر اساس IP برای جلوگیری از سوءاستفاده و مصرف بی‌رویه سهمیه
+const AI_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const AI_RATE_LIMIT_MAX_REQ = 25;
+const aiRateLimitMap = new Map();
+
+function checkAiIpRateLimit(request) {
+  const ip =
+    request?.headers?.get?.('CF-Connecting-IP') ||
+    request?.headers?.get?.('X-Forwarded-For')?.split(',')[0]?.trim() ||
+    'local';
+  const now = Date.now();
+  const prev = aiRateLimitMap.get(ip) || [];
+  const recent = prev.filter((ts) => now - ts < AI_RATE_LIMIT_WINDOW_MS);
+  if (recent.length >= AI_RATE_LIMIT_MAX_REQ) {
+    aiRateLimitMap.set(ip, recent);
+    const retryAfterSec = Math.max(5, Math.ceil((AI_RATE_LIMIT_WINDOW_MS - (now - recent[0])) / 1000));
+    return { allowed: false, retryAfterSec };
+  }
+  recent.push(now);
+  aiRateLimitMap.set(ip, recent);
+  if (aiRateLimitMap.size > 500) {
+    for (const [k, list] of aiRateLimitMap.entries()) {
+      if (!list.some((ts) => now - ts < AI_RATE_LIMIT_WINDOW_MS)) {
+        aiRateLimitMap.delete(k);
+      }
+    }
+  }
+  return { allowed: true, retryAfterSec: 0 };
+}
+
+const SENSITIVE_FIELD_PATTERN = /(password|passwd|secret|token|apikey|api_key|nationalid|nationalcode|national_code|authorization)/i;
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 
@@ -91,9 +155,12 @@ function cleanAndTruncate(obj, maxLength = 2500) {
     const str =
       typeof obj === 'string'
         ? obj
-        : JSON.stringify(obj, (_key, value) => {
+        : JSON.stringify(obj, (key, value) => {
+            if (key && SENSITIVE_FIELD_PATTERN.test(key)) {
+              return '[محرمانه]';
+            }
             if (typeof value === 'string') {
-              if (value.startsWith('data:image') || value.startsWith('data:application')) {
+              if (value.startsWith('data:image') || value.startsWith('data:application') || value.startsWith('data:audio')) {
                 return '[حذف شد]';
               }
               if (value.length > 500) {
@@ -201,14 +268,15 @@ async function callGeminiChat(geminiKey, systemInstruction, history, message) {
   };
 }
 
-export async function onRequestOptions() {
+export async function onRequestOptions(context) {
   return new Response(null, {
     status: 204,
-    headers: CORS_HEADERS,
+    headers: getCorsHeaders(context?.request),
   });
 }
 
 export async function onRequestGet(context) {
+  const JSON_HEADERS = getJsonHeaders(context?.request);
   const apiKey = (context?.env?.GROQ_API_KEY || '').trim();
   const geminiKey = (context?.env?.GEMINI_API_KEY || '').trim();
   const hasGroqKey = Boolean(apiKey);
@@ -240,7 +308,35 @@ export async function onRequestGet(context) {
 }
 
 export async function onRequestPost(context) {
+  const JSON_HEADERS = getJsonHeaders(context?.request);
   try {
+    const rl = checkAiIpRateLimit(context?.request);
+    if (!rl.allowed) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          code: 'RATE_LIMITED',
+          retryAfterSeconds: rl.retryAfterSec,
+          reply: `تعداد درخواست‌های شما در دقیقه از حد مجاز گذشت. لطفاً ${rl.retryAfterSec} ثانیه صبر کرده و دوباره تلاش کنید.`,
+        }),
+        {
+          status: 429,
+          headers: {
+            ...JSON_HEADERS,
+            'Retry-After': String(rl.retryAfterSec),
+          },
+        }
+      );
+    }
+
+    const contentLengthHeader = Number(context.request.headers.get('Content-Length') || '0');
+    if (Number.isFinite(contentLengthHeader) && contentLengthHeader > 65536) {
+      return new Response(
+        JSON.stringify({ ok: false, reply: 'حجم درخواست ارسال‌شده بیش از حد مجاز است.' }),
+        { status: 413, headers: JSON_HEADERS }
+      );
+    }
+
     const body = await context.request.json().catch(() => null);
     if (!body || typeof body !== 'object') {
       return new Response(
@@ -497,12 +593,12 @@ ${cleanAndTruncate(resolvedStudentInfo, 800) || 'کاربر مهمان'}
   }
 }
 
-export async function onRequest() {
+export async function onRequest(context) {
   return new Response(
     JSON.stringify({
       ok: false,
       reply: 'متد درخواستی برای سرویس دستیار هوشمند پشتیبانی نمی‌شود (از POST استفاده کنید).',
     }),
-    { status: 405, headers: JSON_HEADERS }
+    { status: 405, headers: getJsonHeaders(context?.request) }
   );
 }

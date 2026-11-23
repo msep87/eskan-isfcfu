@@ -1289,21 +1289,39 @@ export default function App() {
         );
       })()}
 
-      {/* بنر اطلاعیه سراسری در بالای صفحه */}
-      {settings.announcementBanner && (
-        <div className="bg-gradient-to-r from-teal-600 via-teal-700 to-cyan-600 text-white text-xs py-2.5 px-4 text-center font-bold flex items-center justify-center gap-2 shadow-xs">
-          <Bell className="w-4 h-4 text-amber-300 shrink-0" />
-          <span>{settings.announcementBanner}</span>
+      {/* بنر اطلاعیه سراسری در بالای صفحه (+ تاریخ شمسی و ساعت زنده در حالت ورود کاربر) */}
+      {(settings.announcementBanner || currentUser) && (
+        <div className="bg-gradient-to-r from-teal-600 via-teal-700 to-cyan-600 text-white text-xs py-2 px-3 sm:px-6 font-bold shadow-xs">
+          <div
+            className={`max-w-7xl mx-auto flex flex-wrap items-center gap-2 ${
+              currentUser ? 'justify-between' : 'justify-center'
+            }`}
+          >
+            <div
+              className={`flex items-center gap-2 min-w-0 ${
+                currentUser ? 'justify-start flex-1' : 'justify-center'
+              }`}
+            >
+              {settings.announcementBanner ? (
+                <>
+                  <Bell className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span className={currentUser ? 'leading-relaxed text-right' : 'text-center'}>
+                    {settings.announcementBanner}
+                  </span>
+                </>
+              ) : (
+                <span className="text-white/95 text-[11px] truncate">
+                  {settings.universityName || 'سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان'}
+                </span>
+              )}
+            </div>
+            {currentUser && <JalaliLiveClockBar variant="ribbon" />}
+          </div>
         </div>
       )}
 
       {/* بدنه اصلی */}
       <main className="flex-1 w-full min-w-0 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
-        {currentUser && (
-          <div className="flex justify-end mb-3">
-            <JalaliLiveClockBar compact />
-          </div>
-        )}
 
         {/* ۱. صفحه فرود برای مراجعین قبل از ورود به سامانه (بدون نمایش آمار به عموم) */}
         {!currentUser && (() => {

@@ -6,6 +6,7 @@ interface JalaliLiveClockBarProps {
   academicYear?: string;
   semester?: string;
   compact?: boolean;
+  variant?: 'default' | 'compact' | 'ribbon';
 }
 
 function formatShamsiFullDate(date: Date): string {
@@ -51,6 +52,7 @@ export const JalaliLiveClockBar: React.FC<JalaliLiveClockBarProps> = ({
   academicYear,
   semester,
   compact = false,
+  variant,
 }) => {
   const [now, setNow] = useState<Date>(() => new Date());
 
@@ -64,8 +66,28 @@ export const JalaliLiveClockBar: React.FC<JalaliLiveClockBarProps> = ({
   const fullDate = formatShamsiFullDate(now);
   const numericDate = formatShamsiNumericDate(now);
   const timeText = formatPersianTime(now);
+  const resolvedVariant = variant || (compact ? 'compact' : 'default');
 
-  if (compact) {
+  if (resolvedVariant === 'ribbon') {
+    return (
+      <div
+        className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-lg bg-white/15 backdrop-blur-xs border border-white/25 text-white text-[11px] font-bold shrink-0"
+        aria-label="تاریخ شمسی و ساعت زنده"
+      >
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
+          <Calendar className="w-3 h-3 text-amber-200 shrink-0" />
+          <span>{fullDate}</span>
+        </span>
+        <span className="text-white/40">|</span>
+        <span className="inline-flex items-center gap-1 font-mono font-extrabold text-amber-100 tabular-nums whitespace-nowrap" dir="ltr">
+          <Clock className="w-3 h-3 text-amber-200 shrink-0" />
+          <span>{timeText}</span>
+        </span>
+      </div>
+    );
+  }
+
+  if (resolvedVariant === 'compact') {
     return (
       <div
         className="inline-flex flex-wrap items-center gap-2 px-3 py-1 rounded-xl bg-white/85 dark:bg-slate-900/80 backdrop-blur-sm border border-slate-200/80 dark:border-slate-800 shadow-2xs text-[11px] text-slate-600 dark:text-slate-300"

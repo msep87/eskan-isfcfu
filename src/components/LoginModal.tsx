@@ -5,6 +5,12 @@ import {
   loadAutoCloseOtherSessionsPref,
   saveAutoCloseOtherSessionsPref,
 } from '../utils/realtimePresence';
+import {
+  checkLoginRateLimit,
+  recordLoginFailure,
+  clearLoginFailures,
+  verifyPasswordCompatible,
+} from '../utils/securityHardening';
 import { CurrentUser } from '../types';
 import {
   Building2,
@@ -237,6 +243,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     const cleanId = toEnglishDigits(studentId.trim());
     const cleanNat = toEnglishDigits(nationalId.trim());
 
+    const rateCheck = checkLoginRateLimit('student', cleanId);
+    if (!rateCheck.allowed) {
+      setErrorMsg(
+        rateCheck.message ||
+          'به دلیل تلاش‌های ناموفق متوالی، ورود برای این شناسه موقتاً محدود شده است.'
+      );
+      return;
+    }
+
     // احراز هویت بهینه تک‌ردیفی از Supabase (بدون دانلود کل جدول students)
     setIsAuthenticating(true);
     const authRes = await Storage.authenticateStudentFromCloud(cleanId, cleanNat);
@@ -248,6 +263,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     const student = authRes.matched ? authRes.student : undefined;
 
     if (student) {
+      clearLoginFailures('student', cleanId);
       Storage.addActivityLog({
         category: 'auth',
         action: 'ورود موفق دانشجو',
@@ -260,17 +276,26 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       onLoginSuccess({ role: 'student', student }, { closeOtherSessions });
       handleCloseModal();
     } else {
+      const failState = recordLoginFailure('student', cleanId);
       Storage.addActivityLog({
         category: 'auth',
-        action: 'تلاش ناموفق ورود دانشجو',
-        details: `تلاش ناموفق ورود با شماره دانشجویی «${cleanId}» ثبت شد.`,
+        action: failState.locked
+          ? 'قفل موقت ورود دانشجو (محافظت ضدتلاش مکرر)'
+          : 'تلاش ناموفق ورود دانشجو',
+        details: failState.locked
+          ? `به دلیل تلاش‌های ناموفق متوالی با شماره دانشجویی «${cleanId}»، ورود موقتاً محدود شد.`
+          : `تلاش ناموفق ورود با شماره دانشجویی «${cleanId}» ثبت شد.`,
         targetName: cleanId,
-        severity: 'warning',
+        severity: failState.locked ? 'critical' : 'warning',
         actorName: 'کاربر مهمان',
         actorRole: 'system',
         actorUsername: cleanId,
       });
-      setErrorMsg('اطلاعات وارد شده یافت نشد. شماره دانشجویی یا کلمه عبور (کد ملی) نادرست است.');
+      setErrorMsg(
+        failState.locked && failState.message
+          ? failState.message
+          : 'اطلاعات وارد شده یافت نشد. شماره دانشجویی یا کلمه عبور (کد ملی) نادرست است.'
+      );
     }
   };
 
@@ -280,8 +305,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setErrorMsg('');
 
     if (tab === 'staff') {
+      const cleanStaffUser = toEnglishDigits(username.trim()).toLowerCase();
+      const hasStaffCredentials = Boolean(cleanStaffUser && password.trim());
+      if (cleanStaffUser) {
+        const rateCheck = checkLoginRateLimit('staff', cleanStaffUser);
+        if (!rateCheck.allowed) {
+          setErrorMsg(
+            rateCheck.message ||
+              'به دلیل تلاش‌های ناموفق متوالی، ورود برای این نام کاربری موقتاً محدود شده است.'
+          );
+          return;
+        }
+      }
+
       let result = Storage.authenticateStaffByCredentials(username, password);
-      if (!result.success && username.trim() && password.trim()) {
+      if (!result.success && hasStaffCredentials) {
         setIsAuthenticating(true);
         const synced = await Storage.ensureCloudDataForAuth('staff');
         setIsAuthenticating(false);
@@ -291,9 +329,32 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         }
       }
       if (result.success && result.user) {
+        if (cleanStaffUser) {
+          clearLoginFailures('staff', cleanStaffUser);
+        }
         onLoginSuccess(result.user, { closeOtherSessions });
         handleCloseModal();
       } else {
+        if (hasStaffCredentials) {
+          const failState = recordLoginFailure('staff', cleanStaffUser);
+          if (failState.locked) {
+            Storage.addActivityLog({
+              category: 'auth',
+              action: 'قفل موقت ورود کارکنان (محافظت ضدتلاش مکرر)',
+              details: `به دلیل تلاش‌های ناموفق متوالی برای نام کاربری «${cleanStaffUser}»، ورود موقتاً محدود شد.`,
+              targetName: cleanStaffUser,
+              severity: 'critical',
+              actorName: 'کاربر مهمان',
+              actorRole: 'system',
+              actorUsername: cleanStaffUser,
+            });
+            setErrorMsg(
+              failState.message ||
+                'تعداد تلاش‌های ناموفق از حد مجاز گذشت. ورود موقتاً محدود شد.'
+            );
+            return;
+          }
+        }
         setErrorMsg(result.message || 'نام کاربری یا کلمه عبور نادرست است.');
       }
       return;
@@ -308,21 +369,33 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         return;
       }
 
-      let currentAdminPass = toEnglishDigits(
-        String(Storage.getSettings().adminPassword || '261').trim()
-      );
-      if (cleanAdminUser === 'admin' && cleanAdminPass !== currentAdminPass) {
+      const rateCheck = checkLoginRateLimit('admin', cleanAdminUser);
+      if (!rateCheck.allowed) {
+        setErrorMsg(
+          rateCheck.message ||
+            'به دلیل تلاش‌های ناموفق متوالی، ورود مدیر کل موقتاً محدود شده است.'
+        );
+        return;
+      }
+
+      let currentAdminPass = String(Storage.getSettings().adminPassword || '261').trim();
+      let isAdminMatch =
+        cleanAdminUser === 'admin' &&
+        (await verifyPasswordCompatible(cleanAdminPass, currentAdminPass));
+
+      if (cleanAdminUser === 'admin' && !isAdminMatch) {
         setIsAuthenticating(true);
         const synced = await Storage.ensureCloudDataForAuth('admin');
         setIsAuthenticating(false);
         if (synced) {
           onRefreshData?.();
-          currentAdminPass = toEnglishDigits(
-            String(Storage.getSettings().adminPassword || '261').trim()
-          );
+          currentAdminPass = String(Storage.getSettings().adminPassword || '261').trim();
+          isAdminMatch = await verifyPasswordCompatible(cleanAdminPass, currentAdminPass);
         }
       }
-      if (cleanAdminUser === 'admin' && cleanAdminPass === currentAdminPass) {
+
+      if (isAdminMatch) {
+        clearLoginFailures('admin', cleanAdminUser);
         Storage.addActivityLog({
           category: 'auth',
           action: 'ورود موفق مدیر کل سامانه',
@@ -338,17 +411,26 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         );
         handleCloseModal();
       } else {
+        const failState = recordLoginFailure('admin', cleanAdminUser);
         Storage.addActivityLog({
           category: 'auth',
-          action: 'تلاش ناموفق ورود مدیر کل',
-          details: `تلاش ناموفق ورود با نام کاربری «${cleanAdminUser || '-'}» در بخش مدیر کل ثبت شد.`,
+          action: failState.locked
+            ? 'قفل موقت ورود مدیر کل (محافظت ضدتلاش مکرر)'
+            : 'تلاش ناموفق ورود مدیر کل',
+          details: failState.locked
+            ? `به دلیل تلاش‌های ناموفق متوالی برای نام کاربری «${cleanAdminUser || '-'}» در بخش مدیر کل، ورود موقتاً محدود شد.`
+            : `تلاش ناموفق ورود با نام کاربری «${cleanAdminUser || '-'}» در بخش مدیر کل ثبت شد.`,
           targetName: cleanAdminUser || '-',
           severity: 'critical',
           actorName: 'کاربر مهمان',
           actorRole: 'system',
           actorUsername: cleanAdminUser,
         });
-        setErrorMsg('نام کاربری یا کلمه عبور مدیر اشتباه است.');
+        setErrorMsg(
+          failState.locked && failState.message
+            ? failState.message
+            : 'نام کاربری یا کلمه عبور مدیر اشتباه است.'
+        );
       }
     }
   };

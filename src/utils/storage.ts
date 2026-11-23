@@ -93,6 +93,14 @@ import {
 } from './communityStickers';
 import { getStudentAdmissionStatus, isStudentDormResident } from './financeUtils';
 import {
+  timingSafeEqual,
+  verifyPasswordCompatible,
+  sanitizeCurrentUserForStorage,
+  validateStoredCurrentUser,
+  stripCredentialsFromStaffArray,
+  computeAuditChainHash,
+} from './securityHardening';
+import {
   INITIAL_SETTINGS,
   INITIAL_DORMITORIES,
   INITIAL_SUPERVISORS,
@@ -794,6 +802,11 @@ const IMMEDIATE_CLOUD_KEYS = new Set<string>([
   STORAGE_KEYS.COMMUNITY_USER_PREFS,
 ]);
 
+// پنجره ادغام درخواست‌های همگام‌سازی غیرضروری و نشانگر آخرین تغییر جدول students برای Delta Sync
+const SYNC_COALESCE_WINDOW_MS = 4000;
+const lastCompletedSyncAtByScope: Record<string, number> = {};
+let lastStudentsDeltaSyncIso: string | null = null;
+
 // کلیدهای عمومی قابل کش در sessionStorage به مدت ۵ دقیقه (جلوگیری از فراخوانی تکراری Supabase در هر رفرش)
 const PUBLIC_CACHE_TTL_MS = 5 * 60 * 1000;
 const PUBLIC_CACHE_META_SESSION_KEY = 'farhangian_public_cache_meta_v1';
@@ -910,8 +923,29 @@ function hydratePublicKeysFromSessionCache(): boolean {
       const raw = sessionStorage.getItem(PUBLIC_CACHE_VAL_SESSION_PREFIX + key);
       if (!raw) continue;
       if (lastAppliedSerializedByKey.get(key) === raw && parsedCache.has(key)) continue;
-      const parsed = sanitizePlainValue(JSON.parse(raw));
-      safeLocalStorageSet(key, raw, parsed);
+      let parsed = sanitizePlainValue(JSON.parse(raw));
+      let finalRaw = raw;
+      // حفظ رمز مدیر محلی هنگام بازیابی تنظیمات از کش عمومی (که عمداً بدون adminPassword ذخیره می‌شود)
+      if (
+        key === STORAGE_KEYS.SETTINGS &&
+        parsed &&
+        typeof parsed === 'object' &&
+        !('adminPassword' in (parsed as Record<string, unknown>))
+      ) {
+        const existingSettings = get<Record<string, unknown> | null>(STORAGE_KEYS.SETTINGS, null);
+        if (
+          existingSettings &&
+          typeof existingSettings.adminPassword === 'string' &&
+          existingSettings.adminPassword
+        ) {
+          parsed = {
+            ...(parsed as Record<string, unknown>),
+            adminPassword: existingSettings.adminPassword,
+          };
+          finalRaw = JSON.stringify(parsed);
+        }
+      }
+      safeLocalStorageSet(key, finalRaw, parsed);
       hydratedAny = true;
     } catch {
       // نادیده گرفتن ورودی معیوب کش
@@ -928,7 +962,25 @@ function writePublicKeysToSessionCache(
     for (const entry of entries) {
       if (!PUBLIC_CACHEABLE_KEY_SET.has(entry.key)) continue;
       try {
-        sessionStorage.setItem(PUBLIC_CACHE_VAL_SESSION_PREFIX + entry.key, entry.serialized);
+        let cacheSerialized = entry.serialized;
+        // حذف رمز مدیر از کش sessionStorage عمومی برای کاهش سطح افشا در مرورگر
+        if (entry.key === STORAGE_KEYS.SETTINGS) {
+          try {
+            const parsedSettings = JSON.parse(entry.serialized);
+            if (
+              parsedSettings &&
+              typeof parsedSettings === 'object' &&
+              'adminPassword' in parsedSettings
+            ) {
+              const { adminPassword: _omittedAdminPass, ...safePublicSettings } =
+                parsedSettings as Record<string, unknown>;
+              cacheSerialized = JSON.stringify(safePublicSettings);
+            }
+          } catch {
+            // fallback به رشته اصلی
+          }
+        }
+        sessionStorage.setItem(PUBLIC_CACHE_VAL_SESSION_PREFIX + entry.key, cacheSerialized);
       } catch {
         // در صورت حجم بالای تصویر بنر/اطلاعیه، صرفاً از تکرار در sessionStorage صرف‌نظر می‌شود
         // و متادیتای زمان انقضای ۵ دقیقه‌ای همچنان با پشتوانه localStorage معتبر می‌ماند
@@ -3478,8 +3530,9 @@ export const Storage = {
   getMessages: (): Message[] => get(STORAGE_KEYS.MESSAGES, INITIAL_MESSAGES),
   setMessages: (messages: Message[]) => set(STORAGE_KEYS.MESSAGES, messages),
 
-  getCurrentUser: (): CurrentUser => get(STORAGE_KEYS.CURRENT_USER, null),
-  setCurrentUser: (user: CurrentUser) => set(STORAGE_KEYS.CURRENT_USER, user),
+  getCurrentUser: (): CurrentUser => validateStoredCurrentUser(get(STORAGE_KEYS.CURRENT_USER, null)),
+  setCurrentUser: (user: CurrentUser) =>
+    set(STORAGE_KEYS.CURRENT_USER, sanitizeCurrentUserForStorage(user)),
 
   // نگهداری نشست مدیر کل هنگام ورود مستقیم به کارتابل سایر کاربران (در sessionStorage تب جاری)
   getAdminImpersonator: (): { role: 'admin'; name: string; username: string } | null => {
@@ -8386,10 +8439,13 @@ export const Storage = {
       }
     }
 
+    const logs = Storage.getActivityLogs();
     const now = new Date();
+    const logId = `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const logTimestamp = now.toISOString();
     const newLog: ActivityLog = {
-      id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      timestamp: now.toISOString(),
+      id: logId,
+      timestamp: logTimestamp,
       date: `${now.toLocaleDateString('fa-IR')} - ${now.toLocaleTimeString('fa-IR', {
         hour: '2-digit',
         minute: '2-digit',
@@ -8403,9 +8459,17 @@ export const Storage = {
       details: entry.details,
       targetName: entry.targetName,
       severity: entry.severity || 'info',
+      integrityHash: computeAuditChainHash(logs[0]?.integrityHash, {
+        id: logId,
+        timestamp: logTimestamp,
+        actorRole,
+        actorUsername,
+        category: entry.category,
+        action: entry.action,
+        details: entry.details,
+      }),
     };
 
-    const logs = Storage.getActivityLogs();
     const updated = [newLog, ...logs].slice(0, 500);
     if (memoryKeyUpdatedAt[STORAGE_KEYS.ACTIVITY_LOGS]) {
       Storage.setActivityLogs(updated);
@@ -10693,6 +10757,7 @@ export const Storage = {
     try {
       const pageSize = SUPABASE_STUDENTS_PAGE_SIZE;
       const collected: Student[] = [];
+      let maxRowUpdatedAt: string | null = null;
       let from = 0;
       let hasMore = true;
 
@@ -10727,7 +10792,11 @@ export const Storage = {
 
         for (const row of rows) {
           if (row && typeof row === 'object') {
-            collected.push(mapSupabaseRowToStudent(row as Record<string, unknown>));
+            const rec = row as Record<string, unknown>;
+            if (typeof rec.updated_at === 'string' && (!maxRowUpdatedAt || rec.updated_at > maxRowUpdatedAt)) {
+              maxRowUpdatedAt = rec.updated_at;
+            }
+            collected.push(mapSupabaseRowToStudent(rec));
           }
         }
 
@@ -10744,6 +10813,10 @@ export const Storage = {
 
         hasMore = rows.length === pageSize;
         from += pageSize;
+      }
+
+      if (maxRowUpdatedAt) {
+        lastStudentsDeltaSyncIso = maxRowUpdatedAt;
       }
 
       const lastLocalWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
@@ -10888,10 +10961,11 @@ export const Storage = {
       return { matched: false };
     }
 
-    const matchesPassword = (s: Student): boolean => {
+    const matchesPassword = async (s: Student): Promise<boolean> => {
       if (normalizeAsciiDigits(s.studentId) !== cleanId) return false;
-      const effectivePass = normalizeAsciiDigits(String(s.password || s.nationalId || ''));
-      return Boolean(effectivePass) && effectivePass === cleanPass;
+      const rawStored = String(s.password || s.nationalId || '').trim();
+      if (!rawStored) return false;
+      return verifyPasswordCompatible(cleanPass, rawStored);
     };
 
     // گام ۱: استعلام تک‌ردیفی مستقیم از Supabase (بسیار کم‌حجم؛ زیر ۱ کیلوبایت)
@@ -10901,7 +10975,7 @@ export const Storage = {
     });
 
     if (remoteRes.ok && remoteRes.student) {
-      if (matchesPassword(remoteRes.student)) {
+      if (await matchesPassword(remoteRes.student)) {
         // در نشست دانشجو فقط پرونده خود همان دانشجو در حافظه محلی نگهداری می‌شود
         upsertLocalSingleStudent(remoteRes.student, true);
         notifyCloudDataChanged();
@@ -10912,10 +10986,12 @@ export const Storage = {
     }
 
     // گام ۲: فقط در حالت آفلاین یا داده‌های نمونه محلی (بدون دانلود کل جدول)، بررسی حافظه محلی
-    const localStudent = Storage.getStudents().find(matchesPassword);
-    if (localStudent) {
-      upsertLocalSingleStudent(localStudent, true);
-      return { matched: true, student: localStudent };
+    const localList = Storage.getStudents();
+    for (const candidate of localList) {
+      if (await matchesPassword(candidate)) {
+        upsertLocalSingleStudent(candidate, true);
+        return { matched: true, student: candidate };
+      }
     }
 
     return { matched: false };
@@ -11462,6 +11538,12 @@ export const Storage = {
       options?.roleScope ||
       (!currentUser ? 'guest' : currentUser.role === 'student' ? 'student' : 'staff');
 
+    // جلوگیری از فراخوانی‌های تکراری متوالی در بازه بسیار کوتاه (مگر در حالت force)
+    const lastScopeSyncAt = lastCompletedSyncAtByScope[effectiveScope] || 0;
+    if (!force && lastScopeSyncAt > 0 && Date.now() - lastScopeSyncAt < SYNC_COALESCE_WINDOW_MS) {
+      return false;
+    }
+
     activeSyncPromise = (async () => {
       try {
         let hasRemoteChanges = false;
@@ -11472,6 +11554,7 @@ export const Storage = {
           ...(persistedMeta.keyUpdatedAt || {}),
         };
         let persistedMetaDirty = false;
+        const isImpersonating = Boolean(Storage.getAdminImpersonator());
 
         const bumpNewest = (ts?: string | null) => {
           if (!ts || typeof ts !== 'string') return;
@@ -11492,6 +11575,7 @@ export const Storage = {
 
         // در صفحه اصلی (مهمان) اگر کش ۵ دقیقه‌ای عمومی معتبر باشد، هیچ فراخوانی به Supabase انجام نمی‌شود
         if (effectiveScope === 'guest' && publicCacheFresh) {
+          lastCompletedSyncAtByScope[effectiveScope] = Date.now();
           return hasRemoteChanges;
         }
 
@@ -11514,93 +11598,168 @@ export const Storage = {
 
         const shouldUpdatePublicCache = !publicCacheFresh;
 
-        // گام ۱: دریافت هدفمند جدول app_storage از Supabase
+        // گام ۱: همگام‌سازی دوفاز تفاضلی (2-Phase Delta Sync) برای app_storage جهت صرفه‌جویی شدید در پهنای باند و افزایش سرعت
         const kvStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
         try {
           const allKvRows: Array<{ key: string; value: unknown; updated_at?: string | null }> = [];
-          if (kvKeysToFetch !== null) {
-            if (kvKeysToFetch.length > 0) {
-              const { data, error } = await supabase
-                .from('app_storage')
-                .select('key, value, updated_at')
-                .in('key', kvKeysToFetch);
-              if (error) {
-                hadFetchError = true;
-                const dur =
-                  (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
-                recordCloudTrafficEvent({
-                  direction: 'down',
-                  endpoint: `/supabase/app_storage (${effectiveScope})`,
-                  method: 'GET',
-                  status: 500,
-                  ok: false,
-                  durationMs: dur,
-                  bytes: 0,
-                  detail: `خطا در دریافت جداول app_storage (${effectiveScope})`,
-                  errorMessage: error.message,
-                });
-              } else if (Array.isArray(data)) {
-                for (const r of data) {
-                  allKvRows.push(r as { key: string; value: unknown; updated_at?: string | null });
+          const hasLocalTsBaseline =
+            Object.keys(memoryKeyUpdatedAt).length > 0 ||
+            Object.keys(persistedKeyUpdatedAt).length > 0;
+          let usedDeltaSync = false;
+          let deltaHadZeroChanges = false;
+          let deltaKeysToFetch: string[] | null = kvKeysToFetch;
+
+          if (!force && hasLocalTsBaseline) {
+            const metaQuery =
+              kvKeysToFetch !== null
+                ? supabase
+                    .from('app_storage')
+                    .select('key, updated_at')
+                    .in('key', kvKeysToFetch)
+                : supabase.from('app_storage').select('key, updated_at').range(0, 999);
+
+            const { data: metaRows, error: metaError } = await metaQuery;
+            if (!metaError && Array.isArray(metaRows)) {
+              usedDeltaSync = true;
+              const changedKeys: string[] = [];
+              for (const mRow of metaRows) {
+                const key = String((mRow as { key?: unknown }).key || '');
+                if (!SYNCABLE_KEYS.includes(key) || key === STORAGE_KEYS.STUDENTS) continue;
+                const srvTs =
+                  typeof (mRow as { updated_at?: unknown }).updated_at === 'string'
+                    ? ((mRow as { updated_at?: string }).updated_at as string)
+                    : '';
+                bumpNewest(srvTs);
+
+                const localTs = memoryKeyUpdatedAt[key] || persistedKeyUpdatedAt[key] || '';
+                let hasLocalCopy = parsedCache.has(key);
+                if (!hasLocalCopy) {
+                  try {
+                    hasLocalCopy = localStorage.getItem(key) !== null;
+                  } catch {
+                    hasLocalCopy = false;
+                  }
+                }
+                const needsStaffCounselorRehydrate =
+                  effectiveScope === 'staff' &&
+                  key === STORAGE_KEYS.COUNSELORS &&
+                  Storage.getCounselors().some((c) => !c.username);
+                if (!hasLocalCopy || !srvTs || !localTs || srvTs > localTs || needsStaffCounselorRehydrate) {
+                  changedKeys.push(key);
                 }
               }
-            }
-          } else {
-            let from = 0;
-            let hasMoreKv = true;
-            while (hasMoreKv) {
-              const { data, error } = await supabase
-                .from('app_storage')
-                .select('key, value, updated_at')
-                .range(from, from + 999);
-              if (error) {
-                hadFetchError = true;
+
+              if (changedKeys.length === 0) {
+                deltaHadZeroChanges = true;
                 const dur =
                   (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
+                const metaBytes = getUtf8ByteLength(JSON.stringify(metaRows));
                 recordCloudTrafficEvent({
                   direction: 'down',
-                  endpoint: '/supabase/app_storage',
+                  endpoint: `/supabase/app_storage (delta:${effectiveScope})`,
                   method: 'GET',
-                  status: 500,
-                  ok: false,
+                  status: 200,
+                  ok: true,
                   durationMs: dur,
-                  bytes: 0,
-                  detail: 'خطا در دریافت جداول app_storage از Supabase',
-                  errorMessage: error.message,
+                  bytes: metaBytes,
+                  detail: 'بررسی سریع تغییرات (Delta Sync) — همه جداول به‌روز هستند (بدون دانلود تکراری)',
                 });
-                break;
+              } else {
+                deltaKeysToFetch = changedKeys;
               }
-              const pageRows = Array.isArray(data) ? data : [];
-              for (const r of pageRows) {
-                allKvRows.push(r as { key: string; value: unknown; updated_at?: string | null });
-              }
-              hasMoreKv = pageRows.length === 1000;
-              from += 1000;
             }
           }
 
-          if (!hadFetchError) {
+          if (!deltaHadZeroChanges) {
+            if (deltaKeysToFetch !== null) {
+              if (deltaKeysToFetch.length > 0) {
+                const { data, error } = await supabase
+                  .from('app_storage')
+                  .select('key, value, updated_at')
+                  .in('key', deltaKeysToFetch);
+                if (error) {
+                  hadFetchError = true;
+                  const dur =
+                    (typeof performance !== 'undefined' ? performance.now() : Date.now()) -
+                    kvStartedAt;
+                  recordCloudTrafficEvent({
+                    direction: 'down',
+                    endpoint: `/supabase/app_storage (${effectiveScope})`,
+                    method: 'GET',
+                    status: 500,
+                    ok: false,
+                    durationMs: dur,
+                    bytes: 0,
+                    detail: `خطا در دریافت جداول app_storage (${effectiveScope})`,
+                    errorMessage: error.message,
+                  });
+                } else if (Array.isArray(data)) {
+                  for (const r of data) {
+                    allKvRows.push(r as { key: string; value: unknown; updated_at?: string | null });
+                  }
+                }
+              }
+            } else {
+              let from = 0;
+              let hasMoreKv = true;
+              while (hasMoreKv) {
+                const { data, error } = await supabase
+                  .from('app_storage')
+                  .select('key, value, updated_at')
+                  .range(from, from + 999);
+                if (error) {
+                  hadFetchError = true;
+                  const dur =
+                    (typeof performance !== 'undefined' ? performance.now() : Date.now()) -
+                    kvStartedAt;
+                  recordCloudTrafficEvent({
+                    direction: 'down',
+                    endpoint: '/supabase/app_storage',
+                    method: 'GET',
+                    status: 500,
+                    ok: false,
+                    durationMs: dur,
+                    bytes: 0,
+                    detail: 'خطا در دریافت جداول app_storage از Supabase',
+                    errorMessage: error.message,
+                  });
+                  break;
+                }
+                const pageRows = Array.isArray(data) ? data : [];
+                for (const r of pageRows) {
+                  allKvRows.push(r as { key: string; value: unknown; updated_at?: string | null });
+                }
+                hasMoreKv = pageRows.length === 1000;
+                from += 1000;
+              }
+            }
+          }
+
+          if (!hadFetchError && !deltaHadZeroChanges) {
             const dur =
               (typeof performance !== 'undefined' ? performance.now() : Date.now()) - kvStartedAt;
             const rxBytes = getUtf8ByteLength(JSON.stringify(allKvRows));
             recordCloudTrafficEvent({
               direction: 'down',
-              endpoint:
-                effectiveScope === 'staff'
-                  ? '/supabase/app_storage'
-                  : `/supabase/app_storage (${effectiveScope})`,
+              endpoint: usedDeltaSync
+                ? `/supabase/app_storage (delta:${effectiveScope})`
+                : effectiveScope === 'staff'
+                ? '/supabase/app_storage'
+                : `/supabase/app_storage (${effectiveScope})`,
               method: 'GET',
               status: 200,
               ok: true,
               durationMs: dur,
               bytes: rxBytes,
-              detail: `دریافت ${allKvRows.length.toLocaleString('fa-IR')} جدول (${
-                effectiveScope === 'guest'
-                  ? 'عمومی صفحه اصلی'
-                  : effectiveScope === 'student'
-                  ? 'عملیاتی دانشجو'
-                  : 'پنل مدیریت'
-              }) از Supabase`,
+              detail: usedDeltaSync
+                ? `دریافت تفاضلی ${allKvRows.length.toLocaleString('fa-IR')} جدول تغییریافته (Delta Sync)`
+                : `دریافت ${allKvRows.length.toLocaleString('fa-IR')} جدول (${
+                    effectiveScope === 'guest'
+                      ? 'عمومی صفحه اصلی'
+                      : effectiveScope === 'student'
+                      ? 'عملیاتی دانشجو'
+                      : 'پنل مدیریت'
+                  }) از Supabase`,
             });
 
             let batchChanged = false;
@@ -11609,8 +11768,19 @@ export const Storage = {
             for (const row of allKvRows) {
               const key = String(row.key || '');
               if (!SYNCABLE_KEYS.includes(key) || key === STORAGE_KEYS.STUDENTS) continue;
-              const val = sanitizePlainValue(row.value);
+              let val = sanitizePlainValue(row.value);
               if (val === undefined || val === null) continue;
+
+              // در نشست واقعی دانشجو، فیلدهای ورود مشاوران پیش از ذخیره در مرورگر پاکسازی می‌شوند
+              if (
+                effectiveScope === 'student' &&
+                !isImpersonating &&
+                key === STORAGE_KEYS.COUNSELORS &&
+                Array.isArray(val)
+              ) {
+                val = stripCredentialsFromStaffArray(val);
+              }
+
               const srvTs = typeof row.updated_at === 'string' ? row.updated_at : '';
               bumpNewest(srvTs);
 
@@ -11686,7 +11856,7 @@ export const Storage = {
           });
         }
 
-        // گام ۲: جداسازی کامل بارگذاری جدول students بر اساس نقش کاربر
+        // گام ۲: جداسازی کامل بارگذاری جدول students بر اساس نقش کاربر (+ Delta Sync هوشمند برای پنل مدیریت)
         const lastStudentWrite = keyWriteTimestamps[STORAGE_KEYS.STUDENTS] || 0;
         const canApplyRemoteStudents =
           !pendingCloudRequests[STORAGE_KEYS.STUDENTS] &&
@@ -11705,7 +11875,7 @@ export const Storage = {
           if (!singleRes.ok) {
             hadFetchError = true;
           } else if (singleRes.student) {
-            if (Storage.getAdminImpersonator()) {
+            if (isImpersonating) {
               // در حالت ورود مدیر به کارتابل دانشجو، فهرست کامل دانشجویان محلی مدیر حفظ شده و فقط همین ردیف بروزرسانی می‌شود
               upsertLocalSingleStudent(singleRes.student, false);
               hasRemoteChanges = true;
@@ -11722,41 +11892,125 @@ export const Storage = {
             }
           }
         } else if (effectiveScope === 'staff' && canApplyRemoteStudents) {
-          // بارگذاری کامل جدول students منحصراً در پنل مدیر و کارشناسان انجام می‌شود
-          const fetchedStudents = await Storage.fetchStudentsFromDB();
-          if (fetchedStudents === null) {
-            hadFetchError = true;
-          } else if (fetchedStudents.length > 0) {
-            const serializedStudents = JSON.stringify(fetchedStudents);
-            let currentStudentsLs: string | null = null;
+          // همگام‌سازی تفاضلی هوشمند دانشجویان در پنل مدیر/کارشناسان؛ فقط در صورت حذف یا اولین بار کل جدول دریافت می‌شود
+          let resolvedViaStudentsDelta = false;
+          const localStudentsBefore = Storage.getStudents();
+          if (!force && lastStudentsDeltaSyncIso && localStudentsBefore.length > 0) {
+            const deltaStartedAt =
+              typeof performance !== 'undefined' ? performance.now() : Date.now();
             try {
-              currentStudentsLs = localStorage.getItem(STORAGE_KEYS.STUDENTS);
-            } catch {
-              currentStudentsLs = null;
-            }
-            const studentsChanged =
-              lastAppliedSerializedByKey.get(STORAGE_KEYS.STUDENTS) !== serializedStudents &&
-              currentStudentsLs !== serializedStudents;
-            if (studentsChanged) {
-              safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, fetchedStudents);
-              hasRemoteChanges = true;
-              notifyCloudDataChanged();
-            } else {
-              lastAppliedSerializedByKey.set(STORAGE_KEYS.STUDENTS, serializedStudents);
-              if (!parsedCache.has(STORAGE_KEYS.STUDENTS)) {
-                parsedCache.set(STORAGE_KEYS.STUDENTS, cloneValue(fetchedStudents));
+              const [countRes, deltaRes] = await Promise.all([
+                supabase.from('students').select('id', { count: 'exact', head: true }),
+                supabase
+                  .from('students')
+                  .select('id, national_code, data, avatar_url, updated_at')
+                  .gt('updated_at', lastStudentsDeltaSyncIso)
+                  .limit(500),
+              ]);
+
+              if (
+                !countRes.error &&
+                !deltaRes.error &&
+                typeof countRes.count === 'number' &&
+                Array.isArray(deltaRes.data) &&
+                deltaRes.data.length < 500
+              ) {
+                const mergedMap = new Map<string, Student>();
+                for (const st of localStudentsBefore) {
+                  const keyId = normalizeAsciiDigits(st.studentId);
+                  if (keyId) mergedMap.set(keyId, st);
+                }
+
+                let maxDeltaTs = lastStudentsDeltaSyncIso;
+                for (const rawRow of deltaRes.data) {
+                  if (!rawRow || typeof rawRow !== 'object') continue;
+                  const rec = rawRow as Record<string, unknown>;
+                  if (typeof rec.updated_at === 'string' && rec.updated_at > maxDeltaTs) {
+                    maxDeltaTs = rec.updated_at;
+                  }
+                  const mapped = mapSupabaseRowToStudent(rec);
+                  const keyId = normalizeAsciiDigits(mapped.studentId);
+                  if (keyId) mergedMap.set(keyId, mapped);
+                }
+
+                if (mergedMap.size === countRes.count) {
+                  resolvedViaStudentsDelta = true;
+                  const dur =
+                    (typeof performance !== 'undefined' ? performance.now() : Date.now()) -
+                    deltaStartedAt;
+                  const rxBytes = getUtf8ByteLength(JSON.stringify(deltaRes.data));
+                  recordCloudTrafficEvent({
+                    direction: 'down',
+                    endpoint: '/supabase/students (delta)',
+                    method: 'GET',
+                    status: 200,
+                    ok: true,
+                    durationMs: dur,
+                    bytes: rxBytes,
+                    detail:
+                      deltaRes.data.length === 0
+                        ? 'بررسی سریع دانشجویان (Delta Sync) — بدون تغییر جدید'
+                        : `دریافت تفاضلی ${deltaRes.data.length.toLocaleString('fa-IR')} پرونده دانشجوی تغییریافته`,
+                  });
+
+                  if (deltaRes.data.length > 0) {
+                    const mergedList = Array.from(mergedMap.values());
+                    const serializedMerged = JSON.stringify(mergedList);
+                    safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedMerged, mergedList);
+                    hasRemoteChanges = true;
+                    notifyCloudDataChanged();
+                    lastStudentsDeltaSyncIso = maxDeltaTs;
+                  }
+
+                  const nowTs = new Date().toISOString();
+                  memoryKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = nowTs;
+                  persistedKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = nowTs;
+                  persistedMetaDirty = true;
+                  bumpNewest(nowTs);
+                }
               }
+            } catch {
+              // در صورت خطا در بررسی تفاضلی، به دریافت کامل ایمن برمی‌گردد
             }
-            const nowTs = new Date().toISOString();
-            memoryKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = nowTs;
-            persistedKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = nowTs;
-            persistedMetaDirty = true;
-            bumpNewest(nowTs);
+          }
+
+          if (!resolvedViaStudentsDelta) {
+            const fetchedStudents = await Storage.fetchStudentsFromDB();
+            if (fetchedStudents === null) {
+              hadFetchError = true;
+            } else if (fetchedStudents.length > 0) {
+              const serializedStudents = JSON.stringify(fetchedStudents);
+              let currentStudentsLs: string | null = null;
+              try {
+                currentStudentsLs = localStorage.getItem(STORAGE_KEYS.STUDENTS);
+              } catch {
+                currentStudentsLs = null;
+              }
+              const studentsChanged =
+                lastAppliedSerializedByKey.get(STORAGE_KEYS.STUDENTS) !== serializedStudents &&
+                currentStudentsLs !== serializedStudents;
+              if (studentsChanged) {
+                safeLocalStorageSet(STORAGE_KEYS.STUDENTS, serializedStudents, fetchedStudents);
+                hasRemoteChanges = true;
+                notifyCloudDataChanged();
+              } else {
+                lastAppliedSerializedByKey.set(STORAGE_KEYS.STUDENTS, serializedStudents);
+                if (!parsedCache.has(STORAGE_KEYS.STUDENTS)) {
+                  parsedCache.set(STORAGE_KEYS.STUDENTS, cloneValue(fetchedStudents));
+                }
+              }
+              const nowTs = new Date().toISOString();
+              memoryKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = nowTs;
+              persistedKeyUpdatedAt[STORAGE_KEYS.STUDENTS] = nowTs;
+              persistedMetaDirty = true;
+              bumpNewest(nowTs);
+            }
           }
         }
         // در حالت مهمان (صفحه اصلی): جدول students اصلاً فراخوانی نمی‌شود
 
         if (!hadFetchError) {
+          lastCompletedSyncAtByScope[effectiveScope] = Date.now();
           if (newestUpdatedAt) {
             lastSyncRevision = newestUpdatedAt;
           }
@@ -11967,7 +12221,8 @@ export const Storage = {
     const matched = candidates.filter(
       (c) =>
         normalizeDigits(c.username).toLowerCase() === cleanU &&
-        normalizeDigits(c.password) === cleanP
+        Boolean(c.password) &&
+        timingSafeEqual(normalizeDigits(c.password), cleanP)
     );
 
     const activeMatch = matched.find((m) => !m.isInactive);
