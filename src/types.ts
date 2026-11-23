@@ -143,6 +143,7 @@ export interface Announcement {
   date: string;
   pinned?: boolean;
   showOnHomePage?: boolean; // انتشار در صفحه اول سایت جهت مشاهده عمومی و مراجعین
+  publishInNotifications?: boolean; // انتشار در نوتیفیکیشن کاربران (برای اطلاعیه‌های صفحه اول به‌صورت پیش‌فرض غیرفعال)
   imageUrl?: string; // تصویر یا پوستر ضمیمه شده به اطلاعیه (بیس۶۴ یا URL)
 }
 

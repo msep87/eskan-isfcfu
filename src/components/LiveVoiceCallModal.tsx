@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../utils/storage';
+import { broadcastCallCancelled } from '../utils/realtimePresence';
 import { getRoleDisplayLabel } from '../utils/communityStickers';
 import {
   PhoneOff,
@@ -27,6 +28,7 @@ interface LiveVoiceCallModalProps {
   currentUserId: string;
   currentUserName: string;
   currentUserRole: string;
+  isTargetOnline?: boolean;
   onClose: () => void;
 }
 
@@ -62,6 +64,7 @@ export const LiveVoiceCallModal: React.FC<LiveVoiceCallModalProps> = ({
   currentUserId,
   currentUserName,
   currentUserRole,
+  isTargetOnline,
   onClose,
 }) => {
   const myKeyRef = useRef<string>(
@@ -73,9 +76,11 @@ export const LiveVoiceCallModal: React.FC<LiveVoiceCallModalProps> = ({
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const pendingIceRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const isMutedRef = useRef(false);
+  const hasConnectedPeerRef = useRef(false);
 
-  const [status, setStatus] = useState<'connecting' | 'ringing' | 'connected' | 'error'>('connecting');
+  const [status, setStatus] = useState<'connecting' | 'ringing' | 'connected' | 'rejected' | 'error'>('connecting');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [rejectedMsg, setRejectedMsg] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -87,7 +92,7 @@ export const LiveVoiceCallModal: React.FC<LiveVoiceCallModalProps> = ({
 
   // شمارنده زمان تماس
   useEffect(() => {
-    if (status === 'error') return;
+    if (status === 'error' || status === 'rejected') return;
     const t = setInterval(() => {
       setElapsedSec((prev) => prev + 1);
     }, 1000);
@@ -296,10 +301,23 @@ export const LiveVoiceCallModal: React.FC<LiveVoiceCallModalProps> = ({
 
           setPeers(activePeers);
           if (activePeers.length > 0) {
+            hasConnectedPeerRef.current = true;
             setStatus('connected');
           } else {
-            setStatus(call.roomType === 'dm' ? 'ringing' : 'connected');
+            setStatus((prev) =>
+              prev === 'rejected' ? 'rejected' : call.roomType === 'dm' ? 'ringing' : 'connected'
+            );
           }
+        });
+
+        ch.on('broadcast', { event: 'call_rejected' }, ({ payload }) => {
+          if (!isMounted || !payload) return;
+          const rejectorName = String(payload.rejectorName || call.targetPeerName || 'مخاطب');
+          setRejectedMsg(`${rejectorName} تماس صوتی را رد کرد.`);
+          setStatus('rejected');
+          setTimeout(() => {
+            if (isMounted) onClose();
+          }, 2200);
         });
 
         ch.on('broadcast', { event: 'webrtc_signal' }, async ({ payload }) => {
@@ -401,6 +419,9 @@ export const LiveVoiceCallModal: React.FC<LiveVoiceCallModalProps> = ({
 
     return () => {
       isMounted = false;
+      if (call.roomType === 'dm' && call.isInitiator && call.targetPeerId && !hasConnectedPeerRef.current) {
+        void broadcastCallCancelled(call.targetPeerId, call.roomId, currentUserId);
+      }
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
@@ -467,21 +488,49 @@ export const LiveVoiceCallModal: React.FC<LiveVoiceCallModalProps> = ({
             </div>
           </div>
 
-          <div className="space-y-1">
-            <h3 className="font-black text-base sm:text-lg text-white">
-              {call.targetPeerName || call.roomTitle}
-            </h3>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <h3 className="font-black text-base sm:text-lg text-white">
+                {call.targetPeerName || call.roomTitle}
+              </h3>
+              {call.roomType === 'dm' && typeof isTargetOnline === 'boolean' && (
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                    isTargetOnline
+                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/40'
+                      : 'bg-slate-700/60 text-slate-300 border-slate-500/40'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      isTargetOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'
+                    }`}
+                  />
+                  {isTargetOnline ? 'آنلاین' : 'آفلاین'}
+                </span>
+              )}
+            </div>
             <p className="text-xs text-teal-200/90">
               {status === 'connecting' && 'در حال اتصال به میکروفون و برقراری ارتباط...'}
               {status === 'ringing' &&
-                'در انتظار پیوستن مخاطب به تماس صوتی... (اگر مخاطب در پیام‌رسان باشد اعلان زنگ دریافت می‌کند)'}
+                (isTargetOnline === false
+                  ? 'مخاطب در حال حاضر آفلاین است؛ به محض ورود به سامانه می‌تواند پاسخ دهد...'
+                  : 'در حال زنگ خوردن برای مخاطب... (اعلان تماس تلفنی برای مخاطب ارسال شد)')}
               {status === 'connected' &&
                 (peers.length > 0
                   ? `متصل • ${(peers.length + 1).toLocaleString('fa-IR')} نفر در گفتگوی صوتی فعال`
                   : 'اتاق گفتگوی صوتی آماده است — منتظر پیوستن سایر اعضا...')}
+              {status === 'rejected' && (rejectedMsg || 'مخاطب تماس را رد کرد.')}
               {status === 'error' && 'خطا در برقراری تماس صوتی'}
             </p>
           </div>
+
+          {rejectedMsg && (
+            <div className="w-full p-3 rounded-2xl bg-amber-500/20 border border-amber-400/40 text-amber-100 text-xs flex items-center justify-center gap-2 font-bold">
+              <PhoneOff className="w-4 h-4 text-amber-300 shrink-0" />
+              <span>{rejectedMsg}</span>
+            </div>
+          )}
 
           {errorMsg && (
             <div className="w-full p-3 rounded-2xl bg-rose-500/20 border border-rose-400/40 text-rose-100 text-xs flex items-start gap-2 text-right">
@@ -491,7 +540,7 @@ export const LiveVoiceCallModal: React.FC<LiveVoiceCallModalProps> = ({
           )}
 
           {/* لیست شرکت‌کنندگان فعال در تماس */}
-          {status !== 'error' && (
+          {status !== 'error' && status !== 'rejected' && (
             <div className="w-full rounded-2xl bg-white/5 border border-white/10 p-3 space-y-2 max-h-44 overflow-y-auto text-right">
               <div className="text-[10px] font-extrabold text-teal-300 flex items-center justify-between">
                 <span>حاضرین در گفتگوی صوتی</span>

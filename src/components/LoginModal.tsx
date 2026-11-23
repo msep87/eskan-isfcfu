@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { Storage } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
+import {
+  loadAutoCloseOtherSessionsPref,
+  saveAutoCloseOtherSessionsPref,
+} from '../utils/realtimePresence';
 import { CurrentUser } from '../types';
 import {
   Building2,
@@ -21,7 +25,10 @@ import {
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onLoginSuccess: (user: NonNullable<CurrentUser>) => void;
+  onLoginSuccess: (
+    user: NonNullable<CurrentUser>,
+    options?: { closeOtherSessions?: boolean }
+  ) => void;
   onRefreshData?: () => void;
   onOpenUserGuide?: (
     role?:
@@ -64,6 +71,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [recoverySuccessMsg, setRecoverySuccessMsg] = useState('');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [closeOtherSessions, setCloseOtherSessions] = useState<boolean>(() =>
+    loadAutoCloseOtherSessionsPref()
+  );
+
+  const handleToggleCloseOthers = (checked: boolean) => {
+    setCloseOtherSessions(checked);
+    saveAutoCloseOtherSessionsPref(checked);
+  };
 
   // وضعیت بازیابی رمز عبور دانشجو (دو سوال سه‌گزینه‌ای)
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
@@ -242,7 +257,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         actorRole: 'student',
         actorUsername: student.studentId,
       });
-      onLoginSuccess({ role: 'student', student });
+      onLoginSuccess({ role: 'student', student }, { closeOtherSessions });
       handleCloseModal();
     } else {
       Storage.addActivityLog({
@@ -276,7 +291,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         }
       }
       if (result.success && result.user) {
-        onLoginSuccess(result.user);
+        onLoginSuccess(result.user, { closeOtherSessions });
         handleCloseModal();
       } else {
         setErrorMsg(result.message || 'نام کاربری یا کلمه عبور نادرست است.');
@@ -317,7 +332,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           actorRole: 'admin',
           actorUsername: 'admin',
         });
-        onLoginSuccess({ role: 'admin', name: 'مدیر کل سامانه جامع خدمات دانشجویی', username: 'admin' });
+        onLoginSuccess(
+          { role: 'admin', name: 'مدیر کل سامانه جامع خدمات دانشجویی', username: 'admin' },
+          { closeOtherSessions }
+        );
         handleCloseModal();
       } else {
         Storage.addActivityLog({
@@ -451,6 +469,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 dir="ltr"
               />
             </div>
+
+            <label className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={closeOtherSessions}
+                onChange={(e) => handleToggleCloseOthers(e.target.checked)}
+                className="w-4 h-4 mt-0.5 rounded text-teal-600 focus:ring-teal-500 cursor-pointer shrink-0"
+              />
+              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 leading-relaxed">
+                بستن خودکار نشست‌های باز در سایر سیستم‌ها و گوشی‌ها هنگام ورود
+              </span>
+            </label>
 
             <button
               type="submit"
@@ -655,6 +685,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 dir="ltr"
               />
             </div>
+
+            <label className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={closeOtherSessions}
+                onChange={(e) => handleToggleCloseOthers(e.target.checked)}
+                className="w-4 h-4 mt-0.5 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
+              />
+              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 leading-relaxed">
+                بستن خودکار نشست‌های باز در سایر سیستم‌ها و گوشی‌ها هنگام ورود
+              </span>
+            </label>
 
             <button
               type="submit"

@@ -12,6 +12,11 @@ import {
   Student,
 } from '../types';
 import { Storage, normalizePersianSearch, supabase } from '../utils/storage';
+import {
+  broadcastCallRejected,
+  broadcastPrivateChatNotification,
+  useGlobalOnlineUserIds,
+} from '../utils/realtimePresence';
 import { getStudentAdmissionStatus, isStudentDormResident } from '../utils/financeUtils';
 import {
   COMMUNITY_STICKERS,
@@ -71,11 +76,20 @@ import {
   Briefcase,
 } from 'lucide-react';
 
+export interface CommunityChatInitialTarget {
+  roomId: string;
+  roomType: CommunityChatRoomType;
+  dmParticipants?: { ids: [string, string]; names: [string, string] };
+}
+
 interface CommunityChatHubProps {
   currentUser: NonNullable<CurrentUser>;
   students?: Student[];
   mode?: 'modal' | 'embedded';
   initialView?: 'chat' | 'moderation';
+  initialTargetRoom?: CommunityChatInitialTarget | null;
+  onlineUserIds?: Set<string>;
+  onStartVoiceCall?: (target: LiveVoiceCallTarget) => void;
   cloudSyncTick?: number;
   onClose?: () => void;
   onRefreshGlobalData?: () => void;
@@ -96,10 +110,14 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
   students = [],
   mode = 'embedded',
   initialView = 'chat',
+  initialTargetRoom = null,
+  onlineUserIds: onlineUserIdsProp,
+  onStartVoiceCall,
   cloudSyncTick = 0,
   onClose,
   onRefreshGlobalData,
 }) => {
+  const onlineUserIds = useGlobalOnlineUserIds(onlineUserIdsProp);
   const isModerator = isSupervisorModeratorRole(currentUser.role);
   const isAdmin = currentUser.role === 'admin';
   const isSecurity = currentUser.role === 'security';
@@ -286,8 +304,24 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     setReplyTo(null);
   }, [selectedRoomId]);
 
-  // دریافت اعلان تماس صوتی ورودی مستقیم از طریق Supabase Realtime
+  // هدایت مستقیم به اتاق یا چت خصوصی مشخص (مثلاً هنگام کلیک روی نوتیفیکیشن چت خصوصی)
   useEffect(() => {
+    if (!initialTargetRoom || !initialTargetRoom.roomId) return;
+    setSelectedRoomId(initialTargetRoom.roomId);
+    setSelectedRoomType(initialTargetRoom.roomType);
+    if (initialTargetRoom.dmParticipants) {
+      setActiveDmParticipants(initialTargetRoom.dmParticipants);
+    }
+    if (initialTargetRoom.roomType === 'dm') {
+      setSidebarSection('dms');
+    }
+    setActiveView('chat');
+    setMobileShowChat(true);
+  }, [initialTargetRoom]);
+
+  // دریافت اعلان تماس صوتی ورودی مستقیم از طریق Supabase Realtime (در حالت مستقل بدون هندلر سراسری App)
+  useEffect(() => {
+    if (onStartVoiceCall) return;
     const safeId = me.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
     const ch = supabase.channel(`cfuis_call_invite_${safeId}`);
     ch.on('broadcast', { event: 'incoming_voice_call' }, ({ payload }) => {
@@ -305,7 +339,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [me.id, me.role]);
+  }, [me.id, me.role, onStartVoiceCall]);
 
   // پاکسازی ضبط صوت هنگام بسته شدن کامپوننت
   useEffect(() => {
@@ -911,6 +945,31 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
       return;
     }
 
+    // ارسال نوتیفیکیشن لحظه‌ای چت خصوصی برای مخاطب
+    if (selectedRoomType === 'dm' && dmParticipants) {
+      const targetPeerId = dmParticipants.find((pid) => pid !== me.id);
+      if (targetPeerId) {
+        const previewText = overrideStickerId
+          ? 'یک استیکر ارسال کرد'
+          : draftAudio?.dataUrl
+          ? '🎤 پیام صوتی جدید ارسال کرد'
+          : draftImage && !draftText.trim()
+          ? '🖼️ تصویر جدید ارسال کرد'
+          : draftText.trim();
+        void broadcastPrivateChatNotification(targetPeerId, {
+          messageId: res.chatMessage?.id || `dm_${Date.now()}`,
+          roomId: selectedRoomId,
+          senderId: me.id,
+          senderName: me.name,
+          senderRole: me.role,
+          previewText: previewText.slice(0, 140),
+          isVoiceMessage: Boolean(!overrideStickerId && draftAudio?.dataUrl),
+          hasImage: Boolean(!overrideStickerId && draftImage),
+          sentAt: new Date().toISOString(),
+        });
+      }
+    }
+
     if (!overrideStickerId) {
       setDraftText('');
       setDraftImage(null);
@@ -1114,7 +1173,15 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setIncomingVoiceCall(null)}
+              onClick={() => {
+                void broadcastCallRejected(
+                  incomingVoiceCall.callerId,
+                  incomingVoiceCall.roomId,
+                  me.id,
+                  me.name
+                );
+                setIncomingVoiceCall(null);
+              }}
               className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold flex items-center gap-1 cursor-pointer"
             >
               <PhoneOff className="w-3.5 h-3.5" />
@@ -1471,11 +1538,14 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                               className="flex-1 min-w-0 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-violet-200 dark:border-violet-700 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500"
                             >
                               <option value="">-- انتخاب کاربر از کارکنان --</option>
-                              {staffDirectory.map((st) => (
-                                <option key={`${st.role}:${st.id}`} value={`${st.role}:${st.id}`}>
-                                  {st.fullName} — {st.roleLabel}
-                                </option>
-                              ))}
+                              {staffDirectory.map((st) => {
+                                const online = Boolean(onlineUserIds?.has(st.id));
+                                return (
+                                  <option key={`${st.role}:${st.id}`} value={`${st.role}:${st.id}`}>
+                                    {online ? '● آنلاین' : '○ آفلاین'} | {st.fullName} — {st.roleLabel}
+                                  </option>
+                                );
+                              })}
                             </select>
                             <button
                               type="button"
@@ -1494,6 +1564,34 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                               شروع چت
                             </button>
                           </div>
+                          {selectedStaffDmId && (() => {
+                            const selectedStaff = staffDirectory.find(
+                              (st) => `${st.role}:${st.id}` === selectedStaffDmId
+                            );
+                            if (!selectedStaff) return null;
+                            const isSelectedOnline = Boolean(onlineUserIds?.has(selectedStaff.id));
+                            return (
+                              <div className="flex items-center justify-between text-[10px] px-2 py-1 rounded-lg bg-white/80 dark:bg-slate-900/70 border border-violet-200/70 dark:border-violet-800">
+                                <span className="font-bold text-slate-700 dark:text-slate-200 truncate">
+                                  وضعیت همکار انتخابی:
+                                </span>
+                                <span
+                                  className={`inline-flex items-center gap-1 font-extrabold ${
+                                    isSelectedOnline
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : 'text-slate-500 dark:text-slate-400'
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${
+                                      isSelectedOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+                                    }`}
+                                  />
+                                  {isSelectedOnline ? 'هم‌اکنون آنلاین' : 'آفلاین'}
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </>
                       ) : (
                         <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
@@ -1537,8 +1635,26 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                           {dmLookupProfile && (
                             <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 flex items-center justify-between gap-2">
                               <div className="min-w-0">
-                                <div className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
-                                  {dmLookupProfile.fullName}
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                                    {dmLookupProfile.fullName}
+                                  </span>
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold ${
+                                      onlineUserIds?.has(dmLookupProfile.studentId)
+                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300'
+                                        : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                    }`}
+                                  >
+                                    <span
+                                      className={`w-1.5 h-1.5 rounded-full ${
+                                        onlineUserIds?.has(dmLookupProfile.studentId)
+                                          ? 'bg-emerald-500 animate-pulse'
+                                          : 'bg-slate-400'
+                                      }`}
+                                    />
+                                    {onlineUserIds?.has(dmLookupProfile.studentId) ? 'آنلاین' : 'آفلاین'}
+                                  </span>
                                 </div>
                                 <div className="text-[10px] text-slate-500 truncate">
                                   {dmLookupProfile.fieldOfStudy} • ورودی {dmLookupProfile.entryTerm}
@@ -1576,6 +1692,10 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                         const active = selectedRoomId === dm.roomId;
                         const staffDm = isStaffDmRoomId(dm.roomId);
                         const iAmParticipant = dm.participants.includes(me.id);
+                        const otherPeerId = iAmParticipant
+                          ? dm.otherStudentId || dm.participants.find((pid) => pid !== me.id)
+                          : undefined;
+                        const isPeerOnline = Boolean(otherPeerId && onlineUserIds?.has(otherPeerId));
                         const label = iAmParticipant
                           ? dm.otherStudentName || (staffDm ? 'همکار' : 'دانشجو')
                           : `${dm.participantNames[0]} ↔ ${dm.participantNames[1]}`;
@@ -1604,13 +1724,21 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                             }`}
                           >
                             <div
-                              className={`w-9 h-9 rounded-full bg-gradient-to-br ${
+                              className={`relative w-9 h-9 rounded-full bg-gradient-to-br ${
                                 staffDm
                                   ? 'from-indigo-500 to-violet-600'
                                   : 'from-violet-500 to-fuchsia-600'
                               } text-white flex items-center justify-center text-xs font-black shrink-0`}
                             >
                               {staffDm ? <Briefcase className="w-4 h-4" /> : label.slice(0, 1)}
+                              {iAmParticipant && otherPeerId && (
+                                <span
+                                  title={isPeerOnline ? 'آنلاین' : 'آفلاین'}
+                                  className={`absolute -bottom-0.5 -left-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${
+                                    isPeerOnline ? 'bg-emerald-500' : 'bg-slate-400'
+                                  }`}
+                                />
+                              )}
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-1">
@@ -1621,7 +1749,20 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                                   {dm.messageCount.toLocaleString('fa-IR')}
                                 </span>
                               </div>
-                              <div className="text-[10px] text-slate-500 truncate">{subLabel}</div>
+                              <div className="flex items-center justify-between gap-1 mt-0.5">
+                                <span className="text-[10px] text-slate-500 truncate">{subLabel}</span>
+                                {iAmParticipant && otherPeerId && (
+                                  <span
+                                    className={`text-[9px] font-extrabold shrink-0 ${
+                                      isPeerOnline
+                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                        : 'text-slate-400'
+                                    }`}
+                                  >
+                                    {isPeerOnline ? 'آنلاین' : 'آفلاین'}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </button>
                         );
@@ -1668,6 +1809,29 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                           : 'بسته شده توسط مدیر'}
                       </span>
                     )}
+                    {selectedRoomType === 'dm' && (() => {
+                      const ids = activeDmRoom?.participants || activeDmParticipants?.ids;
+                      const peerId =
+                        ids && ids.includes(me.id) ? ids.find((pid) => pid !== me.id) : undefined;
+                      if (!peerId) return null;
+                      const isPeerOnline = Boolean(onlineUserIds?.has(peerId));
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                            isPeerOnline
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                              : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isPeerOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+                            }`}
+                          />
+                          {isPeerOnline ? 'آنلاین' : 'آفلاین'}
+                        </span>
+                      );
+                    })()}
                     {selectedRoomType === 'dm' && isModerator && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
                         حالت نظارت بر چت خصوصی
@@ -1698,22 +1862,31 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      const ids = activeDmRoom?.participants || activeDmParticipants?.ids;
+                      const names = activeDmRoom?.participantNames || activeDmParticipants?.names;
+                      const peerIdx: 0 | 1 | null =
+                        selectedRoomType === 'dm' && ids && ids.includes(me.id)
+                          ? ids[0] === me.id
+                            ? 1
+                            : 0
+                          : null;
                       const peerId =
-                        selectedRoomType === 'dm' && activeDmRoom?.participants.includes(me.id)
-                          ? activeDmRoom.otherStudentId
-                          : undefined;
+                        peerIdx !== null && ids ? ids[peerIdx] : activeDmRoom?.otherStudentId;
                       const peerName =
-                        selectedRoomType === 'dm' && activeDmRoom?.participants.includes(me.id)
-                          ? activeDmRoom.otherStudentName
-                          : undefined;
-                      setActiveVoiceCall({
+                        peerIdx !== null && names ? names[peerIdx] : activeDmRoom?.otherStudentName;
+                      const callTarget: LiveVoiceCallTarget = {
                         roomId: selectedRoomId,
                         roomTitle: activeRoomTitle,
                         roomType: selectedRoomType,
                         targetPeerId: peerId,
                         targetPeerName: peerName,
                         isInitiator: true,
-                      });
+                      };
+                      if (onStartVoiceCall) {
+                        onStartVoiceCall(callTarget);
+                      } else {
+                        setActiveVoiceCall(callTarget);
+                      }
                     }}
                     className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
                     title={
@@ -2697,6 +2870,11 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
           currentUserId={me.id}
           currentUserName={me.name}
           currentUserRole={me.role}
+          isTargetOnline={
+            activeVoiceCall.targetPeerId
+              ? Boolean(onlineUserIds?.has(activeVoiceCall.targetPeerId))
+              : undefined
+          }
           onClose={() => setActiveVoiceCall(null)}
         />
       )}

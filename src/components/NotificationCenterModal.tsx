@@ -19,6 +19,10 @@ import {
   AlertTriangle,
   ArrowRight,
   Archive,
+  MessagesSquare,
+  PhoneCall,
+  PhoneIncoming,
+  PhoneOff,
 } from 'lucide-react';
 import {
   AppNotificationCategory,
@@ -29,6 +33,8 @@ import {
   isRunningStandalonePWA,
   playNotificationChime,
 } from '../utils/notificationManager';
+import { IncomingVoiceCallPayload } from '../utils/realtimePresence';
+import { getRoleDisplayLabel } from '../utils/communityStickers';
 import { Announcement, RoomWarning } from '../types';
 import { RichTextDisplay } from './RichTextEditor';
 import { AnnouncementImageBox } from './ImageLightboxModal';
@@ -49,12 +55,26 @@ interface NotificationCenterModalProps {
   onMarkAllRead: () => void;
   onClearAll: () => void;
   onNotificationClick: (item: AppNotificationItem) => void;
+  incomingVoiceCall?: IncomingVoiceCallPayload | null;
+  onAcceptIncomingCall?: (call: IncomingVoiceCallPayload) => void;
+  onRejectIncomingCall?: (call: IncomingVoiceCallPayload) => void;
+  onlineUserIds?: Set<string>;
 }
 
 const CATEGORY_META: Record<
   AppNotificationCategory,
   { label: string; colorClass: string; Icon: React.ComponentType<{ className?: string }> }
 > = {
+  private_chat: {
+    label: 'چت خصوصی',
+    colorClass: 'bg-violet-100 text-violet-700 dark:bg-violet-950/70 dark:text-violet-300',
+    Icon: MessagesSquare,
+  },
+  voice_call: {
+    label: 'تماس صوتی',
+    colorClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300',
+    Icon: PhoneCall,
+  },
   message: {
     label: 'پیام و تیکت',
     colorClass: 'bg-teal-100 text-teal-700 dark:bg-teal-950/70 dark:text-teal-300',
@@ -117,12 +137,17 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
   onMarkAllRead,
   onClearAll,
   onNotificationClick,
+  incomingVoiceCall = null,
+  onAcceptIncomingCall,
+  onRejectIncomingCall,
+  onlineUserIds,
 }) => {
   const [activeTab, setActiveTab] = useState<'feed' | 'settings'>('feed');
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
   const [requesting, setRequesting] = useState(false);
   const [viewingItem, setViewingItem] = useState<AppNotificationItem | null>(selectedItem);
   const [showReadArchive, setShowReadArchive] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'private_chat' | 'voice_call' | 'other'>('all');
 
   React.useEffect(() => {
     if (selectedItem) {
@@ -141,6 +166,18 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
   const unreadNotifications = notifications.filter((n) => !n.read);
   const readNotifications = notifications.filter((n) => n.read);
   const unreadCount = unreadNotifications.length;
+  const unreadPrivateChatsCount = unreadNotifications.filter((n) => n.category === 'private_chat').length;
+  const unreadCallsCount = unreadNotifications.filter((n) => n.category === 'voice_call').length;
+  const unreadOtherCount = unreadNotifications.filter(
+    (n) => n.category !== 'private_chat' && n.category !== 'voice_call'
+  ).length;
+
+  const filteredUnreadNotifications = unreadNotifications.filter((item) => {
+    if (categoryFilter === 'all') return true;
+    if (categoryFilter === 'private_chat') return item.category === 'private_chat';
+    if (categoryFilter === 'voice_call') return item.category === 'voice_call';
+    return item.category !== 'private_chat' && item.category !== 'voice_call';
+  });
 
   const handleEnableClick = async () => {
     setRequesting(true);
@@ -474,6 +511,95 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
               })()
             ) : (
             <>
+              {/* بخش اختصاصی تماس صوتی ورودی زنده به شکل تلفن */}
+              {incomingVoiceCall && (
+                <div className="p-3.5 rounded-2xl bg-gradient-to-l from-emerald-700 via-teal-700 to-emerald-800 text-white border-2 border-emerald-400/70 shadow-lg space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="relative shrink-0">
+                      <span className="absolute inset-0 rounded-2xl bg-emerald-300/40 animate-ping" />
+                      <div className="relative w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center">
+                        <PhoneIncoming className="w-5 h-5 text-white animate-bounce" />
+                      </div>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black truncate">{incomingVoiceCall.callerName}</span>
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/30 text-[10px] font-bold">
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              onlineUserIds?.has(incomingVoiceCall.callerId) !== false
+                                ? 'bg-emerald-300'
+                                : 'bg-slate-300'
+                            }`}
+                          />
+                          {onlineUserIds?.has(incomingVoiceCall.callerId) !== false ? 'آنلاین' : 'آفلاین'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-emerald-100 mt-0.5 truncate">
+                        تماس صوتی ورودی · {getRoleDisplayLabel(incomingVoiceCall.callerRole)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onAcceptIncomingCall?.(incomingVoiceCall);
+                        onClose();
+                      }}
+                      className="inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-black transition cursor-pointer"
+                    >
+                      <PhoneCall className="w-4 h-4" />
+                      <span>پاسخ به تماس</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRejectIncomingCall?.(incomingVoiceCall)}
+                      className="inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black transition cursor-pointer"
+                    >
+                      <PhoneOff className="w-4 h-4" />
+                      <span>رد تماس</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* فیلتر تفکیک اعلان‌های چت خصوصی، تماس صوتی و سایر اعلان‌ها */}
+              <div className="flex flex-wrap items-center gap-1.5 pb-1">
+                {(
+                  [
+                    { id: 'all' as const, label: 'همه', count: unreadCount },
+                    { id: 'private_chat' as const, label: 'چت خصوصی', count: unreadPrivateChatsCount },
+                    { id: 'voice_call' as const, label: 'تماس صوتی', count: unreadCallsCount },
+                    { id: 'other' as const, label: 'سایر اعلان‌ها', count: unreadOtherCount },
+                  ] as const
+                ).map((tabItem) => (
+                  <button
+                    key={tabItem.id}
+                    type="button"
+                    onClick={() => setCategoryFilter(tabItem.id)}
+                    className={`px-2.5 py-1 rounded-xl text-[11px] font-extrabold transition cursor-pointer flex items-center gap-1 ${
+                      categoryFilter === tabItem.id
+                        ? 'bg-teal-600 text-white shadow-xs'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <span>{tabItem.label}</span>
+                    {tabItem.count > 0 && (
+                      <span
+                        className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                          categoryFilter === tabItem.id
+                            ? 'bg-white/25 text-white'
+                            : 'bg-rose-600 text-white'
+                        }`}
+                      >
+                        {tabItem.count.toLocaleString('fa-IR')}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
               {(unreadNotifications.length > 0 || readNotifications.length > 0) && (
                 <div className="flex items-center justify-between gap-2 pb-1">
                   {unreadNotifications.length > 0 ? (
@@ -504,55 +630,116 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                 </div>
               )}
 
-              {unreadNotifications.length === 0 ? (
+              {filteredUnreadNotifications.length === 0 ? (
                 <div className="py-8 text-center space-y-2">
                   <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
                     <Bell className="w-6 h-6" />
                   </div>
                   <p className="text-xs font-extrabold text-slate-700 dark:text-slate-200">
-                    اعلان خوانده‌نشده‌ای وجود ندارد
+                    {categoryFilter === 'private_chat'
+                      ? 'پیام جدیدی در چت خصوصی ندارید'
+                      : categoryFilter === 'voice_call'
+                      ? 'اعلان تماس صوتی جدیدی ندارید'
+                      : 'اعلان خوانده‌نشده‌ای وجود ندارد'}
                   </p>
                   <p className="text-[11px] text-slate-400 max-w-xs mx-auto leading-relaxed">
-                    به محض انتشار اطلاعیه، پیام، تذکر، نظرسنجی یا انتخابات جدید، اعلان آن اینجا
+                    به محض دریافت پیام خصوصی، تماس صوتی، اطلاعیه، تذکر، نظرسنجی یا انتخابات جدید، اعلان آن اینجا
                     ظاهر می‌شود و با مشاهده، به‌صورت خودکار خوانده‌شده و از لیست خارج می‌گردد.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {unreadNotifications.map((item) => {
+                  {filteredUnreadNotifications.map((item) => {
                     const meta = CATEGORY_META[item.category] || CATEGORY_META.system;
                     const IconComp = meta.Icon;
+                    const isPrivateChat = item.category === 'private_chat';
+                    const isVoiceCall = item.category === 'voice_call';
+                    const peerOnline = Boolean(item.peerId && onlineUserIds?.has(item.peerId));
                     return (
                       <button
                         key={item.id}
                         type="button"
                         onClick={() => {
                           onNotificationClick(item);
-                          if (item.category !== 'message') {
+                          if (item.category !== 'message' && !isPrivateChat && !isVoiceCall) {
                             setViewingItem(item);
                           }
                         }}
-                        className="w-full text-right p-3 rounded-2xl border transition cursor-pointer flex items-start gap-3 bg-teal-50/60 dark:bg-teal-950/30 border-teal-200 dark:border-teal-800/80 hover:bg-teal-50 dark:hover:bg-teal-950/50"
+                        className={`w-full text-right p-3 rounded-2xl border transition cursor-pointer flex items-start gap-3 ${
+                          isPrivateChat
+                            ? 'bg-violet-50/70 dark:bg-violet-950/30 border-violet-200 dark:border-violet-800/80 hover:bg-violet-50 dark:hover:bg-violet-950/50'
+                            : isVoiceCall
+                            ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/80 hover:bg-emerald-50 dark:hover:bg-emerald-950/50'
+                            : 'bg-teal-50/60 dark:bg-teal-950/30 border-teal-200 dark:border-teal-800/80 hover:bg-teal-50 dark:hover:bg-teal-950/50'
+                        }`}
                       >
-                        <div className={`p-2 rounded-xl shrink-0 ${meta.colorClass}`}>
+                        <div className={`p-2 rounded-xl shrink-0 relative ${meta.colorClass}`}>
                           <IconComp className="w-4 h-4" />
+                          {(isPrivateChat || isVoiceCall) && item.peerId && (
+                            <span
+                              title={peerOnline ? 'آنلاین' : 'آفلاین'}
+                              className={`absolute -bottom-0.5 -left-0.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${
+                                peerOnline ? 'bg-emerald-500' : 'bg-slate-400'
+                              }`}
+                            />
+                          )}
                         </div>
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
                               {item.title}
                             </span>
-                            <span className="w-2 h-2 rounded-full bg-teal-600 shrink-0" />
+                            <span
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                isPrivateChat
+                                  ? 'bg-violet-600'
+                                  : isVoiceCall
+                                  ? 'bg-emerald-600'
+                                  : 'bg-teal-600'
+                              }`}
+                            />
                           </div>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2 leading-relaxed">
                             {item.body}
                           </p>
                           <div className="flex items-center justify-between text-[10px] text-slate-400">
-                            <span className={`px-1.5 py-0.5 rounded-md font-bold ${meta.colorClass}`}>
-                              {meta.label}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`px-1.5 py-0.5 rounded-md font-bold ${meta.colorClass}`}>
+                                {meta.label}
+                              </span>
+                              {(isPrivateChat || isVoiceCall) && item.peerId && (
+                                <span
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-bold ${
+                                    peerOnline
+                                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300'
+                                      : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${
+                                      peerOnline ? 'bg-emerald-500' : 'bg-slate-400'
+                                    }`}
+                                  />
+                                  {peerOnline ? 'آنلاین' : 'آفلاین'}
+                                </span>
+                              )}
+                            </div>
                             <span className="flex items-center gap-1.5">
-                              <span className="text-teal-600 dark:text-teal-400 font-bold">مشاهده ←</span>
+                              <span
+                                className={`font-bold ${
+                                  isPrivateChat
+                                    ? 'text-violet-700 dark:text-violet-300'
+                                    : isVoiceCall
+                                    ? 'text-emerald-700 dark:text-emerald-300'
+                                    : 'text-teal-600 dark:text-teal-400'
+                                }`}
+                              >
+                                {isPrivateChat
+                                  ? 'ورود به چت ←'
+                                  : isVoiceCall
+                                  ? 'باز کردن گفتگو ←'
+                                  : 'مشاهده ←'}
+                              </span>
                               <span>{formatShortFaTime(item.createdAt)}</span>
                             </span>
                           </div>
@@ -588,7 +775,11 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                             key={item.id}
                             type="button"
                             onClick={() => {
-                              if (item.category === 'message') {
+                              if (
+                                item.category === 'message' ||
+                                item.category === 'private_chat' ||
+                                item.category === 'voice_call'
+                              ) {
                                 onNotificationClick(item);
                               } else {
                                 setViewingItem(item);

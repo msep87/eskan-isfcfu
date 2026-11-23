@@ -2904,6 +2904,15 @@ export const Storage = {
     }
   },
 
+  toggleAnnouncementNotifications: (id: string) => {
+    const announcements = Storage.getAnnouncements();
+    const ann = announcements.find((a) => a.id === id);
+    if (ann) {
+      ann.publishInNotifications = !ann.publishInNotifications;
+      Storage.setAnnouncements(announcements);
+    }
+  },
+
   // ایجاد اتاق و تخت‌های آن توسط مدیر
   addRoomWithBeds: (
     dormId: string,

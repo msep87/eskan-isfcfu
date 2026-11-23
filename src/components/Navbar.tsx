@@ -19,6 +19,8 @@ import {
   Bell,
   BellRing,
   MessagesSquare,
+  MonitorSmartphone,
+  PhoneIncoming,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -42,6 +44,10 @@ interface NavbarProps {
   notificationPermission?: NotificationPermission | 'unsupported';
   onOpenCommunityChat?: () => void;
   communityModerationBadge?: number;
+  onOpenActiveSessions?: () => void;
+  activeSessionsCount?: number;
+  hasIncomingVoiceCall?: boolean;
+  onOpenIncomingVoiceCall?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -64,6 +70,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   notificationPermission = 'default',
   onOpenCommunityChat,
   communityModerationBadge = 0,
+  onOpenActiveSessions,
+  activeSessionsCount = 1,
+  hasIncomingVoiceCall = false,
+  onOpenIncomingVoiceCall,
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -250,6 +260,21 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
+            {hasIncomingVoiceCall && onOpenIncomingVoiceCall && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenIncomingVoiceCall();
+                }}
+                className="relative p-2 rounded-xl bg-emerald-600 text-white shadow-md shadow-emerald-600/30 animate-pulse transition cursor-pointer"
+                title="تماس صوتی ورودی — جهت پاسخ یا رد تماس کلیک کنید"
+                aria-label="تماس صوتی ورودی"
+              >
+                <PhoneIncoming className="w-4 h-4 animate-bounce" />
+              </button>
+            )}
+
             {onOpenNotifications && (
               <button
                 type="button"
@@ -398,6 +423,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
+
+            {/* دکمه تلفن چشمک‌زن هنگام وجود تماس صوتی ورودی */}
+            {hasIncomingVoiceCall && onOpenIncomingVoiceCall && (
+              <button
+                type="button"
+                onClick={onOpenIncomingVoiceCall}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black shadow-md shadow-emerald-600/35 animate-pulse transition cursor-pointer"
+                title="تماس صوتی ورودی — جهت پاسخ یا رد تماس کلیک کنید"
+              >
+                <PhoneIncoming className="w-4 h-4 animate-bounce" />
+                <span>تماس ورودی</span>
+              </button>
+            )}
 
             {/* دکمه اعلان‌ها و نوتیفیکیشن فوری */}
             {onOpenNotifications && (
@@ -647,6 +685,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                 </div>
 
+                {/* دکمه نشست‌های فعال (مدیریت سیستم‌های متصل) */}
+                {onOpenActiveSessions && (
+                  <button
+                    type="button"
+                    onClick={onOpenActiveSessions}
+                    className={`relative p-2 rounded-xl transition cursor-pointer ${
+                      activeSessionsCount > 1
+                        ? 'text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 hover:bg-amber-100'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                    title={`نشست‌های فعال و دستگاه‌های متصل (${activeSessionsCount.toLocaleString('fa-IR')} نشست)`}
+                  >
+                    <MonitorSmartphone className="w-4 h-4" />
+                    {activeSessionsCount > 1 && (
+                      <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-amber-600 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
+                        {activeSessionsCount}
+                      </span>
+                    )}
+                  </button>
+                )}
+
                 {/* دکمه تغییر کلمه عبور */}
                 <button
                   onClick={onOpenChangePassword}
@@ -774,6 +833,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <BookOpen className="w-4 h-4" />
                 <span>راهنمای کاربری</span>
               </button>
+
+              {currentUser && onOpenActiveSessions && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    onOpenActiveSessions();
+                  }}
+                  className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border text-xs font-bold cursor-pointer ${
+                    activeSessionsCount > 1
+                      ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <MonitorSmartphone className="w-4 h-4" />
+                  <span>
+                    نشست‌های فعال {activeSessionsCount > 1 ? `(${activeSessionsCount})` : ''}
+                  </span>
+                </button>
+              )}
 
               {currentUser && (
                 <button

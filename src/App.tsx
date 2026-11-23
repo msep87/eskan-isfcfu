@@ -35,6 +35,7 @@ import {
   isRunningStandalonePWA,
   loadNotificationFeed,
   loadNotificationPrefs,
+  playIncomingCallRingtone,
   playNotificationChime,
   requestSystemNotificationPermission,
   saveNotificationFeed,
@@ -42,11 +43,28 @@ import {
   snoozeNotificationPrompt,
   updateAppIconBadge,
 } from './utils/notificationManager';
+import {
+  IncomingPrivateChatPayload,
+  IncomingVoiceCallPayload,
+  TerminateSessionPayload,
+  broadcastCallRejected,
+  broadcastTerminateSessions,
+  getRealtimeUserIdentity,
+  loadAutoCloseOtherSessionsPref,
+  resetTabLoginTime,
+  saveAutoCloseOtherSessionsPref,
+  useRealtimePortalPresence,
+} from './utils/realtimePresence';
+import { canRoleUseLiveVoiceCall } from './utils/communityStickers';
 import { Navbar } from './components/Navbar';
 import { JalaliLiveClockBar } from './components/JalaliLiveClockBar';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { NotificationCenterModal } from './components/NotificationCenterModal';
+import { ActiveSessionsModal } from './components/ActiveSessionsModal';
+import { IncomingCallFloatingBanner } from './components/IncomingCallFloatingBanner';
+import { LiveVoiceCallModal, LiveVoiceCallTarget } from './components/LiveVoiceCallModal';
+import type { CommunityChatInitialTarget } from './components/CommunityChatHub';
 import {
   NotificationPromptBanner,
   LiveNotificationToasts,
@@ -510,7 +528,9 @@ export default function App() {
   // مدیریت کلیک روی نوتیفیکیشن سیستمی از طریق Service Worker یا پنجره
   useEffect(() => {
     const handleNotifOpen = (category?: string) => {
-      if (category === 'message' && currentUser) {
+      if (category === 'private_chat' && currentUser) {
+        setIsCommunityChatOpen(true);
+      } else if (category === 'message' && currentUser) {
         setIsMessagesModalOpen(true);
       } else {
         setIsNotificationModalOpen(true);
@@ -580,7 +600,41 @@ export default function App() {
         return next;
       });
       setLiveToasts((prev) => prev.filter((t) => t.id !== item.id));
-      if (item.category === 'message' && currentUser) {
+      if (item.category === 'private_chat' && currentUser) {
+        const myIdentity = getRealtimeUserIdentity(currentUser);
+        setSelectedNotificationItem(null);
+        setIsNotificationModalOpen(false);
+        if (item.roomId && myIdentity) {
+          setChatTargetRoom({
+            roomId: item.roomId,
+            roomType: 'dm',
+            dmParticipants: item.peerId
+              ? {
+                  ids: [myIdentity.id, item.peerId],
+                  names: [myIdentity.name, item.peerName || 'کاربر سامانه'],
+                }
+              : undefined,
+          });
+        }
+        setIsCommunityChatOpen(true);
+      } else if (item.category === 'voice_call' && currentUser) {
+        const myIdentity = getRealtimeUserIdentity(currentUser);
+        setSelectedNotificationItem(null);
+        setIsNotificationModalOpen(false);
+        if (item.roomId && myIdentity) {
+          setChatTargetRoom({
+            roomId: item.roomId,
+            roomType: 'dm',
+            dmParticipants: item.peerId
+              ? {
+                  ids: [myIdentity.id, item.peerId],
+                  names: [myIdentity.name, item.peerName || 'کاربر سامانه'],
+                }
+              : undefined,
+          });
+        }
+        setIsCommunityChatOpen(true);
+      } else if (item.category === 'message' && currentUser) {
         setSelectedNotificationItem(null);
         setIsNotificationModalOpen(false);
         setFocusedMessageId(item.itemId || null);
@@ -668,6 +722,219 @@ export default function App() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
 
+  // وضعیت‌های چت خصوصی لحظه‌ای، تماس صوتی ورودی و نشست‌های چنددستگاهی
+  const [chatTargetRoom, setChatTargetRoom] = useState<CommunityChatInitialTarget | null>(null);
+  const [incomingVoiceCall, setIncomingVoiceCall] = useState<IncomingVoiceCallPayload | null>(null);
+  const [activeVoiceCall, setActiveVoiceCall] = useState<LiveVoiceCallTarget | null>(null);
+  const [isActiveSessionsModalOpen, setIsActiveSessionsModalOpen] = useState(false);
+  const [autoCloseOtherSessions, setAutoCloseOtherSessions] = useState<boolean>(() =>
+    loadAutoCloseOtherSessionsPref()
+  );
+  const [sessionTerminatedNotice, setSessionTerminatedNotice] = useState<string | null>(null);
+
+  const handleIncomingPrivateChat = useCallback(
+    (payload: IncomingPrivateChatPayload) => {
+      if (!currentUser || !notificationPrefs.enabled || !notificationPrefs.messages) return;
+      const userKey = getUserNotificationKey(currentUser);
+      const notifId = `notif_dm_${payload.messageId || Date.now()}`;
+      const bodyText = payload.isVoiceMessage
+        ? '🎤 پیام صوتی جدید ارسال کرد'
+        : payload.hasImage && !payload.previewText
+        ? '🖼️ تصویر جدید ارسال کرد'
+        : payload.previewText || 'پیام جدید در گفتگوی خصوصی';
+
+      const item: AppNotificationItem = {
+        id: notifId,
+        category: 'private_chat',
+        title: `پیام خصوصی از ${payload.senderName || 'کاربر سامانه'}`,
+        body: bodyText,
+        fullBody: bodyText,
+        createdAt: payload.sentAt || new Date().toISOString(),
+        read: false,
+        itemId: payload.messageId,
+        roomId: payload.roomId,
+        peerId: payload.senderId,
+        peerName: payload.senderName,
+        peerRole: payload.senderRole,
+      };
+
+      setNotificationFeed((prev) => {
+        if (prev.some((n) => n.id === notifId)) return prev;
+        const merged = [item, ...prev].slice(0, 40);
+        saveNotificationFeed(userKey, merged);
+        return merged;
+      });
+      setLiveToasts((prev) => {
+        if (prev.some((t) => t.id === notifId)) return prev;
+        return [item, ...prev].slice(0, 3);
+      });
+      if (notificationPrefs.soundEnabled) {
+        playNotificationChime();
+      }
+      if (notificationPermission === 'granted') {
+        void dispatchOSNotification({
+          title: item.title,
+          body: item.body,
+          tag: notifId,
+          category: 'private_chat',
+          itemId: payload.roomId,
+        });
+      }
+      void Storage.syncFromCloud({ force: false }).then((changed) => {
+        if (changed) refreshAllData();
+      });
+    },
+    [currentUser, notificationPrefs, notificationPermission, refreshAllData]
+  );
+
+  const handleIncomingVoiceCall = useCallback(
+    (payload: IncomingVoiceCallPayload) => {
+      if (!currentUser) return;
+      const liveChatSettings = Storage.getCommunityChatSettings();
+      if (!canRoleUseLiveVoiceCall(liveChatSettings, currentUser.role).allowed) return;
+      if (activeVoiceCall && activeVoiceCall.roomId === payload.roomId) return;
+
+      setIncomingVoiceCall(payload);
+
+      if (notificationPrefs.soundEnabled) {
+        playIncomingCallRingtone();
+      }
+
+      const userKey = getUserNotificationKey(currentUser);
+      const callNotifId = `notif_call_${payload.roomId}_${Date.now()}`;
+      const callItem: AppNotificationItem = {
+        id: callNotifId,
+        category: 'voice_call',
+        title: `تماس صوتی ورودی از ${payload.callerName || 'کاربر سامانه'}`,
+        body: 'در حال برقراری تماس صوتی مستقیم — جهت پاسخ یا مشاهده کلیک کنید',
+        fullBody: `${payload.callerName || 'کاربر سامانه'} با شما تماس صوتی مستقیم برقرار کرد.`,
+        createdAt: payload.sentAt || new Date().toISOString(),
+        read: false,
+        itemId: payload.roomId,
+        roomId: payload.roomId,
+        peerId: payload.callerId,
+        peerName: payload.callerName,
+        peerRole: payload.callerRole,
+      };
+      setNotificationFeed((prev) => {
+        const merged = [callItem, ...prev].slice(0, 40);
+        saveNotificationFeed(userKey, merged);
+        return merged;
+      });
+
+      if (notificationPermission === 'granted') {
+        void dispatchOSNotification({
+          title: callItem.title,
+          body: 'برای پاسخ به تماس صوتی وارد سامانه شوید',
+          tag: `cfuis-call-${payload.roomId}`,
+          category: 'voice_call',
+          itemId: payload.roomId,
+        });
+      }
+    },
+    [currentUser, activeVoiceCall, notificationPrefs.soundEnabled, notificationPermission]
+  );
+
+  const handleIncomingCallCancelled = useCallback((payload: { roomId: string }) => {
+    setIncomingVoiceCall((prev) => (prev && prev.roomId === payload.roomId ? null : prev));
+  }, []);
+
+  const handleRemoteSessionTerminated = useCallback((payload: TerminateSessionPayload) => {
+    Storage.clearAdminImpersonator();
+    setImpersonatingAdmin(null);
+    setIsAiChatOpen(false);
+    setIsCommunityChatOpen(false);
+    setIsMessagesModalOpen(false);
+    setIsActiveSessionsModalOpen(false);
+    setActiveVoiceCall(null);
+    setIncomingVoiceCall(null);
+    setCurrentUser(null);
+    Storage.setCurrentUser(null);
+    setSessionTerminatedNotice(
+      payload.reason ||
+        `نشست شما در این دستگاه از طریق «${payload.initiatorDevice || 'دستگاه دیگر'}» بسته شد.`
+    );
+  }, []);
+
+  const {
+    identity: realtimeIdentity,
+    sessionId: tabSessionId,
+    onlineUserIds,
+    activeSessions,
+    terminateSession,
+    terminateAllOtherSessions,
+  } = useRealtimePortalPresence({
+    currentUser,
+    onIncomingPrivateChat: handleIncomingPrivateChat,
+    onIncomingVoiceCall: handleIncomingVoiceCall,
+    onCallCancelled: handleIncomingCallCancelled,
+    onSessionTerminated: handleRemoteSessionTerminated,
+  });
+
+  useEffect(() => {
+    if (realtimeIdentity) {
+      setAutoCloseOtherSessions(loadAutoCloseOtherSessionsPref(realtimeIdentity.userKey));
+    }
+  }, [realtimeIdentity]);
+
+  const handleToggleAutoCloseOtherSessions = useCallback(
+    (next: boolean) => {
+      setAutoCloseOtherSessions(next);
+      saveAutoCloseOtherSessionsPref(next, realtimeIdentity?.userKey);
+    },
+    [realtimeIdentity]
+  );
+
+  const handleAcceptIncomingVoiceCall = useCallback(
+    (call: IncomingVoiceCallPayload) => {
+      setIncomingVoiceCall(null);
+      if (currentUser) {
+        const userKey = getUserNotificationKey(currentUser);
+        setNotificationFeed((prev) => {
+          const next = prev.map((n) =>
+            n.category === 'voice_call' && n.roomId === call.roomId ? { ...n, read: true } : n
+          );
+          saveNotificationFeed(userKey, next);
+          return next;
+        });
+      }
+      setActiveVoiceCall({
+        roomId: call.roomId,
+        roomTitle: call.callerName || 'تماس صوتی',
+        roomType: call.roomType || 'dm',
+        targetPeerId: call.callerId,
+        targetPeerName: call.callerName,
+        isInitiator: false,
+      });
+    },
+    [currentUser]
+  );
+
+  const handleRejectIncomingVoiceCall = useCallback(
+    (call: IncomingVoiceCallPayload) => {
+      setIncomingVoiceCall(null);
+      if (realtimeIdentity) {
+        void broadcastCallRejected(
+          call.callerId,
+          call.roomId,
+          realtimeIdentity.id,
+          realtimeIdentity.name
+        );
+      }
+      if (currentUser) {
+        const userKey = getUserNotificationKey(currentUser);
+        setNotificationFeed((prev) => {
+          const next = prev.map((n) =>
+            n.category === 'voice_call' && n.roomId === call.roomId ? { ...n, read: true } : n
+          );
+          saveNotificationFeed(userKey, next);
+          return next;
+        });
+      }
+    },
+    [currentUser, realtimeIdentity]
+  );
+
   const handleOpenExcelModal = (tab: ExcelImportTab = 'students') => {
     setExcelModalInitialTab(tab);
     setIsExcelModalOpen(true);
@@ -684,11 +951,32 @@ export default function App() {
     setIsUserGuideOpen(true);
   };
 
-  const handleLoginSuccess = (user: NonNullable<CurrentUser>) => {
+  const handleLoginSuccess = (
+    user: NonNullable<CurrentUser>,
+    options?: { closeOtherSessions?: boolean }
+  ) => {
+    setSessionTerminatedNotice(null);
+    resetTabLoginTime();
     Storage.clearAdminImpersonator();
     setImpersonatingAdmin(null);
     setCurrentUser(user);
     Storage.setCurrentUser(user);
+
+    const nextIdentity = getRealtimeUserIdentity(user);
+    const shouldCloseOthers =
+      options?.closeOtherSessions ??
+      (nextIdentity ? loadAutoCloseOtherSessionsPref(nextIdentity.userKey) : false);
+    if (nextIdentity && typeof options?.closeOtherSessions === 'boolean') {
+      saveAutoCloseOtherSessionsPref(options.closeOtherSessions, nextIdentity.userKey);
+      setAutoCloseOtherSessions(options.closeOtherSessions);
+    }
+    if (shouldCloseOthers && nextIdentity) {
+      void broadcastTerminateSessions(nextIdentity.userKey, {
+        keepSessionId: tabSessionId,
+        reason: 'به دلیل ورود جدید به حساب کاربری در یک دستگاه دیگر، این نشست به‌صورت خودکار بسته شد.',
+      });
+    }
+
     refreshAllData();
     // پس از ورود: برای مدیر و کارشناسان، لیست کامل دانشجویان و تمام جداول از Supabase دریافت می‌شود؛
     // برای دانشجو فقط داده‌های عملیاتی + ردیف همان دانشجو (با حفظ کش ۵ دقیقه‌ای داده‌های عمومی)
@@ -790,6 +1078,11 @@ export default function App() {
     Storage.clearAdminImpersonator();
     setImpersonatingAdmin(null);
     setIsAiChatOpen(false);
+    setIsCommunityChatOpen(false);
+    setChatTargetRoom(null);
+    setActiveVoiceCall(null);
+    setIncomingVoiceCall(null);
+    setIsActiveSessionsModalOpen(false);
     setCurrentUser(null);
     Storage.setCurrentUser(null);
   };
@@ -860,7 +1153,10 @@ export default function App() {
         onOpenNotifications={() => setIsNotificationModalOpen(true)}
         unreadNotificationsCount={unreadNotificationsCount}
         notificationPermission={notificationPermission}
-        onOpenCommunityChat={() => setIsCommunityChatOpen(true)}
+        onOpenCommunityChat={() => {
+          setChatTargetRoom(null);
+          setIsCommunityChatOpen(true);
+        }}
         communityModerationBadge={
           currentUser && (currentUser.role === 'admin' || currentUser.role === 'security' || currentUser.role === 'vice_dean')
             ? Storage.getCommunityForums().filter((f) => {
@@ -871,7 +1167,27 @@ export default function App() {
               }).length + Storage.getCommunityChatReports().filter((r) => r.status === 'pending').length
             : 0
         }
+        onOpenActiveSessions={currentUser ? () => setIsActiveSessionsModalOpen(true) : undefined}
+        activeSessionsCount={activeSessions.length}
+        hasIncomingVoiceCall={Boolean(currentUser && incomingVoiceCall && !activeVoiceCall)}
+        onOpenIncomingVoiceCall={() => setIsNotificationModalOpen(true)}
       />
+
+      {/* اعلان خروج از راه دور در صورت بسته شدن نشست از دستگاه دیگر */}
+      {sessionTerminatedNotice && !currentUser && (
+        <div className="bg-amber-50 dark:bg-amber-950/60 border-b border-amber-200 dark:border-amber-800 px-4 py-2.5">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 text-xs font-extrabold text-amber-900 dark:text-amber-200">
+            <span>{sessionTerminatedNotice}</span>
+            <button
+              type="button"
+              onClick={() => setSessionTerminatedNotice(null)}
+              className="px-2.5 py-1 rounded-lg bg-amber-200/70 dark:bg-amber-900/70 hover:bg-amber-300/70 text-[11px] font-bold cursor-pointer shrink-0"
+            >
+              متوجه شدم
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* بنر دعوت به فعال‌سازی نوتیفیکیشن فوری گوشی و اپلیکیشن */}
       <NotificationPromptBanner
@@ -1594,8 +1910,14 @@ export default function App() {
             currentUser={currentUser}
             students={students}
             mode="modal"
+            initialTargetRoom={chatTargetRoom}
+            onlineUserIds={onlineUserIds}
+            onStartVoiceCall={(target) => setActiveVoiceCall(target)}
             cloudSyncTick={cloudSyncTick}
-            onClose={() => setIsCommunityChatOpen(false)}
+            onClose={() => {
+              setIsCommunityChatOpen(false);
+              setChatTargetRoom(null);
+            }}
             onRefreshGlobalData={refreshAllData}
           />
         )}
@@ -1634,9 +1956,51 @@ export default function App() {
 
       <OfflineIndicator />
 
+      {/* اعلان شناور تلفن تماس صوتی ورودی با دکمه پاسخ و رد تماس */}
+      {currentUser && !activeVoiceCall && (
+        <IncomingCallFloatingBanner
+          call={incomingVoiceCall}
+          isCallerOnline={
+            incomingVoiceCall ? onlineUserIds.has(incomingVoiceCall.callerId) : true
+          }
+          onAccept={handleAcceptIncomingVoiceCall}
+          onReject={handleRejectIncomingVoiceCall}
+        />
+      )}
+
+      {/* پنجره فعال تماس صوتی زنده (مستقل از باز یا بسته بودن پنجره چت) */}
+      {currentUser && activeVoiceCall && realtimeIdentity && (
+        <LiveVoiceCallModal
+          call={activeVoiceCall}
+          currentUserId={realtimeIdentity.id}
+          currentUserName={realtimeIdentity.name}
+          currentUserRole={realtimeIdentity.role}
+          isTargetOnline={
+            activeVoiceCall.targetPeerId
+              ? onlineUserIds.has(activeVoiceCall.targetPeerId)
+              : undefined
+          }
+          onClose={() => setActiveVoiceCall(null)}
+        />
+      )}
+
+      {/* مدال مدیریت نشست‌های فعال در دستگاه‌های مختلف */}
+      {currentUser && (
+        <ActiveSessionsModal
+          isOpen={isActiveSessionsModalOpen}
+          onClose={() => setIsActiveSessionsModalOpen(false)}
+          sessions={activeSessions}
+          autoCloseOtherSessions={autoCloseOtherSessions}
+          onToggleAutoCloseOtherSessions={handleToggleAutoCloseOtherSessions}
+          onTerminateSession={terminateSession}
+          onTerminateAllOtherSessions={terminateAllOtherSessions}
+        />
+      )}
+
       {/* اعلان‌های زنده داخل برنامه (Toast) با انیمیشن نرم ورود و محو شدن خودکار */}
       <LiveNotificationToasts
         toasts={liveToasts}
+        hasIncomingCallBanner={Boolean(currentUser && incomingVoiceCall && !activeVoiceCall)}
         onDismiss={(id) => setLiveToasts((prev) => prev.filter((t) => t.id !== id))}
         onClickToast={(item) => handleNotificationItemClick(item, true)}
       />
@@ -1661,6 +2025,10 @@ export default function App() {
         onMarkAllRead={handleMarkAllNotificationsRead}
         onClearAll={handleClearNotifications}
         onNotificationClick={(item) => handleNotificationItemClick(item, false)}
+        incomingVoiceCall={currentUser && !activeVoiceCall ? incomingVoiceCall : null}
+        onAcceptIncomingCall={handleAcceptIncomingVoiceCall}
+        onRejectIncomingCall={handleRejectIncomingVoiceCall}
+        onlineUserIds={onlineUserIds}
       />
 
       {/* مدال بزرگ‌نمایی و نمایش در ابعاد واقعی تصویر اطلاعیه */}

@@ -747,6 +747,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newAnnPriority, setNewAnnPriority] = useState<Announcement['priority']>('normal');
   const [newAnnTargetDormId, setNewAnnTargetDormId] = useState('all');
   const [newAnnShowOnHome, setNewAnnShowOnHome] = useState(true);
+  const [newAnnPublishInNotifications, setNewAnnPublishInNotifications] = useState(false);
   const [newAnnPinned, setNewAnnPinned] = useState(false);
   const [newAnnImage, setNewAnnImage] = useState<string | null>(null);
   const [annPreviewImage, setAnnPreviewImage] = useState<string | null>(null);
@@ -1524,6 +1525,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setNewAnnPriority(ann.priority);
     setNewAnnTargetDormId(ann.targetDormId || 'all');
     setNewAnnShowOnHome(ann.showOnHomePage !== false);
+    setNewAnnPublishInNotifications(Boolean(ann.publishInNotifications));
     setNewAnnPinned(ann.pinned || false);
     setNewAnnImage(ann.imageUrl || null);
     setMainTab('announcements');
@@ -1538,6 +1540,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setNewAnnPriority('normal');
     setNewAnnTargetDormId('all');
     setNewAnnShowOnHome(true);
+    setNewAnnPublishInNotifications(false);
     setNewAnnPinned(false);
     setNewAnnImage(null);
   };
@@ -1638,6 +1641,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           priority: newAnnPriority,
           targetDormId: newAnnTargetDormId,
           showOnHomePage: newAnnShowOnHome,
+          publishInNotifications: newAnnPublishInNotifications,
           pinned: newAnnPinned,
           imageUrl: newAnnImage || undefined,
         };
@@ -1655,10 +1659,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         date: new Date().toLocaleDateString('fa-IR'),
         targetDormId: newAnnTargetDormId,
         showOnHomePage: newAnnShowOnHome,
+        publishInNotifications: newAnnPublishInNotifications,
         pinned: newAnnPinned,
         imageUrl: newAnnImage || undefined,
       });
-      setAnnFeedback('اطلاعیه با موفقیت ثبت شد و در سامانه و صفحه اول سایت منتشر گردید.');
+      setAnnFeedback(
+        newAnnPublishInNotifications
+          ? 'اطلاعیه با موفقیت ثبت شد و در نوتیفیکیشن کاربران نیز منتشر گردید.'
+          : 'اطلاعیه با موفقیت ثبت شد (بدون ارسال در نوتیفیکیشن کاربران).'
+      );
     }
 
     setNewAnnTitle('');
@@ -1668,6 +1677,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setNewAnnPriority('normal');
     setNewAnnTargetDormId('all');
     setNewAnnShowOnHome(true);
+    setNewAnnPublishInNotifications(false);
     setNewAnnPinned(false);
     setNewAnnImage(null);
     setTimeout(() => setAnnFeedback(null), 3500);
@@ -1690,6 +1700,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleToggleAnnouncementHome = (id: string) => {
     Storage.toggleAnnouncementHomePage(id);
+    onRefreshData();
+  };
+
+  const handleToggleAnnouncementNotifications = (id: string) => {
+    Storage.toggleAnnouncementNotifications(id);
     onRefreshData();
   };
 
@@ -4715,6 +4730,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </span>
                   </label>
                 </div>
+
+                <div className="sm:col-span-2 lg:col-span-3 p-3 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/70">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newAnnPublishInNotifications}
+                      onChange={(e) => setNewAnnPublishInNotifications(e.target.checked)}
+                      className="w-4 h-4 mt-0.5 rounded text-amber-600 focus:ring-amber-500 cursor-pointer shrink-0"
+                    />
+                    <div>
+                      <span className="text-xs font-extrabold text-amber-900 dark:text-amber-200 block">
+                        انتشار در نوتیفیکیشن و اعلان‌های کاربران
+                      </span>
+                      <span className="text-[11px] text-amber-800/80 dark:text-amber-300/80 leading-relaxed block mt-0.5">
+                        اطلاعیه‌های صفحه اول به‌صورت پیش‌فرض در نوتیفیکیشن کاربران ارسال نمی‌شوند؛ تنها در صورت زدن این تیک، به‌عنوان اعلان جدید در زنگوله نوتیفیکیشن کاربران نمایش داده خواهند شد.
+                      </span>
+                    </div>
+                  </label>
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
@@ -4795,12 +4829,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             مخفی از صفحه اول
                           </span>
                         )}
+                        {ann.publishInNotifications ? (
+                          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-extrabold border border-amber-300 dark:border-amber-800 flex items-center gap-1">
+                            <Bell className="w-3 h-3" />
+                            ارسال در نوتیفیکیشن
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 font-bold">
+                            بدون نوتیفیکیشن
+                          </span>
+                        )}
                         <h4 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white mr-1">
                           {ann.title}
                         </h4>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
                         {/* دکمه ویرایش اطلاعیه */}
                         <button
                           onClick={() => handleStartEditAnnouncement(ann)}
@@ -4809,6 +4853,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                           <span>ویرایش</span>
+                        </button>
+
+                        {/* دکمه تغییر وضعیت انتشار در نوتیفیکیشن */}
+                        <button
+                          onClick={() => handleToggleAnnouncementNotifications(ann.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                            ann.publishInNotifications
+                              ? 'bg-amber-500 text-slate-950 hover:bg-amber-400 shadow-xs'
+                              : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-300'
+                          }`}
+                          title="تغییر وضعیت انتشار در نوتیفیکیشن کاربران"
+                        >
+                          <Bell className="w-3.5 h-3.5" />
+                          <span>{ann.publishInNotifications ? 'نوتیفیکیشن: فعال' : 'نوتیفیکیشن: غیرفعال'}</span>
                         </button>
 
                         {/* دکمه تغییر وضعیت انتشار در صفحه اول */}

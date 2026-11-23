@@ -9,6 +9,8 @@ import {
   Bell,
   Smartphone,
   AlertTriangle,
+  MessagesSquare,
+  PhoneIncoming,
 } from 'lucide-react';
 import {
   AppNotificationItem,
@@ -108,6 +110,7 @@ interface LiveNotificationToastsProps {
   onDismiss: (id: string) => void;
   onClickToast: (item: AppNotificationItem) => void;
   autoDismissMs?: number;
+  hasIncomingCallBanner?: boolean;
 }
 
 interface ToastItemCardProps {
@@ -161,12 +164,29 @@ const ToastItemCard: React.FC<ToastItemCardProps> = ({
 
   const getVisuals = (category: AppNotificationItem['category']) => {
     switch (category) {
+      case 'private_chat':
+        return {
+          icon: <MessagesSquare className="w-4 h-4 text-violet-600 dark:text-violet-300" />,
+          iconBg: 'bg-violet-100 dark:bg-violet-950/70',
+          border: 'border-violet-300/90 dark:border-violet-700/80',
+          bar: 'bg-violet-500',
+          actionHint: 'باز کردن چت خصوصی ←',
+        };
+      case 'voice_call':
+        return {
+          icon: <PhoneIncoming className="w-4 h-4 text-emerald-600 dark:text-emerald-300" />,
+          iconBg: 'bg-emerald-100 dark:bg-emerald-950/70',
+          border: 'border-emerald-300/90 dark:border-emerald-700/80',
+          bar: 'bg-emerald-500',
+          actionHint: 'مشاهده تماس صوتی ←',
+        };
       case 'message':
         return {
           icon: <MessageSquare className="w-4 h-4 text-teal-600 dark:text-teal-300" />,
           iconBg: 'bg-teal-50 dark:bg-teal-950/60',
           border: 'border-teal-200/90 dark:border-teal-800/80',
           bar: 'bg-teal-500',
+          actionHint: '',
         };
       case 'announcement':
         return {
@@ -233,6 +253,11 @@ const ToastItemCard: React.FC<ToastItemCardProps> = ({
             <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2 mt-0.5 leading-relaxed">
               {toast.body}
             </p>
+            {'actionHint' in visuals && visuals.actionHint && (
+              <div className="text-[10px] font-extrabold text-violet-700 dark:text-violet-300 mt-1">
+                {visuals.actionHint}
+              </div>
+            )}
           </div>
         </button>
         <button
@@ -266,12 +291,15 @@ export const LiveNotificationToasts: React.FC<LiveNotificationToastsProps> = ({
   onDismiss,
   onClickToast,
   autoDismissMs = 6800,
+  hasIncomingCallBanner = false,
 }) => {
   if (toasts.length === 0) return null;
 
   return (
     <div
-      className="fixed top-16 sm:top-24 left-3 sm:left-5 z-50 w-[min(92vw,370px)] space-y-2.5 pointer-events-none"
+      className={`fixed ${
+        hasIncomingCallBanner ? 'top-64 sm:top-72' : 'top-16 sm:top-24'
+      } left-3 sm:left-5 z-50 w-[min(92vw,370px)] space-y-2.5 pointer-events-none transition-all duration-300`}
       aria-live="polite"
       aria-atomic="false"
     >

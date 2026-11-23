@@ -14,6 +14,8 @@ import {
 import { getStudentResidenceType } from './financeUtils';
 
 export type AppNotificationCategory =
+  | 'private_chat'
+  | 'voice_call'
   | 'message'
   | 'announcement'
   | 'warning'
@@ -30,6 +32,10 @@ export interface AppNotificationItem {
   createdAt: string;
   read: boolean;
   itemId?: string;
+  roomId?: string;
+  peerId?: string;
+  peerName?: string;
+  peerRole?: string;
 }
 
 export interface NotificationPreferences {
@@ -177,6 +183,49 @@ export function playNotificationChime(): void {
   }
 }
 
+export function playIncomingCallRingtone(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    const playBurst = (offset: number, duration: number) => {
+      const oscA = ctx.createOscillator();
+      const oscB = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscA.type = 'sine';
+      oscB.type = 'sine';
+      oscA.frequency.setValueAtTime(659.25, now + offset); // E5
+      oscB.frequency.setValueAtTime(880, now + offset); // A5
+      gain.gain.setValueAtTime(0.0001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.11, now + offset + 0.025);
+      gain.gain.setValueAtTime(0.09, now + offset + duration - 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + duration);
+      oscA.connect(gain);
+      oscB.connect(gain);
+      gain.connect(ctx.destination);
+      oscA.start(now + offset);
+      oscB.start(now + offset);
+      oscA.stop(now + offset + duration + 0.01);
+      oscB.stop(now + offset + duration + 0.01);
+    };
+
+    playBurst(0, 0.24);
+    playBurst(0.32, 0.24);
+    playBurst(0.76, 0.28);
+
+    setTimeout(() => {
+      void ctx.close().catch(() => {});
+    }, 1400);
+  } catch {
+    // ignore autoplay restriction
+  }
+}
+
 export function updateAppIconBadge(count: number): void {
   if (typeof navigator === 'undefined') return;
   const nav = navigator as Navigator & {
@@ -283,7 +332,7 @@ function getCurrentActorId(user: NonNullable<CurrentUser>): string {
     case 'counselor':
       return user.counselor.id;
     case 'admin':
-      return 'admin';
+      return user.username || 'admin';
     default:
       return user.staff.id;
   }
@@ -407,6 +456,14 @@ export function isMessageRelevantToUser(user: NonNullable<CurrentUser>, m: Messa
   return true;
 }
 
+export function shouldNotifyForAnnouncement(a: Announcement): boolean {
+  // اطلاعیه‌های صفحه اول تا زمانی که مدیر تیک «انتشار در نوتیفیکیشن» را نزده باشد، در نوتیفیکیشن نمی‌آیند
+  if (a.showOnHomePage !== false) {
+    return a.publishInNotifications === true;
+  }
+  return a.publishInNotifications !== false;
+}
+
 export function isAnnouncementRelevantToUser(user: CurrentUser, a: Announcement): boolean {
   if (!user) return Boolean(a.showOnHomePage);
   if (user.role === 'student') {
@@ -461,6 +518,7 @@ interface SeenBaselineSnapshot {
   surveyIds: string[];
   electionStates: Record<string, boolean>;
   warningIds?: string[];
+  dmMessageIds?: string[];
 }
 
 export function loadNotificationFeed(userKey: string): AppNotificationItem[] {
@@ -521,10 +579,23 @@ export function detectNewUserNotifications(params: {
   const { user, announcements, messages, surveys, elections, warnings = [], prefs } = params;
   const userKey = getUserNotificationKey(user);
 
-  const relevantAnnouncements = announcements.filter((a) => isAnnouncementRelevantToUser(user, a));
+  const relevantAnnouncements = announcements.filter(
+    (a) => isAnnouncementRelevantToUser(user, a) && shouldNotifyForAnnouncement(a)
+  );
   const relevantMessages = user ? messages.filter((m) => isMessageRelevantToUser(user, m)) : [];
   const relevantSurveys = surveys.filter((s) => isSurveyRelevantToUser(user, s));
   const relevantElections = elections.filter((e) => isElectionRelevantToUser(user, e));
+  const actorIdForDm = user ? getCurrentActorId(user) : '';
+  const relevantDmMessages = user
+    ? Storage.getCommunityChatMessages().filter(
+        (cm) =>
+          cm.roomType === 'dm' &&
+          !cm.isDeleted &&
+          cm.senderId !== actorIdForDm &&
+          Array.isArray(cm.dmParticipants) &&
+          cm.dmParticipants.includes(actorIdForDm)
+      )
+    : [];
   const relevantWarnings = user
     ? warnings.filter((w) => {
         if (w.resolved) return false;
@@ -548,6 +619,7 @@ export function detectNewUserNotifications(params: {
       relevantElections.map((e) => [e.id, Boolean(e.isActiveWindow)])
     ),
     warningIds: relevantWarnings.map((w) => w.id),
+    dmMessageIds: relevantDmMessages.map((dm) => dm.id),
   };
 
   const prev = loadBaseline(userKey);
@@ -563,6 +635,8 @@ export function detectNewUserNotifications(params: {
   const prevElectionStates = prev.electionStates || {};
   const hasPrevWarnings = Array.isArray(prev.warningIds);
   const prevWarningSet = new Set(prev.warningIds || []);
+  const hasPrevDmMessages = Array.isArray(prev.dmMessageIds);
+  const prevDmMessageSet = new Set(prev.dmMessageIds || []);
 
   const nowIso = new Date().toISOString();
   const discovered: AppNotificationItem[] = [];
@@ -606,6 +680,33 @@ export function detectNewUserNotifications(params: {
               itemId: m.id,
             });
           }
+        }
+      }
+    }
+
+    // ۱-ب. پیام‌های جدید چت خصوصی (DM) دریافت‌شده هنگام همگام‌سازی ابری
+    if (hasPrevDmMessages && relevantDmMessages.length > 0) {
+      for (const dm of relevantDmMessages) {
+        if (!prevDmMessageSet.has(dm.id)) {
+          const preview = dm.audioUrl
+            ? '🎤 پیام صوتی جدید ارسال کرد'
+            : dm.imageUrl && !dm.text?.trim()
+            ? '🖼️ تصویر جدید ارسال کرد'
+            : truncateText(dm.text || 'پیام جدید در گفتگوی خصوصی');
+          discovered.push({
+            id: `notif_dm_${dm.id}`,
+            category: 'private_chat',
+            title: `پیام خصوصی از ${dm.senderName || 'کاربر سامانه'}`,
+            body: preview,
+            fullBody: dm.text || preview,
+            createdAt: dm.createdAtIso || nowIso,
+            read: false,
+            itemId: dm.id,
+            roomId: dm.roomId,
+            peerId: dm.senderId,
+            peerName: dm.senderName,
+            peerRole: dm.senderRole,
+          });
         }
       }
     }
