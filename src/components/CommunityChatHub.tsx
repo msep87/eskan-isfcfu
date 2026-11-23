@@ -22,16 +22,22 @@ import {
   COMMUNITY_STICKERS,
   FORUM_CATEGORIES_META,
   PUBLIC_FORUM_ID,
+  AnonymousDmTargetRole,
   compressChatImageFile,
+  getAnonymousDmTargetRole,
+  getAnonymousStudentAlias,
   getRoleDisplayLabel,
   getStickerById,
+  isAnonymousDmRoomId,
   isStaffDmRoomId,
   isStaffEligibleForForum,
   canRoleUseLiveVoiceCall,
   isStudentEligibleForForum,
   isSupervisorModeratorRole,
+  makeAnonymousDmRoomId,
   makeDmRoomId,
   makeStaffDmRoomId,
+  parseAnonymousDmRoomId,
 } from '../utils/communityStickers';
 import { CommunityForumRequestModal } from './CommunityForumRequestModal';
 import { CommunityModerationPanel } from './CommunityModerationPanel';
@@ -62,6 +68,7 @@ import {
   CheckCircle2,
   UserPlus,
   Eye,
+  EyeOff,
   LogOut,
   Sparkles,
   Megaphone,
@@ -243,6 +250,8 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
   } | null>(null);
   // شروع گفتگوی خصوصی کارکنان از لیست کشویی
   const [selectedStaffDmId, setSelectedStaffDmId] = useState('');
+  // شروع گفتگوی ناشناس دانشجو با مشاور یا سرپرست سرا
+  const [selectedAnonTargetKey, setSelectedAnonTargetKey] = useState('');
 
   // ضبط و ارسال پیام صوتی (ویس)
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
@@ -357,6 +366,48 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     );
   }, [isStudent, me.id, me.role, cloudSyncTick, messages.length]);
 
+  // فهرست مشاوران و سرپرستان مجاز برای گفتگوی ناشناس دانشجو (صرفاً در صورت فعال‌سازی مدیر)
+  const anonymousChatTargets = useMemo<
+    { id: string; fullName: string; role: AnonymousDmTargetRole; roleLabel: string; subtitle: string }[]
+  >(() => {
+    if (!isStudent) return [];
+    const list: {
+      id: string;
+      fullName: string;
+      role: AnonymousDmTargetRole;
+      roleLabel: string;
+      subtitle: string;
+    }[] = [];
+    if (chatSettings.allowAnonymousCounselorChat) {
+      Storage.getCounselors().forEach((c) => {
+        list.push({
+          id: c.id,
+          fullName: c.fullName,
+          role: 'counselor',
+          roleLabel: 'مشاور',
+          subtitle: c.specialty || 'مرکز مشاوره',
+        });
+      });
+    }
+    if (chatSettings.allowAnonymousSupervisorChat) {
+      Storage.getSupervisors().forEach((s) => {
+        list.push({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'supervisor',
+          roleLabel: 'سرپرست سرا',
+          subtitle: 'سرپرست خوابگاه',
+        });
+      });
+    }
+    return list;
+  }, [
+    isStudent,
+    chatSettings.allowAnonymousCounselorChat,
+    chatSettings.allowAnonymousSupervisorChat,
+    cloudSyncTick,
+  ]);
+
   // همگام‌سازی خودکار با ابر هر ۱۲ ثانیه در زمان باز بودن پیام‌رسان
   useEffect(() => {
     const unsub = Storage.subscribeCloudDataChanged(() => {
@@ -446,26 +497,35 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
       });
   }, [forums, sidebarSearch, isModerator, isStudent, currentUser, me.id, me.role]);
 
-  // فهرست گفتگوهای خصوصی (دانشجو: گفتگوهای خودش | کارکنان: گفتگوهای خصوصی پرسنلی خودشان | ناظران: چت‌های شخصی همکاران + نظارت بر چت‌های دانشجویی)
+  // فهرست گفتگوهای خصوصی (دانشجو: گفتگوهای خودش + چت ناشناس | کارکنان: گفتگوهای پرسنلی + چت ناشناس ارجاعی | ناظران/مدیر)
   const dmRooms = useMemo<DmRoomSummary[]>(() => {
     const map = new Map<string, DmRoomSummary>();
     messages.forEach((m) => {
       if (m.roomType !== 'dm') return;
       const staffDm = isStaffDmRoomId(m.roomId);
-      const parts: [string, string] = m.dmParticipants || [m.senderId, m.roomId];
+      const anonDm = isAnonymousDmRoomId(m.roomId);
+      const parsedAnon = anonDm ? parseAnonymousDmRoomId(m.roomId) : null;
+      const parts: [string, string] =
+        m.dmParticipants ||
+        (parsedAnon ? [parsedAnon.studentId, parsedAnon.staffId] : [m.senderId, m.roomId]);
       const names: [string, string] = m.dmParticipantNames || [
         m.senderName,
-        staffDm ? 'همکار' : 'دانشجو',
+        staffDm ? 'همکار' : anonDm ? 'مشاور / سرپرست' : 'دانشجو',
       ];
 
       if (isStudent) {
         if (staffDm || !parts.includes(me.id)) return;
+      } else if (isAdmin) {
+        // مدیر کل بر تمامی گفتگوهای خصوصی (دانشجویی، کارکنان و ناشناس با هویت واقعی) نظارت دارد
+      } else if (anonDm) {
+        // در چت ناشناس دانشجو با مشاور یا سرپرست، تنها خود مشاور/سرپرست مخاطب به گفتگو دسترسی دارد
+        if (!parts.includes(me.id)) return;
       } else if (!isModerator) {
         // کارکنان عادی فقط گفتگوهای خصوصی پرسنلی خودشان را می‌بینند
         if (!staffDm || !parts.includes(me.id)) return;
       } else {
-        // ناظران (مدیر، حراست، معاونت): چت‌های پرسنلی خودشان + تمام چت‌های دانشجویی جهت نظارت (و مدیر کل بر همه)
-        if (staffDm && !isAdmin && !parts.includes(me.id)) return;
+        // ناظران غیرمدیر (حراست، معاونت): چت‌های پرسنلی خودشان + چت‌های دانشجویی معمولی
+        if (staffDm && !parts.includes(me.id)) return;
       }
 
       const existing = map.get(m.roomId);
@@ -509,6 +569,13 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     return Array.from(map.values())
       .filter((r) => {
         if (!q) return true;
+        // حفاظت از ناشناس‌بودن دانشجو در جستجوی سایدبار برای مشاور/سرپرست
+        if (isAnonymousDmRoomId(r.roomId) && !isAdmin && !isStudent) {
+          const parsedAnon = parseAnonymousDmRoomId(r.roomId);
+          const alias = getAnonymousStudentAlias(parsedAnon?.studentId || r.participants[0]);
+          const safeHay = normalizePersianSearch(`${alias} ناشناس ${r.lastMessage?.text || ''}`);
+          return safeHay.includes(q);
+        }
         const hay = normalizePersianSearch(
           `${r.participants.join(' ')} ${r.participantNames.join(' ')} ${r.lastMessage?.text || ''}`
         );
@@ -561,9 +628,46 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     }
   }, [activeRoomMessages.length, selectedRoomId, activeView]);
 
+  const activeAnonMeta = useMemo(() => {
+    if (selectedRoomType !== 'dm' || !isAnonymousDmRoomId(selectedRoomId)) return null;
+    const parsed = parseAnonymousDmRoomId(selectedRoomId);
+    const ids = activeDmRoom?.participants || activeDmParticipants?.ids;
+    const names = activeDmRoom?.participantNames || activeDmParticipants?.names;
+    const studentId = parsed?.studentId || ids?.[0] || '';
+    const staffId = parsed?.staffId || ids?.[1] || '';
+    const targetRole = parsed?.targetRole || getAnonymousDmTargetRole(selectedRoomId) || 'counselor';
+    const studentIdx = ids && ids[1] === studentId ? 1 : 0;
+    const staffIdx = studentIdx === 0 ? 1 : 0;
+    const realStudentName =
+      names?.[studentIdx] ||
+      activeRoomMessages.find((m) => m.senderRole === 'student')?.senderName ||
+      'دانشجو';
+    const staffName =
+      names?.[staffIdx] ||
+      (targetRole === 'counselor' ? 'مشاور مرکز' : 'سرپرست سرا');
+    const alias = getAnonymousStudentAlias(studentId);
+    return {
+      targetRole,
+      studentId,
+      staffId,
+      realStudentName,
+      staffName,
+      alias,
+    };
+  }, [selectedRoomType, selectedRoomId, activeDmRoom, activeDmParticipants, activeRoomMessages]);
+
   const activeRoomTitle = useMemo(() => {
     if (selectedRoomType === 'public') return publicForum?.title || 'تالار گفتگوی عمومی دانشگاه';
     if (selectedRoomType === 'forum') return activeForum?.title || 'تالار تخصصی';
+    if (activeAnonMeta) {
+      if (isStudent) {
+        return `گفتگوی ناشناس با ${activeAnonMeta.staffName}`;
+      }
+      if (isAdmin) {
+        return `چت ناشناس: ${activeAnonMeta.alias} ↔ ${activeAnonMeta.staffName}`;
+      }
+      return `${activeAnonMeta.alias} (گفتگوی ناشناس)`;
+    }
     if (activeDmRoom) {
       const staffDm = isStaffDmRoomId(activeDmRoom.roomId);
       const iAmParticipant = activeDmRoom.participants.includes(me.id);
@@ -575,7 +679,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
       return `${staffDm ? 'چت همکاران' : 'چت خصوصی'}: ${activeDmRoom.participantNames[0]} ↔ ${activeDmRoom.participantNames[1]}`;
     }
     return 'گفتگو';
-  }, [selectedRoomType, publicForum, activeForum, activeDmRoom, me.id]);
+  }, [selectedRoomType, publicForum, activeForum, activeAnonMeta, isStudent, isAdmin, activeDmRoom, me.id]);
 
   // بررسی اینکه آیا کاربر فعلی مجاز به ارسال پیام در اتاق انتخابی هست یا خیر
   const composerBlockReason = useMemo<string | null>(() => {
@@ -624,7 +728,16 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
 
     if (selectedRoomType === 'dm') {
       const staffDm = isStaffDmRoomId(selectedRoomId);
-      if (staffDm) {
+      const anonDm = isAnonymousDmRoomId(selectedRoomId);
+      if (anonDm) {
+        const targetRole = getAnonymousDmTargetRole(selectedRoomId);
+        if (targetRole === 'counselor' && !chatSettings.allowAnonymousCounselorChat) {
+          return 'امکان چت ناشناس با مشاوران هم‌اکنون توسط مدیر سامانه غیرفعال شده است.';
+        }
+        if (targetRole === 'supervisor' && !chatSettings.allowAnonymousSupervisorChat) {
+          return 'امکان چت ناشناس با سرپرستان سراها هم‌اکنون توسط مدیر سامانه غیرفعال شده است.';
+        }
+      } else if (staffDm) {
         if (chatSettings.isStaffChatEnabled === false) {
           return 'امکان گفتگوی خصوصی کارکنان هم‌اکنون توسط مدیر سامانه بسته شده است.';
         }
@@ -681,10 +794,12 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
   );
 
   const canStartLiveVoiceCall = useMemo(() => {
+    // در چت ناشناس، تماس صوتی مستقیم برای حفظ ناشناس‌بودن صدا و هویت دانشجو نمایش داده نمی‌شود
+    if (selectedRoomType === 'dm' && isAnonymousDmRoomId(selectedRoomId)) return false;
     if (!voiceCallAccess.allowed) return false;
     if (composerBlockReason && !isModerator) return false;
     return true;
-  }, [voiceCallAccess.allowed, composerBlockReason, isModerator]);
+  }, [selectedRoomType, selectedRoomId, voiceCallAccess.allowed, composerBlockReason, isModerator]);
 
   // جستجوی شماره دانشجویی برای شروع گفتگوی خصوصی جدید
   const handleLookupStudentForDm = async (e: React.FormEvent) => {
@@ -765,6 +880,23 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
     const names: [string, string] =
       me.id.localeCompare(staff.id) <= 0 ? [myLabel, targetLabel] : [targetLabel, myLabel];
 
+    setActiveDmParticipants({ ids: pair, names });
+    setSelectedRoomId(roomId);
+    setSelectedRoomType('dm');
+    setActiveView('chat');
+    setMobileShowChat(true);
+  };
+
+  const handleOpenAnonymousDm = (target: {
+    id: string;
+    fullName: string;
+    role: AnonymousDmTargetRole;
+    roleLabel: string;
+  }) => {
+    if (!isStudent) return;
+    const roomId = makeAnonymousDmRoomId(target.role, me.id, target.id);
+    const pair: [string, string] = [me.id, target.id];
+    const names: [string, string] = [me.name, `${target.fullName} (${target.roleLabel})`];
     setActiveDmParticipants({ ids: pair, names });
     setSelectedRoomId(roomId);
     setSelectedRoomType('dm');
@@ -910,6 +1042,18 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
         ? activeDmRoom?.participantNames || activeDmParticipants?.names
         : undefined;
 
+    const isAnonDm = selectedRoomType === 'dm' && isAnonymousDmRoomId(selectedRoomId);
+    const myAnonAlias = isAnonDm && isStudent ? getAnonymousStudentAlias(me.id) : undefined;
+    const replyIsAnonStudent =
+      Boolean(replyTo) &&
+      isAnonDm &&
+      (replyTo?.isAnonymousStudent || replyTo?.senderRole === 'student');
+    const safeReplySenderName = replyTo
+      ? replyIsAnonStudent
+        ? replyTo.anonymousAlias || getAnonymousStudentAlias(replyTo.senderId)
+        : replyTo.senderName
+      : undefined;
+
     const res = Storage.sendCommunityChatMessage({
       roomType: selectedRoomType,
       roomId: selectedRoomId,
@@ -918,15 +1062,15 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
       senderId: me.id,
       senderName: me.name,
       senderRole: me.role,
-      senderFieldOfStudy: me.fieldOfStudy,
-      senderAvatarUrl: me.avatarUrl,
+      senderFieldOfStudy: isAnonDm && isStudent ? undefined : me.fieldOfStudy,
+      senderAvatarUrl: isAnonDm && isStudent ? undefined : me.avatarUrl,
       text: overrideStickerId ? '' : draftText,
       imageUrl: overrideStickerId ? undefined : draftImage || undefined,
       audioUrl: overrideStickerId ? undefined : draftAudio?.dataUrl,
       audioDurationSec: overrideStickerId ? undefined : draftAudio?.durationSec,
       stickerId: overrideStickerId,
       replyToId: replyTo?.id,
-      replyToSenderName: replyTo?.senderName,
+      replyToSenderName: safeReplySenderName,
       replyToText:
         replyTo?.text ||
         (replyTo?.audioUrl
@@ -938,6 +1082,8 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
           : undefined),
       isModeratorMessage: isModerator && moderatorPostMode === 'moderator',
       isWarningMessage: isModerator && moderatorPostMode === 'warning',
+      isAnonymousStudent: Boolean(isAnonDm && isStudent),
+      anonymousAlias: myAnonAlias,
     });
 
     if (!res.success) {
@@ -945,7 +1091,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
       return;
     }
 
-    // ارسال نوتیفیکیشن لحظه‌ای چت خصوصی برای مخاطب
+    // ارسال نوتیفیکیشن لحظه‌ای چت خصوصی برای مخاطب (با حفظ کامل ناشناس‌بودن در چت ناشناس)
     if (selectedRoomType === 'dm' && dmParticipants) {
       const targetPeerId = dmParticipants.find((pid) => pid !== me.id);
       if (targetPeerId) {
@@ -959,8 +1105,8 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
         void broadcastPrivateChatNotification(targetPeerId, {
           messageId: res.chatMessage?.id || `dm_${Date.now()}`,
           roomId: selectedRoomId,
-          senderId: me.id,
-          senderName: me.name,
+          senderId: isAnonDm && isStudent ? 'anonymous' : me.id,
+          senderName: isAnonDm && isStudent && myAnonAlias ? myAnonAlias : me.name,
           senderRole: me.role,
           previewText: previewText.slice(0, 140),
           isVoiceMessage: Boolean(!overrideStickerId && draftAudio?.dataUrl),
@@ -1679,6 +1825,63 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                     </div>
                   )}
 
+                  {/* باکس شروع گفتگوی ناشناس با مشاور یا سرپرست (صرفاً در صورت فعال‌سازی مدیر) */}
+                  {isStudent &&
+                    chatSettings.isChatSystemEnabled &&
+                    (chatSettings.allowAnonymousCounselorChat ||
+                      chatSettings.allowAnonymousSupervisorChat) && (
+                      <div className="p-2.5 rounded-2xl bg-purple-50/80 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/80 space-y-2">
+                        <div className="text-[11px] font-extrabold text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
+                          <EyeOff className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                          <span>گفتگوی ناشناس با مشاور یا سرپرست</span>
+                        </div>
+                        {anonymousChatTargets.length > 0 ? (
+                          <>
+                            <div className="flex gap-1.5">
+                              <select
+                                value={selectedAnonTargetKey}
+                                onChange={(e) => setSelectedAnonTargetKey(e.target.value)}
+                                className="flex-1 min-w-0 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-700 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              >
+                                <option value="">-- انتخاب مشاور یا سرپرست --</option>
+                                {anonymousChatTargets.map((t) => {
+                                  const online = Boolean(onlineUserIds?.has(t.id));
+                                  return (
+                                    <option key={`${t.role}:${t.id}`} value={`${t.role}:${t.id}`}>
+                                      {online ? '● آنلاین' : '○ آفلاین'} | {t.fullName} ({t.roleLabel})
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                              <button
+                                type="button"
+                                disabled={!selectedAnonTargetKey}
+                                onClick={() => {
+                                  const found = anonymousChatTargets.find(
+                                    (t) => `${t.role}:${t.id}` === selectedAnonTargetKey
+                                  );
+                                  if (found) {
+                                    handleOpenAnonymousDm(found);
+                                    setSelectedAnonTargetKey('');
+                                  }
+                                }}
+                                className="px-2.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 disabled:opacity-45 text-white text-[11px] font-extrabold cursor-pointer shrink-0"
+                              >
+                                شروع ناشناس
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-purple-800/80 dark:text-purple-300/80 leading-4">
+                              نام و شماره دانشجویی شما برای مشاور/سرپرست مخفی می‌ماند و با کد ناشناس نمایش داده می‌شود (هویت واقعی تنها جهت صیانت برای مدیر کل قابل مشاهده است).
+                            </p>
+                          </>
+                        ) : (
+                          <div className="text-[10px] text-purple-700 dark:text-purple-300">
+                            در حال حاضر مشاور یا سرپرستی در سامانه ثبت نشده است.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                   {/* لیست رشته‌گفتگوهای خصوصی */}
                   {dmRooms.length === 0 ? (
                     <div className="px-3 py-4 text-center text-[11px] text-slate-400">
@@ -1691,19 +1894,43 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                       {dmRooms.map((dm) => {
                         const active = selectedRoomId === dm.roomId;
                         const staffDm = isStaffDmRoomId(dm.roomId);
+                        const anonDm = isAnonymousDmRoomId(dm.roomId);
+                        const parsedAnon = anonDm ? parseAnonymousDmRoomId(dm.roomId) : null;
                         const iAmParticipant = dm.participants.includes(me.id);
                         const otherPeerId = iAmParticipant
                           ? dm.otherStudentId || dm.participants.find((pid) => pid !== me.id)
                           : undefined;
                         const isPeerOnline = Boolean(otherPeerId && onlineUserIds?.has(otherPeerId));
-                        const label = iAmParticipant
+
+                        let label = iAmParticipant
                           ? dm.otherStudentName || (staffDm ? 'همکار' : 'دانشجو')
                           : `${dm.participantNames[0]} ↔ ${dm.participantNames[1]}`;
-                        const subLabel = staffDm
+                        let subLabel = staffDm
                           ? 'چت خصوصی کارکنان'
                           : iAmParticipant
                           ? `کد دانشجویی: ${dm.otherStudentId}`
                           : `دانشجویی • ${dm.participants[0]} ↔ ${dm.participants[1]}`;
+
+                        if (anonDm) {
+                          const anonStudentId = parsedAnon?.studentId || dm.participants[0];
+                          const alias = getAnonymousStudentAlias(anonStudentId);
+                          const studentIdx = dm.participants[1] === anonStudentId ? 1 : 0;
+                          const staffIdx = studentIdx === 0 ? 1 : 0;
+                          const realStudentName = dm.participantNames[studentIdx] || 'دانشجو';
+                          const staffName = dm.participantNames[staffIdx] || 'مشاور / سرپرست';
+
+                          if (isStudent) {
+                            label = staffName;
+                            subLabel = 'چت ناشناس (هویت شما مخفی است)';
+                          } else if (isAdmin) {
+                            label = `${alias} ↔ ${staffName}`;
+                            subLabel = `هویت واقعی (مدیر): ${realStudentName} (${anonStudentId})`;
+                          } else {
+                            label = alias;
+                            subLabel = 'گفتگوی ناشناس دانشجو';
+                          }
+                        }
+
                         return (
                           <button
                             key={dm.roomId}
@@ -1719,18 +1946,28 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                             }}
                             className={`w-full text-right p-2.5 rounded-2xl border transition flex items-center gap-2.5 cursor-pointer ${
                               active
-                                ? 'bg-violet-50 dark:bg-violet-950/50 border-violet-300 dark:border-violet-700 shadow-xs'
+                                ? anonDm
+                                  ? 'bg-purple-50 dark:bg-purple-950/50 border-purple-300 dark:border-purple-700 shadow-xs'
+                                  : 'bg-violet-50 dark:bg-violet-950/50 border-violet-300 dark:border-violet-700 shadow-xs'
                                 : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800 hover:border-violet-300'
                             }`}
                           >
                             <div
                               className={`relative w-9 h-9 rounded-full bg-gradient-to-br ${
-                                staffDm
+                                anonDm
+                                  ? 'from-purple-600 to-fuchsia-600'
+                                  : staffDm
                                   ? 'from-indigo-500 to-violet-600'
                                   : 'from-violet-500 to-fuchsia-600'
                               } text-white flex items-center justify-center text-xs font-black shrink-0`}
                             >
-                              {staffDm ? <Briefcase className="w-4 h-4" /> : label.slice(0, 1)}
+                              {anonDm ? (
+                                <EyeOff className="w-4 h-4" />
+                              ) : staffDm ? (
+                                <Briefcase className="w-4 h-4" />
+                              ) : (
+                                label.slice(0, 1)
+                              )}
                               {iAmParticipant && otherPeerId && (
                                 <span
                                   title={isPeerOnline ? 'آنلاین' : 'آفلاین'}
@@ -1750,7 +1987,15 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                                 </span>
                               </div>
                               <div className="flex items-center justify-between gap-1 mt-0.5">
-                                <span className="text-[10px] text-slate-500 truncate">{subLabel}</span>
+                                <span
+                                  className={`text-[10px] truncate ${
+                                    anonDm && isAdmin
+                                      ? 'text-amber-700 dark:text-amber-300 font-bold'
+                                      : 'text-slate-500'
+                                  }`}
+                                >
+                                  {subLabel}
+                                </span>
                                 {iAmParticipant && otherPeerId && (
                                   <span
                                     className={`text-[9px] font-extrabold shrink-0 ${
@@ -2121,6 +2366,36 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
               </div>
             )}
 
+            {/* بنر محرمانگی و شفافیت مدیریتی در اتاق گفتگوی ناشناس */}
+            {activeAnonMeta && (
+              <div
+                className={`px-4 py-2 border-b text-[11px] flex flex-wrap items-center justify-between gap-2 shrink-0 ${
+                  isAdmin
+                    ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800 text-amber-950 dark:text-amber-200'
+                    : 'bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-200'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-bold">
+                  <EyeOff className="w-4 h-4 shrink-0" />
+                  {isAdmin ? (
+                    <span>
+                      شفافیت مدیریتی (فقط قابل مشاهده برای مدیر کل): فرستنده واقعی این گفتگوی ناشناس{' '}
+                      <strong className="underline">{activeAnonMeta.realStudentName}</strong> (شماره دانشجویی:{' '}
+                      <span className="font-mono">{activeAnonMeta.studentId}</span>) با عنوان مستعار «{activeAnonMeta.alias}» است.
+                    </span>
+                  ) : isStudent ? (
+                    <span>
+                      حالت گفتگوی ناشناس فعال است — نام و شماره دانشجویی شما برای {activeAnonMeta.staffName} نمایش داده نمی‌شود و پیام‌های شما با عنوان «{activeAnonMeta.alias}» ارسال می‌گردد.
+                    </span>
+                  ) : (
+                    <span>
+                      گفتگوی ناشناس دانشجو — هویت واقعی دانشجو جهت حفظ محرمانگی و آرامش خاطر برای شما مخفی شده است.
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* جریان پیام‌ها */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {activeRoomMessages.length === 0 ? (
@@ -2139,6 +2414,17 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                 activeRoomMessages.map((msg) => {
                   const isMine = msg.senderId === me.id && msg.senderRole === me.role;
                   const sticker = getStickerById(msg.stickerId);
+                  const isAnonStudentMsg =
+                    isAnonymousDmRoomId(msg.roomId) &&
+                    (msg.isAnonymousStudent || msg.senderRole === 'student');
+                  const anonAlias = isAnonStudentMsg
+                    ? msg.anonymousAlias || getAnonymousStudentAlias(msg.senderId)
+                    : null;
+                  const displaySenderName = isAnonStudentMsg
+                    ? isMine
+                      ? `شما (${anonAlias})`
+                      : anonAlias || 'دانشجوی ناشناس'
+                    : msg.senderName;
 
                   // پیام حذف‌شده
                   if (msg.isDeleted) {
@@ -2148,7 +2434,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                         className="flex justify-center"
                       >
                         <div className="px-3.5 py-1.5 rounded-full bg-slate-200/80 dark:bg-slate-800 text-[11px] text-slate-500 dark:text-slate-400 italic">
-                          پیام {msg.senderName} توسط {msg.deletedBy || 'ناظر'} حذف شد ({msg.deleteReason || 'مغایرت با قوانین'}).
+                          پیام {isAnonStudentMsg && !isAdmin ? anonAlias : msg.senderName} توسط {msg.deletedBy || 'ناظر'} حذف شد ({msg.deleteReason || 'مغایرت با قوانین'}).
                         </div>
                       </div>
                     );
@@ -2319,14 +2605,23 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                       >
                         {/* نام فرستنده و نقش */}
                         <div className="flex items-center justify-between gap-3 mb-1">
-                          <div className="flex items-center gap-1.5 min-w-0">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                             <span
                               className={`text-[11px] font-extrabold truncate ${
-                                isMine ? 'text-teal-50' : 'text-teal-700 dark:text-teal-300'
+                                isMine
+                                  ? 'text-teal-50'
+                                  : isAnonStudentMsg
+                                  ? 'text-purple-700 dark:text-purple-300'
+                                  : 'text-teal-700 dark:text-teal-300'
                               }`}
                             >
-                              {msg.senderName}
+                              {displaySenderName}
                             </span>
+                            {isAnonStudentMsg && isAdmin && (
+                              <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300 shrink-0">
+                                هویت واقعی (مدیر): {msg.senderName} • {msg.senderId}
+                              </span>
+                            )}
                             {msg.senderRole !== 'student' ? (
                               <span
                                 className={`px-1.5 py-0.5 rounded-md text-[9px] font-black shrink-0 ${
@@ -2337,7 +2632,7 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                               >
                                 {getRoleDisplayLabel(msg.senderRole)}
                               </span>
-                            ) : msg.senderFieldOfStudy ? (
+                            ) : !isAnonStudentMsg && msg.senderFieldOfStudy ? (
                               <span
                                 className={`text-[9px] truncate hidden sm:inline ${
                                   isMine ? 'text-teal-100/80' : 'text-slate-400'
@@ -2600,7 +2895,13 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
                 <div className="px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 flex items-center justify-between gap-2 text-xs">
                   <div className="min-w-0 truncate">
                     <span className="font-extrabold text-teal-700 dark:text-teal-300">
-                      پاسخ به {replyTo.senderName}:{' '}
+                      پاسخ به{' '}
+                      {isAnonymousDmRoomId(replyTo.roomId) &&
+                      (replyTo.isAnonymousStudent || replyTo.senderRole === 'student') &&
+                      !isAdmin
+                        ? replyTo.anonymousAlias || getAnonymousStudentAlias(replyTo.senderId)
+                        : replyTo.senderName}
+                      :{' '}
                     </span>
                     <span className="text-slate-600 dark:text-slate-300">
                       {replyTo.text || '[پیوست]'}
@@ -2926,7 +3227,14 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
             </div>
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300">
               <div className="font-bold text-slate-800 dark:text-white mb-1">
-                پیام {reportingMessage.senderName}:
+                پیام{' '}
+                {isAnonymousDmRoomId(reportingMessage.roomId) &&
+                (reportingMessage.isAnonymousStudent || reportingMessage.senderRole === 'student') &&
+                !isAdmin
+                  ? reportingMessage.anonymousAlias ||
+                    getAnonymousStudentAlias(reportingMessage.senderId)
+                  : reportingMessage.senderName}
+                :
               </div>
               <p className="line-clamp-3">{reportingMessage.text || '[تصویر/استیکر]'}</p>
             </div>

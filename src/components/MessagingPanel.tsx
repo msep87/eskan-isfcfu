@@ -10,6 +10,7 @@ import {
   normalizePersianSearch,
 } from '../utils/storage';
 import { toEnglishDigits } from '../utils/excelUtils';
+import { MaintenanceQuickCommButtons } from './MaintenanceQuickCommButtons';
 import {
   MessageSquare,
   Send,
@@ -1692,6 +1693,22 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                         </option>
                       ))}
                     </select>
+                    {referStaffId && (() => {
+                      const selectedTech = maintenanceStaff.find((s) => s.id === referStaffId);
+                      if (!selectedTech) return null;
+                      return (
+                        <div className="mt-2 flex items-center justify-between gap-2 flex-wrap p-2 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700">
+                          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                            ارتباط سریع با {selectedTech.fullName}:
+                          </span>
+                          <MaintenanceQuickCommButtons
+                            technician={selectedTech}
+                            contextNote={referTaskTitle}
+                            showLabels
+                          />
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div>

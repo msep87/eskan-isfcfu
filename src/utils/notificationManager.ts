@@ -12,6 +12,7 @@ import {
   doesStudentMatchMessage,
 } from './storage';
 import { getStudentResidenceType } from './financeUtils';
+import { getAnonymousStudentAlias, isAnonymousDmRoomId } from './communityStickers';
 
 export type AppNotificationCategory =
   | 'private_chat'
@@ -688,6 +689,14 @@ export function detectNewUserNotifications(params: {
     if (hasPrevDmMessages && relevantDmMessages.length > 0) {
       for (const dm of relevantDmMessages) {
         if (!prevDmMessageSet.has(dm.id)) {
+          const isAnonStudentMsg =
+            isAnonymousDmRoomId(dm.roomId) && (dm.isAnonymousStudent || dm.senderRole === 'student');
+          const safeSenderName =
+            isAnonStudentMsg && user.role !== 'admin'
+              ? dm.anonymousAlias || getAnonymousStudentAlias(dm.senderId)
+              : isAnonStudentMsg && user.role === 'admin'
+              ? `${dm.anonymousAlias || getAnonymousStudentAlias(dm.senderId)} (${dm.senderName})`
+              : dm.senderName || 'کاربر سامانه';
           const preview = dm.audioUrl
             ? '🎤 پیام صوتی جدید ارسال کرد'
             : dm.imageUrl && !dm.text?.trim()
@@ -696,15 +705,17 @@ export function detectNewUserNotifications(params: {
           discovered.push({
             id: `notif_dm_${dm.id}`,
             category: 'private_chat',
-            title: `پیام خصوصی از ${dm.senderName || 'کاربر سامانه'}`,
+            title: isAnonStudentMsg
+              ? `پیام ناشناس از ${safeSenderName}`
+              : `پیام خصوصی از ${safeSenderName}`,
             body: preview,
             fullBody: dm.text || preview,
             createdAt: dm.createdAtIso || nowIso,
             read: false,
             itemId: dm.id,
             roomId: dm.roomId,
-            peerId: dm.senderId,
-            peerName: dm.senderName,
+            peerId: isAnonStudentMsg && user.role !== 'admin' ? undefined : dm.senderId,
+            peerName: safeSenderName,
             peerRole: dm.senderRole,
           });
         }

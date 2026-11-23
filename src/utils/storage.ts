@@ -87,6 +87,9 @@ import {
   PUBLIC_FORUM_ID,
   makeDmRoomId,
   isStaffDmRoomId,
+  isAnonymousDmRoomId,
+  getAnonymousDmTargetRole,
+  getAnonymousStudentAlias,
 } from './communityStickers';
 import { getStudentAdmissionStatus, isStudentDormResident } from './financeUtils';
 import {
@@ -14802,6 +14805,8 @@ export const Storage = {
     replyToText?: string;
     isModeratorMessage?: boolean;
     isWarningMessage?: boolean;
+    isAnonymousStudent?: boolean;
+    anonymousAlias?: string;
   }): { success: boolean; message: string; chatMessage?: CommunityChatMessage } => {
     const settings = Storage.getCommunityChatSettings();
     const isMod =
@@ -14809,6 +14814,8 @@ export const Storage = {
       payload.senderRole === 'security' ||
       payload.senderRole === 'vice_dean';
     const isStaffDm = payload.roomType === 'dm' && isStaffDmRoomId(payload.roomId);
+    const isAnonDm = payload.roomType === 'dm' && isAnonymousDmRoomId(payload.roomId);
+    const anonTargetRole = isAnonDm ? getAnonymousDmTargetRole(payload.roomId) : null;
 
     const cleanText = (payload.text || '').trim();
     const hasImage = Boolean(payload.imageUrl);
@@ -14858,7 +14865,30 @@ export const Storage = {
       }
 
       if (payload.roomType === 'dm') {
-        if (isStaffDm) {
+        if (isAnonDm) {
+          if (anonTargetRole === 'counselor' && !settings.allowAnonymousCounselorChat) {
+            return {
+              success: false,
+              message: 'امکان چت ناشناس دانشجو با مشاوران هم‌اکنون توسط مدیر سامانه فعال نشده است.',
+            };
+          }
+          if (anonTargetRole === 'supervisor' && !settings.allowAnonymousSupervisorChat) {
+            return {
+              success: false,
+              message: 'امکان چت ناشناس دانشجو با سرپرستان سراها هم‌اکنون توسط مدیر سامانه فعال نشده است.',
+            };
+          }
+          if (
+            payload.senderRole !== 'student' &&
+            payload.senderRole !== anonTargetRole &&
+            payload.senderRole !== 'admin'
+          ) {
+            return {
+              success: false,
+              message: 'این گفتگوی ناشناس صرفاً میان دانشجو و مشاور/سرپرست مخاطب برقرار است.',
+            };
+          }
+        } else if (isStaffDm) {
           if (payload.senderRole === 'student') {
             return { success: false, message: 'این گفتگوی خصوصی ویژه کارکنان است.' };
           }
@@ -14995,6 +15025,11 @@ export const Storage = {
       replyToText: payload.replyToText ? payload.replyToText.slice(0, 140) : undefined,
       isModeratorMessage: Boolean(isMod && (payload.isModeratorMessage || payload.isWarningMessage)),
       isWarningMessage: Boolean(isMod && payload.isWarningMessage),
+      isAnonymousStudent: Boolean(isAnonDm && payload.senderRole === 'student'),
+      anonymousAlias:
+        isAnonDm && payload.senderRole === 'student'
+          ? payload.anonymousAlias || getAnonymousStudentAlias(payload.senderId)
+          : undefined,
       createdAt: nowStr,
       createdAtIso: nowDate.toISOString(),
     };

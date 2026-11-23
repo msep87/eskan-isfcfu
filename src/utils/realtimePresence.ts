@@ -90,6 +90,35 @@ function publishSharedOnlineUserIds(next: Set<string>): void {
   });
 }
 
+export interface QuickStaffCommTarget {
+  staffId: string;
+  staffName: string;
+  staffRole: string;
+  mode: 'chat' | 'voice_call';
+  contextNote?: string;
+}
+
+const quickStaffCommListeners = new Set<(target: QuickStaffCommTarget) => void>();
+
+export function triggerQuickStaffComm(target: QuickStaffCommTarget): void {
+  quickStaffCommListeners.forEach((listener) => {
+    try {
+      listener(target);
+    } catch {
+      // ignore
+    }
+  });
+}
+
+export function subscribeQuickStaffComm(
+  listener: (target: QuickStaffCommTarget) => void
+): () => void {
+  quickStaffCommListeners.add(listener);
+  return () => {
+    quickStaffCommListeners.delete(listener);
+  };
+}
+
 export function useGlobalOnlineUserIds(override?: Set<string>): Set<string> {
   const [ids, setIds] = useState<Set<string>>(() => override || sharedOnlineUserIds);
 

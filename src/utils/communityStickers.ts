@@ -28,6 +28,8 @@ export const DEFAULT_COMMUNITY_CHAT_SETTINGS: CommunityChatSettings = {
   allowVoiceMessages: true, // ضبط و ارسال پیام صوتی (ویس)
   allowLiveVoiceCall: true, // گفتگوی صوتی مستقیم زنده (کلید سراسری)
   voiceCallBlockedRoles: [], // نقش‌هایی که دسترسی تماس صوتی آن‌ها مسدود است
+  allowAnonymousCounselorChat: false, // چت ناشناس دانشجو با مشاور (تنها با فعال‌سازی مدیر)
+  allowAnonymousSupervisorChat: false, // چت ناشناس دانشجو با سرپرست سرا (تنها با فعال‌سازی مدیر)
   requireRulesAcceptance: true,
   onlyAdmittedStudentsCanChat: false,
   privateChatScope: 'all',
@@ -255,6 +257,58 @@ export function makeStaffDmRoomId(staffIdA: string, staffIdB: string): string {
 
 export function isStaffDmRoomId(roomId?: string | null): boolean {
   return Boolean(roomId && roomId.startsWith('staff_dm_'));
+}
+
+export type AnonymousDmTargetRole = 'counselor' | 'supervisor';
+
+export function makeAnonymousDmRoomId(
+  targetRole: AnonymousDmTargetRole,
+  studentId: string,
+  staffId: string
+): string {
+  return `anon_dm_${targetRole}_${studentId.trim()}__${staffId.trim()}`;
+}
+
+export function isAnonymousDmRoomId(roomId?: string | null): boolean {
+  return Boolean(
+    roomId &&
+      (roomId.startsWith('anon_dm_counselor_') || roomId.startsWith('anon_dm_supervisor_'))
+  );
+}
+
+export function getAnonymousDmTargetRole(roomId?: string | null): AnonymousDmTargetRole | null {
+  if (!roomId) return null;
+  if (roomId.startsWith('anon_dm_counselor_')) return 'counselor';
+  if (roomId.startsWith('anon_dm_supervisor_')) return 'supervisor';
+  return null;
+}
+
+export function parseAnonymousDmRoomId(
+  roomId?: string | null
+): { targetRole: AnonymousDmTargetRole; studentId: string; staffId: string } | null {
+  if (!roomId) return null;
+  const targetRole = getAnonymousDmTargetRole(roomId);
+  if (!targetRole) return null;
+  const prefix = `anon_dm_${targetRole}_`;
+  const rest = roomId.slice(prefix.length);
+  const sepIdx = rest.indexOf('__');
+  if (sepIdx <= 0) return null;
+  const studentId = rest.slice(0, sepIdx);
+  const staffId = rest.slice(sepIdx + 2);
+  if (!studentId || !staffId) return null;
+  return { targetRole, studentId, staffId };
+}
+
+export function getAnonymousStudentAlias(studentId: string): string {
+  const raw = String(studentId || 'student');
+  let hash = 2166136261;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash ^= raw.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const codeNum = 1000 + (Math.abs(hash) % 9000);
+  const faCode = String(codeNum).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)] || d);
+  return `دانشجوی ناشناس #${faCode}`;
 }
 
 export const STAFF_ROLE_OPTIONS: { role: string; label: string }[] = [

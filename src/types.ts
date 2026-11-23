@@ -1530,6 +1530,8 @@ export interface CommunityChatSettings {
   allowVoiceMessages?: boolean; // مجوز ضبط و ارسال پیام صوتی (ویس) در گفتگوها
   allowLiveVoiceCall?: boolean; // مجوز برقراری گفتگوی صوتی مستقیم زنده (تماس صوتی) برای همه کاربران
   voiceCallBlockedRoles?: string[]; // فهرست نقش‌های کاربری که دسترسی آن‌ها به تماس صوتی مستقیم توسط مدیر بسته شده است
+  allowAnonymousCounselorChat?: boolean; // امکان چت ناشناس دانشجو با مشاوران (هویت فقط برای مدیر قابل مشاهده است)
+  allowAnonymousSupervisorChat?: boolean; // امکان چت ناشناس دانشجو با سرپرستان سراها (هویت فقط برای مدیر قابل مشاهده است)
   requireRulesAcceptance: boolean; // الزام پذیرش تعهدنامه قوانین پیش از گفتگو
   onlyAdmittedStudentsCanChat: boolean; // محدودسازی گفتگو به دانشجویان پذیرش‌شده
   privateChatScope: CommunityPrivateChatScope; // دامنه مجاز چت خصوصی
@@ -1597,6 +1599,8 @@ export interface CommunityChatMessage {
   replyToText?: string;
   isModeratorMessage?: boolean; // پیام رسمی ناظر (مدیر، معاون، حراست)
   isWarningMessage?: boolean; // اخطار رسمی ثبت‌شده در گفتگو
+  isAnonymousStudent?: boolean; // پیام ارسال‌شده توسط دانشجو در حالت چت ناشناس با مشاور یا سرپرست
+  anonymousAlias?: string; // نام مستعار دانشجو در چت ناشناس (هویت واقعی فقط برای مدیر قابل مشاهده است)
   isDeleted?: boolean;
   deletedBy?: string;
   deletedAt?: string;

@@ -39,6 +39,7 @@ import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { StudentReferralModal } from './StudentReferralModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
+import { MaintenanceQuickCommButtons } from './MaintenanceQuickCommButtons';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -2114,14 +2115,11 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                               ))}
                             </select>
 
-                            {assignedTech?.mobile && (
-                              <a
-                                href={`tel:${assignedTech.mobile}`}
-                                className="p-1 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                                title="تماس مستقیم با تکنسین"
-                              >
-                                <Phone className="w-3.5 h-3.5" />
-                              </a>
+                            {assignedTech && (
+                              <MaintenanceQuickCommButtons
+                                technician={assignedTech}
+                                contextNote={task.title}
+                              />
                             )}
                           </div>
                         </div>

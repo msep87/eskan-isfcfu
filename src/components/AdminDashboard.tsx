@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PersianDatePicker } from './PersianDatePicker';
 import { PersianTimePicker } from './PersianTimePicker';
 import { PersianDateTimePicker } from './PersianDateTimePicker';
+import { MaintenanceQuickCommButtons } from './MaintenanceQuickCommButtons';
 import {
   PERSIAN_MONTH_NAMES,
   getTodayJalali,
@@ -5548,14 +5549,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               ))}
                             </select>
 
-                            {assignedTech?.mobile && (
-                              <a
-                                href={`tel:${assignedTech.mobile}`}
-                                className="p-1 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                                title="تماس مستقیم با تکنسین"
-                              >
-                                <Phone className="w-3.5 h-3.5" />
-                              </a>
+                            {assignedTech && (
+                              <MaintenanceQuickCommButtons
+                                technician={assignedTech}
+                                contextNote={task.title}
+                              />
                             )}
                           </div>
                         </div>

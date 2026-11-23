@@ -53,9 +53,10 @@ import {
   loadAutoCloseOtherSessionsPref,
   resetTabLoginTime,
   saveAutoCloseOtherSessionsPref,
+  subscribeQuickStaffComm,
   useRealtimePortalPresence,
 } from './utils/realtimePresence';
-import { canRoleUseLiveVoiceCall } from './utils/communityStickers';
+import { canRoleUseLiveVoiceCall, makeStaffDmRoomId } from './utils/communityStickers';
 import { Navbar } from './components/Navbar';
 import { JalaliLiveClockBar } from './components/JalaliLiveClockBar';
 import { PWAInstallButton } from './components/PWAInstallButton';
@@ -743,17 +744,20 @@ export default function App() {
         ? '🖼️ تصویر جدید ارسال کرد'
         : payload.previewText || 'پیام جدید در گفتگوی خصوصی';
 
+      const isAnonIncoming = payload.senderId === 'anonymous';
       const item: AppNotificationItem = {
         id: notifId,
         category: 'private_chat',
-        title: `پیام خصوصی از ${payload.senderName || 'کاربر سامانه'}`,
+        title: isAnonIncoming
+          ? `پیام ناشناس از ${payload.senderName || 'دانشجوی ناشناس'}`
+          : `پیام خصوصی از ${payload.senderName || 'کاربر سامانه'}`,
         body: bodyText,
         fullBody: bodyText,
         createdAt: payload.sentAt || new Date().toISOString(),
         read: false,
         itemId: payload.messageId,
         roomId: payload.roomId,
-        peerId: payload.senderId,
+        peerId: isAnonIncoming ? undefined : payload.senderId,
         peerName: payload.senderName,
         peerRole: payload.senderRole,
       };
@@ -934,6 +938,58 @@ export default function App() {
     },
     [currentUser, realtimeIdentity]
   );
+
+  // هندلر ارتباط سریع درون‌برنامه‌ای (چت یا تماس صوتی مستقیم با تکنسین تأسیسات از بخش ارجاع)
+  useEffect(() => {
+    if (!currentUser || !realtimeIdentity) return;
+    return subscribeQuickStaffComm((target) => {
+      const roomId = makeStaffDmRoomId(realtimeIdentity.id, target.staffId);
+      const ids: [string, string] =
+        realtimeIdentity.id.localeCompare(target.staffId) <= 0
+          ? [realtimeIdentity.id, target.staffId]
+          : [target.staffId, realtimeIdentity.id];
+      const names: [string, string] =
+        realtimeIdentity.id.localeCompare(target.staffId) <= 0
+          ? [realtimeIdentity.name, target.staffName]
+          : [target.staffName, realtimeIdentity.name];
+
+      if (target.mode === 'chat') {
+        setIsMessagesModalOpen(false);
+        setChatTargetRoom({
+          roomId,
+          roomType: 'dm',
+          dmParticipants: { ids, names },
+        });
+        setIsCommunityChatOpen(true);
+        return;
+      }
+
+      if (target.mode === 'voice_call') {
+        const liveSettings = Storage.getCommunityChatSettings();
+        const access = canRoleUseLiveVoiceCall(liveSettings, currentUser.role);
+        if (!access.allowed) {
+          const warnItem: AppNotificationItem = {
+            id: `notif_voice_blocked_${Date.now()}`,
+            category: 'system',
+            title: 'محدودیت تماس صوتی',
+            body: access.reason || 'امکان برقراری تماس صوتی توسط مدیر سامانه غیرفعال شده است.',
+            createdAt: new Date().toISOString(),
+            read: true,
+          };
+          setLiveToasts((prev) => [warnItem, ...prev].slice(0, 3));
+          return;
+        }
+        setActiveVoiceCall({
+          roomId,
+          roomTitle: target.staffName,
+          roomType: 'dm',
+          targetPeerId: target.staffId,
+          targetPeerName: target.staffName,
+          isInitiator: true,
+        });
+      }
+    });
+  }, [currentUser, realtimeIdentity]);
 
   const handleOpenExcelModal = (tab: ExcelImportTab = 'students') => {
     setExcelModalInitialTab(tab);
@@ -1243,6 +1299,11 @@ export default function App() {
 
       {/* بدنه اصلی */}
       <main className="flex-1 w-full min-w-0 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
+        {currentUser && (
+          <div className="flex justify-end mb-3">
+            <JalaliLiveClockBar compact />
+          </div>
+        )}
 
         {/* ۱. صفحه فرود برای مراجعین قبل از ورود به سامانه (بدون نمایش آمار به عموم) */}
         {!currentUser && (() => {
