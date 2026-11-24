@@ -154,9 +154,22 @@ function buildSingleClearancePageHtml(
         </div>
       </div>
 
-      <div style="padding:7px 10px;border:1px solid #99f6e4;background:#f0fdfa;border-radius:7px;display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:10px;">
-        <div><b>تاییدیه اولیه واحد آموزش:</b> ${clearance.educationGateStatus === 'approved' ? 'تایید شده' : 'در انتظار تایید'}</div>
+      <div style="padding:7px 10px;border:1px solid #99f6e4;background:#f0fdfa;border-radius:7px;display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:6px;">
+        <div><b>مرحله ۱ — تاییدیه کارشناس آموزش:</b> ${clearance.educationGateStatus === 'approved' ? 'تایید شده' : 'در انتظار تایید'}</div>
         ${clearance.educationReviewerName ? `<div style="font-size:10px;font-weight:700;color:#115e59;">کارشناس آموزش: ${escapeHtml(clearance.educationReviewerName)} (${escapeHtml(clearance.educationReviewedAt || '')})</div>` : ''}
+      </div>
+
+      <div style="padding:7px 10px;border:1px solid #c7d2fe;background:#eef2ff;border-radius:7px;display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:10px;">
+        <div><b>مرحله ۲ — تاییدیه مدیر گروه رشته (گزارش ۱۰۵۰ سامانه گلستان):</b> ${
+          clearance.deptHeadGateStatus === 'approved' || clearance.deptHeadReport1050Verified
+            ? 'تایید شده (گذراندن کامل واحدهای الزامی سرفصل)'
+            : clearance.status === 'in_clearance' || clearance.status === 'completed'
+            ? 'تایید شده (پرونده پیشین)'
+            : clearance.deptHeadGateStatus === 'rejected'
+            ? 'رد شده (نقص سرفصل)'
+            : 'در انتظار تایید مدیر گروه'
+        }</div>
+        ${clearance.deptHeadReviewerName ? `<div style="font-size:10px;font-weight:700;color:#3730a3;">مدیر گروه: ${escapeHtml(clearance.deptHeadReviewerName)} (${escapeHtml(clearance.deptHeadReviewedAt || '')})</div>` : ''}
       </div>
 
       <div style="margin-bottom:10px;">
@@ -1015,18 +1028,18 @@ export const GraduationDashboard: React.FC<GraduationDashboardProps> = ({
                     {/* بخش جزئیات کامل گردش کار تسویه */}
                     {isExpanded && (
                       <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 p-4 space-y-4">
-                        {/* وضعیت گیت آموزش و وضعیت خاتمه فارغ‌التحصیلان */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {/* وضعیت گیت کارشناس آموزش، مدیر گروه (گزارش ۱۰۵۰) و وضعیت خاتمه فارغ‌التحصیلان */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                           <div className="p-3 rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50/70 dark:bg-teal-950/30 text-xs space-y-1">
                             <div className="flex items-center gap-1.5 font-extrabold text-teal-900 dark:text-teal-200">
                               <ShieldCheck className="w-4 h-4" />
-                              <span>مرحله اول — تاییدیه واحد آموزش</span>
+                              <span>مرحله ۱ — تاییدیه کارشناس آموزش</span>
                             </div>
                             <p className="text-slate-700 dark:text-slate-300">
                               وضعیت:{' '}
                               <b>
                                 {c.educationGateStatus === 'approved'
-                                  ? 'تایید و ارجاع به واحدها'
+                                  ? 'تایید و ارجاع به مدیر گروه'
                                   : c.educationGateStatus === 'rejected'
                                   ? 'رد شده (نقص آموزشی)'
                                   : 'در انتظار بررسی کارشناس آموزش'}
@@ -1042,10 +1055,37 @@ export const GraduationDashboard: React.FC<GraduationDashboardProps> = ({
                             )}
                           </div>
 
+                          <div className="p-3 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30 text-xs space-y-1">
+                            <div className="flex items-center gap-1.5 font-extrabold text-indigo-900 dark:text-indigo-200">
+                              <ShieldCheck className="w-4 h-4" />
+                              <span>مرحله ۲ — مدیر گروه (گزارش ۱۰۵۰ گلستان)</span>
+                            </div>
+                            <p className="text-slate-700 dark:text-slate-300">
+                              وضعیت:{' '}
+                              <b>
+                                {c.deptHeadGateStatus === 'approved' || c.deptHeadReport1050Verified
+                                  ? 'تایید گذراندن کلیه واحدهای الزامی سرفصل'
+                                  : c.status === 'in_clearance' || c.status === 'completed'
+                                  ? 'تایید شده (پرونده پیشین)'
+                                  : c.deptHeadGateStatus === 'rejected'
+                                  ? 'رد شده (نقص سرفصل / گزارش ۱۰۵۰)'
+                                  : 'در انتظار تایید مدیر گروه رشته'}
+                              </b>
+                            </p>
+                            {c.deptHeadReviewerName && (
+                              <p className="text-slate-600 dark:text-slate-400">
+                                مدیر گروه: {c.deptHeadReviewerName} ({c.deptHeadReviewedAt})
+                              </p>
+                            )}
+                            {c.deptHeadNote && (
+                              <p className="text-slate-600 dark:text-slate-400">توضیحات: {c.deptHeadNote}</p>
+                            )}
+                          </div>
+
                           <div
                             className={`p-3 rounded-xl border text-xs space-y-1 ${
                               isFinalized
-                                ? 'border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30'
+                                ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/30'
                                 : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
                             }`}
                           >

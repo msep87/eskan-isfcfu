@@ -662,6 +662,7 @@ export const CulturalDashboard: React.FC<CulturalDashboardProps> = ({
                 badge: Storage.getGraduationClearances().filter(
                   (c) =>
                     c.educationGateStatus === 'approved' &&
+                    c.status === 'in_clearance' &&
                     (c.units?.cultural?.status || 'pending') === 'pending'
                 ).length,
                 badgeTone: 'rose',

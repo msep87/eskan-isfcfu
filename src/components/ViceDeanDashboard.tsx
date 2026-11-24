@@ -940,6 +940,7 @@ export const ViceDeanDashboard: React.FC<ViceDeanDashboardProps> = ({
                 badge: Storage.getGraduationClearances().filter(
                   (c) =>
                     c.educationGateStatus === 'approved' &&
+                    c.status === 'in_clearance' &&
                     (c.units?.vice_dean?.status || 'pending') === 'pending'
                 ).length,
                 badgeTone: 'rose',

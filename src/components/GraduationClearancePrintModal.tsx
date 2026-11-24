@@ -227,22 +227,47 @@ export const GraduationClearancePrintModal: React.FC<GraduationClearancePrintMod
               </div>
             </div>
 
-            {/* وضعیت تاییدیه واحد آموزش */}
-            <div className="px-3.5 py-2.5 rounded-lg border border-teal-300 bg-teal-50/70 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-teal-700 shrink-0" />
-                <span className="font-extrabold text-teal-950">
-                  تاییدیه اولیه واحد آموزش (گذراندن کلیه واحدهای درسی):
-                </span>
-                <span className="font-bold text-teal-800">
-                  {clearance.educationGateStatus === 'approved' ? 'تایید شده' : 'در انتظار تایید'}
-                </span>
+            {/* وضعیت تاییدیه واحد آموزش و مدیر گروه رشته (گزارش ۱۰۵۰ گلستان) */}
+            <div className="space-y-2">
+              <div className="px-3.5 py-2.5 rounded-lg border border-teal-300 bg-teal-50/70 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-teal-700 shrink-0" />
+                  <span className="font-extrabold text-teal-950">
+                    مرحله ۱ — تاییدیه کارشناس آموزش (بررسی اولیه پرونده):
+                  </span>
+                  <span className="font-bold text-teal-800">
+                    {clearance.educationGateStatus === 'approved' ? 'تایید شده' : 'در انتظار تایید'}
+                  </span>
+                </div>
+                {clearance.educationReviewerName && (
+                  <span className="text-[11px] text-teal-900 font-bold">
+                    کارشناس آموزش: {clearance.educationReviewerName} ({clearance.educationReviewedAt})
+                  </span>
+                )}
               </div>
-              {clearance.educationReviewerName && (
-                <span className="text-[11px] text-teal-900 font-bold">
-                  کارشناس آموزش: {clearance.educationReviewerName} ({clearance.educationReviewedAt})
-                </span>
-              )}
+
+              <div className="px-3.5 py-2.5 rounded-lg border border-indigo-300 bg-indigo-50/70 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-indigo-700 shrink-0" />
+                  <span className="font-extrabold text-indigo-950">
+                    مرحله ۲ — تاییدیه مدیر گروه رشته (گذراندن واحدهای الزامی سرفصل طبق گزارش ۱۰۵۰ سامانه گلستان):
+                  </span>
+                  <span className="font-bold text-indigo-800">
+                    {clearance.deptHeadGateStatus === 'approved' || clearance.deptHeadReport1050Verified
+                      ? 'تایید شده (انطباق گزارش ۱۰۵۰)'
+                      : clearance.status === 'in_clearance' || clearance.status === 'completed'
+                      ? 'تایید شده (پرونده پیشین)'
+                      : clearance.deptHeadGateStatus === 'rejected'
+                      ? 'رد شده (نقص سرفصل)'
+                      : 'در انتظار تایید مدیر گروه'}
+                  </span>
+                </div>
+                {clearance.deptHeadReviewerName && (
+                  <span className="text-[11px] text-indigo-900 font-bold">
+                    مدیر گروه: {clearance.deptHeadReviewerName} ({clearance.deptHeadReviewedAt})
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* جدول تاییدیه کلیه واحدهای سامانه */}

@@ -1008,6 +1008,7 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
                 badge: Storage.getGraduationClearances().filter(
                   (c) =>
                     c.educationGateStatus === 'approved' &&
+                    c.status === 'in_clearance' &&
                     (c.units?.warehouse?.status || 'pending') === 'pending'
                 ).length,
                 badgeTone: 'rose',

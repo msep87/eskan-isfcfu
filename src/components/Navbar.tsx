@@ -10,6 +10,7 @@ import {
 import { getStudentAdmissionStatus } from '../utils/financeUtils';
 import { FarhangianEmblem } from './FarhangianEmblem';
 import { PWAInstallButton } from './PWAInstallButton';
+import { JalaliLiveClockBar } from './JalaliLiveClockBar';
 import {
   User,
   LogOut,
@@ -361,19 +362,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {!currentUser && (
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  onOpenLogin();
-                }}
-                className="flex items-center gap-1 px-2.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold shadow-xs transition cursor-pointer"
-              >
-                <User className="w-3.5 h-3.5" />
-                <span>ورود</span>
-              </button>
-            )}
+            {/* در صفحه اصلی قبل از ورود، دکمه ورود تکراری بالا حذف و تاریخ و ساعت در بالای صفحه نمایش داده می‌شود */}
 
             <button
               type="button"
@@ -765,18 +754,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               </div>
             ) : (
-              <button
-                onClick={onOpenLogin}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-md shadow-teal-600/20 transition cursor-pointer"
-              >
-                <User className="w-4 h-4" />
-                <span>ورود به سامانه</span>
-              </button>
+              <JalaliLiveClockBar variant="compact" />
             )}
 
           </div>
 
         </div>
+
+        {/* نمایش فشرده تاریخ شمسی و ساعت زنده در بالای نسخه موبایل قبل از ورود */}
+        {!currentUser && (
+          <div className="md:hidden pb-2 pt-0.5 flex items-center justify-end">
+            <JalaliLiveClockBar variant="compact" />
+          </div>
+        )}
 
         {/* منوی کشویی استاندارد موبایل و نسخه اپلیکیشن */}
         {isMobileMenuOpen && (

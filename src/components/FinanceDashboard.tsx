@@ -729,6 +729,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
             badge: Storage.getGraduationClearances().filter(
               (c) =>
                 c.educationGateStatus === 'approved' &&
+                c.status === 'in_clearance' &&
                 (c.units?.finance?.status || 'pending') === 'pending'
             ).length,
             badgeTone: 'rose',

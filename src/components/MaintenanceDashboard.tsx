@@ -424,6 +424,7 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
             badge: Storage.getGraduationClearances().filter(
               (c) =>
                 c.educationGateStatus === 'approved' &&
+                c.status === 'in_clearance' &&
                 (c.units?.maintenance?.status || 'pending') === 'pending'
             ).length,
             badgeTone: 'rose',

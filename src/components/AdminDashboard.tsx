@@ -8689,15 +8689,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {/* متن بنر سراسری */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  متن بنر اطلاع‌رسانی بالای سایت
+                  متن بنر اطلاع‌رسانی بالای پنل کاربران (پس از ورود)
                 </label>
                 <input
                   type="text"
                   value={localSettings.announcementBanner || ''}
                   onChange={(e) => setLocalSettings((prev) => ({ ...prev, announcementBanner: e.target.value }))}
-                  placeholder="متن پیام کوتاه برای نمایش در بالای تمام صفحات..."
+                  placeholder="متن پیام کوتاه برای نمایش در بالای کارتابل کاربران پس از ورود..."
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
                 />
+              </div>
+
+              {/* عنوان بخش اطلاعیه‌ها در صفحه اصلی سامانه */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  عنوان بخش اطلاعیه‌ها در صفحه اصلی سامانه
+                </label>
+                <input
+                  type="text"
+                  value={localSettings.homeAnnouncementsTitle || ''}
+                  onChange={(e) => setLocalSettings((prev) => ({ ...prev, homeAnnouncementsTitle: e.target.value }))}
+                  placeholder="اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشجویی و سراها"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  در صورت خالی گذاشتن، عنوان پیش‌فرض «اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشجویی و سراها» نمایش داده می‌شود.
+                </p>
               </div>
 
               <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">

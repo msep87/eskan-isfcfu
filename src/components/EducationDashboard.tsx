@@ -277,10 +277,11 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
   );
 
   const pendingClearanceGateCount = useMemo(() => {
-    const all = Storage.getGraduationClearances().filter((c) => c.status === 'pending_education');
+    const targetStatus = isDeptHead ? 'pending_dept_head' : 'pending_education';
+    const all = Storage.getGraduationClearances().filter((c) => c.status === targetStatus);
     if (assignedFields.length === 0) return all.length;
     return all.filter((c) => doesEducationStaffCoverField(staff, c.studentFieldOfStudy)).length;
-  }, [messages, students, cloudSyncTick, assignedFields, staff]);
+  }, [messages, students, cloudSyncTick, assignedFields, staff, isDeptHead]);
 
   const handleSendEducationMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -661,8 +662,12 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
           },
           {
             id: 'clearance',
-            label: 'تسویه حساب فارغ‌التحصیلان (دروازه اول)',
-            subtitle: 'تأیید آغاز فرآیند تسویه حساب دانشجو',
+            label: isDeptHead
+              ? 'تسویه حساب فارغ‌التحصیلان (دروازه دوم — گزارش ۱۰۵۰)'
+              : 'تسویه حساب فارغ‌التحصیلان (دروازه اول — آموزش)',
+            subtitle: isDeptHead
+              ? 'تأیید گذراندن واحدهای سرفصل طبق گزارش ۱۰۵۰ گلستان'
+              : 'بررسی اولیه و ارجاع به مدیر گروه رشته',
             icon: <GraduationCap className="w-4 h-4" />,
             badge: pendingClearanceGateCount,
             badgeTone: 'rose',
@@ -1639,10 +1644,11 @@ export const EducationDashboard: React.FC<EducationDashboardProps> = ({
         </div>
       )}
 
-      {/* بخش ۳: دروازه اولیه و بررسی تسویه حساب فارغ‌التحصیلان */}
+      {/* بخش ۳: دروازه بررسی تسویه حساب فارغ‌التحصیلان (کارشناس آموزش / مدیر گروه گزارش ۱۰۵۰) */}
       {activeTab === 'clearance' && (
         <GraduationClearanceReviewPanel
           unitRole="education"
+          educationSubRole={isDeptHead ? 'department_head' : 'expert'}
           reviewerId={staff.id}
           reviewerName={staff.fullName}
           settings={settings}

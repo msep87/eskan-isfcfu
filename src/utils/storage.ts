@@ -70,6 +70,13 @@ import {
   ClearanceUnitRole,
   ClearanceUnitApproval,
   GraduationClearanceRequest,
+  AcademicWorkflowRequest,
+  AcademicWorkflowRequestCategory,
+  AcademicWorkflowStage,
+  AcademicWorkflowInitiatorRole,
+  AcademicWorkflowTargetMode,
+  AcademicWorkflowActorRole,
+  AcademicWorkflowStep,
   CommunityChatSettings,
   CommunityForum,
   CommunityForumCategory,
@@ -281,6 +288,7 @@ const STORAGE_KEYS = {
   LIBRARY_BOOKS: 'farhangian_dorm_library_books_prod',
   LIBRARY_BOOK_REQUESTS: 'farhangian_dorm_library_book_requests_prod',
   GRADUATION_CLEARANCES: 'farhangian_dorm_graduation_clearances_prod',
+  ACADEMIC_WORKFLOW_REQUESTS: 'farhangian_dorm_academic_workflow_requests_prod',
   COMMUNITY_CHAT_SETTINGS: 'farhangian_dorm_community_chat_settings_prod',
   COMMUNITY_FORUMS: 'farhangian_dorm_community_forums_prod',
   COMMUNITY_CHAT_MESSAGES: 'farhangian_dorm_community_chat_messages_prod',
@@ -539,6 +547,7 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOKS, INITIAL_LIBRARY_BOOKS);
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, INITIAL_LIBRARY_BOOK_REQUESTS);
   setIfMissing(STORAGE_KEYS.GRADUATION_CLEARANCES, INITIAL_GRADUATION_CLEARANCES);
+  setIfMissing(STORAGE_KEYS.ACADEMIC_WORKFLOW_REQUESTS, []);
   setIfMissing(STORAGE_KEYS.COMMUNITY_CHAT_SETTINGS, DEFAULT_COMMUNITY_CHAT_SETTINGS);
   setIfMissing(STORAGE_KEYS.COMMUNITY_FORUMS, [INITIAL_PUBLIC_FORUM]);
   setIfMissing(STORAGE_KEYS.COMMUNITY_CHAT_MESSAGES, []);
@@ -840,6 +849,7 @@ const STUDENT_OPERATIONAL_KEYS: string[] = [
   STORAGE_KEYS.SPORTS_REGISTRATIONS,
   STORAGE_KEYS.LIBRARY_BOOK_REQUESTS,
   STORAGE_KEYS.GRADUATION_CLEARANCES,
+  STORAGE_KEYS.ACADEMIC_WORKFLOW_REQUESTS,
   STORAGE_KEYS.SHIFT_SCHEDULES,
   STORAGE_KEYS.COUNSELOR_SHIFTS,
   STORAGE_KEYS.COUNSELORS,
@@ -1156,6 +1166,7 @@ const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.LIBRARY_BOOKS]: 'فهرست کتب کتابخانه',
   [STORAGE_KEYS.LIBRARY_BOOK_REQUESTS]: 'درخواست‌ها و امانات کتابخانه',
   [STORAGE_KEYS.GRADUATION_CLEARANCES]: 'تسویه حساب الکترونیک فارغ‌التحصیلان',
+  [STORAGE_KEYS.ACADEMIC_WORKFLOW_REQUESTS]: 'درخواست‌ها و گردش کار حوزه معاونت آموزشی',
   [STORAGE_KEYS.ANNOUNCEMENTS]: 'اطلاعیه‌ها و اخبار',
   [STORAGE_KEYS.MESSAGES]: 'پیام‌ها و مکاتبات',
   [STORAGE_KEYS.WARNINGS]: 'اخطارهای انضباطی و اتاق',
@@ -4759,6 +4770,7 @@ export const Storage = {
     libraryBooks: Storage.getLibraryBooks(),
     libraryBookRequests: Storage.getLibraryBookRequests(),
     graduationClearances: Storage.getGraduationClearances(),
+    academicWorkflowRequests: Storage.getAcademicWorkflowRequests(),
     exportedAt: new Date().toISOString(),
     appName: 'سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان اصفهان',
   }),
@@ -5180,6 +5192,7 @@ export const Storage = {
     if (Array.isArray(data.libraryBooks)) writeCollection(STORAGE_KEYS.LIBRARY_BOOKS, data.libraryBooks);
     if (Array.isArray(data.libraryBookRequests)) writeCollection(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, data.libraryBookRequests);
     if (Array.isArray(data.graduationClearances)) writeCollection(STORAGE_KEYS.GRADUATION_CLEARANCES, data.graduationClearances);
+    if (Array.isArray(data.academicWorkflowRequests)) writeCollection(STORAGE_KEYS.ACADEMIC_WORKFLOW_REQUESTS, data.academicWorkflowRequests);
   },
 
   // بازیابی نسخه پشتیبان همگام (سازگاری با فراخوانی‌های قدیمی)
@@ -13454,6 +13467,450 @@ export const Storage = {
   },
 
   // -------------------------------------------------------------
+  // متدهای گردش کار و ارجاعات یکپارچه حوزه معاونت آموزشی
+  // (دانشجو ↔ مدیر گروه تخصصی/رشته ↔ کارشناس آموزش ↔ کارشناس فارغ‌التحصیلان)
+  // -------------------------------------------------------------
+  getAcademicWorkflowRequests: (): AcademicWorkflowRequest[] =>
+    get<AcademicWorkflowRequest[]>(STORAGE_KEYS.ACADEMIC_WORKFLOW_REQUESTS, []),
+
+  setAcademicWorkflowRequests: (items: AcademicWorkflowRequest[]): boolean =>
+    set(STORAGE_KEYS.ACADEMIC_WORKFLOW_REQUESTS, items),
+
+  createAcademicWorkflowRequest: (payload: {
+    student: Student;
+    category: AcademicWorkflowRequestCategory;
+    subject: string;
+    description: string;
+    courseTitle?: string;
+    initiatorRole: AcademicWorkflowInitiatorRole;
+    initiatorId: string;
+    initiatorName: string;
+    targetMode: AcademicWorkflowTargetMode;
+    targetDeptHeadId?: string;
+    targetDeptHeadName?: string;
+    targetExpertId?: string;
+    targetExpertName?: string;
+    autoRouteToGraduationOnDeptApproval?: boolean;
+    initialNote?: string;
+  }): { success: boolean; message: string; request?: AcademicWorkflowRequest } => {
+    const subject = (payload.subject || '').trim();
+    const description = (payload.description || '').trim();
+    if (!subject || !description) {
+      return { success: false, message: 'لطفاً موضوع و شرح کامل درخواست را وارد نمایید.' };
+    }
+
+    const list = Storage.getAcademicWorkflowRequests();
+    const allEduStaff = Storage.getEducationStaff().filter(
+      (e) => e.status !== 'inactive' && e.isActive !== false
+    );
+    const deptHeads = allEduStaff.filter((e) => isEducationDepartmentHead(e));
+    const experts = allEduStaff.filter((e) => !isEducationDepartmentHead(e));
+
+    // تطبیق هوشمند مدیر گروه یا کارشناس رشته دانشجو در صورت عدم انتخاب دستی
+    let assignedDeptHeadId = payload.targetDeptHeadId;
+    let assignedDeptHeadName = payload.targetDeptHeadName;
+    let assignedExpertId = payload.targetExpertId;
+    let assignedExpertName = payload.targetExpertName;
+
+    if (assignedDeptHeadId && !assignedDeptHeadName) {
+      const dh = deptHeads.find((e) => e.id === assignedDeptHeadId);
+      if (dh) assignedDeptHeadName = dh.fullName;
+    }
+    if (assignedExpertId && !assignedExpertName) {
+      const ex = experts.find((e) => e.id === assignedExpertId);
+      if (ex) assignedExpertName = ex.fullName;
+    }
+
+    if (
+      (payload.targetMode === 'major_dept_head' || payload.targetMode === 'course_dept_head') &&
+      !assignedDeptHeadId
+    ) {
+      const matchedDh =
+        deptHeads.find((dh) => doesEducationStaffCoverField(dh, payload.student.fieldOfStudy)) ||
+        deptHeads[0];
+      if (matchedDh) {
+        assignedDeptHeadId = matchedDh.id;
+        assignedDeptHeadName = matchedDh.fullName;
+      }
+    }
+
+    if (payload.initiatorRole === 'education_expert') {
+      assignedExpertId = assignedExpertId || payload.initiatorId;
+      assignedExpertName = assignedExpertName || payload.initiatorName;
+    } else if (!assignedExpertId) {
+      const matchedEx =
+        experts.find((ex) => doesEducationStaffCoverField(ex, payload.student.fieldOfStudy)) ||
+        experts[0];
+      if (matchedEx) {
+        assignedExpertId = matchedEx.id;
+        assignedExpertName = matchedEx.fullName;
+      }
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const initialStage: AcademicWorkflowStage =
+      payload.targetMode === 'education_expert' ? 'pending_expert_action' : 'pending_dept_head';
+
+    const actorRole: AcademicWorkflowActorRole =
+      payload.initiatorRole === 'student'
+        ? 'student'
+        : payload.initiatorRole === 'department_head'
+        ? 'department_head'
+        : 'education_expert';
+
+    const actionLabel =
+      payload.initiatorRole === 'education_expert'
+        ? payload.autoRouteToGraduationOnDeptApproval
+          ? 'ثبت و ارجاع درخواست توسط کارشناس آموزش به مدیر گروه (ارسال خودکار به فارغ‌التحصیلان پس از تأیید)'
+          : 'ثبت و ارجاع درخواست توسط کارشناس آموزش به مدیر گروه'
+        : payload.targetMode === 'course_dept_head'
+        ? `ثبت درخواست دانشجو به مدیر گروه تخصصی درس${payload.courseTitle ? ` «${payload.courseTitle.trim()}»` : ''}`
+        : payload.targetMode === 'major_dept_head'
+        ? 'ثبت درخواست دانشجو به مدیر گروه رشته'
+        : 'ثبت درخواست دانشجو به کارشناس آموزش رشته';
+
+    const firstStep: AcademicWorkflowStep = {
+      id: makeUniqueId('acws'),
+      timestamp: nowStr,
+      actorRole,
+      actorId: payload.initiatorId,
+      actorName: payload.initiatorName,
+      actionLabel,
+      toStage: initialStage,
+      targetStaffId:
+        initialStage === 'pending_dept_head' ? assignedDeptHeadId : assignedExpertId,
+      targetStaffName:
+        initialStage === 'pending_dept_head'
+          ? assignedDeptHeadName || 'مدیر گروه مربوطه'
+          : assignedExpertName || 'کارشناس آموزش رشته',
+      note: (payload.initialNote || '').trim() || undefined,
+    };
+
+    const newReq: AcademicWorkflowRequest = {
+      id: makeUniqueId('acw'),
+      trackingCode: `ACW-${101 + list.length}`,
+      studentId: payload.student.studentId,
+      studentName: payload.student.fullName,
+      studentFieldOfStudy: payload.student.fieldOfStudy || 'نامشخص',
+      studentEntryTerm: payload.student.entryTerm || '-',
+      studentPhone: payload.student.mobile || payload.student.phone || '',
+      category: payload.category,
+      subject,
+      description,
+      courseTitle: (payload.courseTitle || '').trim() || undefined,
+      initiatorRole: payload.initiatorRole,
+      initiatorId: payload.initiatorId,
+      initiatorName: payload.initiatorName,
+      initialTargetMode: payload.targetMode,
+      autoRouteToGraduationOnDeptApproval:
+        payload.autoRouteToGraduationOnDeptApproval ??
+        payload.initiatorRole === 'education_expert',
+      currentStage: initialStage,
+      assignedDeptHeadId,
+      assignedDeptHeadName,
+      assignedExpertId,
+      assignedExpertName,
+      createdAt: nowStr,
+      updatedAt: nowStr,
+      steps: [firstStep],
+    };
+
+    list.unshift(newReq);
+    Storage.setAcademicWorkflowRequests(list);
+
+    Storage.addActivityLog({
+      category: 'education',
+      action: 'ثبت درخواست در گردش کار حوزه معاونت آموزشی',
+      details: `درخواست ${newReq.trackingCode} (${subject}) برای دانشجو ${payload.student.fullName} توسط ${payload.initiatorName} ثبت شد.`,
+      targetName: newReq.trackingCode,
+    });
+
+    if (payload.initiatorRole !== 'student') {
+      Storage.addMessage({
+        senderId: payload.initiatorId,
+        senderName: payload.initiatorName,
+        senderRole: 'education',
+        receiverType: 'student',
+        receiverId: payload.student.studentId,
+        receiverName: payload.student.fullName,
+        targetScope: 'single',
+        category: 'education',
+        subject: `ثبت و ارجاع درخواست آموزشی (${newReq.trackingCode})`,
+        content: `درخواست «${subject}» با کد رهگیری ${newReq.trackingCode} توسط ${payload.initiatorName} ثبت و به «${assignedDeptHeadName || 'مدیر گروه مربوطه'}» ارجاع شد. گردش کار آن در بخش «درخواست‌های آموزشی» کارتابل شما قابل مشاهده است.`,
+        date: nowStr,
+      });
+    }
+
+    return {
+      success: true,
+      message: `درخواست با کد رهگیری «${newReq.trackingCode}» ثبت و به کارتابل «${firstStep.targetStaffName}» ارسال شد.`,
+      request: newReq,
+    };
+  },
+
+  transitionAcademicWorkflowRequest: (
+    requestId: string,
+    payload: {
+      action:
+        | 'refer_to_dept_head'
+        | 'dept_head_approve_to_graduation'
+        | 'dept_head_directive_to_expert'
+        | 'dept_head_complete'
+        | 'expert_forward_to_graduation'
+        | 'expert_complete'
+        | 'graduation_complete'
+        | 'return_to_expert'
+        | 'reject';
+      actorRole: AcademicWorkflowActorRole;
+      actorId: string;
+      actorName: string;
+      targetStaffId?: string;
+      targetStaffName?: string;
+      directive?: string;
+      note?: string;
+      finalLetterNumber?: string;
+      autoRouteToGraduation?: boolean;
+    }
+  ): { success: boolean; message: string; request?: AcademicWorkflowRequest } => {
+    const list = Storage.getAcademicWorkflowRequests();
+    const idx = list.findIndex((r) => r.id === requestId);
+    if (idx === -1) return { success: false, message: 'درخواست مورد نظر یافت نشد.' };
+
+    const cur = list[idx];
+    const note = (payload.note || '').trim();
+    const directive = (payload.directive || '').trim();
+    const finalLetterNumber = (payload.finalLetterNumber || '').trim();
+
+    if (payload.action === 'dept_head_directive_to_expert' && !directive) {
+      return {
+        success: false,
+        message: 'لطفاً دستور اجرایی لازم برای کارشناس آموزش رشته را بنویسید.',
+      };
+    }
+    if ((payload.action === 'reject' || payload.action === 'return_to_expert') && !note) {
+      return {
+        success: false,
+        message: 'لطفاً علت یا توضیحات لازم را وارد نمایید.',
+      };
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const allEduStaff = Storage.getEducationStaff().filter(
+      (e) => e.status !== 'inactive' && e.isActive !== false
+    );
+    const deptHeads = allEduStaff.filter((e) => isEducationDepartmentHead(e));
+    const experts = allEduStaff.filter((e) => !isEducationDepartmentHead(e));
+    const gradStaff = Storage.getGraduationStaff().filter(
+      (g) => g.status !== 'inactive' && g.isActive !== false
+    );
+
+    let nextStage: AcademicWorkflowStage = cur.currentStage;
+    let actionLabel = '';
+    let nextDeptHeadId = cur.assignedDeptHeadId;
+    let nextDeptHeadName = cur.assignedDeptHeadName;
+    let nextExpertId = cur.assignedExpertId;
+    let nextExpertName = cur.assignedExpertName;
+    let nextGradId = cur.assignedGraduationStaffId;
+    let nextGradName = cur.assignedGraduationStaffName;
+    let nextAutoRoute = cur.autoRouteToGraduationOnDeptApproval;
+    let targetStaffId = payload.targetStaffId;
+    let targetStaffName = payload.targetStaffName;
+    let studentNoticeTitle = '';
+    let studentNoticeBody = '';
+
+    switch (payload.action) {
+      case 'refer_to_dept_head': {
+        const pickedDh =
+          (targetStaffId && deptHeads.find((d) => d.id === targetStaffId)) ||
+          deptHeads.find((d) => doesEducationStaffCoverField(d, cur.studentFieldOfStudy)) ||
+          deptHeads[0];
+        nextDeptHeadId = pickedDh?.id || targetStaffId;
+        nextDeptHeadName = pickedDh?.fullName || targetStaffName || 'مدیر گروه رشته';
+        targetStaffId = nextDeptHeadId;
+        targetStaffName = nextDeptHeadName;
+        nextExpertId = cur.assignedExpertId || payload.actorId;
+        nextExpertName = cur.assignedExpertName || payload.actorName;
+        nextAutoRoute = payload.autoRouteToGraduation ?? true;
+        nextStage = 'pending_dept_head';
+        actionLabel = nextAutoRoute
+          ? 'ارجاع کارشناس آموزش به مدیر گروه (با ارسال خودکار به فارغ‌التحصیلان پس از تأیید)'
+          : 'ارجاع کارشناس آموزش به مدیر گروه جهت بررسی و صدور دستور';
+        studentNoticeTitle = `ارجاع درخواست آموزشی به مدیر گروه (${cur.trackingCode})`;
+        studentNoticeBody = `درخواست شما («${cur.subject}») توسط کارشناس آموزش (${payload.actorName}) به مدیر گروه مربوطه (${nextDeptHeadName}) ارجاع گردید.${note ? `\nتوضیحات: ${note}` : ''}`;
+        break;
+      }
+      case 'dept_head_approve_to_graduation': {
+        const pickedGrad =
+          (targetStaffId && gradStaff.find((g) => g.id === targetStaffId)) || gradStaff[0];
+        nextGradId = pickedGrad?.id || targetStaffId;
+        nextGradName = pickedGrad?.fullName || targetStaffName || 'کارشناس واحد فارغ‌التحصیلان';
+        targetStaffId = nextGradId;
+        targetStaffName = nextGradName;
+        nextStage = 'pending_graduation';
+        actionLabel = 'تأیید مدیر گروه و ارسال خودکار به کارتابل کارشناس فارغ‌التحصیلان';
+        studentNoticeTitle = `تأیید مدیر گروه و ارسال به واحد فارغ‌التحصیلان (${cur.trackingCode})`;
+        studentNoticeBody = `درخواست «${cur.subject}» توسط مدیر گروه (${payload.actorName}) تأیید شد و به‌صورت خودکار جهت اقدام نهایی در کارتابل واحد فارغ‌التحصیلان قرار گرفت.${note ? `\nتوضیحات مدیر گروه: ${note}` : ''}`;
+        break;
+      }
+      case 'dept_head_directive_to_expert': {
+        const pickedEx =
+          (targetStaffId && experts.find((e) => e.id === targetStaffId)) ||
+          experts.find((e) => doesEducationStaffCoverField(e, cur.studentFieldOfStudy)) ||
+          experts[0];
+        nextExpertId = pickedEx?.id || targetStaffId;
+        nextExpertName = pickedEx?.fullName || targetStaffName || 'کارشناس آموزش رشته';
+        targetStaffId = nextExpertId;
+        targetStaffName = nextExpertName;
+        nextStage = 'pending_expert_action';
+        actionLabel = 'صدور دستور مدیر گروه و ارجاع به کارشناس آموزش رشته جهت اقدام';
+        studentNoticeTitle = `صدور دستور مدیر گروه و ارجاع به کارشناس رشته (${cur.trackingCode})`;
+        studentNoticeBody = `مدیر گروه (${payload.actorName}) دستور لازم را برای درخواست «${cur.subject}» ثبت و جهت اجرا به کارشناس آموزش (${nextExpertName}) ارسال نمود.\nدستور مدیر گروه: ${directive}`;
+        break;
+      }
+      case 'dept_head_complete': {
+        nextStage = 'completed';
+        actionLabel = 'رسیدگی و تکمیل مستقیم توسط مدیر گروه';
+        studentNoticeTitle = `تکمیل درخواست آموزشی (${cur.trackingCode})`;
+        studentNoticeBody = `درخواست «${cur.subject}» توسط مدیر گروه (${payload.actorName}) بررسی و تکمیل شد.${note ? `\nنتیجه: ${note}` : ''}`;
+        break;
+      }
+      case 'expert_forward_to_graduation': {
+        const pickedGrad =
+          (targetStaffId && gradStaff.find((g) => g.id === targetStaffId)) || gradStaff[0];
+        nextGradId = pickedGrad?.id || targetStaffId;
+        nextGradName = pickedGrad?.fullName || targetStaffName || 'کارشناس واحد فارغ‌التحصیلان';
+        targetStaffId = nextGradId;
+        targetStaffName = nextGradName;
+        nextStage = 'pending_graduation';
+        actionLabel = 'اجرای دستور توسط کارشناس آموزش و ارسال به واحد فارغ‌التحصیلان';
+        studentNoticeTitle = `ارسال درخواست به واحد فارغ‌التحصیلان (${cur.trackingCode})`;
+        studentNoticeBody = `کارشناس آموزش (${payload.actorName}) اقدام لازم را انجام داد و پرونده «${cur.subject}» جهت اقدام نهایی به واحد فارغ‌التحصیلان ارسال گردید.${note ? `\nتوضیحات: ${note}` : ''}`;
+        break;
+      }
+      case 'expert_complete': {
+        nextStage = 'completed';
+        actionLabel = 'انجام اقدام لازم و تکمیل درخواست توسط کارشناس آموزش';
+        studentNoticeTitle = `تکمیل و اجرای درخواست آموزشی (${cur.trackingCode})`;
+        studentNoticeBody = `اقدام لازم برای درخواست «${cur.subject}» توسط کارشناس آموزش (${payload.actorName}) انجام و پرونده تکمیل گردید.${note ? `\nتوضیحات: ${note}` : ''}`;
+        break;
+      }
+      case 'graduation_complete': {
+        nextStage = 'completed';
+        nextGradId = payload.actorId;
+        nextGradName = payload.actorName;
+        actionLabel = 'اقدام نهایی و خاتمه درخواست در واحد فارغ‌التحصیلان';
+        studentNoticeTitle = `اقدام نهایی واحد فارغ‌التحصیلان انجام شد (${cur.trackingCode})`;
+        studentNoticeBody = `درخواست «${cur.subject}» توسط واحد فارغ‌التحصیلان (${payload.actorName}) با موفقیت نهایی شد.${finalLetterNumber ? `\nشماره نامه / پیگیری: ${finalLetterNumber}` : ''}${note ? `\nتوضیحات نهایی: ${note}` : ''}`;
+        break;
+      }
+      case 'return_to_expert': {
+        const pickedEx =
+          (targetStaffId && experts.find((e) => e.id === targetStaffId)) ||
+          (cur.assignedExpertId && experts.find((e) => e.id === cur.assignedExpertId)) ||
+          experts.find((e) => doesEducationStaffCoverField(e, cur.studentFieldOfStudy)) ||
+          experts[0];
+        nextExpertId = pickedEx?.id || cur.assignedExpertId;
+        nextExpertName = pickedEx?.fullName || cur.assignedExpertName || 'کارشناس آموزش رشته';
+        targetStaffId = nextExpertId;
+        targetStaffName = nextExpertName;
+        nextStage = 'pending_expert_action';
+        actionLabel = 'عودت درخواست از واحد فارغ‌التحصیلان به کارشناس آموزش جهت تکمیل';
+        studentNoticeTitle = `عودت درخواست جهت بررسی تکمیلی آموزش (${cur.trackingCode})`;
+        studentNoticeBody = `درخواست «${cur.subject}» جهت بررسی تکمیلی از واحد فارغ‌التحصیلان به کارشناس آموزش (${nextExpertName}) بازگردانده شد.\nتوضیحات: ${note}`;
+        break;
+      }
+      case 'reject': {
+        nextStage = 'rejected';
+        actionLabel =
+          payload.actorRole === 'department_head'
+            ? 'عدم تأیید / رد درخواست توسط مدیر گروه'
+            : payload.actorRole === 'graduation'
+            ? 'عدم تأیید / رد درخواست توسط واحد فارغ‌التحصیلان'
+            : 'عدم تأیید / رد درخواست توسط کارشناس آموزش';
+        studentNoticeTitle = `نتیجه بررسی درخواست آموزشی (${cur.trackingCode})`;
+        studentNoticeBody = `درخواست «${cur.subject}» توسط ${payload.actorName} تأیید نشد.\nعلت / توضیحات: ${note}`;
+        break;
+      }
+    }
+
+    const newStep: AcademicWorkflowStep = {
+      id: makeUniqueId('acws'),
+      timestamp: nowStr,
+      actorRole: payload.actorRole,
+      actorId: payload.actorId,
+      actorName: payload.actorName,
+      actionLabel,
+      fromStage: cur.currentStage,
+      toStage: nextStage,
+      targetStaffId,
+      targetStaffName,
+      directive: directive || undefined,
+      note: note || undefined,
+    };
+
+    const updated: AcademicWorkflowRequest = {
+      ...cur,
+      currentStage: nextStage,
+      assignedDeptHeadId: nextDeptHeadId,
+      assignedDeptHeadName: nextDeptHeadName,
+      assignedExpertId: nextExpertId,
+      assignedExpertName: nextExpertName,
+      assignedGraduationStaffId: nextGradId,
+      assignedGraduationStaffName: nextGradName,
+      autoRouteToGraduationOnDeptApproval: nextAutoRoute,
+      deptHeadDirective: directive || cur.deptHeadDirective,
+      finalActionNote:
+        nextStage === 'completed' || nextStage === 'rejected'
+          ? note || cur.finalActionNote
+          : cur.finalActionNote,
+      finalLetterNumber: finalLetterNumber || cur.finalLetterNumber,
+      updatedAt: nowStr,
+      steps: [...(cur.steps || []), newStep],
+    };
+
+    list[idx] = updated;
+    Storage.setAcademicWorkflowRequests(list);
+
+    Storage.addActivityLog({
+      category: 'education',
+      action: actionLabel,
+      details: `درخواست ${cur.trackingCode} (${cur.studentName}) توسط ${payload.actorName} بروزرسانی شد.`,
+      targetName: cur.trackingCode,
+      severity: nextStage === 'rejected' ? 'warning' : 'info',
+    });
+
+    if (studentNoticeTitle) {
+      Storage.addMessage({
+        senderId: payload.actorId,
+        senderName: payload.actorName,
+        senderRole: payload.actorRole === 'graduation' ? 'graduation' : 'education',
+        receiverType: 'student',
+        receiverId: cur.studentId,
+        receiverName: cur.studentName,
+        targetScope: 'single',
+        category: payload.actorRole === 'graduation' ? 'graduation' : 'education',
+        subject: studentNoticeTitle,
+        content: studentNoticeBody,
+        date: nowStr,
+      });
+    }
+
+    return {
+      success: true,
+      message: `${actionLabel} با موفقیت ثبت شد.`,
+      request: updated,
+    };
+  },
+
+  // -------------------------------------------------------------
   // متدهای گردش کار تسویه حساب الکترونیک فراغت از تحصیل
   // -------------------------------------------------------------
   getGraduationClearances: (): GraduationClearanceRequest[] =>
@@ -13473,7 +13930,7 @@ export const Storage = {
   }): { success: boolean; message: string; request?: GraduationClearanceRequest } => {
     const list = Storage.getGraduationClearances();
     const existing = list.find((r) => r.studentId === payload.student.studentId);
-    if (existing && existing.status !== 'rejected_education') {
+    if (existing && existing.status !== 'rejected_education' && existing.status !== 'rejected_dept_head') {
       return {
         success: false,
         message: 'شما قبلاً درخواست تسویه حساب فراغت از تحصیل ثبت کرده‌اید و پرونده شما در حال گردش است.',
@@ -13503,7 +13960,8 @@ export const Storage = {
         ? existing.studentPhotoUrl
         : undefined;
 
-    if (existing && existing.status === 'rejected_education') {
+    if (existing && (existing.status === 'rejected_education' || existing.status === 'rejected_dept_head')) {
+      const isDeptHeadResubmit = existing.status === 'rejected_dept_head';
       const updatedReq: GraduationClearanceRequest = {
         ...existing,
         studentPhone: (payload.studentPhone || '').trim() || payload.student.mobile || payload.student.phone || '',
@@ -13511,21 +13969,27 @@ export const Storage = {
         graduationAcademicYear: payload.graduationAcademicYear.trim(),
         graduationSemester: payload.graduationSemester.trim(),
         studentNote: (payload.studentNote || '').trim() || undefined,
-        status: 'pending_education',
-        educationGateStatus: 'pending',
+        status: isDeptHeadResubmit ? 'pending_dept_head' : 'pending_education',
+        educationGateStatus: isDeptHeadResubmit ? 'approved' : 'pending',
+        deptHeadGateStatus: isDeptHeadResubmit ? 'pending' : undefined,
+        deptHeadReport1050Verified: false,
         updatedAt: nowStr,
       };
       const next = list.map((r) => (r.id === existing.id ? updatedReq : r));
       Storage.setGraduationClearances(next);
       Storage.addActivityLog({
         category: 'graduation_clearance',
-        action: 'ارسال مجدد درخواست تسویه حساب به کارشناس آموزش',
-        details: `دانشجو ${payload.student.fullName} (${payload.student.studentId}) درخواست تسویه حساب ${updatedReq.trackingCode} را مجدداً به واحد آموزش ارسال کرد.`,
+        action: isDeptHeadResubmit
+          ? 'ارسال مجدد درخواست تسویه حساب به مدیر گروه رشته (گزارش ۱۰۵۰)'
+          : 'ارسال مجدد درخواست تسویه حساب به کارشناس آموزش',
+        details: `دانشجو ${payload.student.fullName} (${payload.student.studentId}) درخواست تسویه حساب ${updatedReq.trackingCode} را مجدداً به ${isDeptHeadResubmit ? 'مدیر گروه رشته' : 'واحد آموزش'} ارسال کرد.`,
         targetName: updatedReq.trackingCode,
       });
       return {
         success: true,
-        message: `درخواست تسویه حساب شما (${updatedReq.trackingCode}) مجدداً برای کارشناس آموزش ارسال شد.`,
+        message: isDeptHeadResubmit
+          ? `درخواست تسویه حساب شما (${updatedReq.trackingCode}) مجدداً جهت بررسی گزارش ۱۰۵۰ به مدیر گروه رشته ارسال شد.`
+          : `درخواست تسویه حساب شما (${updatedReq.trackingCode}) مجدداً برای کارشناس آموزش ارسال شد.`,
         request: updatedReq,
       };
     }
@@ -13563,7 +14027,7 @@ export const Storage = {
     });
     return {
       success: true,
-      message: `درخواست تسویه حساب شما با کد رهگیری «${newReq.trackingCode}» ثبت شد و ابتدا جهت تایید گذراندن کلیه واحدها به کارشناس آموزش ارسال گردید.`,
+      message: `درخواست تسویه حساب شما با کد رهگیری «${newReq.trackingCode}» ثبت شد و ابتدا به کارشناس آموزش و سپس جهت تأیید سرفصل (گزارش ۱۰۵۰ گلستان) به مدیر گروه رشته ارسال می‌گردد.`,
       request: newReq,
     };
   },
@@ -13607,16 +14071,20 @@ export const Storage = {
         reviewerId: payload.reviewerId,
         reviewerName: payload.reviewerName,
         reviewedAt: nowStr,
-        note: note || 'گذراندن کلیه واحدهای درسی تایید و پرونده جهت تسویه به تمامی واحدهای سامانه ارسال گردید.',
+        note:
+          note ||
+          'بررسی اولیه کارشناس آموزش تایید و پرونده جهت تایید سرفصل (گزارش ۱۰۵۰ گلستان) به مدیر گروه رشته ارجاع شد.',
       };
       list[idx] = {
         ...cur,
-        status: 'in_clearance',
+        status: 'pending_dept_head',
         educationGateStatus: 'approved',
         educationReviewerId: payload.reviewerId,
         educationReviewerName: payload.reviewerName,
         educationReviewedAt: nowStr,
-        educationNote: note || 'گذراندن کلیه واحدها تایید شد.',
+        educationNote: note || 'بررسی اولیه کارشناس آموزش تایید شد.',
+        deptHeadGateStatus: 'pending',
+        deptHeadReport1050Verified: false,
         units: nextUnits,
         updatedAt: nowStr,
       };
@@ -13648,7 +14116,7 @@ export const Storage = {
       category: 'graduation_clearance',
       action:
         payload.decision === 'approved'
-          ? 'تایید واحد آموزش و ارسال فرم تسویه به کلیه واحدها'
+          ? 'تایید کارشناس آموزش و ارجاع تسویه حساب به مدیر گروه رشته (گزارش ۱۰۵۰)'
           : 'رد اولیه درخواست تسویه حساب توسط کارشناس آموزش',
       details: `پرونده ${cur.trackingCode} (${cur.studentName}) توسط ${payload.reviewerName} بررسی شد.`,
       targetName: cur.trackingCode,
@@ -13657,7 +14125,7 @@ export const Storage = {
 
     Storage.addMessage({
       senderId: payload.reviewerId,
-      senderName: `${payload.reviewerName} (واحد آموزش)`,
+      senderName: `${payload.reviewerName} (کارشناس آموزش)`,
       senderRole: 'education',
       receiverType: 'student',
       receiverId: cur.studentId,
@@ -13666,12 +14134,12 @@ export const Storage = {
       category: 'education',
       subject:
         payload.decision === 'approved'
-          ? `تایید آموزشی تسویه حساب فراغت از تحصیل (${cur.trackingCode})`
+          ? `تایید کارشناس آموزش و ارجاع به مدیر گروه رشته (${cur.trackingCode})`
           : `نقص پرونده آموزشی تسویه حساب (${cur.trackingCode})`,
       content:
         payload.decision === 'approved'
-          ? `گذراندن کلیه واحدهای درسی شما تایید شد و فرم تسویه حساب عکس‌دار شما به کلیه واحدهای سامانه ارسال گردید. می‌توانید گردش کار آن را در بخش تسویه حساب الکترونیک پیگیری نمایید.${note ? `\nتوضیحات آموزش: ${note}` : ''}`
-          : `درخواست تسویه حساب فراغت از تحصیل شما توسط واحد آموزش تایید نشد.\nعلت / توضیحات: ${note}`,
+          ? `بررسی اولیه کارشناس آموزش برای درخواست تسویه حساب شما تایید شد و پرونده جهت تایید گذراندن کلیه واحدهای الزامی سرفصل طبق گزارش ۱۰۵۰ سامانه گلستان به «مدیر گروه رشته» ارسال گردید.${note ? `\nتوضیحات کارشناس آموزش: ${note}` : ''}`
+          : `درخواست تسویه حساب فراغت از تحصیل شما توسط کارشناس آموزش تایید نشد.\nعلت / توضیحات: ${note}`,
       date: nowStr,
     });
 
@@ -13679,8 +14147,139 @@ export const Storage = {
       success: true,
       message:
         payload.decision === 'approved'
-          ? `تایید آموزشی ثبت شد و فرم تسویه «${cur.studentName}» برای تمامی واحدهای سامانه ارسال گردید.`
+          ? `تایید کارشناس آموزش ثبت شد و پرونده «${cur.studentName}» جهت بررسی گزارش ۱۰۵۰ گلستان به کارتابل مدیر گروه رشته ارجاع گردید.`
           : `درخواست تسویه حساب «${cur.studentName}» با ذکر توضیحات رد شد.`,
+    };
+  },
+
+  reviewGraduationClearanceDeptHeadGate: (
+    clearanceId: string,
+    payload: {
+      decision: 'approved' | 'rejected';
+      reviewerId: string;
+      reviewerName: string;
+      report1050Verified?: boolean;
+      note?: string;
+    }
+  ): { success: boolean; message: string } => {
+    const list = Storage.getGraduationClearances();
+    const idx = list.findIndex((r) => r.id === clearanceId);
+    if (idx === -1) return { success: false, message: 'پرونده تسویه حساب یافت نشد.' };
+
+    const cur = list[idx];
+    if (cur.status !== 'pending_dept_head' && cur.status !== 'rejected_dept_head') {
+      return {
+        success: false,
+        message: 'این پرونده در مرحله بررسی مدیر گروه رشته قرار ندارد.',
+      };
+    }
+
+    const note = (payload.note || '').trim();
+    if (payload.decision === 'approved' && !payload.report1050Verified) {
+      return {
+        success: false,
+        message: 'پیش از تایید، تیک تأیید گذراندن کلیه واحدهای الزامی سرفصل طبق گزارش ۱۰۵۰ سامانه گلستان الزامی است.',
+      };
+    }
+    if (payload.decision === 'rejected' && !note) {
+      return {
+        success: false,
+        message: 'لطفاً علت رد یا کسری واحدهای سرفصل (گزارش ۱۰۵۰) را در بخش توضیحات ذکر نمایید.',
+      };
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const nextUnits: Record<ClearanceUnitRole, ClearanceUnitApproval> = { ...cur.units };
+    CLEARANCE_UNITS_META.forEach((u) => {
+      if (!nextUnits[u.role]) {
+        nextUnits[u.role] = { unitRole: u.role, unitLabel: u.label, status: 'pending' };
+      }
+    });
+
+    if (payload.decision === 'approved') {
+      nextUnits.education = {
+        ...nextUnits.education,
+        unitRole: 'education',
+        unitLabel: 'واحد آموزش',
+        status: 'approved',
+        reviewerId: cur.educationReviewerId || payload.reviewerId,
+        reviewerName: cur.educationReviewerName || payload.reviewerName,
+        reviewedAt: cur.educationReviewedAt || nowStr,
+        note:
+          cur.educationNote ||
+          'گذراندن واحدهای درسی تایید شد (تایید نهایی سرفصل و گزارش ۱۰۵۰ توسط مدیر گروه انجام گردید).',
+      };
+      list[idx] = {
+        ...cur,
+        status: 'in_clearance',
+        deptHeadGateStatus: 'approved',
+        deptHeadReviewerId: payload.reviewerId,
+        deptHeadReviewerName: payload.reviewerName,
+        deptHeadReviewedAt: nowStr,
+        deptHeadReport1050Verified: true,
+        deptHeadNote:
+          note ||
+          'تایید شد: دانشجو کلیه واحدهای الزامی سرفصل رشته را طبق گزارش ۱۰۵۰ سامانه گلستان با موفقیت گذرانده است.',
+        units: nextUnits,
+        updatedAt: nowStr,
+      };
+    } else {
+      list[idx] = {
+        ...cur,
+        status: 'rejected_dept_head',
+        deptHeadGateStatus: 'rejected',
+        deptHeadReviewerId: payload.reviewerId,
+        deptHeadReviewerName: payload.reviewerName,
+        deptHeadReviewedAt: nowStr,
+        deptHeadReport1050Verified: false,
+        deptHeadNote: note,
+        units: nextUnits,
+        updatedAt: nowStr,
+      };
+    }
+
+    Storage.setGraduationClearances(list);
+    Storage.addActivityLog({
+      category: 'graduation_clearance',
+      action:
+        payload.decision === 'approved'
+          ? 'تایید مدیر گروه رشته (گزارش ۱۰۵۰ گلستان) و ارسال فرم تسویه به کلیه واحدها'
+          : 'رد پرونده تسویه حساب توسط مدیر گروه رشته (نقص سرفصل / گزارش ۱۰۵۰)',
+      details: `پرونده ${cur.trackingCode} (${cur.studentName}) توسط مدیر گروه ${payload.reviewerName} بررسی شد.`,
+      targetName: cur.trackingCode,
+      severity: payload.decision === 'rejected' ? 'warning' : 'info',
+    });
+
+    Storage.addMessage({
+      senderId: payload.reviewerId,
+      senderName: `${payload.reviewerName} (مدیر گروه رشته)`,
+      senderRole: 'education',
+      receiverType: 'student',
+      receiverId: cur.studentId,
+      receiverName: cur.studentName,
+      targetScope: 'single',
+      category: 'education',
+      subject:
+        payload.decision === 'approved'
+          ? `تایید مدیر گروه (گزارش ۱۰۵۰ گلستان) و آغاز گردش تسویه حساب (${cur.trackingCode})`
+          : `نقص سرفصل / گزارش ۱۰۵۰ در تسویه حساب (${cur.trackingCode})`,
+      content:
+        payload.decision === 'approved'
+          ? `مدیر گروه رشته گذراندن کلیه واحدهای الزامی سرفصل شما را طبق گزارش ۱۰۵۰ سامانه گلستان تایید کرد و فرم عکس‌دار تسویه حساب شما به‌صورت خودکار به تمامی ۱۲ واحد دانشگاه ارسال گردید.${note ? `\nتوضیحات مدیر گروه: ${note}` : ''}`
+          : `درخواست تسویه حساب شما در مرحله بررسی مدیر گروه رشته (انطباق گزارش ۱۰۵۰ گلستان) تایید نشد.\nعلت / توضیحات: ${note}`,
+      date: nowStr,
+    });
+
+    return {
+      success: true,
+      message:
+        payload.decision === 'approved'
+          ? `تایید مدیر گروه (گزارش ۱۰۵۰ گلستان) ثبت شد و فرم تسویه «${cur.studentName}» به تمامی ۱۲ واحد دانشگاه ارسال گردید.`
+          : `درخواست تسویه حساب «${cur.studentName}» با ذکر علت نقص گزارش ۱۰۵۰ رد شد.`,
     };
   },
 
@@ -13702,7 +14301,7 @@ export const Storage = {
     if (cur.status !== 'in_clearance' && cur.status !== 'completed') {
       return {
         success: false,
-        message: 'این پرونده هنوز توسط کارشناس آموزش تایید و به واحدها ارجاع نشده است.',
+        message: 'این پرونده هنوز تایید کارشناس آموزش و مدیر گروه رشته (گزارش ۱۰۵۰ گلستان) را تکمیل نکرده است.',
       };
     }
 

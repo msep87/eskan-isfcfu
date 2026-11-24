@@ -473,6 +473,7 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
                 badge: Storage.getGraduationClearances().filter(
                   (c) =>
                     c.educationGateStatus === 'approved' &&
+                    c.status === 'in_clearance' &&
                     (c.units?.counselor?.status || 'pending') === 'pending'
                 ).length,
                 badgeTone: 'rose',

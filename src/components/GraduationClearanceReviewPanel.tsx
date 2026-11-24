@@ -38,6 +38,10 @@ interface GraduationClearanceReviewPanelProps {
    * برای کارشناس آموزش بر اساس رشته: اگر تعریف شده باشد، فقط پرونده‌های دانشجویان رشته‌های تحت پوشش نمایش داده می‌شود.
    */
   allowedFields?: string[];
+  /**
+   * تفکیک نقش در حوزه آموزش: کارشناس آموزش (دروازه اول) یا مدیر گروه رشته (دروازه دوم - گزارش ۱۰۵۰ گلستان)
+   */
+  educationSubRole?: 'expert' | 'department_head';
 }
 
 export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewPanelProps> = ({
@@ -48,10 +52,13 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
   onDataChange,
   restrictStudentPrivacy = false,
   allowedFields,
+  educationSubRole = 'expert',
 }) => {
+  const isDeptHeadMode = unitRole === 'education' && educationSubRole === 'department_head';
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'completed'>('pending');
   const [noteById, setNoteById] = useState<Record<string, string>>({});
+  const [report1050ById, setReport1050ById] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [printTarget, setPrintTarget] = useState<GraduationClearanceRequest | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -98,21 +105,40 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
   }, [clearances, unitRole, normalizedAllowedFields]);
 
   const stats = useMemo(() => {
+    if (isDeptHeadMode) {
+      return {
+        pending: relevantClearances.filter((c) => c.status === 'pending_dept_head').length,
+        approved: relevantClearances.filter(
+          (c) => c.deptHeadGateStatus === 'approved' || c.status === 'in_clearance' || c.status === 'completed'
+        ).length,
+        rejected: relevantClearances.filter((c) => c.status === 'rejected_dept_head').length,
+        completed: relevantClearances.filter((c) => c.status === 'completed').length,
+      };
+    }
     if (unitRole === 'education') {
       return {
         pending: relevantClearances.filter((c) => c.status === 'pending_education').length,
         approved: relevantClearances.filter((c) => c.educationGateStatus === 'approved').length,
-        rejected: relevantClearances.filter((c) => c.status === 'rejected_education').length,
+        rejected: relevantClearances.filter(
+          (c) => c.status === 'rejected_education' || c.status === 'rejected_dept_head'
+        ).length,
         completed: relevantClearances.filter((c) => c.status === 'completed').length,
       };
     }
     if (unitRole === 'admin') {
       return {
-        pending: relevantClearances.filter((c) => c.status === 'pending_education' || c.status === 'in_clearance').length,
+        pending: relevantClearances.filter(
+          (c) =>
+            c.status === 'pending_education' ||
+            c.status === 'pending_dept_head' ||
+            c.status === 'in_clearance'
+        ).length,
         approved: relevantClearances.filter((c) => c.status === 'in_clearance').length,
-        rejected: relevantClearances.filter((c) =>
-          c.status === 'rejected_education' ||
-          CLEARANCE_UNITS_META.some((u) => c.units?.[u.role]?.status === 'rejected')
+        rejected: relevantClearances.filter(
+          (c) =>
+            c.status === 'rejected_education' ||
+            c.status === 'rejected_dept_head' ||
+            CLEARANCE_UNITS_META.some((u) => c.units?.[u.role]?.status === 'rejected')
         ).length,
         completed: relevantClearances.filter((c) => c.status === 'completed').length,
       };
@@ -123,7 +149,7 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
       rejected: relevantClearances.filter((c) => c.units?.[unitRole]?.status === 'rejected').length,
       completed: relevantClearances.filter((c) => c.status === 'completed').length,
     };
-  }, [relevantClearances, unitRole]);
+  }, [relevantClearances, unitRole, isDeptHeadMode]);
 
   const filteredList = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -146,16 +172,35 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
       if (statusFilter === 'all') return true;
       if (statusFilter === 'completed') return c.status === 'completed';
 
-      if (unitRole === 'education') {
+      if (isDeptHeadMode) {
+        if (statusFilter === 'pending') return c.status === 'pending_dept_head';
+        if (statusFilter === 'approved') {
+          return (
+            c.deptHeadGateStatus === 'approved' ||
+            c.status === 'in_clearance' ||
+            c.status === 'completed'
+          );
+        }
+        if (statusFilter === 'rejected') return c.status === 'rejected_dept_head';
+      } else if (unitRole === 'education') {
         if (statusFilter === 'pending') return c.status === 'pending_education';
         if (statusFilter === 'approved') return c.educationGateStatus === 'approved';
-        if (statusFilter === 'rejected') return c.status === 'rejected_education';
+        if (statusFilter === 'rejected') {
+          return c.status === 'rejected_education' || c.status === 'rejected_dept_head';
+        }
       } else if (unitRole === 'admin') {
-        if (statusFilter === 'pending') return c.status === 'pending_education' || c.status === 'in_clearance';
+        if (statusFilter === 'pending') {
+          return (
+            c.status === 'pending_education' ||
+            c.status === 'pending_dept_head' ||
+            c.status === 'in_clearance'
+          );
+        }
         if (statusFilter === 'approved') return c.status === 'in_clearance';
         if (statusFilter === 'rejected') {
           return (
             c.status === 'rejected_education' ||
+            c.status === 'rejected_dept_head' ||
             CLEARANCE_UNITS_META.some((u) => c.units?.[u.role]?.status === 'rejected')
           );
         }
@@ -165,7 +210,7 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
       }
       return true;
     });
-  }, [relevantClearances, searchQuery, statusFilter, unitRole, restrictStudentPrivacy]);
+  }, [relevantClearances, searchQuery, statusFilter, unitRole, isDeptHeadMode, restrictStudentPrivacy]);
 
   const showFeedback = (type: 'success' | 'error', text: string) => {
     setFeedback({ type, text });
@@ -183,6 +228,26 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
     if (res.success) {
       showFeedback('success', res.message);
       setNoteById((prev) => ({ ...prev, [c.id]: '' }));
+      setRefreshTick((t) => t + 1);
+      onDataChange();
+    } else {
+      showFeedback('error', res.message);
+    }
+  };
+
+  const handleDeptHeadGateDecision = (c: GraduationClearanceRequest, decision: 'approved' | 'rejected') => {
+    const note = (noteById[c.id] || '').trim();
+    const res = Storage.reviewGraduationClearanceDeptHeadGate(c.id, {
+      decision,
+      reviewerId,
+      reviewerName,
+      report1050Verified: Boolean(report1050ById[c.id]),
+      note,
+    });
+    if (res.success) {
+      showFeedback('success', res.message);
+      setNoteById((prev) => ({ ...prev, [c.id]: '' }));
+      setReport1050ById((prev) => ({ ...prev, [c.id]: false }));
       setRefreshTick((t) => t + 1);
       onDataChange();
     } else {
@@ -227,18 +292,22 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
-                {unitRole === 'education'
-                  ? 'دروازه تایید آموزش و گردش کار تسویه حساب فارغ‌التحصیلان'
+                {isDeptHeadMode
+                  ? 'دروازه دوم تسویه حساب — تأیید مدیر گروه رشته (گزارش ۱۰۵۰ سامانه گلستان)'
+                  : unitRole === 'education'
+                  ? 'دروازه اول تایید کارشناس آموزش و گردش کار تسویه حساب فارغ‌التحصیلان'
                   : unitRole === 'admin'
                   ? 'نظارت جامع بر پرونده‌های تسویه حساب الکترونیک فراغت از تحصیل'
                   : `کارتابل تسویه حساب فارغ‌التحصیلان — ${unitMeta?.label || ''}`}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                {unitRole === 'education'
-                  ? 'درخواست‌های تسویه حساب ابتدا جهت تایید گذراندن کلیه واحدهای درسی به کارتابل شما ارسال می‌شود. پس از تایید، فرم عکس‌دار دانشجو به تمامی ۱۲ واحد سامانه ارسال می‌گردد.'
+                {isDeptHeadMode
+                  ? 'پرونده‌هایی که توسط کارشناس آموزش تأیید شده‌اند در اینجا قرار می‌گیرند. پس از بررسی و تأیید گذراندن کلیه واحدهای الزامی سرفصل رشته طبق گزارش ۱۰۵۰ سامانه گلستان، فرم عکس‌دار به‌صورت خودکار به تمامی ۱۲ واحد دانشگاه ارسال می‌گردد.'
+                  : unitRole === 'education'
+                  ? 'درخواست‌های تسویه حساب ابتدا به کارتابل کارشناس آموزش ارسال می‌شود. پس از تأیید شما، پرونده جهت تأیید انطباق سرفصل با گزارش ۱۰۵۰ سامانه گلستان به مدیر گروه رشته ارجاع شده و سپس در ۱۲ واحد دانشگاه به گردش درمی‌آید.'
                   : unitRole === 'admin'
-                  ? 'پایش زنده وضعیت تاییدیه کلیه واحدها، مشاهده جزئیات هر پرونده و امکان چاپ فرم نهایی تسویه حساب.'
-                  : 'فرم‌های عکس‌دار دانشجویانی که تایید واحد آموزش را دریافت کرده‌اند در اینجا نمایش داده می‌شوند. وضعیت تسویه را تایید یا با ذکر توضیحات رد نمایید.'}
+                  ? 'پایش زنده وضعیت تاییدیه کارشناس آموزش، مدیر گروه رشته (گزارش ۱۰۵۰ گلستان) و کلیه ۱۲ واحد دانشگاه به همراه چاپ فرم نهایی.'
+                  : 'فرم‌های عکس‌دار دانشجویانی که تایید کارشناس آموزش و مدیر گروه رشته (گزارش ۱۰۵۰ گلستان) را دریافت کرده‌اند در اینجا نمایش داده می‌شوند.'}
               </p>
             </div>
           </div>
@@ -366,11 +435,14 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
                   ).length
                 : 0;
 
-            const isEducationStage1 = unitRole === 'education' && c.status === 'pending_education';
+            const isEducationStage1 =
+              unitRole === 'education' && !isDeptHeadMode && c.status === 'pending_education';
+            const isDeptHeadStage2 = isDeptHeadMode && c.status === 'pending_dept_head';
             const canDecideMyUnit =
               unitRole !== 'admin' &&
               unitRole !== 'education' &&
-              c.educationGateStatus === 'approved';
+              c.educationGateStatus === 'approved' &&
+              (c.status === 'in_clearance' || c.status === 'completed');
             const isExpanded = expandedId === c.id;
 
             return (
@@ -419,12 +491,22 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
                         ) : c.status === 'pending_education' ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 text-xs font-bold">
                             <Clock className="w-3.5 h-3.5" />
-                            در انتظار تایید واحدهای درسی (آموزش)
+                            در انتظار تایید کارشناس آموزش (مرحله ۱)
+                          </span>
+                        ) : c.status === 'pending_dept_head' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-100 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200 text-xs font-bold">
+                            <Clock className="w-3.5 h-3.5" />
+                            در انتظار تایید مدیر گروه رشته — گزارش ۱۰۵۰ (مرحله ۲)
                           </span>
                         ) : c.status === 'rejected_education' ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 text-xs font-bold">
                             <XCircle className="w-3.5 h-3.5" />
-                            رد شده در مرحله آموزش
+                            رد شده در مرحله کارشناس آموزش
+                          </span>
+                        ) : c.status === 'rejected_dept_head' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 text-xs font-bold">
+                            <XCircle className="w-3.5 h-3.5" />
+                            رد شده توسط مدیر گروه (نقص گزارش ۱۰۵۰)
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 text-xs font-bold">
@@ -574,11 +656,49 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
                   </div>
                 )}
 
+                {/* نمایش وضعیت تأیید کارشناس آموزش و مدیر گروه (گزارش ۱۰۵۰) */}
+                {(c.educationGateStatus === 'approved' || c.deptHeadGateStatus) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    {c.educationGateStatus === 'approved' && (
+                      <div className="px-3 py-2 rounded-xl bg-teal-50/70 dark:bg-teal-950/25 border border-teal-200 dark:border-teal-800/70 text-teal-900 dark:text-teal-200">
+                        <span className="font-black">مرحله ۱ — کارشناس آموزش: </span>
+                        <span>تأیید شد</span>
+                        {c.educationReviewerName && (
+                          <span className="opacity-80 mr-1">
+                            ({c.educationReviewerName} • {c.educationReviewedAt})
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {c.deptHeadGateStatus === 'approved' ? (
+                      <div className="px-3 py-2 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/25 border border-indigo-200 dark:border-indigo-800/70 text-indigo-900 dark:text-indigo-200">
+                        <span className="font-black">مرحله ۲ — مدیر گروه (گزارش ۱۰۵۰ گلستان): </span>
+                        <span>تأیید شد</span>
+                        {c.deptHeadReviewerName && (
+                          <span className="opacity-80 mr-1">
+                            ({c.deptHeadReviewerName} • {c.deptHeadReviewedAt})
+                          </span>
+                        )}
+                      </div>
+                    ) : c.deptHeadGateStatus === 'rejected' ? (
+                      <div className="px-3 py-2 rounded-xl bg-rose-50/70 dark:bg-rose-950/25 border border-rose-200 dark:border-rose-800/70 text-rose-900 dark:text-rose-200">
+                        <span className="font-black">مرحله ۲ — مدیر گروه (گزارش ۱۰۵۰): </span>
+                        <span>رد شد — {c.deptHeadNote}</span>
+                      </div>
+                    ) : c.status === 'pending_dept_head' ? (
+                      <div className="px-3 py-2 rounded-xl bg-amber-50/70 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-800/70 text-amber-900 dark:text-amber-200">
+                        <span className="font-black">مرحله ۲ — مدیر گروه رشته: </span>
+                        <span>در انتظار بررسی و تأیید گزارش ۱۰۵۰ سامانه گلستان</span>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
                 {/* بخش اقدام کارشناس آموزش (مرحله اول) */}
                 {isEducationStage1 && (
                   <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-200">
-                      بررسی گذراندن کلیه واحدهای درسی و ارسال فرم عکس‌دار به تمام واحدهای سامانه:
+                      مرحله ۱ — بررسی اولیه پرونده توسط کارشناس آموزش و ارجاع به مدیر گروه رشته (تأیید گزارش ۱۰۵۰ گلستان):
                     </label>
                     <div className="flex flex-col sm:flex-row gap-2">
                       <input
@@ -594,7 +714,7 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
                         className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
                       >
                         <Send className="w-3.5 h-3.5" />
-                        <span>تایید واحدها و ارسال به کلیه واحدها</span>
+                        <span>تایید و ارجاع به مدیر گروه رشته</span>
                       </button>
                       <button
                         type="button"
@@ -603,6 +723,58 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
                       >
                         <XCircle className="w-3.5 h-3.5" />
                         <span>رد درخواست</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* بخش اقدام مدیر گروه رشته (مرحله دوم — تأیید گزارش ۱۰۵۰ سامانه گلستان) */}
+                {isDeptHeadStage2 && (
+                  <div className="pt-3 border-t border-indigo-200 dark:border-indigo-800 space-y-3 bg-indigo-50/50 dark:bg-indigo-950/20 p-3.5 rounded-2xl">
+                    <div className="text-xs font-black text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                      <span>مرحله ۲ — تأییدیه مدیر گروه رشته (تطبیق واحدهای سرفصل با گزارش ۱۰۵۰ سامانه گلستان)</span>
+                    </div>
+
+                    <label className="flex items-start gap-2.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(report1050ById[c.id])}
+                        onChange={(e) =>
+                          setReport1050ById((prev) => ({ ...prev, [c.id]: e.target.checked }))
+                        }
+                        className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0"
+                      />
+                      <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 leading-relaxed">
+                        تأیید می‌کنم دانشجو <strong>«{c.studentName}»</strong> تمامی واحدهای الزامی سرفصل رشته{' '}
+                        <strong>{c.studentFieldOfStudy}</strong> را طبق{' '}
+                        <strong className="text-indigo-700 dark:text-indigo-300">گزارش ۱۰۵۰ سامانه گلستان</strong> با موفقیت گذرانده است.
+                      </span>
+                    </label>
+
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        value={noteById[c.id] || ''}
+                        onChange={(e) => setNoteById((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                        placeholder="توضیحات مدیر گروه (در صورت رد / کسری واحد در گزارش ۱۰۵۰، ذکر علت الزامی است)..."
+                        className="flex-1 px-3 py-2 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleDeptHeadGateDecision(c, 'approved')}
+                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold inline-flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>تأیید گزارش ۱۰۵۰ و ارسال به ۱۲ واحد</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeptHeadGateDecision(c, 'rejected')}
+                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>رد (نقص سرفصل)</span>
                       </button>
                     </div>
                   </div>
@@ -701,10 +873,14 @@ export const GraduationClearanceReviewPanel: React.FC<GraduationClearanceReviewP
                   </div>
                 )}
 
-                {unitRole === 'admin' && c.status === 'pending_education' && (
+                {unitRole === 'admin' && (c.status === 'pending_education' || c.status === 'pending_dept_head') && (
                   <div className="text-[11px] text-amber-700 dark:text-amber-300 flex items-center gap-1.5 font-bold">
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>این پرونده در صف تایید اولیه کارشناس آموزش (بررسی گذراندن واحدهای درسی) قرار دارد.</span>
+                    <span>
+                      {c.status === 'pending_education'
+                        ? 'این پرونده در صف تأیید اولیه کارشناس آموزش (مرحله ۱) قرار دارد.'
+                        : 'این پرونده در صف تأیید مدیر گروه رشته جهت انطباق سرفصل با گزارش ۱۰۵۰ سامانه گلستان (مرحله ۲) قرار دارد.'}
+                    </span>
                   </div>
                 )}
               </div>

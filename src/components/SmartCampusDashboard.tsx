@@ -115,6 +115,7 @@ export const SmartCampusDashboard: React.FC<SmartCampusDashboardProps> = ({
     return Storage.getGraduationClearances().filter(
       (c) =>
         c.educationGateStatus === 'approved' &&
+        c.status === 'in_clearance' &&
         (c.units?.smart_campus?.status || 'pending') === 'pending'
     ).length;
   }, [refreshTick]);

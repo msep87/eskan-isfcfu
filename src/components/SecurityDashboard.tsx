@@ -748,6 +748,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                 badge: Storage.getGraduationClearances().filter(
                   (c) =>
                     c.educationGateStatus === 'approved' &&
+                    c.status === 'in_clearance' &&
                     (c.units?.security?.status || 'pending') === 'pending'
                 ).length,
                 badgeTone: 'rose',

@@ -35,6 +35,7 @@ import { StudentGuestRequestPanel } from './StudentGuestRequestPanel';
 import { StudentSurveyPanel } from './StudentSurveyPanel';
 import { StudentLibraryPanel } from './StudentLibraryPanel';
 import { StudentGraduationClearancePanel } from './StudentGraduationClearancePanel';
+import { AcademicWorkflowPanel } from './AcademicWorkflowPanel';
 import { CommunityChatHub } from './CommunityChatHub';
 import { ImportantAnnouncementsWidget } from './ImportantAnnouncementsWidget';
 import {
@@ -111,7 +112,13 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onOpenUserGuide,
 }) => {
   // تب‌های داشبورد
-  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections' | 'library' | 'clearance' | 'community_chat' | 'portals'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections' | 'library' | 'academic_requests' | 'clearance' | 'community_chat' | 'portals'>('overview');
+  const myActiveAcademicRequestsCount = Storage.getAcademicWorkflowRequests().filter(
+    (r) =>
+      r.studentId === student.studentId &&
+      r.currentStage !== 'completed' &&
+      r.currentStage !== 'rejected'
+  ).length;
   const activeStudentPortals = resolveStudentPortals(settings.studentPortals).filter(
     (p) => p.isActive !== false
   );
@@ -682,6 +689,23 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('academic_requests')}
+          className={`flex-1 min-w-[210px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+            activeTab === 'academic_requests'
+              ? 'bg-indigo-700 text-white shadow-indigo-700/20'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <ClipboardList className={`w-4 h-4 ${activeTab === 'academic_requests' ? 'text-white' : 'text-indigo-600'}`} />
+          <span>درخواست‌های آموزشی (مدیر گروه / آموزش)</span>
+          {myActiveAcademicRequestsCount > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-200 font-black">
+              {myActiveAcademicRequestsCount.toLocaleString('fa-IR')} در جریان
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab('clearance')}
           className={`flex-1 min-w-[200px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
             activeTab === 'clearance'
@@ -695,11 +719,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
               myClearance.status === 'completed'
                 ? 'bg-emerald-500 text-white'
-                : myClearance.status === 'rejected_education'
+                : myClearance.status === 'rejected_education' || myClearance.status === 'rejected_dept_head'
                 ? 'bg-rose-500 text-white'
                 : 'bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300'
             }`}>
-              {myClearance.status === 'completed' ? 'تکمیل (آماده چاپ)' : myClearance.status === 'rejected_education' ? 'نیازمند اصلاح' : 'در جریان'}
+              {myClearance.status === 'completed'
+                ? 'تکمیل (آماده چاپ)'
+                : myClearance.status === 'rejected_education' || myClearance.status === 'rejected_dept_head'
+                ? 'نیازمند اصلاح'
+                : 'در جریان'}
             </span>
           )}
         </button>
@@ -2024,6 +2052,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       {/* تب کتابخانه و پژوهش دانشجو */}
       {activeTab === 'library' && (
         <StudentLibraryPanel student={student} onDataChange={onRefreshData} />
+      )}
+
+      {/* تب درخواست‌های آموزشی و گردش کار با مدیر گروه و کارشناس آموزش */}
+      {activeTab === 'academic_requests' && (
+        <AcademicWorkflowPanel mode="student" student={student} onDataChange={onRefreshData} />
       )}
 
       {/* تب تسویه حساب الکترونیک فراغت از تحصیل */}

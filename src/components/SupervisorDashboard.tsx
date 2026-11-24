@@ -986,7 +986,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
         ).length;
         const shiftReportsCount = Storage.getShiftReports().length;
         const pendingClearanceCount = Storage.getGraduationClearances().filter(
-          (c) => c.educationGateStatus === 'approved' && (c.units?.supervisor?.status || 'pending') === 'pending'
+          (c) => c.educationGateStatus === 'approved' && c.status === 'in_clearance' && (c.units?.supervisor?.status || 'pending') === 'pending'
         ).length;
 
         return (

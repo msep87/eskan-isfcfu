@@ -59,7 +59,6 @@ import {
 import { canRoleUseLiveVoiceCall, makeStaffDmRoomId } from './utils/communityStickers';
 import { Navbar } from './components/Navbar';
 import { JalaliLiveClockBar } from './components/JalaliLiveClockBar';
-import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { NotificationCenterModal } from './components/NotificationCenterModal';
 import { ActiveSessionsModal } from './components/ActiveSessionsModal';
@@ -96,14 +95,13 @@ const WarehouseDashboard = lazyWithRetry(() => import('./components/WarehouseDas
 const ProcurementDashboard = lazyWithRetry(() => import('./components/ProcurementDashboard').then((m) => ({ default: m.ProcurementDashboard })));
 const CounselorDashboard = lazyWithRetry(() => import('./components/CounselorDashboard').then((m) => ({ default: m.CounselorDashboard })));
 const FinanceDashboard = lazyWithRetry(() => import('./components/FinanceDashboard').then((m) => ({ default: m.FinanceDashboard })));
-const EducationDashboard = lazyWithRetry(() => import('./components/EducationDashboard').then((m) => ({ default: m.EducationDashboard })));
+const AcademicDeputyHub = lazyWithRetry(() => import('./components/AcademicDeputyHub').then((m) => ({ default: m.AcademicDeputyHub })));
 const CulturalDashboard = lazyWithRetry(() => import('./components/CulturalDashboard').then((m) => ({ default: m.CulturalDashboard })));
 const StudentAffairsDashboard = lazyWithRetry(() => import('./components/StudentAffairsDashboard').then((m) => ({ default: m.StudentAffairsDashboard })));
 const SecurityDashboard = lazyWithRetry(() => import('./components/SecurityDashboard').then((m) => ({ default: m.SecurityDashboard })));
 const ViceDeanDashboard = lazyWithRetry(() => import('./components/ViceDeanDashboard').then((m) => ({ default: m.ViceDeanDashboard })));
 const LibraryDashboard = lazyWithRetry(() => import('./components/LibraryDashboard').then((m) => ({ default: m.LibraryDashboard })));
 const SmartCampusDashboard = lazyWithRetry(() => import('./components/SmartCampusDashboard').then((m) => ({ default: m.SmartCampusDashboard })));
-const GraduationDashboard = lazyWithRetry(() => import('./components/GraduationDashboard').then((m) => ({ default: m.GraduationDashboard })));
 import { resolveFontCssFamily } from './utils/fonts';
 import {
   DEFAULT_HOME_NOTES_TITLE,
@@ -132,6 +130,8 @@ import {
   MessageCircle,
   RotateCcw,
   UserCheck,
+  Pin,
+  LogIn,
 } from 'lucide-react';
 
 function getImpersonatedUserMeta(user: NonNullable<CurrentUser>): {
@@ -1318,23 +1318,15 @@ export default function App() {
         );
       })()}
 
-      {/* بنر اطلاعیه سراسری در بالای صفحه (+ تاریخ شمسی و ساعت زنده در حالت ورود کاربر) */}
-      {(settings.announcementBanner || currentUser) && (
+      {/* بنر اطلاعیه سراسری و تاریخ شمسی زنده — فقط پس از ورود کاربر (در صفحه اصلی حذف شده است) */}
+      {currentUser && (
         <div className="bg-gradient-to-r from-teal-600 via-teal-700 to-cyan-600 text-white text-xs py-2 px-3 sm:px-6 font-bold shadow-xs">
-          <div
-            className={`max-w-7xl mx-auto flex flex-wrap items-center gap-2 ${
-              currentUser ? 'justify-between' : 'justify-center'
-            }`}
-          >
-            <div
-              className={`flex items-center gap-2 min-w-0 ${
-                currentUser ? 'justify-start flex-1' : 'justify-center'
-              }`}
-            >
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0 justify-start flex-1">
               {settings.announcementBanner ? (
                 <>
                   <Bell className="w-4 h-4 text-amber-300 shrink-0" />
-                  <span className={currentUser ? 'leading-relaxed text-right' : 'text-center'}>
+                  <span className="leading-relaxed text-right">
                     {settings.announcementBanner}
                   </span>
                 </>
@@ -1344,7 +1336,7 @@ export default function App() {
                 </span>
               )}
             </div>
-            {currentUser && <JalaliLiveClockBar variant="ribbon" />}
+            <JalaliLiveClockBar variant="ribbon" />
           </div>
         </div>
       )}
@@ -1367,17 +1359,15 @@ export default function App() {
               ? 'grid-cols-1 sm:grid-cols-2'
               : 'grid-cols-1 sm:grid-cols-3';
 
-          return (
-          <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-300">
-            {/* نوار تاریخ شمسی و ساعت زنده در بالای صفحه اول */}
-            <JalaliLiveClockBar
-              academicYear={settings.currentAcademicYear}
-              semester={settings.currentSemester}
-            />
+          const homeAnnouncementsTitle =
+            settings.homeAnnouncementsTitle?.trim() ||
+            'اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشجویی و سراها';
 
-            {/* هیرو بنر رسمی با آرم دانشگاه فرهنگیان */}
+          return (
+          <div className="space-y-5 sm:space-y-7 animate-in fade-in duration-300">
+            {/* هیرو بنر رسمی و فشرده با آرم دانشگاه فرهنگیان */}
             <div
-              className={`relative rounded-3xl overflow-hidden ${heroBanner.bgClassName} text-white p-8 sm:p-12 shadow-2xl transition-all duration-300`}
+              className={`relative rounded-3xl overflow-hidden ${heroBanner.bgClassName} text-white px-6 py-6 sm:px-9 sm:py-8 shadow-2xl transition-all duration-300`}
               style={heroBanner.style}
             >
               {heroBanner.imageUrl && (
@@ -1392,12 +1382,11 @@ export default function App() {
                 <div className="absolute inset-0 bg-gradient-to-l from-slate-950/75 via-slate-950/55 to-slate-950/35 pointer-events-none" />
               )}
               <div className="max-w-3xl relative z-10">
-                
                 {/* آرم دانشگاه و نشان رسمی (در صورت بارگذاری توسط مدیر) */}
-                <div className="flex items-center gap-4 mb-5">
+                <div className="flex items-center gap-3.5 mb-3.5">
                   {settings.customLogoUrl && (
-                    <div className="bg-white p-2 rounded-2xl shadow-lg border border-white/40 shrink-0">
-                      <FarhangianEmblem size={74} customLogoUrl={settings.customLogoUrl} />
+                    <div className="bg-white p-1.5 rounded-2xl shadow-lg border border-white/40 shrink-0">
+                      <FarhangianEmblem size={64} customLogoUrl={settings.customLogoUrl} />
                     </div>
                   )}
                   <div>
@@ -1405,64 +1394,47 @@ export default function App() {
                       <School className="w-4 h-4 text-amber-300" />
                       <span>دانشگاه فرهنگیان استان اصفهان</span>
                     </div>
-                    <div className="text-xs text-teal-200 font-semibold">
+                    <div className="text-xs text-teal-100/95 font-semibold">
                       مدیریت یکپارچه سراهای دانشجویی، آموزش، مالی، کتابخانه، هوشمندسازی و امور دانشجویی • سال تحصیلی {settings.currentAcademicYear}
                     </div>
                   </div>
                 </div>
 
-                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black leading-tight tracking-tight mb-6">
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black leading-tight tracking-tight mb-5">
                   سامانه جامع خدمات دانشجویی
                 </h1>
 
                 <div className="flex flex-wrap items-center gap-3">
                   <button
+                    type="button"
                     onClick={() => setIsLoginModalOpen(true)}
-                    className="px-7 py-3.5 bg-white text-teal-900 hover:bg-teal-50 rounded-2xl font-black text-sm shadow-xl transition flex items-center gap-2 cursor-pointer hover:scale-105"
+                    className="group px-7 py-3.5 bg-gradient-to-l from-amber-300 via-amber-200 to-white hover:from-amber-200 hover:to-white text-slate-950 rounded-2xl font-black text-sm sm:text-base shadow-2xl shadow-black/30 ring-2 ring-white/80 hover:ring-amber-300 transition-all duration-200 flex items-center gap-2.5 cursor-pointer hover:scale-[1.02]"
                   >
-                    <span>ورود به سامانه جامع خدمات دانشجویی (دانشجو / کارکنان / مدیر)</span>
-                    <ArrowRight className="w-4 h-4 rotate-180" />
-                  </button>
-
-                  <button
-                    onClick={() => handleOpenUserGuide()}
-                    className="px-5 py-3.5 bg-teal-900/70 hover:bg-teal-900 text-teal-100 hover:text-white rounded-2xl font-bold text-xs sm:text-sm border border-white/20 transition flex items-center gap-2 cursor-pointer shadow-md"
-                  >
-                    <BookOpen className="w-4 h-4 text-amber-300" />
-                    <span>راهنمای متنی و تصویری کاربری (PDF)</span>
-                  </button>
-
-                  <PWAInstallButton variant="hero" />
-
-                  {/* وضعیت زمانی انتخاب واحد */}
-                  <div className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-teal-900/60 border border-white/15 text-xs text-teal-100 backdrop-blur-md">
-                    <Clock className="w-4 h-4 text-amber-300 shrink-0" />
-                    <span>
-                      {settings.selectionActive
-                        ? `بازه مجاز انتخاب اتاق: ${settings.selectionStartDate} تا ${settings.selectionEndDate}`
-                        : 'سامانه انتخاب اتاق در حال حاضر غیرفعال است'}
+                    <span className="p-1.5 rounded-xl bg-teal-800 text-white shadow-xs">
+                      <LogIn className="w-4 h-4" />
                     </span>
-                  </div>
+                    <span>ورود به سامانه (دانشجو / کارکنان / مدیران گروه / مدیر)</span>
+                    <ArrowRight className="w-4 h-4 rotate-180 text-teal-900 group-hover:-translate-x-1 transition-transform" />
+                  </button>
                 </div>
-
               </div>
 
               {/* طرح و المان گرافیکی زمینه */}
               <div className="hidden lg:block absolute left-8 top-1/2 -translate-y-1/2 opacity-20 pointer-events-none">
-                <Building2 className="w-72 h-72 text-white" />
+                <Building2 className="w-56 h-56 text-white" />
               </div>
             </div>
 
             {/* ۲. بخش اطلاعیه‌های عمومی سراها در صفحه اول (قابل مشاهده برای همه دانشجویان قبل از ورود) */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 mb-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
                 <div className="flex items-center gap-2.5">
                   <div className="p-2 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
                     <Bell className="w-5 h-5" />
                   </div>
                   <div>
                     <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white">
-                      اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشجویی و سراها
+                      {homeAnnouncementsTitle}
                     </h2>
                     <p className="text-xs text-slate-400 mt-0.5">
                       سال تحصیلی {settings.currentAcademicYear} • {settings.currentSemester}
@@ -1471,12 +1443,67 @@ export default function App() {
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => setIsLoginModalOpen(true)}
-                  className="hidden sm:inline-flex items-center gap-1.5 text-xs font-bold text-teal-600 hover:text-teal-700 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold shadow-xs transition cursor-pointer"
                 >
+                  <LogIn className="w-3.5 h-3.5" />
                   <span>ورود به حساب کاربری</span>
-                  <ArrowRight className="w-3.5 h-3.5 rotate-180" />
                 </button>
+              </div>
+
+              {/* اطلاعیه پین‌شده بازه مجاز انتخاب اتاق */}
+              <div
+                className={`mb-5 p-3.5 sm:p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 ${
+                  settings.selectionActive
+                    ? 'bg-teal-50/90 dark:bg-teal-950/40 border-teal-200 dark:border-teal-800/80 text-teal-950 dark:text-teal-100'
+                    : 'bg-amber-50/90 dark:bg-amber-950/35 border-amber-200 dark:border-amber-800/80 text-amber-950 dark:text-amber-100'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div
+                    className={`p-2 rounded-xl shrink-0 ${
+                      settings.selectionActive
+                        ? 'bg-teal-600 text-white'
+                        : 'bg-amber-500 text-white'
+                    }`}
+                  >
+                    <Pin className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                      <span
+                        className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
+                          settings.selectionActive
+                            ? 'bg-teal-700 text-white'
+                            : 'bg-amber-600 text-white'
+                        }`}
+                      >
+                        اطلاعیه پین‌شده
+                      </span>
+                      <span className="text-[11px] font-bold opacity-80">
+                        زمان‌بندی انتخاب اتاق سراهای دانشجویی
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs sm:text-sm font-extrabold">
+                      <Clock className="w-4 h-4 shrink-0 opacity-80" />
+                      <span>
+                        {settings.selectionActive
+                          ? `بازه مجاز انتخاب اتاق: ${settings.selectionStartDate} تا ${settings.selectionEndDate}`
+                          : 'سامانه انتخاب اتاق در حال حاضر غیرفعال است'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <span
+                  className={`text-[11px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
+                    settings.selectionActive
+                      ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-700'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  {settings.selectionActive ? 'در حال پذیرش' : 'غیرفعال'}
+                </span>
               </div>
 
               {/* فقط اطلاعیه‌های منتشر شده در صفحه اول نمایش داده می‌شوند */}
@@ -1729,10 +1756,11 @@ export default function App() {
           />
         )}
 
-        {/* ۹. در صورتی که کاربر کارشناس آموزش است (فقط پیام‌های آموزشی و اعلام مرخصی/اخراج به مدیر) */}
+        {/* ۹. داشبورد یکپارچه حوزه معاونت آموزشی (مدیران گروه و کارشناسان آموزش) */}
         {currentUser?.role === 'education' && (
-          <EducationDashboard
-            staff={currentUser.staff}
+          <AcademicDeputyHub
+            role="education"
+            educationStaff={currentUser.staff}
             students={students}
             messages={messages}
             settings={settings}
@@ -1843,13 +1871,16 @@ export default function App() {
           />
         )}
 
-        {/* ۱۶. در صورتی که کاربر واحد فارغ‌التحصیلان است */}
+        {/* ۱۶. داشبورد یکپارچه حوزه معاونت آموزشی (واحد فارغ‌التحصیلان) */}
         {currentUser?.role === 'graduation' && (
-          <GraduationDashboard
-            staff={currentUser.staff}
+          <AcademicDeputyHub
+            role="graduation"
+            graduationStaff={currentUser.staff}
+            students={students}
             messages={messages}
             settings={settings}
-            onDataChange={refreshAllData}
+            cloudSyncTick={cloudSyncTick}
+            onRefreshData={refreshAllData}
             onOpenMessages={() => setIsMessagesModalOpen(true)}
             onOpenUserGuide={(r) => handleOpenUserGuide(r || 'graduation')}
           />

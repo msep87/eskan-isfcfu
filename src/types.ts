@@ -803,6 +803,7 @@ export interface AppSettings {
   heroBgMode?: 'default' | 'color' | 'image'; // حالت پس‌زمینه بنر اصلی صفحه اول
   heroBgColor?: string; // رنگ دلخواه پس‌زمینه بنر اصلی صفحه اول
   heroBgImageUrl?: string; // تصویر دلخواه پس‌زمینه بنر اصلی صفحه اول
+  homeAnnouncementsTitle?: string; // عنوان قابل ویرایش بخش اطلاعیه‌ها در صفحه اصلی سامانه
   homeNotesTitle?: string; // عنوان بخش نکات مهم انتخاب اتاق و اسکان صفحه اول
   homeNotes?: HomeNoteItem[]; // کارت‌های بخش نکات مهم صفحه اول
   studentSecondaryEditEnabled?: boolean; // اجازه ویرایش ثانویه اطلاعات و عکس توسط دانشجو پس از تکمیل اولیه پرونده
@@ -1482,6 +1483,8 @@ export interface ClearanceUnitApproval {
 export type GraduationClearanceStatus =
   | 'pending_education'
   | 'rejected_education'
+  | 'pending_dept_head'
+  | 'rejected_dept_head'
   | 'in_clearance'
   | 'completed';
 
@@ -1509,6 +1512,13 @@ export interface GraduationClearanceRequest {
   educationReviewerName?: string;
   educationReviewedAt?: string;
   educationNote?: string;
+  // دروازه دوم: تأیید مدیر گروه رشته (انطباق واحدهای الزامی سرفصل با گزارش ۱۰۵۰ سامانه گلستان)
+  deptHeadGateStatus?: ClearanceUnitDecisionStatus;
+  deptHeadReviewerId?: string;
+  deptHeadReviewerName?: string;
+  deptHeadReviewedAt?: string;
+  deptHeadNote?: string;
+  deptHeadReport1050Verified?: boolean;
   units: Record<ClearanceUnitRole, ClearanceUnitApproval>;
   completedAt?: string;
   // خاتمه و تحویل نهایی توسط واحد فارغ‌التحصیلان
@@ -1518,6 +1528,88 @@ export interface GraduationClearanceRequest {
   graduationFinalizedById?: string;
   graduationFinalNote?: string;
   graduationArchiveNumber?: string;
+}
+
+// -------------------------------------------------------------
+// گردش کار و ارجاعات یکپارچه حوزه معاونت آموزشی
+// (دانشجو ↔ مدیر گروه تخصصی/رشته ↔ کارشناس آموزش ↔ کارشناس فارغ‌التحصیلان)
+// -------------------------------------------------------------
+export type AcademicWorkflowRequestCategory =
+  | 'graduation_action'
+  | 'course_equivalency'
+  | 'course_prerequisite'
+  | 'unit_registration'
+  | 'grade_review'
+  | 'academic_leave'
+  | 'certificate'
+  | 'other';
+
+export type AcademicWorkflowStage =
+  | 'pending_dept_head'
+  | 'pending_expert_action'
+  | 'pending_graduation'
+  | 'completed'
+  | 'rejected';
+
+export type AcademicWorkflowInitiatorRole = 'student' | 'education_expert' | 'department_head';
+
+export type AcademicWorkflowTargetMode =
+  | 'major_dept_head'
+  | 'course_dept_head'
+  | 'education_expert';
+
+export type AcademicWorkflowActorRole =
+  | 'student'
+  | 'education_expert'
+  | 'department_head'
+  | 'graduation'
+  | 'admin';
+
+export interface AcademicWorkflowStep {
+  id: string;
+  timestamp: string;
+  actorRole: AcademicWorkflowActorRole;
+  actorId: string;
+  actorName: string;
+  actionLabel: string;
+  fromStage?: AcademicWorkflowStage;
+  toStage: AcademicWorkflowStage;
+  targetStaffId?: string;
+  targetStaffName?: string;
+  directive?: string;
+  note?: string;
+}
+
+export interface AcademicWorkflowRequest {
+  id: string;
+  trackingCode: string; // مثلاً ACW-101
+  studentId: string;
+  studentName: string;
+  studentFieldOfStudy: string;
+  studentEntryTerm: string;
+  studentPhone?: string;
+  category: AcademicWorkflowRequestCategory;
+  subject: string;
+  description: string;
+  courseTitle?: string; // نام درس تخصصی (وقتی به مدیر گروه تخصصی یک درس ارسال می‌شود)
+  initiatorRole: AcademicWorkflowInitiatorRole;
+  initiatorId: string;
+  initiatorName: string;
+  initialTargetMode: AcademicWorkflowTargetMode;
+  autoRouteToGraduationOnDeptApproval?: boolean; // اگر کارشناس آموزش به مدیر گروه ارجاع داده، پس از تأیید خودکار به فارغ‌التحصیلان برود
+  currentStage: AcademicWorkflowStage;
+  assignedDeptHeadId?: string;
+  assignedDeptHeadName?: string;
+  assignedExpertId?: string;
+  assignedExpertName?: string;
+  assignedGraduationStaffId?: string;
+  assignedGraduationStaffName?: string;
+  deptHeadDirective?: string;
+  finalActionNote?: string;
+  finalLetterNumber?: string;
+  createdAt: string;
+  updatedAt: string;
+  steps: AcademicWorkflowStep[];
 }
 
 // -------------------------------------------------------------

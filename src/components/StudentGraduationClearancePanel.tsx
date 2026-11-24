@@ -108,7 +108,7 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
                 تسویه حساب الکترونیک فراغت از تحصیل
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                درخواست شما ابتدا جهت تایید گذراندن کلیه واحدهای درسی به کارشناس آموزش ارسال می‌شود. پس از تایید آموزش، فرم عکس‌دار شما به صورت خودکار به تمام ۱۲ واحد دانشگاه ارسال شده و پس از تایید همه واحدها می‌توانید نسخه رسمی را چاپ و به اداره امور فارغ‌التحصیلان تحویل دهید.
+                درخواست شما ابتدا توسط کارشناس آموزش بررسی شده، سپس برای <strong>مدیر گروه رشته</strong> ارسال می‌شود تا گذراندن کلیه واحدهای الزامی سرفصل را طبق <strong>گزارش ۱۰۵۰ سامانه گلستان</strong> تأیید کند. پس از این دو تأیید، فرم عکس‌دار شما به‌صورت خودکار به تمام ۱۲ واحد دانشگاه ارسال می‌گردد.
               </p>
             </div>
           </div>
@@ -125,14 +125,16 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
           )}
         </div>
 
-        {/* مراحل سه‌گانه گردش کار */}
-        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+        {/* مراحل چهارگانه گردش کار */}
+        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
           <div
             className={`p-3 rounded-xl border flex items-center gap-2.5 ${
               myClearance?.educationGateStatus === 'approved'
                 ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
                 : myClearance?.status === 'pending_education'
                 ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200'
+                : myClearance?.status === 'rejected_education'
+                ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
                 : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
             }`}
           >
@@ -141,7 +143,29 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
             </span>
             <div>
               <div className="font-extrabold">تایید کارشناس آموزش</div>
-              <div className="text-[11px] opacity-80">بررسی گذراندن کلیه واحدهای درسی</div>
+              <div className="text-[11px] opacity-80">بررسی اولیه پرونده آموزشی</div>
+            </div>
+          </div>
+
+          <div
+            className={`p-3 rounded-xl border flex items-center gap-2.5 ${
+              myClearance?.deptHeadGateStatus === 'approved' ||
+              myClearance?.status === 'in_clearance' ||
+              myClearance?.status === 'completed'
+                ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                : myClearance?.status === 'pending_dept_head'
+                ? 'bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800 text-indigo-800 dark:text-indigo-200'
+                : myClearance?.status === 'rejected_dept_head'
+                ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            <span className="w-6 h-6 rounded-full bg-white dark:bg-slate-900 border border-current flex items-center justify-center font-black shrink-0">
+              ۲
+            </span>
+            <div>
+              <div className="font-extrabold">تایید مدیر گروه رشته</div>
+              <div className="text-[11px] opacity-80">انطباق سرفصل (گزارش ۱۰۵۰ گلستان)</div>
             </div>
           </div>
 
@@ -155,7 +179,7 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
             }`}
           >
             <span className="w-6 h-6 rounded-full bg-white dark:bg-slate-900 border border-current flex items-center justify-center font-black shrink-0">
-              ۲
+              ۳
             </span>
             <div>
               <div className="font-extrabold">گردش در ۱۲ واحد سامانه</div>
@@ -173,7 +197,7 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
             }`}
           >
             <span className="w-6 h-6 rounded-full bg-white dark:bg-slate-900 border border-current flex items-center justify-center font-black shrink-0">
-              ۳
+              ۴
             </span>
             <div>
               <div className="font-extrabold">
@@ -233,19 +257,27 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
         </div>
       )}
 
-      {/* فرم ثبت درخواست (وقتی هنوز ثبت نشده یا توسط آموزش رد شده) */}
-      {(!myClearance || myClearance.status === 'rejected_education') && (
+      {/* فرم ثبت درخواست (وقتی هنوز ثبت نشده یا توسط کارشناس آموزش / مدیر گروه رد شده) */}
+      {(!myClearance || myClearance.status === 'rejected_education' || myClearance.status === 'rejected_dept_head') && (
         <form
           onSubmit={handleSubmit}
           className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4"
         >
-          {myClearance?.status === 'rejected_education' && (
+          {(myClearance?.status === 'rejected_education' || myClearance?.status === 'rejected_dept_head') && (
             <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-200 space-y-1">
               <div className="font-black flex items-center gap-1.5">
                 <XCircle className="w-4 h-4" />
-                <span>درخواست قبلی شما توسط واحد آموزش تایید نشد:</span>
+                <span>
+                  {myClearance.status === 'rejected_dept_head'
+                    ? 'درخواست قبلی شما در مرحله بررسی مدیر گروه رشته (انطباق گزارش ۱۰۵۰ گلستان) تایید نشد:'
+                    : 'درخواست قبلی شما توسط کارشناس آموزش تایید نشد:'}
+                </span>
               </div>
-              <p className="leading-relaxed">{myClearance.educationNote}</p>
+              <p className="leading-relaxed">
+                {myClearance.status === 'rejected_dept_head'
+                  ? myClearance.deptHeadNote
+                  : myClearance.educationNote}
+              </p>
               <p className="text-[11px] opacity-80">
                 پس از رفع مورد اعلام‌شده، می‌توانید درخواست را مجدداً ارسال نمایید.
               </p>
@@ -344,7 +376,9 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
             >
               <Send className="w-4 h-4" />
               <span>
-                {myClearance?.status === 'rejected_education'
+                {myClearance?.status === 'rejected_dept_head'
+                  ? 'ارسال مجدد درخواست به مدیر گروه رشته (گزارش ۱۰۵۰)'
+                  : myClearance?.status === 'rejected_education'
                   ? 'ارسال مجدد درخواست به کارشناس آموزش'
                   : 'ثبت و ارسال درخواست به کارشناس آموزش'}
               </span>
@@ -354,7 +388,7 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
       )}
 
       {/* پیگیری زنده پرونده تسویه حساب */}
-      {myClearance && myClearance.status !== 'rejected_education' && (
+      {myClearance && myClearance.status !== 'rejected_education' && myClearance.status !== 'rejected_dept_head' && (
         <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="space-y-1">
@@ -384,7 +418,12 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
             ) : myClearance.status === 'pending_education' ? (
               <span className="px-3 py-1.5 rounded-xl bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 text-xs font-bold inline-flex items-center gap-1.5">
                 <Clock className="w-4 h-4" />
-                در انتظار بررسی و تایید کارشناس آموزش
+                مرحله ۱: در انتظار بررسی کارشناس آموزش
+              </span>
+            ) : myClearance.status === 'pending_dept_head' ? (
+              <span className="px-3 py-1.5 rounded-xl bg-indigo-100 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200 text-xs font-bold inline-flex items-center gap-1.5">
+                <Clock className="w-4 h-4" />
+                مرحله ۲: در انتظار تأیید مدیر گروه (گزارش ۱۰۵۰ گلستان)
               </span>
             ) : (
               <span className="px-3 py-1.5 rounded-xl bg-blue-100 dark:bg-blue-950/50 text-blue-800 dark:text-blue-300 text-xs font-bold inline-flex items-center gap-1.5">
@@ -418,7 +457,21 @@ export const StudentGraduationClearancePanel: React.FC<StudentGraduationClearanc
 
           {myClearance.status === 'pending_education' ? (
             <div className="p-5 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/70 text-xs text-amber-900 dark:text-amber-200 leading-relaxed">
-              پرونده شما با کد رهگیری <span className="font-mono font-bold">{myClearance.trackingCode}</span> به کارتابل <strong>کارشناس آموزش</strong> ارسال شده است. به‌محض تایید گذراندن کلیه واحدهای درسی توسط آموزش، فرم عکس‌دار شما به‌صورت خودکار به تمامی واحدهای دانشگاه ارجاع می‌شود و جدول گردش کار در همین صفحه فعال خواهد شد.
+              پرونده شما با کد رهگیری <span className="font-mono font-bold">{myClearance.trackingCode}</span> به کارتابل <strong>کارشناس آموزش</strong> ارسال شده است. پس از بررسی کارشناس آموزش، جهت تأیید انطباق واحدهای الزامی سرفصل با <strong>گزارش ۱۰۵۰ سامانه گلستان</strong> به کارتابل <strong>مدیر گروه رشته</strong> ارجاع می‌شود.
+            </div>
+          ) : myClearance.status === 'pending_dept_head' ? (
+            <div className="p-5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/25 border border-indigo-200 dark:border-indigo-800/70 text-xs text-indigo-900 dark:text-indigo-200 leading-relaxed space-y-2">
+              <div className="font-black text-sm">
+                بررسی کارشناس آموزش تأیید شد — پرونده هم‌اکنون در کارتابل مدیر گروه رشته است.
+              </div>
+              <p>
+                مدیر گروه رشته در حال بررسی گذراندن کلیه واحدهای الزامی سرفصل شما طبق <strong>گزارش ۱۰۵۰ سامانه گلستان</strong> است. به‌محض تأیید مدیر گروه، فرم عکس‌دار شما به‌صورت خودکار به تمامی ۱۲ واحد دانشگاه ارسال می‌گردد.
+              </p>
+              {myClearance.educationReviewerName && (
+                <p className="text-[11px] opacity-85">
+                  تأیید کارشناس آموزش: <strong>{myClearance.educationReviewerName}</strong> ({myClearance.educationReviewedAt})
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-4">

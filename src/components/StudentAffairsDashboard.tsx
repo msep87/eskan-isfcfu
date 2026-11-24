@@ -1009,6 +1009,7 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
                 badge: Storage.getGraduationClearances().filter(
                   (c) =>
                     c.educationGateStatus === 'approved' &&
+                    c.status === 'in_clearance' &&
                     (c.units?.student_affairs?.status || 'pending') === 'pending'
                 ).length,
                 badgeTone: 'rose',

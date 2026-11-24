@@ -150,6 +150,7 @@ export const LibraryDashboard: React.FC<LibraryDashboardProps> = ({
     return Storage.getGraduationClearances().filter(
       (c) =>
         c.educationGateStatus === 'approved' &&
+        c.status === 'in_clearance' &&
         (c.units?.library?.status || 'pending') === 'pending'
     ).length;
   }, [refreshTick]);
