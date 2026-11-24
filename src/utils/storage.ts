@@ -22,6 +22,7 @@ import {
   InventoryItem,
   InventoryTransaction,
   WarehouseRequest,
+  WarehouseRequesterRole,
   ProcurementRequest,
   ProcurementRequestStatus,
   SupervisorShiftSchedule,
@@ -2566,6 +2567,18 @@ export function normalizeAssignedFieldsList(fields?: string[]): string[] {
   return result;
 }
 
+export function isEducationDepartmentHead(
+  staff?: Pick<EducationStaff, 'educationRole'> | null
+): boolean {
+  return staff?.educationRole === 'department_head';
+}
+
+export function getEducationStaffRoleLabel(
+  staff?: Pick<EducationStaff, 'educationRole'> | null
+): string {
+  return isEducationDepartmentHead(staff) ? 'مدیر گروه آموزشی' : 'کارشناس آموزش';
+}
+
 export function doesEducationStaffCoverField(
   staff: EducationStaff,
   fieldOfStudy?: string
@@ -2577,14 +2590,44 @@ export function doesEducationStaffCoverField(
   return assigned.some((f) => normalizePersianSearch(f) === target);
 }
 
-export function resolveEducationStaffForField(
-  fieldOfStudy: string | undefined,
+export function doEducationStaffShareField(a: EducationStaff, b: EducationStaff): boolean {
+  const fieldsA = normalizeAssignedFieldsList(a.assignedFields);
+  const fieldsB = normalizeAssignedFieldsList(b.assignedFields);
+  if (fieldsA.length === 0 || fieldsB.length === 0) return true;
+  const setA = new Set(fieldsA.map((f) => normalizePersianSearch(f)));
+  return fieldsB.some((f) => setA.has(normalizePersianSearch(f)));
+}
+
+export function getRelatedEducationColleagues(
+  staff: EducationStaff,
   allEducationStaff: EducationStaff[]
 ): EducationStaff[] {
-  const activeStaff = allEducationStaff.filter(
+  const activeOthers = allEducationStaff.filter(
+    (e) => e.id !== staff.id && e.status !== 'inactive' && e.isActive !== false
+  );
+  const staffIsHead = isEducationDepartmentHead(staff);
+  // برای مدیر گروه: اولویت با کارشناسان آموزش هم‌رشته؛ برای کارشناس آموزش: اولویت با مدیران گروه هم‌رشته
+  const targetRoleList = activeOthers.filter((e) =>
+    staffIsHead ? !isEducationDepartmentHead(e) : isEducationDepartmentHead(e)
+  );
+  const matched = targetRoleList.filter((e) => doEducationStaffShareField(staff, e));
+  return matched.length > 0 ? matched : targetRoleList;
+}
+
+export function resolveEducationStaffForField(
+  fieldOfStudy: string | undefined,
+  allEducationStaff: EducationStaff[],
+  roleFilter: 'all' | 'expert' | 'department_head' = 'all'
+): EducationStaff[] {
+  const roleScoped = allEducationStaff.filter((e) => {
+    if (roleFilter === 'department_head') return isEducationDepartmentHead(e);
+    if (roleFilter === 'expert') return !isEducationDepartmentHead(e);
+    return true;
+  });
+  const activeStaff = roleScoped.filter(
     (e) => e.status !== 'inactive' && e.isActive !== false
   );
-  const pool = activeStaff.length > 0 ? activeStaff : allEducationStaff;
+  const pool = activeStaff.length > 0 ? activeStaff : roleScoped;
   const target = normalizePersianSearch(fieldOfStudy || '');
   if (target) {
     const dedicated = pool.filter((e) => {
@@ -2605,10 +2648,10 @@ export function doesEducationStaffMatchMessage(
   students: Student[]
 ): boolean {
   if (!staff || !msg) return false;
-  // پیام‌هایی که خود همین کارشناس ارسال کرده همیشه برای خودش قابل مشاهده است
+  // پیام‌هایی که خود همین کاربر آموزش (کارشناس یا مدیر گروه) ارسال کرده همیشه برای خودش قابل مشاهده است
   if (msg.senderId === staff.id) return true;
 
-  // اگر پیام اختصاصاً به یک کارشناس آموزش مشخص ارجاع شده باشد
+  // اگر پیام اختصاصاً به یک کارشناس آموزش یا مدیر گروه مشخص ارجاع شده باشد
   if (msg.targetEducationStaffId) {
     return msg.targetEducationStaffId === staff.id;
   }
@@ -2620,7 +2663,7 @@ export function doesEducationStaffMatchMessage(
 
   const assigned = normalizeAssignedFieldsList(staff.assignedFields);
 
-  // پیام‌های ارسال‌شده توسط دانشجو به واحد آموزش بر اساس رشته تحصیلی به کارشناس مربوطه ارجاع می‌شوند
+  // پیام‌های ارسال‌شده توسط دانشجو به واحد آموزش بر اساس رشته تحصیلی به کارشناس و مدیر گروه مربوطه ارجاع می‌شوند
   if (msg.senderRole === 'student' && (msg.receiverType === 'education' || msg.category === 'education')) {
     let studentField = (msg.senderFieldOfStudy || '').trim();
     if (!studentField) {
@@ -2629,7 +2672,7 @@ export function doesEducationStaffMatchMessage(
       studentField = (found?.fieldOfStudy || '').trim();
     }
     if (studentField) {
-      const matchedSpecialists = resolveEducationStaffForField(studentField, allEducationStaff);
+      const matchedSpecialists = resolveEducationStaffForField(studentField, allEducationStaff, 'all');
       if (matchedSpecialists.length > 0) {
         return matchedSpecialists.some((s) => s.id === staff.id);
       }
@@ -2641,8 +2684,15 @@ export function doesEducationStaffMatchMessage(
     return assigned.length === 0 || allEducationStaff.every((e) => normalizeAssignedFieldsList(e.assignedFields).length > 0);
   }
 
-  // پیام‌های ارسال‌شده توسط یک کارشناس دیگر به دانشجویان یک رشته خاص: فقط برای خود ارسال‌کننده یا کارشناس همان رشته
+  // پیام‌های ارسال‌شده توسط یک کاربر آموزش دیگر (کارشناس ↔ مدیر گروه یا ارسال به دانشجو/رشته)
   if (msg.senderRole === 'education' && msg.senderId !== staff.id) {
+    if (msg.receiverType === 'education') {
+      const senderStaff = allEducationStaff.find((e) => e.id === msg.senderId);
+      if (senderStaff) {
+        return doEducationStaffShareField(staff, senderStaff);
+      }
+      return true;
+    }
     if (msg.targetScope === 'field' && msg.targetFieldOfStudy) {
       return doesEducationStaffCoverField(staff, msg.targetFieldOfStudy);
     }
@@ -2650,7 +2700,7 @@ export function doesEducationStaffMatchMessage(
       const sid = normalizeAsciiDigits(msg.receiverId);
       const found = students.find((s) => normalizeAsciiDigits(s.studentId) === sid);
       if (found?.fieldOfStudy) {
-        const matched = resolveEducationStaffForField(found.fieldOfStudy, allEducationStaff);
+        const matched = resolveEducationStaffForField(found.fieldOfStudy, allEducationStaff, 'all');
         return matched.some((s) => s.id === staff.id);
       }
     }
@@ -7424,10 +7474,14 @@ export const Storage = {
       taskTrackingCode?: string;
       dormId: string;
       dormName: string;
+      requesterDepartment?: string;
+      requestLocation?: string;
       requestedByStaffId: string;
       requestedByStaffName: string;
-      requestedByRole: 'maintenance' | 'supervisor' | 'admin';
+      requestedByRole: WarehouseRequesterRole;
       itemTitle: string;
+      itemCategory?: string;
+      isCustomItem?: boolean;
       inventoryItemId?: string;
       quantityRequested: number;
       unit: string;
@@ -7439,8 +7493,10 @@ export const Storage = {
     const codeNum = requests.length + 101;
     const requestCode = `W-${codeNum}`;
 
-    // اگر درخواست مستقیماً توسط سرپرست یا مدیر صادر شده باشد، نیازی به تأیید مجدد سرپرست نیست
-    const isAutoApproved = requestData.requestedByRole === 'supervisor' || requestData.requestedByRole === 'admin';
+    // درخواست‌های مستقیم کارکنان، سرپرستان و مدیر مستقیماً به کارتابل انبار ارسال می‌شوند؛
+    // فقط درخواست‌های متصل به مأموریت تأسیسات ابتدا جهت تأیید سرپرست ارسال می‌گردند
+    const isAutoApproved =
+      requestData.requestedByRole !== 'maintenance' || !requestData.taskId;
 
     const newReq: WarehouseRequest = {
       id: `wreq_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -7449,10 +7505,14 @@ export const Storage = {
       taskTrackingCode: requestData.taskTrackingCode,
       dormId: requestData.dormId,
       dormName: requestData.dormName,
+      requesterDepartment: requestData.requesterDepartment?.trim() || undefined,
+      requestLocation: requestData.requestLocation?.trim() || undefined,
       requestedByStaffId: requestData.requestedByStaffId,
       requestedByStaffName: requestData.requestedByStaffName,
       requestedByRole: requestData.requestedByRole,
-      itemTitle: requestData.itemTitle,
+      itemTitle: requestData.itemTitle.trim(),
+      itemCategory: requestData.itemCategory?.trim() || undefined,
+      isCustomItem: Boolean(requestData.isCustomItem),
       inventoryItemId: requestData.inventoryItemId,
       quantityRequested: requestData.quantityRequested,
       unit: requestData.unit,
@@ -7488,10 +7548,17 @@ export const Storage = {
       }
     }
 
+    Storage.addActivityLog({
+      category: 'warehouse',
+      action: 'ثبت درخواست اقلام از انبار',
+      details: `درخواست ${requestCode} برای «${newReq.itemTitle}» (${newReq.quantityRequested} ${newReq.unit}) توسط ${newReq.requestedByStaffName}${newReq.requestLocation ? ` — محل: ${newReq.requestLocation}` : ''} ثبت شد.`,
+      targetName: requestCode,
+    });
+
     return {
       success: true,
       message: isAutoApproved
-        ? `درخواست به انبار با کد رهگیری «${requestCode}» صادر و مستقیماً به کارتابل انبار ارسال شد.`
+        ? `درخواست به انبار با کد رهگیری «${requestCode}» ثبت و مستقیماً به کارتابل انبار ارسال شد.`
         : `درخواست کالا با کد رهگیری «${requestCode}» ثبت و جهت تأیید اولیه به کارتابل سرپرست ارسال گردید.`,
       request: newReq,
     };
@@ -9236,12 +9303,18 @@ export const Storage = {
       return { success: false, message: 'این نام کاربری قبلاً برای کارشناس آموزش دیگری ثبت شده است.' };
     }
     const normalizedFields = normalizeAssignedFieldsList(staffData.assignedFields);
+    const eduRole: 'expert' | 'department_head' =
+      staffData.educationRole === 'department_head' ? 'department_head' : 'expert';
+    const roleLabel = eduRole === 'department_head' ? 'مدیر گروه آموزشی' : 'کارشناس آموزش';
     const newStaff: EducationStaff = {
       ...staffData,
       id: makeUniqueId('edu'),
       username: cleanUsername,
       role: 'education',
-      department: staffData.department?.trim() || 'واحد آموزش و امور دانشجویی',
+      educationRole: eduRole,
+      department:
+        staffData.department?.trim() ||
+        (eduRole === 'department_head' ? 'گروه آموزشی' : 'واحد آموزش و امور دانشجویی'),
       assignedFields: normalizedFields.length > 0 ? normalizedFields : undefined,
       status: staffData.status || 'active',
       isActive: staffData.isActive !== false,
@@ -9250,13 +9323,13 @@ export const Storage = {
     Storage.setEducationStaff(list);
     Storage.addActivityLog({
       category: 'staff',
-      action: 'ثبت کارشناس آموزش',
-      details: `کارشناس آموزش «${newStaff.fullName}» (${newStaff.username})${normalizedFields.length > 0 ? ` — رشته‌ها: ${normalizedFields.join('، ')}` : ' — همه رشته‌ها'} در سامانه ثبت شد.`,
+      action: `ثبت ${roleLabel}`,
+      details: `${roleLabel} «${newStaff.fullName}» (${newStaff.username})${normalizedFields.length > 0 ? ` — رشته‌ها: ${normalizedFields.join('، ')}` : ' — همه رشته‌ها'} در سامانه ثبت شد.`,
       targetName: newStaff.fullName,
     });
     return {
       success: true,
-      message: `کارشناس آموزش «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      message: `${roleLabel} «${newStaff.fullName}» با موفقیت افزوده شد.`,
       staff: newStaff,
     };
   },
@@ -9267,13 +9340,13 @@ export const Storage = {
   ): { success: boolean; message: string } => {
     const list = Storage.getEducationStaff();
     const idx = list.findIndex((s) => s.id === id);
-    if (idx === -1) return { success: false, message: 'کارشناس آموزش یافت نشد.' };
+    if (idx === -1) return { success: false, message: 'کاربر حوزه آموزش یافت نشد.' };
     const normalizedUpdates = { ...updates };
     if (normalizedUpdates.username !== undefined) {
       const cleanU = normalizeAsciiDigits(normalizedUpdates.username).toLowerCase();
       if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
       if (list.some((e) => e.id !== id && normalizeAsciiDigits(e.username).toLowerCase() === cleanU)) {
-        return { success: false, message: 'این نام کاربری قبلاً برای کارشناس آموزش دیگری ثبت شده است.' };
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر آموزش دیگری ثبت شده است.' };
       }
       normalizedUpdates.username = cleanU;
     }
@@ -9287,7 +9360,8 @@ export const Storage = {
     if (cu && cu.role === 'education' && cu.staff.id === id) {
       Storage.setCurrentUser({ role: 'education', staff: list[idx] });
     }
-    return { success: true, message: 'اطلاعات کارشناس آموزش با موفقیت بروزرسانی شد.' };
+    const roleLabel = getEducationStaffRoleLabel(list[idx]);
+    return { success: true, message: `اطلاعات ${roleLabel} با موفقیت بروزرسانی شد.` };
   },
 
   deleteEducationStaff: (id: string): { success: boolean; message: string } => {
@@ -9295,10 +9369,11 @@ export const Storage = {
     const target = list.find((s) => s.id === id);
     Storage.setEducationStaff(list.filter((s) => s.id !== id));
     if (target) {
+      const roleLabel = getEducationStaffRoleLabel(target);
       Storage.addActivityLog({
         category: 'staff',
-        action: 'حذف کارشناس آموزش',
-        details: `حساب کاربری کارشناس آموزش «${target.fullName}» حذف گردید.`,
+        action: `حذف ${roleLabel}`,
+        details: `حساب کاربری ${roleLabel} «${target.fullName}» حذف گردید.`,
         targetName: target.fullName,
         severity: 'warning',
       });
@@ -12146,7 +12221,7 @@ export const Storage = {
       })),
       ...Storage.getEducationStaff().map((e) => ({
         role: 'education' as const,
-        roleLabel: 'کارشناس آموزش',
+        roleLabel: getEducationStaffRoleLabel(e),
         fullName: e.fullName,
         username: e.username,
         password: e.password,
@@ -14575,14 +14650,20 @@ export const Storage = {
         })),
       ...Storage.getEducationStaff()
         .filter((s) => s.status !== 'inactive' && s.isActive !== false)
-        .map((s) => ({
-          id: s.id,
-          fullName: s.fullName,
-          role: 'education',
-          roleLabel: 'کارشناس آموزش',
-          department: s.department || 'واحد آموزش',
-          photoUrl: s.photoUrl,
-        })),
+        .map((s) => {
+          const fields = normalizeAssignedFieldsList(s.assignedFields);
+          const roleLabel = getEducationStaffRoleLabel(s);
+          const deptBase =
+            s.department || (isEducationDepartmentHead(s) ? 'گروه آموزشی' : 'واحد آموزش');
+          return {
+            id: s.id,
+            fullName: s.fullName,
+            role: 'education',
+            roleLabel,
+            department: fields.length > 0 ? `${deptBase} (${fields.join('، ')})` : deptBase,
+            photoUrl: s.photoUrl,
+          };
+        }),
       ...Storage.getCounselors()
         .filter((s) => s.status !== 'inactive' && s.isActive !== false)
         .map((s) => ({

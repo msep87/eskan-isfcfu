@@ -278,9 +278,10 @@ export interface EducationStaff {
   fullName: string;
   phone: string;
   mobile?: string;
-  photoUrl?: string; // تصویر پروفایل کارشناس آموزش
-  department?: string; // واحد آموزش و امور دانشجویی
-  assignedFields?: string[]; // رشته‌های تحصیلی تحت پوشش کارشناس (خالی = همه رشته‌ها / کارشناس عمومی)
+  photoUrl?: string; // تصویر پروفایل کارشناس آموزش یا مدیر گروه آموزشی
+  department?: string; // واحد آموزش و امور دانشجویی / گروه آموزشی
+  educationRole?: 'expert' | 'department_head'; // سمت در حوزه آموزش: کارشناس آموزش یا مدیر گروه آموزشی
+  assignedFields?: string[]; // رشته‌های تحصیلی تحت پوشش کارشناس یا مدیر گروه (خالی = همه رشته‌ها / کارشناس عمومی)
   role: 'education';
   status: 'active' | 'inactive';
   isActive?: boolean;
@@ -522,6 +523,23 @@ export interface InventoryItem {
   lastRestockedDate?: string;
 }
 
+export type WarehouseRequesterRole =
+  | 'maintenance'
+  | 'supervisor'
+  | 'admin'
+  | 'counselor'
+  | 'finance'
+  | 'procurement'
+  | 'education'
+  | 'cultural'
+  | 'student_affairs'
+  | 'security'
+  | 'vice_dean'
+  | 'library'
+  | 'smart_campus'
+  | 'graduation'
+  | 'warehouse';
+
 export interface WarehouseRequest {
   id: string;
   requestCode: string; // کد حواله مثلاً W-101
@@ -529,14 +547,18 @@ export interface WarehouseRequest {
   taskTrackingCode?: string;
   dormId: string;
   dormName: string;
+  requesterDepartment?: string; // حوزه یا واحد درخواست‌کننده
+  requestLocation?: string; // محل دقیق درخواست / مصرف
   requestedByStaffId: string;
   requestedByStaffName: string;
-  requestedByRole: 'maintenance' | 'supervisor' | 'admin';
+  requestedByRole: WarehouseRequesterRole;
   itemTitle: string; // نام قطعه یا موارد درخواستی
+  itemCategory?: string; // دسته‌بندی قلم درخواستی
+  isCustomItem?: boolean; // آیا قلم به صورت دستی (خارج از لیست پیش‌فرض) اضافه شده است
   inventoryItemId?: string;
   quantityRequested: number;
   unit: string;
-  reason: string; // علت نیاز و محل مصرف
+  reason: string; // علت نیاز و توضیحات درخواست
   urgency: 'normal' | 'urgent' | 'emergency';
   requestDate: string;
   status: 'pending_supervisor' | 'pending_warehouse' | 'referred_to_procurement' | 'issued' | 'rejected';

@@ -8586,14 +8586,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { key: 'procurement' as const, label: `کارپرداز (${procurementStaffList.length})` },
                 { key: 'counselors' as const, label: `مشاوران (${counselorsList.length})` },
                 { key: 'finance' as const, label: `امور مالی (${financeStaffList.length})` },
-                { key: 'education' as const, label: `کارشناس آموزش (${educationStaffList.length})` },
+                {
+                  key: 'education' as const,
+                  label: `حوزه معاونت آموزشی (${educationStaffList.length + graduationStaffList.length})`,
+                },
                 { key: 'cultural' as const, label: `امور فرهنگی (${culturalStaffList.length})` },
                 { key: 'student_affairs' as const, label: `امور دانشجویی (${studentAffairsStaffList.length})` },
                 { key: 'security' as const, label: `حراست (${securityStaffList.length})` },
                 { key: 'vice_dean' as const, label: `معاونت دانشجویی (${viceDeanStaffList.length})` },
                 { key: 'library' as const, label: `کتابخانه و پژوهش (${libraryStaffList.length})` },
                 { key: 'smart_campus' as const, label: `واحد هوشمندسازی (${smartCampusStaffList.length})` },
-                { key: 'graduation' as const, label: `واحد فارغ‌التحصیلان (${graduationStaffList.length})` },
               ].map((item) => (
                 <button
                   key={item.key}

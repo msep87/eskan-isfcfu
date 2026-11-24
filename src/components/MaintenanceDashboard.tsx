@@ -7,6 +7,10 @@ import {
   Student,
 } from '../types';
 import { Storage } from '../utils/storage';
+import {
+  DEFAULT_WAREHOUSE_CATALOG,
+  WAREHOUSE_CATALOG_CATEGORY_LABELS,
+} from '../utils/warehouseCatalog';
 import { SendSecurityReportModal } from './SendSecurityReportModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
@@ -111,23 +115,25 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
     setTimeout(() => setFeedbackMsg(null), 3500);
   };
 
-  const inventoryCatalog = Storage.getInventoryItems();
   const allStudents = students || Storage.getStudents();
 
   const handleWarehouseRequestSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!partRequestTask || !partItemTitle.trim()) return;
 
+    const isPresetSelected = Boolean(partItemId);
     const res = Storage.createWarehouseRequest({
       taskId: partRequestTask.id,
       taskTrackingCode: partRequestTask.trackingCode,
       dormId: partRequestTask.dormId,
       dormName: partRequestTask.dormName,
+      requesterDepartment: technician.specialty || 'واحد تأسیسات و فنی',
+      requestLocation: `${partRequestTask.dormName}${partRequestTask.roomNumber ? ` — اتاق ${partRequestTask.roomNumber}` : ''}`,
       requestedByStaffId: technician.id,
       requestedByStaffName: `${technician.fullName} (تأسیسات)`,
       requestedByRole: 'maintenance',
       itemTitle: partItemTitle.trim(),
-      inventoryItemId: partItemId || undefined,
+      isCustomItem: !isPresetSelected,
       quantityRequested: Number(partQty) || 1,
       unit: partUnit.trim() || 'عدد',
       reason: partReason.trim() || `جهت رفع نقص ${partRequestTask.title}`,
@@ -1079,37 +1085,40 @@ export const MaintenanceDashboard: React.FC<MaintenanceDashboardProps> = ({
               <div>
                 <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    انتخاب از کاتالوگ انبار سراها (فقط مشاهده)
+                    انتخاب از فهرست پیش‌فرض اقلام انبار (یا افزودن قلم جدید)
                   </label>
                   <span className="text-[10px] text-slate-400">
-                    ویرایش موجودی منحصراً در اختیار مسئول انبار است
+                    موجودی واقعی انبار منحصراً در اختیار مسئول انبار است
                   </span>
                 </div>
                 <select
                   value={partItemId}
                   onChange={(e) => {
                     setPartItemId(e.target.value);
-                    const it = inventoryCatalog.find((i) => i.id === e.target.value);
+                    const it = DEFAULT_WAREHOUSE_CATALOG.find((i) => i.id === e.target.value);
                     if (it) {
                       setPartItemTitle(it.name);
-                      setPartUnit(it.unit);
+                      setPartUnit(it.defaultUnit);
                     }
                   }}
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium mb-1.5"
                 >
-                  <option value="">-- انتخاب از اقلام ثبت‌شده انبار --</option>
-                  {inventoryCatalog.map((it) => (
+                  <option value="">-- انتخاب از فهرست پیش‌فرض اقلام --</option>
+                  {DEFAULT_WAREHOUSE_CATALOG.map((it) => (
                     <option key={it.id} value={it.id}>
-                      {it.code} - {it.name} (موجودی: {it.quantity} {it.unit})
+                      [{WAREHOUSE_CATALOG_CATEGORY_LABELS[it.category]}] {it.name} ({it.defaultUnit})
                     </option>
                   ))}
                 </select>
 
                 <input
                   type="text"
-                  placeholder="یا عنوان قطعه و مشخصات دقیق فنی را دستی بنویسید..."
+                  placeholder="یا عنوان قلم/قطعه جدید (خارج از لیست) را دستی بنویسید..."
                   value={partItemTitle}
-                  onChange={(e) => setPartItemTitle(e.target.value)}
+                  onChange={(e) => {
+                    setPartItemTitle(e.target.value);
+                    setPartItemId('');
+                  }}
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium"
                   required
                 />

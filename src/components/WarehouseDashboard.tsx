@@ -8,6 +8,7 @@ import {
   Dormitory,
 } from '../types';
 import { Storage } from '../utils/storage';
+import { WAREHOUSE_REQUESTER_ROLE_LABELS } from '../utils/warehouseCatalog';
 import {
   downloadInventoryTemplate,
   parseInventoryExcel,
@@ -256,6 +257,8 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
         r.requestCode.toLowerCase().includes(q) ||
         r.itemTitle.toLowerCase().includes(q) ||
         r.dormName.toLowerCase().includes(q) ||
+        (r.requestLocation || '').toLowerCase().includes(q) ||
+        (r.requesterDepartment || '').toLowerCase().includes(q) ||
         r.requestedByStaffName.toLowerCase().includes(q) ||
         (r.taskTrackingCode || '').toLowerCase().includes(q) ||
         (r.procurementTrackingCode || '').toLowerCase().includes(q)
@@ -1149,6 +1152,16 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
                               فوری
                             </span>
                           )}
+                          {req.urgency === 'emergency' && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-700 text-white font-extrabold">
+                              اضطراری
+                            </span>
+                          )}
+                          {req.isCustomItem && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold border border-amber-300/70">
+                              قلم جدید (خارج از لیست)
+                            </span>
+                          )}
                         </div>
 
                         <div>
@@ -1204,9 +1217,19 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
                             <span className="text-rose-600 font-bold">ناموجود / ثبت‌نشده در کاتالوگ</span>
                           )}
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-slate-500">سرا و محل مصرف:</span>
-                          <span className="font-bold text-slate-800 dark:text-slate-200">{req.dormName}</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-500 shrink-0">حوزه / واحد:</span>
+                          <span className="font-bold text-indigo-700 dark:text-indigo-300 text-left">
+                            {req.requesterDepartment ||
+                              WAREHOUSE_REQUESTER_ROLE_LABELS[req.requestedByRole] ||
+                              'سایر واحدها'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-500 shrink-0">محل درخواست / مصرف:</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200 text-left">
+                            {req.requestLocation || req.dormName}
+                          </span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="font-semibold text-slate-500">متقاضی:</span>
@@ -1220,7 +1243,7 @@ export const WarehouseDashboard: React.FC<WarehouseDashboardProps> = ({
 
                       {req.reason && (
                         <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 bg-white dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                          <strong>علت نیاز: </strong>
+                          <strong>توضیحات و علت نیاز: </strong>
                           {req.reason}
                         </p>
                       )}

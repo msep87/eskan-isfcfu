@@ -258,9 +258,23 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const [formActive, setFormActive] = useState(true);
   const [formDormIds, setFormDormIds] = useState<string[]>([]);
   const [formAssignedFields, setFormAssignedFields] = useState<string[]>([]);
+  const [formEducationRole, setFormEducationRole] = useState<'expert' | 'department_head'>('expert');
+  const [academicDeputySubTab, setAcademicDeputySubTab] = useState<
+    'all' | 'department_head' | 'expert' | 'graduation'
+  >('all');
   const [customFieldInput, setCustomFieldInput] = useState('');
   const [formPhotoUrl, setFormPhotoUrl] = useState('');
   const [formError, setFormError] = useState('');
+
+  // اگر دسته فارغ‌التحصیلان از بیرون ارسال شود، به زیرتب فارغ‌التحصیلان در حوزه معاونت آموزشی هدایت شود
+  useEffect(() => {
+    if (activeCategory === 'graduation') {
+      setAcademicDeputySubTab('graduation');
+    }
+  }, [activeCategory]);
+
+  const isAcademicDeputyCategory =
+    activeCategory === 'education' || activeCategory === 'graduation';
 
   const availableEducationFields = useMemo(() => {
     const raw: string[] = [];
@@ -1047,14 +1061,36 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       if (staffStatusFilter === 'inactive' && isActive) return false;
 
       if (q) {
+        const eduRoleTitle =
+          edu.educationRole === 'department_head' ? 'مدیر گروه آموزشی' : 'کارشناس آموزش';
         const txt = `${norm(edu.fullName)} ${norm(edu.username)} ${norm(edu.mobile || edu.phone)} ${norm(
           edu.department
-        )} ${norm((edu.assignedFields || []).join(' '))} ${norm(edu.notes)}`;
+        )} ${norm(eduRoleTitle)} ${norm((edu.assignedFields || []).join(' '))} ${norm(edu.notes)}`;
         if (!txt.includes(q)) return false;
       }
       return true;
     });
   }, [educationStaff, staffQuery, staffStatusFilter]);
+
+  const departmentHeadStaff = useMemo(
+    () => educationStaff.filter((edu) => edu.educationRole === 'department_head'),
+    [educationStaff]
+  );
+
+  const educationExpertStaff = useMemo(
+    () => educationStaff.filter((edu) => edu.educationRole !== 'department_head'),
+    [educationStaff]
+  );
+
+  const filteredDepartmentHeads = useMemo(
+    () => filteredEducation.filter((edu) => edu.educationRole === 'department_head'),
+    [filteredEducation]
+  );
+
+  const filteredEducationExperts = useMemo(
+    () => filteredEducation.filter((edu) => edu.educationRole !== 'department_head'),
+    [filteredEducation]
+  );
 
   const filteredCultural = useMemo(() => {
     const q = norm(staffQuery);
@@ -1169,15 +1205,28 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       if (q) {
         const txt = `${norm(gr.fullName)} ${norm(gr.username)} ${norm(gr.mobile || gr.phone)} ${norm(
           gr.department
-        )} ${norm(gr.notes)}`;
+        )} ${norm('کارشناس فارغ التحصیلان واحد فارغ التحصیلان معاونت آموزشی')} ${norm(gr.notes)}`;
         if (!txt.includes(q)) return false;
       }
       return true;
     });
   }, [graduationStaff, staffQuery, staffStatusFilter]);
 
+  const totalAcademicDeputyCount = educationStaff.length + graduationStaff.length;
+  const filteredAcademicDeputyCount =
+    academicDeputySubTab === 'department_head'
+      ? filteredDepartmentHeads.length
+      : academicDeputySubTab === 'expert'
+      ? filteredEducationExperts.length
+      : academicDeputySubTab === 'graduation'
+      ? filteredGraduation.length
+      : filteredEducation.length + filteredGraduation.length;
+
   // باز کردن مدال افزودن کاربر پرسنل
-  const openAddStaffModal = (role: StaffRole) => {
+  const openAddStaffModal = (
+    role: StaffRole,
+    defaultEducationRole: 'expert' | 'department_head' = 'expert'
+  ) => {
     setStaffModalRole(role);
     setEditingStaffId(null);
     setFormFullName('');
@@ -1191,7 +1240,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         : role === 'procurement'
         ? 'واحد کارپردازی و خرید'
         : role === 'education'
-        ? 'واحد امور آموزشی'
+        ? defaultEducationRole === 'department_head'
+          ? 'گروه آموزشی'
+          : 'واحد امور آموزشی'
         : role === 'cultural'
         ? 'واحد امور فرهنگی و اجتماعی سراها'
         : role === 'student_affairs'
@@ -1213,6 +1264,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     setFormActive(true);
     setFormPhotoUrl('');
     setFormAssignedFields([]);
+    setFormEducationRole(role === 'education' ? defaultEducationRole : 'expert');
     setCustomFieldInput('');
     setFormDormIds(
       role === 'supervisor'
@@ -1298,6 +1350,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormNotes(edu.notes || '');
       setFormActive(edu.status !== 'inactive' && edu.isActive !== false);
       setFormAssignedFields(normalizeAssignedFieldsList(edu.assignedFields));
+      setFormEducationRole(edu.educationRole === 'department_head' ? 'department_head' : 'expert');
       setCustomFieldInput('');
     } else if (role === 'cultural') {
       const cul = user as CulturalStaff;
@@ -1631,6 +1684,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       }
     } else if (staffModalRole === 'education') {
       const cleanAssignedFields = normalizeAssignedFieldsList(formAssignedFields);
+      const defaultDept =
+        formEducationRole === 'department_head' ? 'گروه آموزشی' : 'واحد امور آموزشی';
       if (editingStaffId) {
         const res = Storage.updateEducationStaff(editingStaffId, {
           fullName: cleanName,
@@ -1639,7 +1694,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           phone: cleanPhone,
           mobile: cleanPhone,
           photoUrl: resolvedPhotoUrl || undefined,
-          department: formDepartment.trim() || 'واحد امور آموزشی',
+          department: formDepartment.trim() || defaultDept,
+          educationRole: formEducationRole,
           assignedFields: cleanAssignedFields,
           status: formActive ? 'active' : 'inactive',
           isActive: formActive,
@@ -1658,7 +1714,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           phone: cleanPhone,
           mobile: cleanPhone,
           photoUrl: resolvedPhotoUrl || undefined,
-          department: formDepartment.trim() || 'واحد امور آموزشی',
+          department: formDepartment.trim() || defaultDept,
+          educationRole: formEducationRole,
           assignedFields: cleanAssignedFields,
           role: 'education',
           status: formActive ? 'active' : 'inactive',
@@ -2128,9 +2185,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     },
     {
       key: 'education' as const,
-      title: 'کارشناس آموزش',
-      subtitle: 'پیام‌های آموزشی دانشجویان و اعلام مرخصی/اخراج به مدیر',
-      count: educationStaff.length,
+      title: 'حوزه معاونت آموزشی',
+      subtitle: 'مدیران گروه آموزشی، کارشناسان آموزش و کارشناسان فارغ‌التحصیلان',
+      count: totalAcademicDeputyCount,
       icon: GraduationCap,
       activeBg: 'bg-sky-600 text-white border-sky-600 shadow-lg shadow-sky-600/25',
       badgeBg: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
@@ -2188,15 +2245,6 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       icon: Cpu,
       activeBg: 'bg-cyan-700 text-white border-cyan-700 shadow-lg shadow-cyan-700/25',
       badgeBg: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300',
-    },
-    {
-      key: 'graduation' as const,
-      title: 'واحد فارغ‌التحصیلان',
-      subtitle: 'مشاهده گردش کار تسویه، دریافت و چاپ تکی/یکجای برگه‌ها و خاتمه فرآیند',
-      count: graduationStaff.length,
-      icon: FileCheck2,
-      activeBg: 'bg-emerald-700 text-white border-emerald-700 shadow-lg shadow-emerald-700/25',
-      badgeBg: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
     },
   ];
 
@@ -2262,13 +2310,19 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-5 pt-5 border-t border-white/15">
           {roleCategories.map((cat) => {
             const Icon = cat.icon;
-            const isActive = activeCategory === cat.key;
+            const isActive =
+              cat.key === 'education'
+                ? isAcademicDeputyCategory
+                : activeCategory === cat.key;
             return (
               <button
                 key={cat.key}
                 type="button"
-                  onClick={() => {
+                onClick={() => {
                   onCategoryChange(cat.key);
+                  if (cat.key === 'education') {
+                    setAcademicDeputySubTab('all');
+                  }
                   setStaffQuery('');
                   setStaffDormFilter('all');
                   setStaffStatusFilter('all');
@@ -3417,14 +3471,13 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 {activeCategory === 'procurement' && <ShoppingBag className="w-5 h-5 text-orange-600" />}
                 {activeCategory === 'counselors' && <HeartHandshake className="w-5 h-5" />}
                 {activeCategory === 'finance' && <Wallet className="w-5 h-5 text-emerald-600" />}
-                {activeCategory === 'education' && <GraduationCap className="w-5 h-5 text-sky-600" />}
+                {isAcademicDeputyCategory && <GraduationCap className="w-5 h-5 text-sky-600" />}
                 {activeCategory === 'cultural' && <FileText className="w-5 h-5 text-fuchsia-600" />}
                 {activeCategory === 'student_affairs' && <Award className="w-5 h-5 text-indigo-700" />}
                 {activeCategory === 'security' && <Shield className="w-5 h-5 text-amber-600" />}
                 {activeCategory === 'vice_dean' && <Landmark className="w-5 h-5 text-indigo-700" />}
                 {activeCategory === 'library' && <BookOpen className="w-5 h-5 text-indigo-600" />}
                 {activeCategory === 'smart_campus' && <Cpu className="w-5 h-5 text-cyan-600" />}
-                {activeCategory === 'graduation' && <FileCheck2 className="w-5 h-5 text-emerald-600" />}
               </div>
               <div>
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
@@ -3434,75 +3487,112 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'procurement' && `مدیریت کاربران کارپردازی و خرید (${filteredProcurement.length} از ${procurementStaff.length})`}
                   {activeCategory === 'counselors' && `مدیریت مشاوران و روانشناسان (${filteredCounselors.length} از ${counselors.length})`}
                   {activeCategory === 'finance' && `مدیریت کاربران امور مالی و حسابداری (${filteredFinance.length} از ${financeStaff.length})`}
-                  {activeCategory === 'education' && `مدیریت کارشناسان آموزش (${filteredEducation.length} از ${educationStaff.length})`}
+                  {isAcademicDeputyCategory &&
+                    (academicDeputySubTab === 'department_head'
+                      ? `حوزه معاونت آموزشی • مدیران گروه آموزشی (${filteredDepartmentHeads.length} از ${departmentHeadStaff.length})`
+                      : academicDeputySubTab === 'expert'
+                      ? `حوزه معاونت آموزشی • کارشناسان آموزش (${filteredEducationExperts.length} از ${educationExpertStaff.length})`
+                      : academicDeputySubTab === 'graduation'
+                      ? `حوزه معاونت آموزشی • کارشناسان واحد فارغ‌التحصیلان (${filteredGraduation.length} از ${graduationStaff.length})`
+                      : `مدیریت کاربران حوزه معاونت آموزشی (${filteredAcademicDeputyCount} از ${totalAcademicDeputyCount})`)}
                   {activeCategory === 'cultural' && `مدیریت کاربران امور فرهنگی (${filteredCultural.length} از ${culturalStaff.length})`}
                   {activeCategory === 'student_affairs' && `مدیریت کاربران امور دانشجویی و تربیت بدنی (${filteredStudentAffairs.length} از ${studentAffairsStaff.length})`}
                   {activeCategory === 'security' && `مدیریت کارشناسان حراست و انتظامات (${filteredSecurity.length} از ${securityStaff.length})`}
                   {activeCategory === 'vice_dean' && `مدیریت کاربران معاونت دانشجویی (${filteredViceDean.length} از ${viceDeanStaff.length})`}
                   {activeCategory === 'library' && `مدیریت کاربران کتابخانه و پژوهش (${filteredLibrary.length} از ${libraryStaff.length})`}
                   {activeCategory === 'smart_campus' && `مدیریت کاربران واحد هوشمندسازی (${filteredSmartCampus.length} از ${smartCampusStaff.length})`}
-                  {activeCategory === 'graduation' && `مدیریت کاربران واحد فارغ‌التحصیلان (${filteredGraduation.length} از ${graduationStaff.length})`}
                 </h3>
                 <p className="text-xs text-slate-400">
-                  مشاهده، جستجوی پیشرفته، ویرایش مشخصات، تغییر یا ریست رمز عبور و ورود تکی یا گروهی
+                  {isAcademicDeputyCategory
+                    ? 'مدیریت یکپارچه مدیران گروه آموزشی، کارشناسان آموزش و کارشناسان واحد فارغ‌التحصیلان، رشته‌های تحت پوشش و رمز عبور'
+                    : 'مشاهده، جستجوی پیشرفته، ویرایش مشخصات، تغییر یا ریست رمز عبور و ورود تکی یا گروهی'}
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  openAddStaffModal(
-                    activeCategory === 'supervisors'
-                      ? 'supervisor'
-                      : activeCategory === 'maintenance'
-                      ? 'maintenance'
-                      : activeCategory === 'warehouse'
-                      ? 'warehouse'
-                      : activeCategory === 'procurement'
-                      ? 'procurement'
-                      : activeCategory === 'finance'
-                      ? 'finance'
-                      : activeCategory === 'education'
-                      ? 'education'
-                      : activeCategory === 'cultural'
-                      ? 'cultural'
-                      : activeCategory === 'student_affairs'
-                      ? 'student_affairs'
-                      : activeCategory === 'security'
-                      ? 'security'
-                      : activeCategory === 'vice_dean'
-                      ? 'vice_dean'
-                      : activeCategory === 'library'
-                      ? 'library'
-                      : activeCategory === 'smart_campus'
-                      ? 'smart_campus'
-                      : activeCategory === 'graduation'
-                      ? 'graduation'
-                      : 'counselor'
-                  )
-                }
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <UserPlus className="w-4 h-4" />
-                <span>
-                  {activeCategory === 'supervisors' && 'افزودن سرپرست جدید'}
-                  {activeCategory === 'maintenance' && 'افزودن تکنسین جدید'}
-                  {activeCategory === 'warehouse' && 'افزودن کاربر انبار جدید'}
-                  {activeCategory === 'procurement' && 'افزودن کارپرداز جدید'}
-                  {activeCategory === 'counselors' && 'افزودن مشاور جدید'}
-                  {activeCategory === 'finance' && 'افزودن کاربر امور مالی جدید'}
-                  {activeCategory === 'education' && 'افزودن کارشناس آموزش جدید'}
-                  {activeCategory === 'cultural' && 'افزودن کاربر امور فرهنگی جدید'}
-                  {activeCategory === 'student_affairs' && 'افزودن کاربر امور دانشجویی جدید'}
-                  {activeCategory === 'security' && 'افزودن کاربر حراست جدید'}
-                  {activeCategory === 'vice_dean' && 'افزودن کاربر معاونت دانشجویی'}
-                  {activeCategory === 'library' && 'افزودن کاربر کتابخانه و پژوهش'}
-                  {activeCategory === 'smart_campus' && 'افزودن کاربر واحد هوشمندسازی'}
-                  {activeCategory === 'graduation' && 'افزودن کاربر واحد فارغ‌التحصیلان'}
-                </span>
-              </button>
+              {isAcademicDeputyCategory ? (
+                <>
+                  {(academicDeputySubTab === 'all' || academicDeputySubTab === 'department_head') && (
+                    <button
+                      type="button"
+                      onClick={() => openAddStaffModal('education', 'department_head')}
+                      className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>افزودن مدیر گروه آموزشی</span>
+                    </button>
+                  )}
+                  {(academicDeputySubTab === 'all' || academicDeputySubTab === 'expert') && (
+                    <button
+                      type="button"
+                      onClick={() => openAddStaffModal('education', 'expert')}
+                      className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>افزودن کارشناس آموزش</span>
+                    </button>
+                  )}
+                  {(academicDeputySubTab === 'all' || academicDeputySubTab === 'graduation') && (
+                    <button
+                      type="button"
+                      onClick={() => openAddStaffModal('graduation')}
+                      className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>افزودن کارشناس فارغ‌التحصیلان</span>
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() =>
+                    openAddStaffModal(
+                      activeCategory === 'supervisors'
+                        ? 'supervisor'
+                        : activeCategory === 'maintenance'
+                        ? 'maintenance'
+                        : activeCategory === 'warehouse'
+                        ? 'warehouse'
+                        : activeCategory === 'procurement'
+                        ? 'procurement'
+                        : activeCategory === 'finance'
+                        ? 'finance'
+                        : activeCategory === 'cultural'
+                        ? 'cultural'
+                        : activeCategory === 'student_affairs'
+                        ? 'student_affairs'
+                        : activeCategory === 'security'
+                        ? 'security'
+                        : activeCategory === 'vice_dean'
+                        ? 'vice_dean'
+                        : activeCategory === 'library'
+                        ? 'library'
+                        : activeCategory === 'smart_campus'
+                        ? 'smart_campus'
+                        : 'counselor'
+                    )
+                  }
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>
+                    {activeCategory === 'supervisors' && 'افزودن سرپرست جدید'}
+                    {activeCategory === 'maintenance' && 'افزودن تکنسین جدید'}
+                    {activeCategory === 'warehouse' && 'افزودن کاربر انبار جدید'}
+                    {activeCategory === 'procurement' && 'افزودن کارپرداز جدید'}
+                    {activeCategory === 'counselors' && 'افزودن مشاور جدید'}
+                    {activeCategory === 'finance' && 'افزودن کاربر امور مالی جدید'}
+                    {activeCategory === 'cultural' && 'افزودن کاربر امور فرهنگی جدید'}
+                    {activeCategory === 'student_affairs' && 'افزودن کاربر امور دانشجویی جدید'}
+                    {activeCategory === 'security' && 'افزودن کاربر حراست جدید'}
+                    {activeCategory === 'vice_dean' && 'افزودن کاربر معاونت دانشجویی'}
+                    {activeCategory === 'library' && 'افزودن کاربر کتابخانه و پژوهش'}
+                    {activeCategory === 'smart_campus' && 'افزودن کاربر واحد هوشمندسازی'}
+                  </span>
+                </button>
+              )}
 
               {activeCategory !== 'cultural' &&
                 activeCategory !== 'student_affairs' &&
@@ -3510,7 +3600,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 activeCategory !== 'vice_dean' &&
                 activeCategory !== 'library' &&
                 activeCategory !== 'smart_campus' &&
-                activeCategory !== 'graduation' && (
+                !(isAcademicDeputyCategory && academicDeputySubTab === 'graduation') && (
                 <button
                   type="button"
                   onClick={() =>
@@ -3525,7 +3615,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                         ? 'procurement'
                         : activeCategory === 'finance'
                         ? 'finance'
-                        : activeCategory === 'education'
+                        : isAcademicDeputyCategory
                         ? 'education'
                         : 'counselors'
                     )
@@ -3549,8 +3639,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     ? 'procurement'
                     : activeCategory === 'finance'
                     ? 'finance'
-                    : activeCategory === 'education'
-                    ? 'education'
+                    : isAcademicDeputyCategory
+                    ? academicDeputySubTab === 'graduation'
+                      ? 'graduation'
+                      : 'education'
                     : activeCategory === 'cultural'
                     ? 'cultural'
                     : activeCategory === 'student_affairs'
@@ -3563,8 +3655,6 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     ? 'library'
                     : activeCategory === 'smart_campus'
                     ? 'smart_campus'
-                    : activeCategory === 'graduation'
-                    ? 'graduation'
                     : 'counselor';
                 return (
                   <>
@@ -3602,6 +3692,81 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
               })()}
             </div>
           </div>
+
+          {/* زیرتب‌های تفکیکی حوزه معاونت آموزشی: همه، مدیران گروه، کارشناسان آموزش، کارشناسان فارغ‌التحصیلان */}
+          {isAcademicDeputyCategory && (
+            <div className="p-3 rounded-2xl bg-gradient-to-l from-sky-50 via-indigo-50/60 to-emerald-50/70 dark:from-sky-950/30 dark:via-indigo-950/25 dark:to-emerald-950/25 border border-sky-200/80 dark:border-sky-800/60 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                <span className="flex items-center gap-1.5">
+                  <GraduationCap className="w-4 h-4 text-sky-600 shrink-0" />
+                  <span>زیرمجموعه‌های حوزه معاونت آموزشی (انتخاب برای فیلتر سریع):</span>
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  مجموع کل معاونت آموزشی: <strong className="text-sky-700 dark:text-sky-300">{totalAcademicDeputyCount} نفر</strong>
+                </span>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                {[
+                  {
+                    id: 'all' as const,
+                    label: 'همه کاربران معاونت آموزشی',
+                    count: totalAcademicDeputyCount,
+                    activeCls: 'bg-slate-900 dark:bg-sky-600 text-white border-slate-900 dark:border-sky-500 shadow-sm',
+                    badgeCls: 'bg-slate-200/80 dark:bg-slate-700 text-slate-800 dark:text-slate-200',
+                  },
+                  {
+                    id: 'department_head' as const,
+                    label: 'مدیران گروه آموزشی',
+                    count: departmentHeadStaff.length,
+                    activeCls: 'bg-indigo-600 text-white border-indigo-600 shadow-sm',
+                    badgeCls: 'bg-indigo-100 dark:bg-indigo-950/80 text-indigo-800 dark:text-indigo-200',
+                  },
+                  {
+                    id: 'expert' as const,
+                    label: 'کارشناسان آموزش',
+                    count: educationExpertStaff.length,
+                    activeCls: 'bg-sky-600 text-white border-sky-600 shadow-sm',
+                    badgeCls: 'bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-200',
+                  },
+                  {
+                    id: 'graduation' as const,
+                    label: 'کارشناسان فارغ‌التحصیلان',
+                    count: graduationStaff.length,
+                    activeCls: 'bg-emerald-600 text-white border-emerald-600 shadow-sm',
+                    badgeCls: 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-200',
+                  },
+                ].map((sub) => {
+                  const isSubActive = academicDeputySubTab === sub.id;
+                  return (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() => {
+                        setAcademicDeputySubTab(sub.id);
+                        if (activeCategory === 'graduation' && sub.id !== 'graduation') {
+                          onCategoryChange('education');
+                        }
+                      }}
+                      className={`px-3 py-2.5 rounded-xl border text-xs font-extrabold transition flex items-center justify-between gap-2 cursor-pointer ${
+                        isSubActive
+                          ? sub.activeCls
+                          : 'bg-white/90 dark:bg-slate-900/80 text-slate-700 dark:text-slate-200 border-slate-200/90 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <span className="truncate">{sub.label}</span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[11px] font-black shrink-0 ${
+                          isSubActive ? 'bg-white/20 text-white' : sub.badgeCls
+                        }`}
+                      >
+                        {sub.count} نفر
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="px-3.5 py-2 rounded-xl bg-cyan-50/70 dark:bg-cyan-950/20 border border-cyan-200/80 dark:border-cyan-900/40 text-[11px] text-cyan-900 dark:text-cyan-200 flex flex-wrap items-center gap-1.5">
             <Camera className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
@@ -3699,7 +3864,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     activeCategory === 'smart_campus' ||
                     activeCategory === 'graduation') && (
                     <th className="p-3">
-                      {activeCategory === 'education' ? 'بخش / رشته‌های تحت پوشش' : 'بخش / سمت و توضیحات'}
+                      {isAcademicDeputyCategory
+                        ? 'سمت در معاونت آموزشی / بخش و رشته‌های تحت پوشش'
+                        : 'بخش / سمت و توضیحات'}
                     </th>
                   )}
                   {activeCategory !== 'supervisors' && <th className="p-3">وضعیت</th>}
@@ -4648,173 +4815,368 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     })
                   ))}
 
-                {activeCategory === 'education' &&
-                  (filteredEducation.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-8 text-center text-slate-400">
-                        هیچ کارشناس آموزشی با مشخصات جستجوشده یافت نشد. برای ثبت کاربر از دکمه «افزودن کارشناس آموزش جدید» یا «ثبت گروهی با اکسل» استفاده کنید.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredEducation.map((edu) => {
-                      const isActive = edu.status !== 'inactive' && edu.isActive !== false;
-                      const passKey = `edu_${edu.id}`;
-                      const isShown = revealedPasswords[passKey];
+                {isAcademicDeputyCategory && (() => {
+                  const visibleEduList =
+                    academicDeputySubTab === 'department_head'
+                      ? filteredDepartmentHeads
+                      : academicDeputySubTab === 'expert'
+                      ? filteredEducationExperts
+                      : academicDeputySubTab === 'all'
+                      ? [...filteredDepartmentHeads, ...filteredEducationExperts]
+                      : [];
+                  const visibleGradList =
+                    academicDeputySubTab === 'graduation' || academicDeputySubTab === 'all'
+                      ? filteredGraduation
+                      : [];
 
-                      return (
-                        <tr key={edu.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-bold text-slate-900 dark:text-white">
-                            <div className="flex items-center gap-2">
-                              {edu.photoUrl ? (
-                                <img
-                                  src={edu.photoUrl}
-                                  alt=""
-                                  className="w-8 h-8 rounded-full object-cover border border-sky-200 dark:border-sky-700 shrink-0"
-                                />
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-sky-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-                                  {(edu.fullName || 'آ').slice(0, 1)}
-                                </div>
-                              )}
-                              <span>{edu.fullName}</span>
-                            </div>
-                          </td>
-                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
-                            {edu.username}
-                          </td>
-                          <td className="p-3">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                                {isShown ? edu.password : '••••••'}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => toggleRevealPassword(passKey)}
-                                className="p-1 text-slate-400 hover:text-sky-600 cursor-pointer"
-                                title={isShown ? 'مخفی کردن رمز' : 'نمایش رمز'}
-                              >
-                                {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                              </button>
-                            </div>
-                          </td>
-                          <td className="p-3 font-mono" dir="ltr">
-                            {edu.mobile || edu.phone || '-'}
-                          </td>
-                          <td className="p-3 space-y-1">
-                            <div className="font-semibold text-sky-700 dark:text-sky-300">
-                              {edu.department || 'واحد امور آموزشی'}
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                              {edu.assignedFields && edu.assignedFields.length > 0 ? (
-                                edu.assignedFields.map((fld) => (
-                                  <span
-                                    key={fld}
-                                    className="px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-[10px] font-bold"
+                  if (visibleEduList.length === 0 && visibleGradList.length === 0) {
+                    return (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-slate-400">
+                          {academicDeputySubTab === 'department_head'
+                            ? 'هیچ مدیر گروه آموزشی با مشخصات جستجوشده یافت نشد. از دکمه «افزودن مدیر گروه آموزشی» استفاده کنید.'
+                            : academicDeputySubTab === 'expert'
+                            ? 'هیچ کارشناس آموزشی با مشخصات جستجوشده یافت نشد. از دکمه «افزودن کارشناس آموزش» استفاده کنید.'
+                            : academicDeputySubTab === 'graduation'
+                            ? 'هیچ کارشناس واحد فارغ‌التحصیلان با مشخصات جستجوشده یافت نشد. از دکمه «افزودن کارشناس فارغ‌التحصیلان» استفاده کنید.'
+                            : 'هیچ کاربری در حوزه معاونت آموزشی با مشخصات جستجوشده یافت نشد. از دکمه‌های افزودن مدیر گروه، کارشناس آموزش یا کارشناس فارغ‌التحصیلان استفاده کنید.'}
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return (
+                    <>
+                      {visibleEduList.map((edu) => {
+                        const isActive = edu.status !== 'inactive' && edu.isActive !== false;
+                        const passKey = `edu_${edu.id}`;
+                        const isShown = revealedPasswords[passKey];
+
+                        return (
+                          <tr key={edu.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <td className="p-3 font-bold text-slate-900 dark:text-white">
+                              <div className="flex items-center gap-2">
+                                {edu.photoUrl ? (
+                                  <img
+                                    src={edu.photoUrl}
+                                    alt=""
+                                    className="w-8 h-8 rounded-full object-cover border border-sky-200 dark:border-sky-700 shrink-0"
+                                  />
+                                ) : (
+                                  <div
+                                    className={`w-8 h-8 rounded-full text-white text-[11px] font-bold flex items-center justify-center shrink-0 ${
+                                      edu.educationRole === 'department_head'
+                                        ? 'bg-indigo-600'
+                                        : 'bg-sky-600'
+                                    }`}
                                   >
-                                    {fld}
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold">
-                                  همه رشته‌ها (عمومی)
+                                    {(edu.fullName || 'آ').slice(0, 1)}
+                                  </div>
+                                )}
+                                <span>{edu.fullName}</span>
+                              </div>
+                            </td>
+                            <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
+                              {edu.username}
+                            </td>
+                            <td className="p-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                  {isShown ? edu.password : '••••••'}
                                 </span>
-                              )}
-                            </div>
-                            {edu.notes && <div className="text-[11px] text-slate-400">{edu.notes}</div>}
-                          </td>
-                          <td className="p-3">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const nextStatus = isActive ? 'inactive' : 'active';
-                                Storage.updateEducationStaff(edu.id, {
-                                  status: nextStatus,
-                                  isActive: nextStatus === 'active',
-                                });
-                                onRefreshData();
-                              }}
-                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
-                                isActive
-                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
-                              }`}
-                            >
-                              {isActive ? 'فعال' : 'غیرفعال'}
-                            </button>
-                          </td>
-                          <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
-                              {actorRole === 'admin' && onImpersonateUser && (
                                 <button
                                   type="button"
-                                  onClick={() => onImpersonateUser({ role: 'education', staff: edu })}
-                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
-                                  title={`ورود مستقیم به کارتابل آموزش (${edu.fullName})`}
+                                  onClick={() => toggleRevealPassword(passKey)}
+                                  className="p-1 text-slate-400 hover:text-sky-600 cursor-pointer"
+                                  title={isShown ? 'مخفی کردن رمز' : 'نمایش رمز'}
                                 >
-                                  <LogIn className="w-3.5 h-3.5" />
+                                  {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                                 </button>
-                              )}
-                              <label
-                                className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
-                                title="بارگذاری یا تغییر عکس کارشناس آموزش"
-                              >
-                                <Camera className="w-3.5 h-3.5" />
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  onChange={(e) =>
-                                    handleQuickSinglePhotoUpload('education', edu.id, edu.fullName, e, edu.username)
-                                  }
-                                  className="hidden"
-                                />
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => openEditStaffModal('education', edu)}
-                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
-                                title="ویرایش مشخصات کارشناس آموزش"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
+                              </div>
+                            </td>
+                            <td className="p-3 font-mono" dir="ltr">
+                              {edu.mobile || edu.phone || '-'}
+                            </td>
+                            <td className="p-3 space-y-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border ${
+                                    edu.educationRole === 'department_head'
+                                      ? 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-200 border-indigo-300 dark:border-indigo-700'
+                                      : 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800'
+                                  }`}
+                                >
+                                  {edu.educationRole === 'department_head'
+                                    ? 'مدیر گروه آموزشی'
+                                    : 'کارشناس آموزش'}
+                                </span>
+                                <span className="font-semibold text-sky-700 dark:text-sky-300">
+                                  {edu.department ||
+                                    (edu.educationRole === 'department_head'
+                                      ? 'گروه آموزشی'
+                                      : 'واحد امور آموزشی')}
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {edu.assignedFields && edu.assignedFields.length > 0 ? (
+                                  edu.assignedFields.map((fld) => (
+                                    <span
+                                      key={fld}
+                                      className="px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-[10px] font-bold"
+                                    >
+                                      {fld}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold">
+                                    همه رشته‌ها (عمومی)
+                                  </span>
+                                )}
+                              </div>
+                              {edu.notes && <div className="text-[11px] text-slate-400">{edu.notes}</div>}
+                            </td>
+                            <td className="p-3">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setPasswordError('');
-                                  setNewPasswordInput('');
-                                  setPasswordModalTarget({
-                                    role: 'education',
-                                    id: edu.id,
-                                    fullName: edu.fullName,
-                                    usernameOrCode: edu.username,
-                                    defaultResetValue: '123456',
-                                    defaultResetLabel: 'ریست فوری به 123456',
+                                  const nextStatus = isActive ? 'inactive' : 'active';
+                                  Storage.updateEducationStaff(edu.id, {
+                                    status: nextStatus,
+                                    isActive: nextStatus === 'active',
                                   });
+                                  onRefreshData();
                                 }}
-                                className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
-                                title="تغییر یا ریست رمز عبور"
+                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                                  isActive
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                    : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                                }`}
                               >
-                                <KeyRound className="w-3.5 h-3.5" />
+                                {isActive ? 'فعال' : 'غیرفعال'}
                               </button>
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                {actorRole === 'admin' && onImpersonateUser && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onImpersonateUser({ role: 'education', staff: edu })}
+                                    className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                    title={`ورود مستقیم به کارتابل ${edu.educationRole === 'department_head' ? 'مدیر گروه آموزشی' : 'کارشناس آموزش'} (${edu.fullName})`}
+                                  >
+                                    <LogIn className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <label
+                                  className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                  title="بارگذاری یا تغییر عکس کاربر"
+                                >
+                                  <Camera className="w-3.5 h-3.5" />
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) =>
+                                      handleQuickSinglePhotoUpload('education', edu.id, edu.fullName, e, edu.username)
+                                    }
+                                    className="hidden"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditStaffModal('education', edu)}
+                                  className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                                  title="ویرایش مشخصات کاربر"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPasswordError('');
+                                    setNewPasswordInput('');
+                                    setPasswordModalTarget({
+                                      role: 'education',
+                                      id: edu.id,
+                                      fullName: edu.fullName,
+                                      usernameOrCode: edu.username,
+                                      defaultResetValue: '123456',
+                                      defaultResetLabel: 'ریست فوری به 123456',
+                                    });
+                                  }}
+                                  className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                                  title="تغییر یا ریست رمز عبور"
+                                >
+                                  <KeyRound className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDeleteTarget({
+                                      role: 'education',
+                                      id: edu.id,
+                                      fullName: edu.fullName,
+                                    })
+                                  }
+                                  className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                                  title="حذف کاربر"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {visibleGradList.map((gr) => {
+                        const isActive = gr.status !== 'inactive' && gr.isActive !== false;
+                        const passKey = `gr_${gr.id}`;
+                        const isShown = revealedPasswords[passKey];
+                        return (
+                          <tr key={gr.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <td className="p-3 font-bold text-slate-900 dark:text-white">
+                              <div className="flex items-center gap-2">
+                                {gr.photoUrl ? (
+                                  <img
+                                    src={gr.photoUrl}
+                                    alt=""
+                                    className="w-8 h-8 rounded-full object-cover border border-emerald-300 dark:border-emerald-700 shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-emerald-700 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                    {(gr.fullName || 'ف').slice(0, 1)}
+                                  </div>
+                                )}
+                                <span>{gr.fullName}</span>
+                              </div>
+                            </td>
+                            <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
+                              {gr.username}
+                            </td>
+                            <td className="p-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                  {isShown ? gr.password : '••••••'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleRevealPassword(passKey)}
+                                  className="p-1 text-slate-400 hover:text-emerald-600 cursor-pointer"
+                                  title={isShown ? 'مخفی کردن رمز' : 'نمایش رمز'}
+                                >
+                                  {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
+                            </td>
+                            <td className="p-3 font-mono" dir="ltr">
+                              {gr.mobile || gr.phone || '-'}
+                            </td>
+                            <td className="p-3 space-y-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-extrabold border bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700">
+                                  کارشناس فارغ‌التحصیلان
+                                </span>
+                                <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+                                  {gr.department || 'اداره امور فارغ‌التحصیلان'}
+                                </span>
+                              </div>
+                              {gr.notes && <div className="text-[11px] text-slate-400">{gr.notes}</div>}
+                            </td>
+                            <td className="p-3">
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setDeleteTarget({
-                                    role: 'education',
-                                    id: edu.id,
-                                    fullName: edu.fullName,
-                                  })
-                                }
-                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
-                                title="حذف کارشناس آموزش"
+                                onClick={() => {
+                                  const nextStatus = isActive ? 'inactive' : 'active';
+                                  Storage.updateGraduationStaff(gr.id, {
+                                    status: nextStatus,
+                                    isActive: nextStatus === 'active',
+                                  });
+                                  onRefreshData();
+                                }}
+                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                                  isActive
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                    : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                                }`}
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                {isActive ? 'فعال' : 'غیرفعال'}
                               </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ))}
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                {actorRole === 'admin' && onImpersonateUser && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onImpersonateUser({ role: 'graduation', staff: gr })}
+                                    className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                                    title={`ورود مستقیم به کارتابل واحد فارغ‌التحصیلان (${gr.fullName})`}
+                                  >
+                                    <LogIn className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <label
+                                  className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                  title="بارگذاری یا تغییر عکس کارشناس فارغ‌التحصیلان"
+                                >
+                                  <Camera className="w-3.5 h-3.5" />
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) =>
+                                      handleQuickSinglePhotoUpload('graduation', gr.id, gr.fullName, e, gr.username)
+                                    }
+                                    className="hidden"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditStaffModal('graduation', gr)}
+                                  className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                                  title="ویرایش مشخصات کارشناس فارغ‌التحصیلان"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPasswordError('');
+                                    setNewPasswordInput('');
+                                    setPasswordModalTarget({
+                                      role: 'graduation',
+                                      id: gr.id,
+                                      fullName: gr.fullName,
+                                      usernameOrCode: gr.username,
+                                      defaultResetValue: '123456',
+                                      defaultResetLabel: 'ریست فوری به 123456',
+                                    });
+                                  }}
+                                  className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                                  title="تغییر یا ریست رمز عبور"
+                                >
+                                  <KeyRound className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDeleteTarget({
+                                      role: 'graduation',
+                                      id: gr.id,
+                                      fullName: gr.fullName,
+                                    })
+                                  }
+                                  className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                                  title="حذف کارشناس فارغ‌التحصیلان"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
 
                 {activeCategory === 'cultural' &&
                   (filteredCultural.length === 0 ? (
@@ -5737,149 +6099,6 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     })
                   ))}
 
-                {activeCategory === 'graduation' &&
-                  (filteredGraduation.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-8 text-center text-slate-400">
-                        هیچ کاربر واحد فارغ‌التحصیلان با مشخصات جستجوشده یافت نشد. برای ثبت کاربر از دکمه «افزودن کاربر واحد فارغ‌التحصیلان» استفاده کنید.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredGraduation.map((gr) => {
-                      const isActive = gr.status !== 'inactive' && gr.isActive !== false;
-                      const passKey = `gr_${gr.id}`;
-                      const isShown = revealedPasswords[passKey];
-                      return (
-                        <tr key={gr.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-bold text-slate-900 dark:text-white">
-                            <div className="flex items-center gap-2">
-                              {gr.photoUrl ? (
-                                <img
-                                  src={gr.photoUrl}
-                                  alt=""
-                                  className="w-8 h-8 rounded-full object-cover border border-emerald-300 dark:border-emerald-700 shrink-0"
-                                />
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-emerald-700 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-                                  {(gr.fullName || 'ف').slice(0, 1)}
-                                </div>
-                              )}
-                              <span>{gr.fullName}</span>
-                            </div>
-                          </td>
-                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
-                            {gr.username}
-                          </td>
-                          <td className="p-3">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                                {isShown ? gr.password : '••••••'}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => toggleRevealPassword(passKey)}
-                                className="p-1 text-slate-400 hover:text-emerald-600 cursor-pointer"
-                              >
-                                {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                              </button>
-                            </div>
-                          </td>
-                          <td className="p-3 font-mono" dir="ltr">
-                            {gr.mobile || gr.phone || '-'}
-                          </td>
-                          <td className="p-3 space-y-1">
-                            <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                              {gr.department || 'اداره امور فارغ‌التحصیلان'}
-                            </div>
-                            {gr.notes && <div className="text-[11px] text-slate-500">{gr.notes}</div>}
-                          </td>
-                          <td className="p-3">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const nextStatus = isActive ? 'inactive' : 'active';
-                                Storage.updateGraduationStaff(gr.id, {
-                                  status: nextStatus,
-                                  isActive: nextStatus === 'active',
-                                });
-                                onRefreshData();
-                              }}
-                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
-                                isActive
-                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
-                              }`}
-                            >
-                              {isActive ? 'فعال' : 'غیرفعال'}
-                            </button>
-                          </td>
-                          <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
-                              {actorRole === 'admin' && onImpersonateUser && (
-                                <button
-                                  type="button"
-                                  onClick={() => onImpersonateUser({ role: 'graduation', staff: gr })}
-                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
-                                  title={`ورود مستقیم به کارتابل واحد فارغ‌التحصیلان (${gr.fullName})`}
-                                >
-                                  <LogIn className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                              <label className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer">
-                                <Camera className="w-3.5 h-3.5" />
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  onChange={(e) =>
-                                    handleQuickSinglePhotoUpload('graduation', gr.id, gr.fullName, e, gr.username)
-                                  }
-                                  className="hidden"
-                                />
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => openEditStaffModal('graduation', gr)}
-                                className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPasswordError('');
-                                  setNewPasswordInput('');
-                                  setPasswordModalTarget({
-                                    role: 'graduation',
-                                    id: gr.id,
-                                    fullName: gr.fullName,
-                                    usernameOrCode: gr.username,
-                                    defaultResetValue: '123456',
-                                    defaultResetLabel: 'ریست فوری به 123456',
-                                  });
-                                }}
-                                className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
-                              >
-                                <KeyRound className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setDeleteTarget({
-                                    role: 'graduation',
-                                    id: gr.id,
-                                    fullName: gr.fullName,
-                                  })
-                                }
-                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ))}
               </tbody>
             </table>
           </div>
@@ -5896,9 +6115,17 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
               <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
                 {editingStaffId ? <Edit3 className="w-5 h-5 text-amber-500" /> : <UserPlus className="w-5 h-5 text-teal-600" />}
                 <span>
-                  {editingStaffId
-                    ? `ویرایش مشخصات ${roleLabels[staffModalRole]}`
-                    : `افزودن ${roleLabels[staffModalRole]} جدید`}
+                  {(() => {
+                    const modalRoleTitle =
+                      staffModalRole === 'education'
+                        ? formEducationRole === 'department_head'
+                          ? 'مدیر گروه آموزشی'
+                          : 'کارشناس آموزش'
+                        : roleLabels[staffModalRole];
+                    return editingStaffId
+                      ? `ویرایش مشخصات ${modalRoleTitle}`
+                      : `افزودن ${modalRoleTitle} جدید`;
+                  })()}
                 </span>
               </h3>
               <button
@@ -6164,16 +6391,98 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 )}
               </div>
 
-              {staffModalRole === 'education' && (
+              {(staffModalRole === 'education' || (!editingStaffId && staffModalRole === 'graduation')) && (
                 <div className="p-3.5 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800/70 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+                  {/* انتخاب سمت در حوزه معاونت آموزشی: مدیر گروه آموزشی، کارشناس آموزش یا کارشناس فارغ‌التحصیلان */}
+                  <div className="space-y-1.5">
+                    <label className="block font-extrabold text-sky-900 dark:text-sky-200 text-xs">
+                      سمت کاربر در حوزه معاونت آموزشی *
+                    </label>
+                    <div className={`grid gap-2 ${!editingStaffId ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-2'}`}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStaffModalRole('education');
+                          setFormEducationRole('department_head');
+                          if (
+                            !formDepartment.trim() ||
+                            formDepartment.trim() === 'واحد امور آموزشی' ||
+                            formDepartment.trim() === 'اداره امور فارغ‌التحصیلان'
+                          ) {
+                            setFormDepartment('گروه آموزشی');
+                          }
+                        }}
+                        className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition cursor-pointer ${
+                          staffModalRole === 'education' && formEducationRole === 'department_head'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        مدیر گروه آموزشی
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStaffModalRole('education');
+                          setFormEducationRole('expert');
+                          if (
+                            !formDepartment.trim() ||
+                            formDepartment.trim() === 'گروه آموزشی' ||
+                            formDepartment.trim() === 'اداره امور فارغ‌التحصیلان'
+                          ) {
+                            setFormDepartment('واحد امور آموزشی');
+                          }
+                        }}
+                        className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition cursor-pointer ${
+                          staffModalRole === 'education' && formEducationRole === 'expert'
+                            ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        کارشناس آموزش
+                      </button>
+                      {!editingStaffId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStaffModalRole('graduation');
+                            if (
+                              !formDepartment.trim() ||
+                              formDepartment.trim() === 'واحد امور آموزشی' ||
+                              formDepartment.trim() === 'گروه آموزشی'
+                            ) {
+                              setFormDepartment('اداره امور فارغ‌التحصیلان');
+                            }
+                          }}
+                          className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition cursor-pointer ${
+                            staffModalRole === 'graduation'
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                          }`}
+                        >
+                          کارشناس فارغ‌التحصیلان
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {staffModalRole === 'education' && (
+                  <>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-sky-200/70 dark:border-sky-800/60">
                     <div>
                       <label className="font-extrabold text-sky-900 dark:text-sky-200 flex items-center gap-1.5">
                         <GraduationCap className="w-4 h-4 text-sky-600" />
-                        <span>رشته‌های تحصیلی تحت پوشش این کارشناس آموزش</span>
+                        <span>
+                          {formEducationRole === 'department_head'
+                            ? 'رشته‌های تحت مدیریت این مدیر گروه (یک یا چند رشته)'
+                            : 'رشته‌های تحصیلی تحت پوشش این کارشناس آموزش'}
+                        </span>
                       </label>
                       <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
-                        پیام‌های آموزشی و درخواست‌های هر دانشجو به‌طور خودکار به کارتابل کارشناس رشته مربوطه ارسال می‌شود. در صورت انتخاب نکردن هیچ رشته‌ای، این کارشناس به صورت عمومی برای «همه رشته‌ها» عمل می‌کند.
+                        {formEducationRole === 'department_head'
+                          ? 'مدیر گروه آموزشی مستقیماً با کارشناسان آموزش و دانشجویان رشته‌های انتخاب‌شده در ارتباط است و پیام‌ها و لیست دانشجویان رشته‌های خود را مدیریت می‌کند.'
+                          : 'پیام‌های آموزشی و درخواست‌های هر دانشجو به‌طور خودکار به کارتابل کارشناس رشته مربوطه ارسال می‌شود. در صورت انتخاب نکردن هیچ رشته‌ای، این کارشناس به صورت عمومی برای «همه رشته‌ها» عمل می‌کند.'}
                       </p>
                     </div>
                     {formAssignedFields.length > 0 && (
@@ -6282,6 +6591,14 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       <span>افزودن رشته</span>
                     </button>
                   </div>
+                  </>
+                  )}
+
+                  {staffModalRole === 'graduation' && (
+                    <p className="text-[11px] text-emerald-800 dark:text-emerald-200 pt-1 border-t border-sky-200/70 dark:border-sky-800/60 leading-relaxed">
+                      کارشناس واحد فارغ‌التحصیلان زیرمجموعه حوزه معاونت آموزشی بوده و به کارتابل پایش گردش کار تسویه حساب، چاپ تکی/یکجای برگه‌های تسویه و خاتمه رسمی فرآیند فارغ‌التحصیلی دسترسی دارد.
+                    </p>
+                  )}
                 </div>
               )}
 

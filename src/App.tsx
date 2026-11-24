@@ -86,6 +86,7 @@ const AboutModal = lazyWithRetry(() => import('./components/AboutModal').then((m
 const UserGuideModal = lazyWithRetry(() => import('./components/UserGuideModal').then((m) => ({ default: m.UserGuideModal })));
 const AiDormAssistant = lazyWithRetry(() => import('./components/AiDormAssistant').then((m) => ({ default: m.AiDormAssistant })));
 const CommunityChatHub = lazyWithRetry(() => import('./components/CommunityChatHub').then((m) => ({ default: m.CommunityChatHub })));
+const WarehouseRequisitionModal = lazyWithRetry(() => import('./components/WarehouseRequisitionModal').then((m) => ({ default: m.WarehouseRequisitionModal })));
 
 const StudentDashboard = lazyWithRetry(() => import('./components/StudentDashboard').then((m) => ({ default: m.StudentDashboard })));
 const SupervisorDashboard = lazyWithRetry(() => import('./components/SupervisorDashboard').then((m) => ({ default: m.SupervisorDashboard })));
@@ -284,6 +285,7 @@ export default function App() {
   const [selectedNotificationItem, setSelectedNotificationItem] =
     useState<AppNotificationItem | null>(null);
   const [isCommunityChatOpen, setIsCommunityChatOpen] = useState(false);
+  const [isWarehouseRequestModalOpen, setIsWarehouseRequestModalOpen] = useState(false);
   const [isNotifPromptSnoozed, setIsNotifPromptSnoozed] = useState<boolean>(() =>
     isNotificationPromptSnoozed()
   );
@@ -1227,6 +1229,33 @@ export default function App() {
         activeSessionsCount={activeSessions.length}
         hasIncomingVoiceCall={Boolean(currentUser && incomingVoiceCall && !activeVoiceCall)}
         onOpenIncomingVoiceCall={() => setIsNotificationModalOpen(true)}
+        onOpenWarehouseRequest={
+          currentUser && currentUser.role !== 'student' && currentUser.role !== 'warehouse'
+            ? () => setIsWarehouseRequestModalOpen(true)
+            : undefined
+        }
+        myPendingWarehouseRequestsCount={
+          currentUser && currentUser.role !== 'student' && currentUser.role !== 'warehouse'
+            ? warehouseRequests.filter((r) => {
+                const myId =
+                  currentUser.role === 'admin'
+                    ? currentUser.username || 'admin'
+                    : currentUser.role === 'supervisor'
+                    ? currentUser.supervisor.id
+                    : currentUser.role === 'counselor'
+                    ? currentUser.counselor.id
+                    : currentUser.role === 'maintenance'
+                    ? currentUser.technician.id
+                    : currentUser.staff.id;
+                return (
+                  r.requestedByStaffId === myId &&
+                  (r.status === 'pending_warehouse' ||
+                    r.status === 'pending_supervisor' ||
+                    r.status === 'referred_to_procurement')
+                );
+              }).length
+            : 0
+        }
       />
 
       {/* اعلان خروج از راه دور در صورت بسته شدن نشست از دستگاه دیگر */}
@@ -2000,6 +2029,20 @@ export default function App() {
             onRefreshGlobalData={refreshAllData}
           />
         )}
+
+        {currentUser &&
+          currentUser.role !== 'student' &&
+          currentUser.role !== 'warehouse' &&
+          isWarehouseRequestModalOpen && (
+            <WarehouseRequisitionModal
+              isOpen={isWarehouseRequestModalOpen}
+              onClose={() => setIsWarehouseRequestModalOpen(false)}
+              currentUser={currentUser}
+              dorms={dorms}
+              warehouseRequests={warehouseRequests}
+              onSubmitted={refreshAllData}
+            />
+          )}
 
         {currentUser && isChangePasswordModalOpen && (
           <ChangePasswordModal

@@ -181,14 +181,14 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                 { id: 'student_affairs', label: 'امور دانشجویی', role: 'student_affairs' as UserRoleType },
                 { id: 'security', label: 'حراست و انتظامات', role: 'security' as UserRoleType },
                 { id: 'counselor', label: 'مشاور و روانشناس', role: 'counselor' as UserRoleType },
-                { id: 'education', label: 'کارشناس آموزش', role: 'education' as UserRoleType },
+                { id: 'education', label: 'معاونت آموزشی (مدیر گروه / آموزش)', role: 'education' as UserRoleType },
+                { id: 'graduation', label: 'معاونت آموزشی (فارغ‌التحصیلان)', role: 'graduation' as UserRoleType },
                 { id: 'maintenance', label: 'تأسیسات و فنی', role: 'maintenance' as UserRoleType },
                 { id: 'warehouse', label: 'انبار و تجهیزات', role: 'warehouse' as UserRoleType },
                 { id: 'procurement', label: 'کارپرداز و خرید', role: 'procurement' as UserRoleType },
                 { id: 'finance', label: 'امور مالی', role: 'finance' as UserRoleType },
                 { id: 'library', label: 'کتابخانه و پژوهش', role: 'library' as UserRoleType },
                 { id: 'smart_campus', label: 'واحد هوشمندسازی', role: 'smart_campus' as UserRoleType },
-                { id: 'graduation', label: 'واحد فارغ‌التحصیلان', role: 'graduation' as UserRoleType },
                 { id: 'student', label: 'دانشجومعلم', role: 'student' as UserRoleType },
               ] as const
             ).map((tab) => {
