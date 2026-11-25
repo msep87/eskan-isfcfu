@@ -18,6 +18,7 @@ import {
   calculateProfessorLoadSummary,
   detectOfferingConflicts,
   exportJsonRowsToExcel,
+  getSchedSlotTitle,
   printSchedHtml,
   round2,
 } from '../utils/schedulingUtils';
@@ -89,8 +90,8 @@ function renderMatrixTableHtml(
 ): string {
   const headerCells = sortedSlots
     .map(
-      (s) =>
-        `<th>${escapeHtml(s.label)}<div class="muted mono">${escapeHtml(s.startTime)}-${escapeHtml(s.endTime)}</div></th>`
+      (s, idx) =>
+        `<th>${escapeHtml(getSchedSlotTitle(s, idx))}<div class="muted mono">${escapeHtml(s.startTime)}-${escapeHtml(s.endTime)}</div></th>`
     )
     .join('');
 
@@ -408,12 +409,12 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
             <th className="p-2.5 text-right font-extrabold w-28 border-l border-slate-200 dark:border-slate-700">
               روز هفته / سانس
             </th>
-            {sortedSlots.map((slot) => (
+            {sortedSlots.map((slot, idx) => (
               <th
                 key={slot.id}
                 className="p-2 text-center font-bold border-l border-slate-200 dark:border-slate-700 last:border-l-0"
               >
-                <div>{slot.label}</div>
+                <div>{getSchedSlotTitle(slot, idx)}</div>
                 <div className="text-[10px] font-mono tabular-nums text-slate-500 dark:text-slate-400" dir="ltr">
                   {slot.startTime} - {slot.endTime}
                 </div>
@@ -665,7 +666,11 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                     'کلاس فیزیکی': o.classroomName || '-',
                     'روز': o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'تعیین‌نشده',
                     'سانس‌ها': o.slotIds
-                      .map((id) => sortedSlots.find((s) => s.id === id)?.label || id)
+                      .map((id) => {
+                        const idx = sortedSlots.findIndex((s) => s.id === id);
+                        const sl = idx >= 0 ? sortedSlots[idx] : undefined;
+                        return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : id;
+                      })
                       .join(' + '),
                     'کد درس': o.courseCode,
                     'عنوان درس': o.courseTitle,
@@ -839,7 +844,11 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                       'کلاس': o.classroomName || '-',
                       'روز': o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : '-',
                       'سانس': o.slotIds
-                        .map((id) => sortedSlots.find((s) => s.id === id)?.label || id)
+                        .map((id) => {
+                          const idx = sortedSlots.findIndex((s) => s.id === id);
+                          const sl = idx >= 0 ? sortedSlots[idx] : undefined;
+                          return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : id;
+                        })
                         .join(' + '),
                       'واحد': bd.rawUnits,
                       'ساعت هفتگی': bd.weeklyHours,

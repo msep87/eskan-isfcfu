@@ -1932,6 +1932,8 @@ export interface SchedSharedTarget {
   studentCount?: number;
 }
 
+export type SchedSlotHalf = 'full' | 'first_hour' | 'second_hour';
+
 export interface SchedCourseOffering {
   id: string;
   termKey: string; // نیمسال فعال مثلاً 1405-1
@@ -1951,6 +1953,7 @@ export interface SchedCourseOffering {
   sectionName?: string;
   sharedWithTargets?: SchedSharedTarget[]; // دانشجویان سایر رشته‌ها در صورت یکسان بودن کد ۷ رقمی درس
   enrolledCount: number; // تعداد کل دانشجویان کلاس (اثرگذار در محاسبه واحد معادل کارورزی)
+  internshipSubGroupLabel?: string; // عنوان شعبه کارورزی (مثلاً گروه کارورزی ۱ - حداکثر ۱۲ نفر)
   professorId?: string;
   professorCode?: string;
   professorName?: string;
@@ -1958,6 +1961,7 @@ export interface SchedCourseOffering {
   classroomName?: string;
   dayOfWeek?: SchedDayKey;
   slotIds: string[]; // سانس‌های اشغال‌شده
+  slotParts?: Record<string, SchedSlotHalf>; // تفکیک ساعت اول (راست) / ساعت دوم (چپ) / کل سانس
   splitPart?: 'full' | 'theory' | 'practical';
   notes?: string;
   createdById: string;

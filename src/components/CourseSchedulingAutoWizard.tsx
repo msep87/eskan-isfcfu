@@ -12,6 +12,7 @@ import {
   SCHED_PRACTICAL_TYPE_LABELS,
   SmartSchedulerResult,
   calculateOfferingBreakdown,
+  getSchedSlotTitle,
   normalizeSchedCode,
   round2,
   runSmartAutoScheduler,
@@ -519,9 +520,12 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
                   <thead className="bg-slate-50 dark:bg-slate-800/70">
                     <tr>
                       <th className="p-3 text-right">روز هفته / سانس</th>
-                      {sortedSlots.map((slot) => (
-                        <th key={slot.id} className="p-2.5 font-mono tabular-nums">
-                          {slot.label}
+                      {sortedSlots.map((slot, idx) => (
+                        <th key={slot.id} className="p-2.5 text-center">
+                          <div>{getSchedSlotTitle(slot, idx)}</div>
+                          <div className="text-[10px] font-mono tabular-nums text-slate-500" dir="ltr">
+                            {slot.startTime} - {slot.endTime}
+                          </div>
                         </th>
                       ))}
                     </tr>
@@ -777,7 +781,11 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
                     {previewResult.placedOfferings.map((o) => {
                       const bd = calculateOfferingBreakdown(o, rules);
                       const slotLabels = o.slotIds
-                        .map((sid) => rules.timeSlots.find((s) => s.id === sid)?.label || sid)
+                        .map((sid) => {
+                          const idx = sortedSlots.findIndex((s) => s.id === sid);
+                          const sl = idx >= 0 ? sortedSlots[idx] : undefined;
+                          return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : sid;
+                        })
                         .join(' + ');
                       return (
                         <tr key={o.id}>

@@ -10,6 +10,7 @@ import {
   SchedProfessor,
   SchedProgramCohort,
   SchedRulesSettings,
+  SchedSlotHalf,
   SchedTimeSlot,
 } from '../types';
 import { toEnglishDigits } from './excelUtils';
@@ -78,6 +79,117 @@ export function normalizePersianText(raw: string | undefined | null): string {
 
 export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+const PERSIAN_SLOT_ORDINALS = [
+  'سانس اول',
+  'سانس دوم',
+  'سانس سوم',
+  'سانس چهارم',
+  'سانس پنجم',
+  'سانس ششم',
+  'سانس هفتم',
+  'سانس هشتم',
+  'سانس نهم',
+  'سانس دهم',
+  'سانس یازدهم',
+  'سانس دوازدهم',
+];
+
+export function getSchedSlotOrdinalLabel(index: number): string {
+  if (index >= 0 && index < PERSIAN_SLOT_ORDINALS.length) {
+    return PERSIAN_SLOT_ORDINALS[index];
+  }
+  return `سانس ${(index + 1).toLocaleString('fa-IR')}`;
+}
+
+export function isTimeRangeLikeLabel(label: string | undefined | null): boolean {
+  const clean = normalizeSchedCode(label);
+  if (!clean) return true;
+  // اگر برچسب صرفاً بازه ساعتی باشد (مانند ۰۸:۰۰-۱۰:۰۰ یا 8تا10) باید عنوان سانس جایگزین شود
+  return /^\d{1,2}(:\d{2})?[-–تا]+\d{1,2}(:\d{2})?$/.test(clean);
+}
+
+export function getSchedSlotTitle(slot: SchedTimeSlot, orderIndex?: number): string {
+  if (isTimeRangeLikeLabel(slot.label)) {
+    const idx = typeof orderIndex === 'number' ? orderIndex : Math.max(0, (slot.order || 1) - 1);
+    return getSchedSlotOrdinalLabel(idx);
+  }
+  return slot.label.trim();
+}
+
+export function getSchedSlotTimeRange(slot: SchedTimeSlot): string {
+  const s = (slot.startTime || '').trim();
+  const e = (slot.endTime || '').trim();
+  if (!s && !e) return '';
+  return `${s} - ${e}`;
+}
+
+export function buildDefaultTimeSlots(
+  count: number,
+  startHour = 8,
+  durationHours = 2
+): SchedTimeSlot[] {
+  const safeCount = Math.max(1, Math.min(12, Math.floor(count) || 6));
+  const safeStart = Math.max(6, Math.min(18, Number(startHour) || 8));
+  const safeDur = Math.max(1, Math.min(4, Number(durationHours) || 2));
+  const slots: SchedTimeSlot[] = [];
+  for (let i = 0; i < safeCount; i++) {
+    const h1 = safeStart + i * safeDur;
+    const h2 = h1 + safeDur;
+    const fmt = (h: number) => `${String(Math.min(23, Math.floor(h))).padStart(2, '0')}:00`;
+    slots.push({
+      id: `slot_${i + 1}`,
+      label: getSchedSlotOrdinalLabel(i),
+      startTime: fmt(h1),
+      endTime: fmt(h2),
+      order: i + 1,
+    });
+  }
+  return slots;
+}
+
+export function getOfferingSlotHalf(
+  offering: Pick<SchedCourseOffering, 'slotParts'>,
+  slotId: string
+): SchedSlotHalf {
+  return offering.slotParts?.[slotId] || 'full';
+}
+
+export function doSlotHalvesOverlap(h1: SchedSlotHalf, h2: SchedSlotHalf): boolean {
+  if (h1 === 'full' || h2 === 'full') return true;
+  return h1 === h2;
+}
+
+export function getSlotHalfLabel(half: SchedSlotHalf): string {
+  if (half === 'first_hour') return 'ساعت اول (راست)';
+  if (half === 'second_hour') return 'ساعت دوم (چپ)';
+  return 'کل سانس (۲ ساعته)';
+}
+
+export function computeInternshipSplitPlan(
+  totalStudents: number,
+  maxPerGroup = 12
+): Array<{ label: string; studentCount: number }> {
+  const total = Math.max(1, Math.floor(totalStudents) || 1);
+  const cap = Math.max(1, Math.floor(maxPerGroup) || 12);
+  if (total <= cap) {
+    return [{ label: 'شعبه ۱ کارورزی', studentCount: total }];
+  }
+  // تقسیم هوشمند بر مبنای ظرفیت استاندارد (مثلاً ۲۴ -> ۱۲ و ۱۲؛ ۲۳ -> ۱۲ و ۱۱؛ ۲۵ -> ۱۲ و ۱۳)
+  const groupCount = Math.max(2, Math.round(total / cap));
+  const base = Math.floor(total / groupCount);
+  const rem = total % groupCount;
+  const result: Array<{ label: string; studentCount: number }> = [];
+  for (let i = 0; i < groupCount; i++) {
+    // توزیع طوری که گروه‌های اول عدد استاندارد/بزرگ‌تر را بگیرند (مثلاً 12 و 11، یا 13 و 12، یا 12 و 12)
+    const count = base + (i < rem ? 1 : 0);
+    result.push({
+      label: `شعبه ${(i + 1).toLocaleString('fa-IR')} کارورزی`,
+      studentCount: count,
+    });
+  }
+  return result;
 }
 
 export function getPracticalHoursRate(
@@ -268,14 +380,21 @@ export function detectOfferingConflicts(
         o.id !== candidate.id &&
         o.termKey === candidate.termKey &&
         o.dayOfWeek === candidate.dayOfWeek &&
-        o.slotIds.some((sid) => candidate.slotIds.includes(sid))
+        o.slotIds.some(
+          (sid) =>
+            candidate.slotIds.includes(sid) &&
+            doSlotHalvesOverlap(
+              getOfferingSlotHalf(candidate, sid),
+              getOfferingSlotHalf(o, sid)
+            )
+        )
     );
 
     for (const other of sameTermOthers) {
       // ۱. تداخل کلاس فیزیکی
       if (candidate.classroomId && other.classroomId === candidate.classroomId) {
         errors.push(
-          `تداخل مکان: کلاس «${candidate.classroomName || other.classroomName}» در همین روز و سانس به درس «${other.courseTitle}» (${other.ownerMajorName}) اختصاص دارد.`
+          `تداخل مکان: کلاس «${candidate.classroomName || other.classroomName}» در همین روز و ساعت به درس «${other.courseTitle}» (${other.ownerMajorName}) اختصاص دارد.`
         );
       }
 
@@ -286,8 +405,12 @@ export function detectOfferingConflicts(
         );
       }
 
-      // ۳. تداخل ورودی/شعبه دانشجویان
-      const cohortOverlap = doTargetsOverlap(candidate, other);
+      // ۳. تداخل ورودی/شعبه دانشجویان (برای شعبه‌های کارورزی همان بخش با ظرفیت تقسیم‌شده، تداخل دانشجو محسوب نمی‌شود)
+      const bothInternshipSplit =
+        candidate.practicalType === 'internship' &&
+        other.practicalType === 'internship' &&
+        (Boolean(candidate.internshipSubGroupLabel) || Boolean(other.internshipSubGroupLabel));
+      const cohortOverlap = bothInternshipSplit ? null : doTargetsOverlap(candidate, other);
       if (cohortOverlap) {
         errors.push(
           `تداخل برنامه دانشجویان (${cohortOverlap}): همزمان درس «${other.courseTitle}» برای این گروه برنامه‌ریزی شده است.`

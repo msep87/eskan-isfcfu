@@ -9,6 +9,7 @@ import {
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
   exportJsonRowsToExcel,
+  getSchedSlotTitle,
   printSchedHtml,
 } from '../utils/schedulingUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
@@ -107,8 +108,8 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
   const handlePrintSchedule = () => {
     const headerCells = sortedSlots
       .map(
-        (s) =>
-          `<th>${escapeHtml(s.label)}<div class="muted mono">${escapeHtml(s.startTime)}-${escapeHtml(s.endTime)}</div></th>`
+        (s, idx) =>
+          `<th>${escapeHtml(getSchedSlotTitle(s, idx))}<div class="muted mono">${escapeHtml(s.startTime)}-${escapeHtml(s.endTime)}</div></th>`
       )
       .join('');
     const bodyRows = activeDays
@@ -160,7 +161,11 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
         'کلاس فیزیکی': o.classroomName || '-',
         'روز هفته': o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'تعیین‌نشده',
         'سانس‌ها': o.slotIds
-          .map((id) => sortedSlots.find((s) => s.id === id)?.label || id)
+          .map((id) => {
+            const idx = sortedSlots.findIndex((s) => s.id === id);
+            const sl = idx >= 0 ? sortedSlots[idx] : undefined;
+            return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : id;
+          })
           .join(' + '),
         'تعداد دانشجو': o.enrolledCount,
         'واحد کل': bd.rawUnits,
@@ -314,12 +319,12 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
                 <th className="p-2.5 text-right font-extrabold w-28 border-l border-slate-200 dark:border-slate-700">
                   روز هفته / سانس
                 </th>
-                {sortedSlots.map((slot) => (
+                {sortedSlots.map((slot, idx) => (
                   <th
                     key={slot.id}
                     className="p-2 text-center font-bold border-l border-slate-200 dark:border-slate-700 last:border-l-0"
                   >
-                    <div>{slot.label}</div>
+                    <div>{getSchedSlotTitle(slot, idx)}</div>
                     <div className="text-[10px] font-mono text-slate-500" dir="ltr">
                       {slot.startTime} - {slot.endTime}
                     </div>

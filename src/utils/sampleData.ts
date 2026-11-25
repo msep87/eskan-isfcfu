@@ -254,11 +254,12 @@ export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
   },
   activeDays: ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
   timeSlots: [
-    { id: 'slot_1', label: '۰۸:۰۰ - ۱۰:۰۰', startTime: '08:00', endTime: '10:00', order: 1 },
-    { id: 'slot_2', label: '۱۰:۰۰ - ۱۲:۰۰', startTime: '10:00', endTime: '12:00', order: 2 },
-    { id: 'slot_3', label: '۱۳:۳۰ - ۱۵:۳۰', startTime: '13:30', endTime: '15:30', order: 3 },
-    { id: 'slot_4', label: '۱۵:۳۰ - ۱۷:۳۰', startTime: '15:30', endTime: '17:30', order: 4 },
-    { id: 'slot_5', label: '۱۷:۳۰ - ۱۹:۳۰', startTime: '17:30', endTime: '19:30', order: 5 },
+    { id: 'slot_1', label: 'سانس اول', startTime: '08:00', endTime: '10:00', order: 1 },
+    { id: 'slot_2', label: 'سانس دوم', startTime: '10:00', endTime: '12:00', order: 2 },
+    { id: 'slot_3', label: 'سانس سوم', startTime: '12:00', endTime: '14:00', order: 3 },
+    { id: 'slot_4', label: 'سانس چهارم', startTime: '14:00', endTime: '16:00', order: 4 },
+    { id: 'slot_5', label: 'سانس پنجم', startTime: '16:00', endTime: '18:00', order: 5 },
+    { id: 'slot_6', label: 'سانس ششم', startTime: '18:00', endTime: '20:00', order: 6 },
   ],
 };
 

@@ -12,6 +12,7 @@ import {
   SchedProgramCohort,
   SchedRulesSettings,
   SchedSharedTarget,
+  SchedSlotHalf,
   SchedTimeSlot,
 } from '../types';
 import { Storage, normalizeAssignedFieldsList, normalizePersianSearch } from '../utils/storage';
@@ -22,11 +23,17 @@ import {
   SCHED_EMPLOYMENT_LABELS,
   SCHED_PRACTICAL_TYPE_LABELS,
   SCHED_ROOM_TYPE_LABELS,
+  buildDefaultTimeSlots,
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
+  computeInternshipSplitPlan,
   detectOfferingConflicts,
   downloadSchedExcelTemplate,
   exportJsonRowsToExcel,
+  getOfferingSlotHalf,
+  getSchedSlotOrdinalLabel,
+  getSchedSlotTitle,
+  getSlotHalfLabel,
   normalizeSchedCode,
   parseSchedExcelFile,
   printSchedHtml,
@@ -34,6 +41,7 @@ import {
 } from '../utils/schedulingUtils';
 import { CourseSchedulingAutoWizard } from './CourseSchedulingAutoWizard';
 import { CourseSchedulingReports } from './CourseSchedulingReports';
+import { CourseSchedulingMasterGrid } from './CourseSchedulingMasterGrid';
 import {
   AlertCircle,
   AlertTriangle,
@@ -50,6 +58,7 @@ import {
   GraduationCap,
   Layers,
   LayoutDashboard,
+  LayoutGrid,
   Plus,
   Printer,
   Search,
@@ -79,6 +88,7 @@ type WorkspaceSection =
   | 'professors'
   | 'courses'
   | 'rules'
+  | 'master_grid'
   | 'schedule'
   | 'auto_wizard'
   | 'reports';
@@ -95,7 +105,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const canViewSensitiveProfInfo = userRole === 'admin' || userRole === 'academic_deputy';
 
   const [section, setSection] = useState<WorkspaceSection>(
-    canManageMasterData ? 'overview' : 'schedule'
+    canManageMasterData ? 'overview' : 'master_grid'
   );
   const [classrooms, setClassrooms] = useState<SchedClassroom[]>(() =>
     Storage.getSchedClassrooms()
@@ -716,7 +726,13 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [offClassroomId, setOffClassroomId] = useState('');
   const [offDay, setOffDay] = useState<SchedDayKey | ''>('saturday');
   const [offSlotIds, setOffSlotIds] = useState<string[]>([]);
+  const [offSlotParts, setOffSlotParts] = useState<Record<string, SchedSlotHalf>>({});
   const [offSplitPart, setOffSplitPart] = useState<'full' | 'theory' | 'practical'>('full');
+  const [offInternshipSubLabel, setOffInternshipSubLabel] = useState('');
+  const [offInternshipGroups, setOffInternshipGroups] = useState<
+    Array<{ id: string; label: string; studentCount: number; professorId: string }>
+  >([]);
+  const [modalAllChartCourses, setModalAllChartCourses] = useState(false);
   const [offSharedTargets, setOffSharedTargets] = useState<SchedSharedTarget[]>([]);
   const [offNotes, setOffNotes] = useState('');
   const [sharePickerCohortId, setSharePickerCohortId] = useState('');
@@ -738,27 +754,90 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     return set;
   }, [courses, selectedOffCourse]);
 
-  const openNewOfferingModal = (presetDay?: SchedDayKey, presetSlotId?: string) => {
+  const initInternshipGroupsForCourse = (
+    crs: SchedCurriculumCourse | undefined,
+    enrolled: number,
+    profId = ''
+  ) => {
+    if (crs?.practicalType === 'internship') {
+      const cap = rules.equivalentPerUnit.internshipMinStudents || 12;
+      const plan = computeInternshipSplitPlan(enrolled, cap);
+      setOffInternshipGroups(
+        plan.map((g, idx) => ({
+          id: `ig_${Date.now()}_${idx}`,
+          label: g.label,
+          studentCount: g.studentCount,
+          professorId: profId,
+        }))
+      );
+    } else {
+      setOffInternshipGroups([]);
+    }
+  };
+
+  const openNewOfferingModal = (
+    presetDayOrOpts?:
+      | SchedDayKey
+      | {
+          cohortId?: string;
+          sectionId?: string;
+          dayOfWeek?: SchedDayKey;
+          slotId?: string;
+          slotHalf?: SchedSlotHalf;
+        },
+    presetSlotIdArg?: string
+  ) => {
+    const opts =
+      typeof presetDayOrOpts === 'object' && presetDayOrOpts !== null
+        ? presetDayOrOpts
+        : { dayOfWeek: presetDayOrOpts, slotId: presetSlotIdArg };
+
+    const targetCohort = opts.cohortId
+      ? programs.find((p) => p.id === opts.cohortId)
+      : undefined;
+
     const visibleCourses = canManageMasterData
       ? courses
       : allowCrossMajorView
       ? courses
       : courses.filter((c) => isOwnMajorName(c.majorName));
-    const firstCourse = visibleCourses[0] || courses[0];
+
+    // اگر هدف مشخص شده، اول درس هم‌رشته یا درس چارت گروه را برگزین
+    const firstCourse =
+      (targetCohort
+        ? visibleCourses.find((c) => c.majorCode === targetCohort.majorCode)
+        : undefined) ||
+      visibleCourses[0] ||
+      courses[0];
+
     const matchingCohort =
-      programs.find((p) => p.majorCode === firstCourse?.majorCode) || programs[0];
-    const firstSec = matchingCohort?.sections[0];
+      targetCohort ||
+      programs.find((p) => p.majorCode === firstCourse?.majorCode) ||
+      programs[0];
+
+    const matchingSec = opts.sectionId
+      ? matchingCohort?.sections.find((s) => s.id === opts.sectionId)
+      : matchingCohort?.sections[0];
+
+    const baseEnrolled =
+      matchingSec?.studentCount || matchingCohort?.totalStudents || 28;
+    const initSlotId = opts.slotId || sortedSlots[0]?.id || '';
+    const initHalf: SchedSlotHalf = opts.slotHalf || 'full';
 
     setEditingOffId(null);
+    setModalAllChartCourses(false);
     setOffCourseId(firstCourse?.id || '');
     setOffCohortId(matchingCohort?.id || '');
-    setOffSectionId(firstSec?.id || '');
-    setOffEnrolledCount(String(firstSec?.studentCount || matchingCohort?.totalStudents || 28));
+    setOffSectionId(matchingSec?.id || '');
+    setOffEnrolledCount(String(baseEnrolled));
     setOffProfessorId('');
     setOffClassroomId('');
-    setOffDay(presetDay || activeDays[0] || 'saturday');
-    setOffSlotIds(presetSlotId ? [presetSlotId] : sortedSlots[0]?.id ? [sortedSlots[0].id] : []);
+    setOffDay(opts.dayOfWeek || activeDays[0] || 'saturday');
+    setOffSlotIds(initSlotId ? [initSlotId] : []);
+    setOffSlotParts(initSlotId ? { [initSlotId]: initHalf } : {});
     setOffSplitPart('full');
+    setOffInternshipSubLabel('');
+    initInternshipGroupsForCourse(firstCourse, baseEnrolled, '');
     setOffSharedTargets([]);
     setOffNotes('');
     setSharePickerCohortId('');
@@ -768,6 +847,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
   const openEditOfferingModal = (o: SchedCourseOffering) => {
     setEditingOffId(o.id);
+    setModalAllChartCourses(true);
     setOffCourseId(o.courseId);
     setOffCohortId(o.cohortId);
     setOffSectionId(o.sectionId || '');
@@ -776,7 +856,14 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setOffClassroomId(o.classroomId || '');
     setOffDay(o.dayOfWeek || '');
     setOffSlotIds([...o.slotIds]);
+    const parts: Record<string, SchedSlotHalf> = {};
+    o.slotIds.forEach((sid) => {
+      parts[sid] = getOfferingSlotHalf(o, sid);
+    });
+    setOffSlotParts(parts);
     setOffSplitPart(o.splitPart || 'full');
+    setOffInternshipSubLabel(o.internshipSubGroupLabel || '');
+    setOffInternshipGroups([]);
     setOffSharedTargets([...(o.sharedWithTargets || [])]);
     setOffNotes(o.notes || '');
     setSharePickerCohortId('');
@@ -821,6 +908,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       sectionId: sec?.id,
       sectionName: sec?.name,
       enrolledCount: enrolled,
+      internshipSubGroupLabel: offInternshipSubLabel.trim() || undefined,
       sharedWithTargets: offSharedTargets.length > 0 ? offSharedTargets : undefined,
       professorId: prof?.id,
       professorCode: prof?.professorCode,
@@ -829,6 +917,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       classroomName: room?.name,
       dayOfWeek: offDay || undefined,
       slotIds: offSlotIds,
+      slotParts: Object.keys(offSlotParts).length > 0 ? offSlotParts : undefined,
       splitPart: offSplitPart,
       notes: offNotes.trim() || undefined,
       createdById: actor.id,
@@ -846,6 +935,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     classrooms,
     offClassroomId,
     offEnrolledCount,
+    offInternshipSubLabel,
     offSplitPart,
     rules,
     editingOffId,
@@ -853,6 +943,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     offSharedTargets,
     offDay,
     offSlotIds,
+    offSlotParts,
     offNotes,
     actor,
     userRole,
@@ -914,6 +1005,57 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const handleSaveOffering = (e: React.FormEvent) => {
     e.preventDefault();
     if (!candidateOffering) return;
+
+    // حالت ثبت چند شعبه کارورزی (مثلاً تقسیم ۲۴ نفر به دو شعبه ۱۲ نفره یا ۲۳ نفر به ۱۲+۱۱)
+    if (
+      !editingOffId &&
+      selectedOffCourse?.practicalType === 'internship' &&
+      offInternshipGroups.length > 0
+    ) {
+      const created: SchedCourseOffering[] = [];
+      let workingTerm = [...termOfferings];
+      for (let i = 0; i < offInternshipGroups.length; i++) {
+        const grp = offInternshipGroups[i];
+        const grpProf =
+          professors.find((p) => p.id === (grp.professorId || offProfessorId)) || undefined;
+        const grpBd = calculateOfferingBreakdown(
+          {
+            theoreticalUnits: selectedOffCourse.theoreticalUnits,
+            practicalUnits: selectedOffCourse.practicalUnits,
+            practicalType: selectedOffCourse.practicalType,
+            splitPart: offSplitPart,
+            enrolledCount: Math.max(1, grp.studentCount || 1),
+          },
+          rules
+        );
+        const item: SchedCourseOffering = {
+          ...candidateOffering,
+          id: `off_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+          enrolledCount: Math.max(1, grp.studentCount || 1),
+          weeklyHours: grpBd.weeklyHours,
+          internshipSubGroupLabel: grp.label.trim() || `شعبه ${i + 1} کارورزی`,
+          professorId: grpProf?.id,
+          professorCode: grpProf?.professorCode,
+          professorName: grpProf?.fullName,
+          updatedAt: new Date().toISOString(),
+        };
+        const rep = detectOfferingConflicts(item, workingTerm, classrooms, professors);
+        if (rep.hasHardConflict) {
+          notify('error', `تداخل در ${item.internshipSubGroupLabel}: ${rep.errors[0]}`);
+          return;
+        }
+        created.push(item);
+        workingTerm.push(item);
+      }
+      persistOfferings([...offerings, ...created]);
+      notify(
+        'success',
+        `${created.length} شعبه کارورزی برای درس «${selectedOffCourse.title}» با موفقیت ثبت شد.`
+      );
+      setOffModalOpen(false);
+      return;
+    }
+
     if (candidateConflictReport.hasHardConflict) {
       notify('error', 'به دلیل وجود تداخل زمانی قطعی امکان ذخیره وجود ندارد. تداخل را برطرف نمایید.');
       return;
@@ -991,6 +1133,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     {
       groupTitle: 'برنامه‌ریزی و گزارش‌ها',
       items: [
+        {
+          key: 'master_grid',
+          label: 'برنامه جامع و فراگیر (کل رشته‌ها)',
+          icon: LayoutGrid,
+          badge: String(termOfferings.length),
+        },
         {
           key: 'schedule',
           label: 'ثبت دروس و برنامه هفتگی',
@@ -1192,10 +1340,18 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => setSection('schedule')}
-                    className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold cursor-pointer"
+                    onClick={() => setSection('master_grid')}
+                    className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
                   >
-                    ورود به جدول برنامه و ثبت دروس
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>ورود به برنامه جامع و فراگیر</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSection('schedule')}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-extrabold cursor-pointer"
+                  >
+                    جدول هفتگی و ثبت درس
                   </button>
                   <button
                     type="button"
@@ -2129,38 +2285,89 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   </div>
                 </div>
 
-                <div className="space-y-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-slate-900 dark:text-white">
-                      سانس‌های زمانی کلاس‌ها
-                    </span>
+                <div className="space-y-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="font-extrabold text-slate-900 dark:text-white block">
+                        سانس‌های زمانی کلاس‌ها (عنوان استاندارد «سانس اول، دوم...» + ساعت قابل ویرایش)
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        پیش‌فرض سیستم ۶ سانس دو ساعتی از ۰۸:۰۰ تا ۲۰:۰۰ است؛ با تغییر ساعت، عنوان سانس در تمام جداول به‌صورت «سانس اول»، «سانس دوم» و... و ساعت جدید در زیر آن نمایش داده می‌شود.
+                      </span>
+                    </div>
                     {canManageMasterData && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const nextOrder = draftRules.timeSlots.length + 1;
-                          const newSlot: SchedTimeSlot = {
-                            id: `slot_${Date.now()}`,
-                            label: `سانس ${nextOrder}`,
-                            startTime: '18:00',
-                            endTime: '20:00',
-                            order: nextOrder,
-                          };
-                          setDraftRules((prev) => ({
-                            ...prev,
-                            timeSlots: [...prev.timeSlots, newSlot],
-                          }));
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 font-bold hover:bg-teal-600 hover:text-white cursor-pointer"
-                      >
-                        + افزودن سانس
-                      </button>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <label className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
+                          <span className="text-[11px] font-bold">تعداد سانس روزانه:</span>
+                          <select
+                            value={draftRules.timeSlots.length}
+                            onChange={(e) => {
+                              const cnt = Math.max(1, Math.min(10, Number(e.target.value) || 6));
+                              const generated = buildDefaultTimeSlots(cnt, 8, 2);
+                              // حفظ ساعت‌های قبلی در صورت وجود
+                              const merged = generated.map((g, idx) => {
+                                const old = [...draftRules.timeSlots].sort(
+                                  (a, b) => a.order - b.order
+                                )[idx];
+                                return old
+                                  ? {
+                                      ...g,
+                                      id: old.id,
+                                      startTime: old.startTime,
+                                      endTime: old.endTime,
+                                    }
+                                  : g;
+                              });
+                              setDraftRules((prev) => ({ ...prev, timeSlots: merged }));
+                            }}
+                            className="bg-transparent font-mono font-black focus:outline-none cursor-pointer"
+                          >
+                            {[3, 4, 5, 6, 7, 8].map((n) => (
+                              <option key={n} value={n} className="bg-white dark:bg-slate-900">
+                                {n} سانس
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDraftRules((prev) => ({
+                              ...prev,
+                              timeSlots: buildDefaultTimeSlots(6, 8, 2),
+                            }))
+                          }
+                          className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold cursor-pointer"
+                        >
+                          بازنشانی به ۶ سانس (۸ تا ۲۰)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextOrder = draftRules.timeSlots.length + 1;
+                            const newSlot: SchedTimeSlot = {
+                              id: `slot_${Date.now()}`,
+                              label: getSchedSlotOrdinalLabel(nextOrder - 1),
+                              startTime: '18:00',
+                              endTime: '20:00',
+                              order: nextOrder,
+                            };
+                            setDraftRules((prev) => ({
+                              ...prev,
+                              timeSlots: [...prev.timeSlots, newSlot],
+                            }));
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 font-bold hover:bg-teal-600 hover:text-white cursor-pointer"
+                        >
+                          + افزودن سانس
+                        </button>
+                      </div>
                     )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                     {[...draftRules.timeSlots]
                       .sort((a, b) => a.order - b.order)
-                      .map((slot) => (
+                      .map((slot, sIdx) => (
                         <div
                           key={slot.id}
                           className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 space-y-1.5"
@@ -2169,7 +2376,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             <input
                               type="text"
                               disabled={!canManageMasterData}
-                              value={slot.label}
+                              value={getSchedSlotTitle(slot, sIdx)}
                               onChange={(e) =>
                                 setDraftRules((prev) => ({
                                   ...prev,
@@ -2234,6 +2441,30 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
             </div>
           )}
 
+          {/* ۶.۵ برنامه جامع و فراگیر (ماتریس شیت متمرکز همه رشته‌ها) */}
+          {section === 'master_grid' && (
+            <CourseSchedulingMasterGrid
+              activeTerm={activeTerm}
+              offerings={offerings}
+              termOfferings={termOfferings}
+              programs={programs}
+              classrooms={classrooms}
+              professors={professors}
+              courses={courses}
+              rules={rules}
+              activeDays={activeDays}
+              sortedSlots={sortedSlots}
+              canManageMasterData={canManageMasterData}
+              userRole={userRole}
+              actor={actor}
+              isOwnMajorName={isOwnMajorName}
+              onPersistOfferings={persistOfferings}
+              onOpenNewOffering={(opts) => openNewOfferingModal(opts)}
+              onOpenEditOffering={(o) => openEditOfferingModal(o)}
+              onNotify={notify}
+            />
+          )}
+
           {/* ۷. نمایش برنامه هفتگی و ثبت/مدیریت دروس ارائه‌شده */}
           {section === 'schedule' && (
             <div className="space-y-4">
@@ -2257,6 +2488,14 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     >
                       <Plus className="w-4 h-4" />
                       <span>ثبت / ارائه درس جدید در برنامه</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSection('master_grid')}
+                      className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <LayoutGrid className="w-3.5 h-3.5" />
+                      <span>برنامه جامع و فراگیر</span>
                     </button>
                     <button
                       type="button"
@@ -2287,7 +2526,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             'کلاس فیزیکی': o.classroomName || '-',
                             'روز': o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'تعیین‌نشده',
                             'سانس': o.slotIds
-                              .map((id) => sortedSlots.find((s) => s.id === id)?.label || id)
+                              .map((id) => {
+                                const idx = sortedSlots.findIndex((s) => s.id === id);
+                                const sl = idx >= 0 ? sortedSlots[idx] : undefined;
+                                return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : id;
+                              })
                               .join(' + '),
                             'واحد کل': bd.rawUnits,
                             'ساعت هفتگی': bd.weeklyHours,
@@ -2413,12 +2656,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         <th className="p-2.5 text-right font-extrabold w-28 border-l border-slate-200 dark:border-slate-700">
                           روز / سانس
                         </th>
-                        {sortedSlots.map((slot) => (
+                        {sortedSlots.map((slot, sIdx) => (
                           <th
                             key={slot.id}
                             className="p-2 text-center font-bold border-l border-slate-200 dark:border-slate-700 last:border-l-0"
                           >
-                            <div>{slot.label}</div>
+                            <div>{getSchedSlotTitle(slot, sIdx)}</div>
                             <div
                               className="text-[10px] font-mono tabular-nums text-slate-500"
                               dir="ltr"
@@ -2562,7 +2805,13 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                               <div className="text-[10px] text-slate-500">
                                 {o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'بدون روز'} ·{' '}
                                 {o.slotIds
-                                  .map((id) => sortedSlots.find((s) => s.id === id)?.label || id)
+                                  .map((id) => {
+                                    const idx = sortedSlots.findIndex((s) => s.id === id);
+                                    const sl = idx >= 0 ? sortedSlots[idx] : undefined;
+                                    return sl
+                                      ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})`
+                                      : id;
+                                  })
                                   .join(' + ')}
                               </div>
                             </td>
@@ -3004,9 +3253,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     <th className="p-2 text-right border border-slate-200 dark:border-slate-700">
                       روز / سانس
                     </th>
-                    {sortedSlots.map((s) => (
+                    {sortedSlots.map((s, idx) => (
                       <th key={s.id} className="p-2 text-center border border-slate-200 dark:border-slate-700">
-                        <div>{s.label}</div>
+                        <div>{getSchedSlotTitle(s, idx)}</div>
                         <div className="font-mono text-[10px] text-slate-500" dir="ltr">
                           {s.startTime}-{s.endTime}
                         </div>
@@ -3240,8 +3489,21 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
             <form onSubmit={handleSaveOffering} className="space-y-3.5 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="space-y-1">
-                  <span className="font-bold">انتخاب درس از چارت (کد ۷ رقمی) *</span>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold">انتخاب درس از چارت (کد ۷ رقمی) *</span>
+                    {!canManageMasterData && (
+                      <label className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={modalAllChartCourses}
+                          onChange={(e) => setModalAllChartCourses(e.target.checked)}
+                          className="rounded text-indigo-600"
+                        />
+                        <span>همه دروس دانشگاه</span>
+                      </label>
+                    )}
+                  </div>
                   <select
                     required
                     value={offCourseId}
@@ -3250,12 +3512,19 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       setOffCourseId(nextId);
                       const c = courses.find((x) => x.id === nextId);
                       if (c) {
-                        const coh = programs.find((p) => p.majorCode === c.majorCode);
-                        if (coh) {
-                          setOffCohortId(coh.id);
-                          const sec = coh.sections[0];
-                          setOffSectionId(sec?.id || '');
-                          setOffEnrolledCount(String(sec?.studentCount || coh.totalStudents));
+                        let currentEnrolled = Number(normalizeSchedCode(offEnrolledCount)) || 28;
+                        if (!offCohortId) {
+                          const coh = programs.find((p) => p.majorCode === c.majorCode);
+                          if (coh) {
+                            setOffCohortId(coh.id);
+                            const sec = coh.sections[0];
+                            setOffSectionId(sec?.id || '');
+                            currentEnrolled = sec?.studentCount || coh.totalStudents;
+                            setOffEnrolledCount(String(currentEnrolled));
+                          }
+                        }
+                        if (!editingOffId) {
+                          initInternshipGroupsForCourse(c, currentEnrolled, offProfessorId);
                         }
                         setOffSharedTargets([]);
                       }
@@ -3267,6 +3536,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         (c) =>
                           canManageMasterData ||
                           allowCrossMajorView ||
+                          modalAllChartCourses ||
                           isOwnMajorName(c.majorName)
                       )
                       .map((c) => (
@@ -3275,7 +3545,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         </option>
                       ))}
                   </select>
-                </label>
+                </div>
 
                 <label className="space-y-1">
                   <span className="font-bold">رشته و ورودی میزبان *</span>
@@ -3288,7 +3558,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       const coh = programs.find((p) => p.id === nextCid);
                       const sec = coh?.sections[0];
                       setOffSectionId(sec?.id || '');
-                      setOffEnrolledCount(String(sec?.studentCount || coh?.totalStudents || 25));
+                      const countVal = sec?.studentCount || coh?.totalStudents || 25;
+                      setOffEnrolledCount(String(countVal));
+                      if (!editingOffId && selectedOffCourse?.practicalType === 'internship') {
+                        initInternshipGroupsForCourse(selectedOffCourse, countVal, offProfessorId);
+                      }
                     }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                   >
@@ -3310,7 +3584,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       setOffSectionId(e.target.value);
                       const coh = programs.find((p) => p.id === offCohortId);
                       const sec = coh?.sections.find((s) => s.id === e.target.value);
-                      if (sec) setOffEnrolledCount(String(sec.studentCount));
+                      const countVal = sec?.studentCount || coh?.totalStudents || 25;
+                      setOffEnrolledCount(String(countVal));
+                      if (!editingOffId && selectedOffCourse?.practicalType === 'internship') {
+                        initInternshipGroupsForCourse(selectedOffCourse, countVal, offProfessorId);
+                      }
                     }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   >
@@ -3326,7 +3604,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 </label>
 
                 <label className="space-y-1">
-                  <span className="font-bold">کل دانشجویان شرکت‌کننده *</span>
+                  <span className="font-bold">
+                    {selectedOffCourse?.practicalType === 'internship' && editingOffId
+                      ? 'تعداد نفر کارورزی این شعبه *'
+                      : 'کل دانشجویان شرکت‌کننده *'}
+                  </span>
                   <input
                     type="number"
                     min={1}
@@ -3352,6 +3634,143 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   </select>
                 </label>
               </div>
+
+              {/* مدیریت اختصاصی شعبه‌های کارورزی (مثلاً تقسیم ۲۴ نفر به ۱۲+۱۲ یا ۲۳ به ۱۲+۱۱ یا ۲۵ به ۱۲+۱۳) */}
+              {selectedOffCourse?.practicalType === 'internship' && (
+                <div className="p-3.5 rounded-xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-black text-violet-900 dark:text-violet-200">
+                        شعبه‌بندی و ظرفیت درس کارورزی (نصاب استاندارد: {rules.equivalentPerUnit.internshipMinStudents || 12} نفر)
+                      </div>
+                      <div className="text-[11px] text-violet-700 dark:text-violet-300">
+                        تعداد دانشجو برای هر شعبه کارورزی توسط مدیر گروه قابل تعیین است (مثلاً ۲۴ نفر ← دو شعبه ۱۲ نفره، ۲۳ نفر ← ۱۲ و ۱۱ نفره، ۲۵ نفر ← ۱۲ و ۱۳ نفره).
+                      </div>
+                    </div>
+                    {!editingOffId && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            initInternshipGroupsForCourse(
+                              selectedOffCourse,
+                              Number(normalizeSchedCode(offEnrolledCount)) || 24,
+                              offProfessorId
+                            )
+                          }
+                          className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold cursor-pointer"
+                        >
+                          تقسیم هوشمند ({rules.equivalentPerUnit.internshipMinStudents || 12} نفره)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOffInternshipGroups((prev) => [
+                              ...prev,
+                              {
+                                id: `ig_${Date.now()}_${prev.length}`,
+                                label: `شعبه ${(prev.length + 1).toLocaleString('fa-IR')} کارورزی`,
+                                studentCount: rules.equivalentPerUnit.internshipMinStudents || 12,
+                                professorId: offProfessorId,
+                              },
+                            ])
+                          }
+                          className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-violet-300 dark:border-violet-700 text-violet-800 dark:text-violet-200 text-[11px] font-bold cursor-pointer"
+                        >
+                          + افزودن شعبه کارورزی
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {editingOffId ? (
+                    <label className="block space-y-1">
+                      <span className="font-bold text-violet-900 dark:text-violet-200">
+                        عنوان شعبه کارورزی (اختیاری)
+                      </span>
+                      <input
+                        type="text"
+                        value={offInternshipSubLabel}
+                        onChange={(e) => setOffInternshipSubLabel(e.target.value)}
+                        placeholder="مثلاً: شعبه ۱ کارورزی"
+                        className="w-full px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-slate-900"
+                      />
+                    </label>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {offInternshipGroups.map((grp, gIdx) => (
+                        <div
+                          key={grp.id}
+                          className="grid grid-cols-12 gap-2 items-center bg-white dark:bg-slate-900 p-2 rounded-lg border border-violet-200 dark:border-violet-800"
+                        >
+                          <input
+                            type="text"
+                            value={grp.label}
+                            onChange={(e) =>
+                              setOffInternshipGroups((prev) =>
+                                prev.map((x, i) => (i === gIdx ? { ...x, label: e.target.value } : x))
+                              )
+                            }
+                            placeholder="نام شعبه کارورزی"
+                            className="col-span-4 px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                          />
+                          <div className="col-span-3 flex items-center gap-1">
+                            <span className="text-[10px] text-slate-500">نفرات:</span>
+                            <input
+                              type="number"
+                              min={1}
+                              value={grp.studentCount}
+                              onChange={(e) =>
+                                setOffInternshipGroups((prev) =>
+                                  prev.map((x, i) =>
+                                    i === gIdx
+                                      ? { ...x, studentCount: Math.max(1, Number(e.target.value) || 1) }
+                                      : x
+                                  )
+                                )
+                              }
+                              className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
+                            />
+                          </div>
+                          <select
+                            value={grp.professorId}
+                            onChange={(e) =>
+                              setOffInternshipGroups((prev) =>
+                                prev.map((x, i) =>
+                                  i === gIdx ? { ...x, professorId: e.target.value } : x
+                                )
+                              )
+                            }
+                            className="col-span-4 px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                          >
+                            <option value="">(استاد عمومی فرم)</option>
+                            {professors
+                              .filter((p) => p.isActive)
+                              .map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.fullName}
+                                </option>
+                              ))}
+                          </select>
+                          <div className="col-span-1 text-center">
+                            {offInternshipGroups.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setOffInternshipGroups((prev) => prev.filter((_, i) => i !== gIdx))
+                                }
+                                className="text-rose-500 hover:text-rose-700 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* بخش مشترک‌سازی بین چند رشته صرفاً با کد ۷ رقمی یکسان */}
               <div className="p-3 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/25 border border-indigo-200 dark:border-indigo-900 space-y-2">
@@ -3482,8 +3901,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 </label>
               </div>
 
-              {/* روز و سانس */}
-              <div className="space-y-2">
+              {/* روز و سانس و تفکیک دو تک‌ساعت */}
+              <div className="space-y-2.5">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <label className="space-y-1">
                     <span className="font-bold">روز برگزاری کلاس</span>
@@ -3503,32 +3922,86 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   <div className="space-y-1">
                     <span className="font-bold block">سانس‌های زمانی</span>
                     <div className="flex flex-wrap gap-1.5">
-                      {sortedSlots.map((slot) => {
+                      {sortedSlots.map((slot, sIdx) => {
                         const checked = offSlotIds.includes(slot.id);
                         return (
                           <button
                             key={slot.id}
                             type="button"
-                            onClick={() =>
-                              setOffSlotIds((prev) =>
-                                checked
-                                  ? prev.filter((id) => id !== slot.id)
-                                  : [...prev, slot.id]
-                              )
-                            }
+                            onClick={() => {
+                              if (checked) {
+                                setOffSlotIds((prev) => prev.filter((id) => id !== slot.id));
+                                setOffSlotParts((prev) => {
+                                  const next = { ...prev };
+                                  delete next[slot.id];
+                                  return next;
+                                });
+                              } else {
+                                setOffSlotIds((prev) => [...prev, slot.id]);
+                                setOffSlotParts((prev) => ({
+                                  ...prev,
+                                  [slot.id]: prev[slot.id] || 'full',
+                                }));
+                              }
+                            }}
                             className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold cursor-pointer ${
                               checked
                                 ? 'bg-teal-600 text-white border-teal-600'
                                 : 'bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700'
                             }`}
                           >
-                            {slot.label} ({slot.startTime})
+                            {getSchedSlotTitle(slot, sIdx)} ({slot.startTime}-{slot.endTime})
                           </button>
                         );
                       })}
                     </div>
                   </div>
                 </div>
+
+                {offSlotIds.length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
+                    <div className="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
+                      تعیین کل سانس یا تفکیک دو تک‌ساعت (نیمه راست: ساعت اول · نیمه چپ: ساعت دوم)
+                    </div>
+                    <div className="space-y-1.5">
+                      {offSlotIds.map((sid) => {
+                        const sIdx = sortedSlots.findIndex((x) => x.id === sid);
+                        const sl = sIdx >= 0 ? sortedSlots[sIdx] : undefined;
+                        const curHalf: SchedSlotHalf = offSlotParts[sid] || 'full';
+                        return (
+                          <div
+                            key={`half_${sid}`}
+                            className="flex flex-wrap items-center justify-between gap-2 text-[11px]"
+                          >
+                            <span className="font-bold text-slate-700 dark:text-slate-200">
+                              {sl ? `${getSchedSlotTitle(sl, sIdx)} (${sl.startTime}-${sl.endTime})` : sid}:
+                            </span>
+                            <div className="inline-flex items-center gap-1">
+                              {(
+                                ['full', 'first_hour', 'second_hour'] as SchedSlotHalf[]
+                              ).map((h) => (
+                                <button
+                                  key={h}
+                                  type="button"
+                                  onClick={() =>
+                                    setOffSlotParts((prev) => ({ ...prev, [sid]: h }))
+                                  }
+                                  className={`px-2.5 py-1 rounded-lg border font-bold cursor-pointer ${
+                                    curHalf === h
+                                      ? 'bg-indigo-600 text-white border-indigo-600'
+                                      : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                                  }`}
+                                >
+                                  {getSlotHalfLabel(h)}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* پیش‌نمایش محاسبه ساعات و واحد معادل + خطاهای تداخل */}
@@ -3590,10 +4063,21 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 )}
                 <button
                   type="submit"
-                  disabled={candidateConflictReport.hasHardConflict}
+                  disabled={
+                    !editingOffId &&
+                    selectedOffCourse?.practicalType === 'internship' &&
+                    offInternshipGroups.length > 0
+                      ? false
+                      : candidateConflictReport.hasHardConflict
+                  }
                   className="px-6 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-extrabold cursor-pointer"
                 >
-                  {editingOffId ? 'ذخیره تغییرات درس' : 'ثبت قطعی در برنامه هفتگی'}
+                  {editingOffId
+                    ? 'ذخیره تغییرات درس'
+                    : selectedOffCourse?.practicalType === 'internship' &&
+                      offInternshipGroups.length > 1
+                    ? `ثبت قطعی ${offInternshipGroups.length.toLocaleString('fa-IR')} شعبه کارورزی`
+                    : 'ثبت قطعی در برنامه هفتگی'}
                 </button>
               </div>
             </form>

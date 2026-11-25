@@ -96,6 +96,7 @@ import {
   PublicStudentChatProfile,
   StaffChatDirectoryItem,
 } from '../types';
+import { getSchedSlotTitle } from './schedulingUtils';
 import {
   DEFAULT_COMMUNITY_CHAT_SETTINGS,
   INITIAL_PUBLIC_FORUM,
@@ -13788,10 +13789,14 @@ export const Storage = {
         Array.isArray(stored.activeDays) && stored.activeDays.length > 0
           ? stored.activeDays
           : DEFAULT_SCHED_RULES.activeDays,
-      timeSlots:
+      timeSlots: (
         Array.isArray(stored.timeSlots) && stored.timeSlots.length > 0
           ? stored.timeSlots
-          : DEFAULT_SCHED_RULES.timeSlots,
+          : DEFAULT_SCHED_RULES.timeSlots
+      ).map((slot, idx) => ({
+        ...slot,
+        label: getSchedSlotTitle(slot, idx),
+      })),
     };
   },
   setSchedRules: (rules: SchedRulesSettings): boolean =>
