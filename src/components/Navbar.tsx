@@ -428,15 +428,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* دکمه راهنمای متنی و تصویری کاربری (PDF) */}
-            <button
-              onClick={onOpenUserGuide}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold transition cursor-pointer shadow-xs"
-              title="دفترچه راهنمای جامع و مصور کاربری برای تمامی نقش‌ها همراه با دانلود PDF"
-            >
-              <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
-              <span>راهنمای کاربری (PDF)</span>
-            </button>
+            {/* دکمه راهنمای متنی و تصویری کاربری (PDF) - فقط پیش از ورود کاربر */}
+            {!currentUser && (
+              <button
+                onClick={onOpenUserGuide}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold transition cursor-pointer shadow-xs"
+                title="دفترچه راهنمای جامع و مصور کاربری برای تمامی نقش‌ها همراه با دانلود PDF"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                <span>راهنمای کاربری (PDF)</span>
+              </button>
+            )}
 
             {/* گزارش‌ها و آمار - فقط برای مدیر، سرپرست و کادر فنی/انبار/مشاور/امور دانشجویی (نه دانشجو، امور مالی، کارشناس آموزش و امور فرهنگی) */}
             {currentUser &&
@@ -924,17 +926,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  onOpenUserGuide();
-                }}
-                className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold cursor-pointer"
-              >
-                <BookOpen className="w-4 h-4" />
-                <span>راهنمای کاربری</span>
-              </button>
+              {!currentUser && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    onOpenUserGuide();
+                  }}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold cursor-pointer"
+                >
+                  <BookOpen className="w-4 h-4" />
+                  <span>راهنمای کاربری</span>
+                </button>
+              )}
 
               {currentUser && onOpenActiveSessions && (
                 <button
