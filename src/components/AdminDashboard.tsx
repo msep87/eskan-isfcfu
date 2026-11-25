@@ -212,6 +212,7 @@ import {
   PinOff,
   Menu,
   MessagesSquare,
+  PackagePlus,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -250,6 +251,8 @@ interface AdminDashboardProps {
       | 'student'
   ) => void;
   onImpersonateUser?: (user: NonNullable<CurrentUser>) => void;
+  onOpenWarehouseRequest?: () => void;
+  myPendingWarehouseRequestsCount?: number;
   cloudSyncTick?: number;
   focusAboutEditorTick?: number;
 }
@@ -273,6 +276,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onUpdateSettings,
   onOpenUserGuide,
   onImpersonateUser,
+  onOpenWarehouseRequest,
+  myPendingWarehouseRequestsCount = 0,
   cloudSyncTick = 0,
   focusAboutEditorTick = 0,
 }) => {
@@ -284,6 +289,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'requests'
     | 'maintenance'
     | 'warehouse'
+    | 'warehouse_request'
     | 'shifts'
     | 'counseling'
     | 'surveys'
@@ -339,6 +345,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleToggleOrSelectTab = (tab: AdminMainTabKey) => {
     if (tab === 'course_scheduling') {
       setIsCourseSchedulingOpen(true);
+      setIsMobileSidebarOpen(false);
+      if (adminSidebarAutoHide) {
+        setIsAutoHideExpanded(false);
+      }
+      return;
+    }
+    if (tab === 'warehouse_request') {
+      onOpenWarehouseRequest?.();
       setIsMobileSidebarOpen(false);
       if (adminSidebarAutoHide) {
         setIsAutoHideExpanded(false);
@@ -2905,10 +2919,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {
             key: 'warehouse',
             title: 'انبار و کارپردازی (مشاهده)',
-            desc: 'پایش موجودی انبار، تراکنش‌ها و وضعیت خرید کارپرداز',
+            desc: 'پایش موجودی انبار، تراکنش‌ها، وضعیت خرید کارپرداز و درخواست اقلام',
             icon: Package,
             iconTone: 'text-violet-600 bg-violet-50 dark:bg-violet-950/50 border-violet-200 dark:border-violet-800',
             activeRing: 'border-violet-500 bg-violet-50/70 dark:bg-violet-950/40 shadow-md shadow-violet-500/10',
+          },
+          {
+            key: 'warehouse_request',
+            title: 'درخواست اقلام از انبار',
+            desc: 'ثبت درخواست اقلام مصرفی و اداری از انبار و پیگیری وضعیت تحویل',
+            icon: PackagePlus,
+            iconTone: 'text-violet-700 bg-violet-50 dark:bg-violet-950/50 border-violet-200 dark:border-violet-800',
+            activeRing: 'border-violet-500 bg-violet-50/70 dark:bg-violet-950/40 shadow-md shadow-violet-500/10',
+            badge:
+              myPendingWarehouseRequestsCount > 0
+                ? `${myPendingWarehouseRequestsCount.toLocaleString('fa-IR')} جاری`
+                : undefined,
+            badgePulse: myPendingWarehouseRequestsCount > 0,
+            badgeClass: 'bg-violet-600 text-white',
           },
           {
             key: 'shifts',
@@ -3434,10 +3462,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     {
                       key: 'warehouse' as const,
                       title: 'انبار و کارپردازی (مشاهده)',
-                      desc: 'موجودی انبار و وضعیت خرید کارپرداز',
+                      desc: 'موجودی انبار، وضعیت خرید و درخواست اقلام',
                       icon: Package,
                       iconTone: 'text-violet-600 bg-violet-50 dark:bg-violet-950/50 border-violet-200 dark:border-violet-800',
                       activeRing: 'border-violet-500 bg-violet-50/70 dark:bg-violet-950/40',
+                    },
+                    {
+                      key: 'warehouse_request' as const,
+                      title: 'درخواست اقلام از انبار',
+                      desc: 'ثبت درخواست اقلام اداری/مصرفی از انبار',
+                      icon: PackagePlus,
+                      iconTone: 'text-violet-700 bg-violet-50 dark:bg-violet-950/50 border-violet-200 dark:border-violet-800',
+                      activeRing: 'border-violet-500 bg-violet-50/70 dark:bg-violet-950/40',
+                      badge:
+                        myPendingWarehouseRequestsCount > 0
+                          ? `${myPendingWarehouseRequestsCount.toLocaleString('fa-IR')} جاری`
+                          : undefined,
+                      badgeClass: 'bg-violet-600 text-white',
                     },
                     {
                       key: 'shifts' as const,
@@ -7824,14 +7865,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => exportInventoryToExcel(invItems, invTxs)}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>خروجی اکسل موجودی و گردش</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {onOpenWarehouseRequest && (
+                  <button
+                    type="button"
+                    onClick={onOpenWarehouseRequest}
+                    className="relative px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shadow-sm transition"
+                  >
+                    <PackagePlus className="w-4 h-4" />
+                    <span>درخواست اقلام از انبار</span>
+                    {myPendingWarehouseRequestsCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-white/25 text-white text-[10px] font-black">
+                        {myPendingWarehouseRequestsCount.toLocaleString('fa-IR')}
+                      </span>
+                    )}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => exportInventoryToExcel(invItems, invTxs)}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>خروجی اکسل موجودی و گردش</span>
+                </button>
+              </div>
             </div>
 
             {/* کارت‌های آماری */}

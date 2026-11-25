@@ -75,6 +75,7 @@ import {
   Tag,
   AlertCircle,
   Package,
+  PackagePlus,
   Boxes,
   BookOpen,
   Printer,
@@ -2168,6 +2169,26 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
 
             return (
               <>
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <Boxes className="w-4 h-4 text-teal-600" />
+                      <span>بخش انبار، حواله‌ها و تأییدیه اقلام سرای دانشجویی</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      بررسی و تأیید درخواست‌های تکنسین‌ها یا ثبت مستقیم درخواست کالا و ملزومات از انبار مرکزی
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => window.dispatchEvent(new CustomEvent('cfuis:open-warehouse-request'))}
+                    className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black flex items-center gap-2 shadow-sm transition cursor-pointer shrink-0 self-start sm:self-auto"
+                  >
+                    <PackagePlus className="w-4 h-4" />
+                    <span>ثبت درخواست از انبار</span>
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 shadow-xs">
                     <span className="text-[11px] text-amber-600 block mb-1 font-bold">نیازمند تأیید سرپرست</span>

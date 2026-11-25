@@ -28,7 +28,6 @@ import {
   MessagesSquare,
   MonitorSmartphone,
   PhoneIncoming,
-  PackagePlus,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -56,8 +55,6 @@ interface NavbarProps {
   activeSessionsCount?: number;
   hasIncomingVoiceCall?: boolean;
   onOpenIncomingVoiceCall?: () => void;
-  onOpenWarehouseRequest?: () => void;
-  myPendingWarehouseRequestsCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -84,16 +81,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeSessionsCount = 1,
   hasIncomingVoiceCall = false,
   onOpenIncomingVoiceCall,
-  onOpenWarehouseRequest,
-  myPendingWarehouseRequestsCount = 0,
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  const canRequestFromWarehouse =
-    Boolean(currentUser) &&
-    currentUser?.role !== 'student' &&
-    currentUser?.role !== 'warehouse' &&
-    currentUser?.role !== 'professor';
 
   const canViewReports =
     Boolean(currentUser) &&
@@ -504,24 +493,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* درخواست اقلام از انبار - ویژه تمامی کارکنان و سرپرستان (بدون دسترسی به موجودی واقعی انبار) */}
-            {canRequestFromWarehouse && onOpenWarehouseRequest && (
-              <button
-                type="button"
-                onClick={onOpenWarehouseRequest}
-                className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-violet-50 dark:bg-violet-950/60 hover:bg-violet-100 dark:hover:bg-violet-900/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 text-[11px] font-extrabold shadow-xs transition cursor-pointer"
-                title="ثبت درخواست اقلام از انبار برای حوزه و محل کاری شما"
-              >
-                <PackagePlus className="w-3.5 h-3.5" />
-                <span className="hidden xl:inline">درخواست از انبار</span>
-                {myPendingWarehouseRequestsCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-violet-600 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
-                    {myPendingWarehouseRequestsCount > 9 ? '9+' : myPendingWarehouseRequestsCount}
-                  </span>
-                )}
-              </button>
-            )}
-
             {/* تالار گفتگوی عمومی و پیام‌رسان دانشجویی - برای تمام کاربران واردشده */}
             {currentUser && onOpenCommunityChat && (
               <button
@@ -873,25 +844,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="col-span-2 flex items-center justify-start">
                 <PWAInstallButton variant="navbar" />
               </div>
-
-              {canRequestFromWarehouse && onOpenWarehouseRequest && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    onOpenWarehouseRequest();
-                  }}
-                  className="col-span-2 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 text-xs font-extrabold cursor-pointer"
-                >
-                  <PackagePlus className="w-4 h-4" />
-                  <span>درخواست اقلام از انبار</span>
-                  {myPendingWarehouseRequestsCount > 0 && (
-                    <span className="px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[10px] font-black">
-                      {myPendingWarehouseRequestsCount}
-                    </span>
-                  )}
-                </button>
-              )}
 
               {currentUser && onOpenCommunityChat && (
                 <button

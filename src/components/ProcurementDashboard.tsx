@@ -26,6 +26,7 @@ import {
   Receipt,
   Calculator,
   Boxes,
+  PackagePlus,
 } from 'lucide-react';
 
 interface ProcurementDashboardProps {
@@ -326,6 +327,16 @@ export const ProcurementDashboard: React.FC<ProcurementDashboardProps> = ({
             >
               <FileSpreadsheet className="w-4 h-4" />
               <span>خروجی اکسل خریدها</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('cfuis:open-warehouse-request'))}
+              className="px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-2xl text-xs font-black transition flex items-center gap-2 shadow-md cursor-pointer"
+              title="ثبت درخواست اقلام از انبار"
+            >
+              <PackagePlus className="w-4 h-4" />
+              <span>درخواست از انبار</span>
             </button>
 
             <button

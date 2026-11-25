@@ -1,5 +1,6 @@
 import React from 'react';
-import { ChevronDown, ChevronUp, LayoutGrid, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, LayoutGrid, PackagePlus, X } from 'lucide-react';
+import { Storage } from '../utils/storage';
 
 export interface CollapsibleMenuItem<K extends string = string> {
   id: K;
@@ -43,6 +44,36 @@ export function CollapsibleMenuGrid<K extends string>({
   title = 'منوی بخش‌های کارتابل (برای باز یا بسته شدن روی هر گزینه کلیک کنید)',
   emptyPrompt = 'برای مشاهده هر بخش، روی دکمه مربوطه در منوی بالا کلیک کنید. با کلیک مجدد، همان بخش بسته می‌شود.',
 }: CollapsibleMenuGridProps<K>) {
+  const currentUser = Storage.getCurrentUser();
+  const canRequestWarehouse = Boolean(
+    currentUser &&
+      currentUser.role !== 'student' &&
+      currentUser.role !== 'warehouse' &&
+      currentUser.role !== 'professor' &&
+      currentUser.role !== 'admin'
+  );
+  const myStaffId = currentUser
+    ? 'supervisor' in currentUser
+      ? currentUser.supervisor.id
+      : 'counselor' in currentUser
+      ? currentUser.counselor.id
+      : 'technician' in currentUser
+      ? currentUser.technician.id
+      : 'staff' in currentUser
+      ? currentUser.staff.id
+      : ''
+    : '';
+  const pendingWarehouseCount =
+    canRequestWarehouse && myStaffId
+      ? Storage.getWarehouseRequests().filter(
+          (r) =>
+            r.requestedByStaffId === myStaffId &&
+            (r.status === 'pending_warehouse' ||
+              r.status === 'pending_supervisor' ||
+              r.status === 'referred_to_procurement')
+        ).length
+      : 0;
+
   const groups: CollapsibleMenuCategory<K>[] = categories
     ? categories
     : items
@@ -61,16 +92,34 @@ export function CollapsibleMenuGrid<K extends string>({
             <LayoutGrid className="w-4 h-4 text-teal-600 shrink-0" />
             <span>{title}</span>
           </div>
-          {activeKey !== null && activeItem && (
-            <button
-              type="button"
-              onClick={() => (onCloseActive ? onCloseActive() : onToggle(activeKey))}
-              className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>بستن «{activeItem.label}»</span>
-            </button>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {canRequestWarehouse && (
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('cfuis:open-warehouse-request'))}
+                className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/90 dark:bg-amber-950/50 dark:hover:bg-amber-950 dark:text-amber-300 dark:border-amber-800/70 text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer"
+                title="ثبت و پیگیری درخواست کالا و ملزومات از انبار"
+              >
+                <PackagePlus className="w-3.5 h-3.5 shrink-0" />
+                <span>درخواست از انبار</span>
+                {pendingWarehouseCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black tabular-nums">
+                    {pendingWarehouseCount.toLocaleString('fa-IR')}
+                  </span>
+                )}
+              </button>
+            )}
+            {activeKey !== null && activeItem && (
+              <button
+                type="button"
+                onClick={() => (onCloseActive ? onCloseActive() : onToggle(activeKey))}
+                className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>بستن «{activeItem.label}»</span>
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="space-y-4">

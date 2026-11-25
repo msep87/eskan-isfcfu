@@ -1016,6 +1016,25 @@ export default function App() {
     });
   }, [currentUser, realtimeIdentity]);
 
+  // باز کردن مدال درخواست اقلام از انبار از داخل منوی کاربردی و بخش‌های مرتبط کارتابل‌ها
+  useEffect(() => {
+    const handleOpenWarehouseModalEvent = () => {
+      if (
+        !currentUser ||
+        currentUser.role === 'student' ||
+        currentUser.role === 'warehouse' ||
+        currentUser.role === 'professor'
+      ) {
+        return;
+      }
+      setIsWarehouseRequestModalOpen(true);
+    };
+    window.addEventListener('cfuis:open-warehouse-request', handleOpenWarehouseModalEvent);
+    return () => {
+      window.removeEventListener('cfuis:open-warehouse-request', handleOpenWarehouseModalEvent);
+    };
+  }, [currentUser]);
+
   const handleOpenExcelModal = (tab: ExcelImportTab = 'students') => {
     setExcelModalInitialTab(tab);
     setIsExcelModalOpen(true);
@@ -1254,39 +1273,6 @@ export default function App() {
         activeSessionsCount={activeSessions.length}
         hasIncomingVoiceCall={Boolean(currentUser && incomingVoiceCall && !activeVoiceCall)}
         onOpenIncomingVoiceCall={() => setIsNotificationModalOpen(true)}
-        onOpenWarehouseRequest={
-          currentUser &&
-          currentUser.role !== 'student' &&
-          currentUser.role !== 'warehouse' &&
-          currentUser.role !== 'professor'
-            ? () => setIsWarehouseRequestModalOpen(true)
-            : undefined
-        }
-        myPendingWarehouseRequestsCount={
-          currentUser &&
-          currentUser.role !== 'student' &&
-          currentUser.role !== 'warehouse' &&
-          currentUser.role !== 'professor'
-            ? warehouseRequests.filter((r) => {
-                const myId =
-                  currentUser.role === 'admin'
-                    ? currentUser.username || 'admin'
-                    : currentUser.role === 'supervisor'
-                    ? currentUser.supervisor.id
-                    : currentUser.role === 'counselor'
-                    ? currentUser.counselor.id
-                    : currentUser.role === 'maintenance'
-                    ? currentUser.technician.id
-                    : currentUser.staff.id;
-                return (
-                  r.requestedByStaffId === myId &&
-                  (r.status === 'pending_warehouse' ||
-                    r.status === 'pending_supervisor' ||
-                    r.status === 'referred_to_procurement')
-                );
-              }).length
-            : 0
-        }
       />
 
       {/* اعلان خروج از راه دور در صورت بسته شدن نشست از دستگاه دیگر */}
@@ -1716,6 +1702,18 @@ export default function App() {
             }}
             onOpenUserGuide={(r) => handleOpenUserGuide(r || 'admin')}
             onImpersonateUser={handleImpersonateUser}
+            onOpenWarehouseRequest={() => setIsWarehouseRequestModalOpen(true)}
+            myPendingWarehouseRequestsCount={
+              currentUser.role === 'admin'
+                ? warehouseRequests.filter(
+                    (r) =>
+                      r.requestedByStaffId === (currentUser.username || 'admin') &&
+                      (r.status === 'pending_warehouse' ||
+                        r.status === 'pending_supervisor' ||
+                        r.status === 'referred_to_procurement')
+                  ).length
+                : 0
+            }
             cloudSyncTick={cloudSyncTick}
             focusAboutEditorTick={focusAboutEditorTick}
           />

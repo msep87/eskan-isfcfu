@@ -29,6 +29,7 @@ import {
   LayoutDashboard,
   Mail,
   Maximize2,
+  PackagePlus,
   Phone,
   ShieldCheck,
   Sparkles,
@@ -330,6 +331,17 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
           )}
+
+          {(role === 'academic_deputy' || role === 'graduation') && (
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('cfuis:open-warehouse-request'))}
+              className={`${canOpenCourseScheduling ? '' : 'mr-auto '}px-4 py-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-extrabold inline-flex items-center gap-1.5 transition cursor-pointer`}
+            >
+              <PackagePlus className="w-4 h-4 text-amber-300" />
+              <span>درخواست از انبار</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -369,6 +381,14 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
                     >
                       <Mail className="w-4 h-4" />
                       <span>پیام‌ها و مکاتبات</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.dispatchEvent(new CustomEvent('cfuis:open-warehouse-request'))}
+                      className="px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black inline-flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+                    >
+                      <PackagePlus className="w-4 h-4" />
+                      <span>درخواست از انبار</span>
                     </button>
                     <button
                       type="button"
