@@ -102,6 +102,7 @@ const SecurityDashboard = lazyWithRetry(() => import('./components/SecurityDashb
 const ViceDeanDashboard = lazyWithRetry(() => import('./components/ViceDeanDashboard').then((m) => ({ default: m.ViceDeanDashboard })));
 const LibraryDashboard = lazyWithRetry(() => import('./components/LibraryDashboard').then((m) => ({ default: m.LibraryDashboard })));
 const SmartCampusDashboard = lazyWithRetry(() => import('./components/SmartCampusDashboard').then((m) => ({ default: m.SmartCampusDashboard })));
+const ProfessorDashboard = lazyWithRetry(() => import('./components/ProfessorDashboard').then((m) => ({ default: m.ProfessorDashboard })));
 import { resolveFontCssFamily } from './utils/fonts';
 import {
   DEFAULT_HOME_NOTES_TITLE,
@@ -229,6 +230,18 @@ function getImpersonatedUserMeta(user: NonNullable<CurrentUser>): {
         fullName: user.staff.fullName,
         roleLabel: 'کارشناس واحد فارغ‌التحصیلان',
         identifier: user.staff.username,
+      };
+    case 'academic_deputy':
+      return {
+        fullName: user.staff.fullName,
+        roleLabel: 'معاونت آموزشی',
+        identifier: user.staff.username,
+      };
+    case 'professor':
+      return {
+        fullName: user.professor.fullName,
+        roleLabel: 'استاد / عضو هیئت علمی',
+        identifier: user.professor.professorCode,
       };
     case 'admin':
       return {
@@ -383,6 +396,16 @@ export default function App() {
       const refreshedGrad = Storage.getGraduationStaff().find((gr) => gr.id === user.staff.id);
       if (refreshedGrad) {
         setCurrentUser({ role: 'graduation', staff: refreshedGrad });
+      }
+    } else if (user && user.role === 'academic_deputy') {
+      const refreshedAd = Storage.getAcademicDeputyStaff().find((ad) => ad.id === user.staff.id);
+      if (refreshedAd) {
+        setCurrentUser({ role: 'academic_deputy', staff: refreshedAd });
+      }
+    } else if (user && user.role === 'professor') {
+      const refreshedProf = Storage.getSchedProfessors().find((p) => p.id === user.professor.id);
+      if (refreshedProf) {
+        setCurrentUser({ role: 'professor', professor: refreshedProf });
       }
     } else if (user && user.role === 'counselor') {
       const refreshedCns = Storage.getCounselors().find((c) => c.id === user.counselor.id);
@@ -1194,7 +1217,9 @@ export default function App() {
             currentUser.role !== 'cultural' &&
             currentUser.role !== 'library' &&
             currentUser.role !== 'smart_campus' &&
-            currentUser.role !== 'graduation'
+            currentUser.role !== 'graduation' &&
+            currentUser.role !== 'academic_deputy' &&
+            currentUser.role !== 'professor'
           ) {
             setIsReportsModalOpen(true);
           }
@@ -1230,12 +1255,18 @@ export default function App() {
         hasIncomingVoiceCall={Boolean(currentUser && incomingVoiceCall && !activeVoiceCall)}
         onOpenIncomingVoiceCall={() => setIsNotificationModalOpen(true)}
         onOpenWarehouseRequest={
-          currentUser && currentUser.role !== 'student' && currentUser.role !== 'warehouse'
+          currentUser &&
+          currentUser.role !== 'student' &&
+          currentUser.role !== 'warehouse' &&
+          currentUser.role !== 'professor'
             ? () => setIsWarehouseRequestModalOpen(true)
             : undefined
         }
         myPendingWarehouseRequestsCount={
-          currentUser && currentUser.role !== 'student' && currentUser.role !== 'warehouse'
+          currentUser &&
+          currentUser.role !== 'student' &&
+          currentUser.role !== 'warehouse' &&
+          currentUser.role !== 'professor'
             ? warehouseRequests.filter((r) => {
                 const myId =
                   currentUser.role === 'admin'
@@ -1885,6 +1916,33 @@ export default function App() {
             onOpenUserGuide={(r) => handleOpenUserGuide(r || 'graduation')}
           />
         )}
+
+        {/* ۱۷. داشبورد معاونت آموزشی (نظارت و برنامه‌ریزی درسی جامع) */}
+        {currentUser?.role === 'academic_deputy' && (
+          <AcademicDeputyHub
+            role="academic_deputy"
+            academicDeputyStaff={currentUser.staff}
+            students={students}
+            messages={messages}
+            settings={settings}
+            cloudSyncTick={cloudSyncTick}
+            onRefreshData={refreshAllData}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onOpenUserGuide={(r) => handleOpenUserGuide(r || 'academic_deputy')}
+          />
+        )}
+
+        {/* ۱۸. پورتال اساتید و اعضای هیئت علمی */}
+        {currentUser?.role === 'professor' && (
+          <ProfessorDashboard
+            professor={currentUser.professor}
+            messages={messages}
+            cloudSyncTick={cloudSyncTick}
+            onRefreshData={refreshAllData}
+            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
+          />
+        )}
         </Suspense>
         </ChunkErrorBoundary>
 
@@ -1908,7 +1966,9 @@ export default function App() {
                 currentUser.role !== 'cultural' &&
                 currentUser.role !== 'library' &&
                 currentUser.role !== 'smart_campus' &&
-                currentUser.role !== 'graduation' && (
+                currentUser.role !== 'graduation' &&
+                currentUser.role !== 'academic_deputy' &&
+                currentUser.role !== 'professor' && (
                 <>
                   <button
                     type="button"
@@ -2003,6 +2063,8 @@ export default function App() {
           currentUser.role !== 'library' &&
           currentUser.role !== 'smart_campus' &&
           currentUser.role !== 'graduation' &&
+          currentUser.role !== 'academic_deputy' &&
+          currentUser.role !== 'professor' &&
           isReportsModalOpen && (
             <ReportsView
               isOpen={isReportsModalOpen}
@@ -2064,6 +2126,7 @@ export default function App() {
         {currentUser &&
           currentUser.role !== 'student' &&
           currentUser.role !== 'warehouse' &&
+          currentUser.role !== 'professor' &&
           isWarehouseRequestModalOpen && (
             <WarehouseRequisitionModal
               isOpen={isWarehouseRequestModalOpen}
@@ -2091,6 +2154,8 @@ export default function App() {
           currentUser.role !== 'library' &&
           currentUser.role !== 'smart_campus' &&
           currentUser.role !== 'graduation' &&
+          currentUser.role !== 'academic_deputy' &&
+          currentUser.role !== 'professor' &&
           isAiChatOpen && (
             <AiDormAssistant
               isOpen={isAiChatOpen}

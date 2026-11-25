@@ -18,6 +18,7 @@ import {
   LibraryStaff,
   SmartCampusStaff,
   GraduationStaff,
+  AcademicDeputyStaff,
   CurrentUser,
 } from '../types';
 import { Storage, compressAvatarImageFile, normalizeAssignedFieldsList } from '../utils/storage';
@@ -124,6 +125,7 @@ interface AdminUsersPanelProps {
   libraryStaff?: LibraryStaff[];
   smartCampusStaff?: SmartCampusStaff[];
   graduationStaff?: GraduationStaff[];
+  academicDeputyStaff?: AcademicDeputyStaff[];
   onRefreshData: () => void;
   onOpenExcelModal: (tab: ExcelImportTab) => void;
   onOpenReports: () => void;
@@ -157,7 +159,8 @@ type StaffRole =
   | 'vice_dean'
   | 'library'
   | 'smart_campus'
-  | 'graduation';
+  | 'graduation'
+  | 'academic_deputy';
 type StudentSortKey =
   | 'default'
   | 'lastName'
@@ -188,6 +191,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   libraryStaff = [],
   smartCampusStaff = [],
   graduationStaff = [],
+  academicDeputyStaff = [],
   onRefreshData,
   onOpenExcelModal,
   onOpenReports,
@@ -260,7 +264,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const [formAssignedFields, setFormAssignedFields] = useState<string[]>([]);
   const [formEducationRole, setFormEducationRole] = useState<'expert' | 'department_head'>('expert');
   const [academicDeputySubTab, setAcademicDeputySubTab] = useState<
-    'all' | 'department_head' | 'expert' | 'graduation'
+    'all' | 'academic_deputy' | 'department_head' | 'expert' | 'graduation'
   >('all');
   const [customFieldInput, setCustomFieldInput] = useState('');
   const [formPhotoUrl, setFormPhotoUrl] = useState('');
@@ -439,6 +443,12 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
           showToast('error', res.message);
           return;
         }
+      } else if (role === 'academic_deputy') {
+        const res = Storage.updateAcademicDeputyStaff(id, { photoUrl: finalUrl });
+        if (!res.success) {
+          showToast('error', res.message);
+          return;
+        }
       }
 
       const syncRes = await Storage.waitForPendingCloudSync();
@@ -541,6 +551,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             ? smartCampusStaff
             : targetRole === 'graduation'
             ? graduationStaff
+            : targetRole === 'academic_deputy'
+            ? academicDeputyStaff
             : counselors;
         const found = pool.find((u) => normKey(u.username) === nk || normKey(u.id) === nk);
         if (found) {
@@ -1212,15 +1224,34 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     });
   }, [graduationStaff, staffQuery, staffStatusFilter]);
 
-  const totalAcademicDeputyCount = educationStaff.length + graduationStaff.length;
+  const filteredAcademicDeputy = useMemo(() => {
+    const q = norm(staffQuery);
+    return academicDeputyStaff.filter((ad) => {
+      const isActive = ad.status !== 'inactive' && ad.isActive !== false;
+      if (staffStatusFilter === 'active' && !isActive) return false;
+      if (staffStatusFilter === 'inactive' && isActive) return false;
+      if (q) {
+        const txt = `${norm(ad.fullName)} ${norm(ad.username)} ${norm(ad.mobile || ad.phone)} ${norm(
+          ad.department
+        )} ${norm(ad.title)} ${norm('معاونت آموزشی معاون آموزشی')} ${norm(ad.notes)}`;
+        if (!txt.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [academicDeputyStaff, staffQuery, staffStatusFilter]);
+
+  const totalAcademicDeputyCount =
+    academicDeputyStaff.length + educationStaff.length + graduationStaff.length;
   const filteredAcademicDeputyCount =
-    academicDeputySubTab === 'department_head'
+    academicDeputySubTab === 'academic_deputy'
+      ? filteredAcademicDeputy.length
+      : academicDeputySubTab === 'department_head'
       ? filteredDepartmentHeads.length
       : academicDeputySubTab === 'expert'
       ? filteredEducationExperts.length
       : academicDeputySubTab === 'graduation'
       ? filteredGraduation.length
-      : filteredEducation.length + filteredGraduation.length;
+      : filteredAcademicDeputy.length + filteredEducation.length + filteredGraduation.length;
 
   // باز کردن مدال افزودن کاربر پرسنل
   const openAddStaffModal = (
@@ -1257,9 +1288,17 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         ? 'واحد هوشمندسازی و فناوری'
         : role === 'graduation'
         ? 'اداره امور فارغ‌التحصیلان'
+        : role === 'academic_deputy'
+        ? 'معاونت آموزشی دانشگاه فرهنگیان'
         : ''
     );
-    setFormOfficeLocation(role === 'vice_dean' ? 'معاون دانشجویی' : '');
+    setFormOfficeLocation(
+      role === 'vice_dean'
+        ? 'معاون دانشجویی'
+        : role === 'academic_deputy'
+        ? 'معاون آموزشی'
+        : ''
+    );
     setFormNotes('');
     setFormActive(true);
     setFormPhotoUrl('');
@@ -1295,6 +1334,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       | LibraryStaff
       | SmartCampusStaff
       | GraduationStaff
+      | AcademicDeputyStaff
   ) => {
     setStaffModalRole(role);
     setEditingStaffId(user.id);
@@ -1391,6 +1431,12 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       setFormDepartment(gr.department || 'اداره امور فارغ‌التحصیلان');
       setFormNotes(gr.notes || '');
       setFormActive(gr.status !== 'inactive' && gr.isActive !== false);
+    } else if (role === 'academic_deputy') {
+      const ad = user as AcademicDeputyStaff;
+      setFormDepartment(ad.department || 'معاونت آموزشی دانشگاه فرهنگیان');
+      setFormOfficeLocation(ad.title || 'معاون آموزشی');
+      setFormNotes(ad.notes || '');
+      setFormActive(ad.status !== 'inactive' && ad.isActive !== false);
     }
 
     setStaffModalOpen(true);
@@ -2008,6 +2054,47 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
         }
         showToast('success', res.message);
       }
+    } else if (staffModalRole === 'academic_deputy') {
+      if (editingStaffId) {
+        const res = Storage.updateAcademicDeputyStaff(editingStaffId, {
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'معاونت آموزشی دانشگاه فرهنگیان',
+          title: formOfficeLocation.trim() || 'معاون آموزشی',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      } else {
+        const res = Storage.addAcademicDeputyStaff({
+          fullName: cleanName,
+          username: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          mobile: cleanPhone,
+          photoUrl: resolvedPhotoUrl || undefined,
+          department: formDepartment.trim() || 'معاونت آموزشی دانشگاه فرهنگیان',
+          title: formOfficeLocation.trim() || 'معاون آموزشی',
+          role: 'academic_deputy',
+          status: formActive ? 'active' : 'inactive',
+          isActive: formActive,
+          notes: formNotes.trim() || undefined,
+        });
+        if (!res.success) {
+          setFormError(res.message);
+          return;
+        }
+        showToast('success', res.message);
+      }
     }
 
     const syncRes = await Storage.waitForPendingCloudSync();
@@ -2108,6 +2195,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       baseMessage = Storage.deleteSmartCampusStaff(deleteTarget.id).message;
     } else if (deleteTarget.role === 'graduation') {
       baseMessage = Storage.deleteGraduationStaff(deleteTarget.id).message;
+    } else if (deleteTarget.role === 'academic_deputy') {
+      baseMessage = Storage.deleteAcademicDeputyStaff(deleteTarget.id).message;
     }
     const syncRes = await Storage.waitForPendingCloudSync();
     setDeleteTarget(null);
@@ -2263,6 +2352,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
     library: 'کتابخانه و پژوهش',
     smart_campus: 'واحد هوشمندسازی',
     graduation: 'کارشناس واحد فارغ‌التحصیلان',
+    academic_deputy: 'معاونت آموزشی',
   };
 
   return (
@@ -2301,7 +2391,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 viceDeanStaff.length +
                 libraryStaff.length +
                 smartCampusStaff.length +
-                graduationStaff.length}
+                graduationStaff.length +
+                academicDeputyStaff.length}
             </span>
           </div>
         </div>
@@ -3488,7 +3579,9 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   {activeCategory === 'counselors' && `مدیریت مشاوران و روانشناسان (${filteredCounselors.length} از ${counselors.length})`}
                   {activeCategory === 'finance' && `مدیریت کاربران امور مالی و حسابداری (${filteredFinance.length} از ${financeStaff.length})`}
                   {isAcademicDeputyCategory &&
-                    (academicDeputySubTab === 'department_head'
+                    (academicDeputySubTab === 'academic_deputy'
+                      ? `حوزه معاونت آموزشی • معاونت آموزشی (${filteredAcademicDeputy.length} از ${academicDeputyStaff.length})`
+                      : academicDeputySubTab === 'department_head'
                       ? `حوزه معاونت آموزشی • مدیران گروه آموزشی (${filteredDepartmentHeads.length} از ${departmentHeadStaff.length})`
                       : academicDeputySubTab === 'expert'
                       ? `حوزه معاونت آموزشی • کارشناسان آموزش (${filteredEducationExperts.length} از ${educationExpertStaff.length})`
@@ -3504,7 +3597,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 </h3>
                 <p className="text-xs text-slate-400">
                   {isAcademicDeputyCategory
-                    ? 'مدیریت یکپارچه مدیران گروه آموزشی، کارشناسان آموزش و کارشناسان واحد فارغ‌التحصیلان، رشته‌های تحت پوشش و رمز عبور'
+                    ? 'مدیریت یکپارچه معاونت آموزشی، مدیران گروه آموزشی، کارشناسان آموزش و کارشناسان واحد فارغ‌التحصیلان، رشته‌های تحت پوشش و رمز عبور'
                     : 'مشاهده، جستجوی پیشرفته، ویرایش مشخصات، تغییر یا ریست رمز عبور و ورود تکی یا گروهی'}
                 </p>
               </div>
@@ -3513,6 +3606,16 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               {isAcademicDeputyCategory ? (
                 <>
+                  {(academicDeputySubTab === 'all' || academicDeputySubTab === 'academic_deputy') && (
+                    <button
+                      type="button"
+                      onClick={() => openAddStaffModal('academic_deputy')}
+                      className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>افزودن معاون آموزشی جدید</span>
+                    </button>
+                  )}
                   {(academicDeputySubTab === 'all' || academicDeputySubTab === 'department_head') && (
                     <button
                       type="button"
@@ -3642,6 +3745,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     : isAcademicDeputyCategory
                     ? academicDeputySubTab === 'graduation'
                       ? 'graduation'
+                      : academicDeputySubTab === 'academic_deputy'
+                      ? 'academic_deputy'
                       : 'education'
                     : activeCategory === 'cultural'
                     ? 'cultural'
@@ -3693,7 +3798,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
             </div>
           </div>
 
-          {/* زیرتب‌های تفکیکی حوزه معاونت آموزشی: همه، مدیران گروه، کارشناسان آموزش، کارشناسان فارغ‌التحصیلان */}
+          {/* زیرتب‌های تفکیکی حوزه معاونت آموزشی: همه، معاونت آموزشی، مدیران گروه، کارشناسان آموزش، کارشناسان فارغ‌التحصیلان */}
           {isAcademicDeputyCategory && (
             <div className="p-3 rounded-2xl bg-gradient-to-l from-sky-50 via-indigo-50/60 to-emerald-50/70 dark:from-sky-950/30 dark:via-indigo-950/25 dark:to-emerald-950/25 border border-sky-200/80 dark:border-sky-800/60 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-300">
@@ -3705,7 +3810,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   مجموع کل معاونت آموزشی: <strong className="text-sky-700 dark:text-sky-300">{totalAcademicDeputyCount} نفر</strong>
                 </span>
               </div>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
                 {[
                   {
                     id: 'all' as const,
@@ -3713,6 +3818,13 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     count: totalAcademicDeputyCount,
                     activeCls: 'bg-slate-900 dark:bg-sky-600 text-white border-slate-900 dark:border-sky-500 shadow-sm',
                     badgeCls: 'bg-slate-200/80 dark:bg-slate-700 text-slate-800 dark:text-slate-200',
+                  },
+                  {
+                    id: 'academic_deputy' as const,
+                    label: 'معاونت آموزشی',
+                    count: academicDeputyStaff.length,
+                    activeCls: 'bg-amber-600 text-white border-amber-600 shadow-sm',
+                    badgeCls: 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-200',
                   },
                   {
                     id: 'department_head' as const,
@@ -4816,6 +4928,10 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   ))}
 
                 {isAcademicDeputyCategory && (() => {
+                  const visibleAcademicDeputyList =
+                    academicDeputySubTab === 'academic_deputy' || academicDeputySubTab === 'all'
+                      ? filteredAcademicDeputy
+                      : [];
                   const visibleEduList =
                     academicDeputySubTab === 'department_head'
                       ? filteredDepartmentHeads
@@ -4829,17 +4945,23 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                       ? filteredGraduation
                       : [];
 
-                  if (visibleEduList.length === 0 && visibleGradList.length === 0) {
+                  if (
+                    visibleAcademicDeputyList.length === 0 &&
+                    visibleEduList.length === 0 &&
+                    visibleGradList.length === 0
+                  ) {
                     return (
                       <tr>
                         <td colSpan={7} className="p-8 text-center text-slate-400">
-                          {academicDeputySubTab === 'department_head'
+                          {academicDeputySubTab === 'academic_deputy'
+                            ? 'هیچ کاربر معاونت آموزشی با مشخصات جستجوشده یافت نشد. از دکمه «افزودن معاون آموزشی جدید» استفاده کنید.'
+                            : academicDeputySubTab === 'department_head'
                             ? 'هیچ مدیر گروه آموزشی با مشخصات جستجوشده یافت نشد. از دکمه «افزودن مدیر گروه آموزشی» استفاده کنید.'
                             : academicDeputySubTab === 'expert'
                             ? 'هیچ کارشناس آموزشی با مشخصات جستجوشده یافت نشد. از دکمه «افزودن کارشناس آموزش» استفاده کنید.'
                             : academicDeputySubTab === 'graduation'
                             ? 'هیچ کارشناس واحد فارغ‌التحصیلان با مشخصات جستجوشده یافت نشد. از دکمه «افزودن کارشناس فارغ‌التحصیلان» استفاده کنید.'
-                            : 'هیچ کاربری در حوزه معاونت آموزشی با مشخصات جستجوشده یافت نشد. از دکمه‌های افزودن مدیر گروه، کارشناس آموزش یا کارشناس فارغ‌التحصیلان استفاده کنید.'}
+                            : 'هیچ کاربری در حوزه معاونت آموزشی با مشخصات جستجوشده یافت نشد. از دکمه‌های افزودن معاون آموزشی، مدیر گروه، کارشناس آموزش یا کارشناس فارغ‌التحصیلان استفاده کنید.'}
                         </td>
                       </tr>
                     );
@@ -4847,6 +4969,152 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
 
                   return (
                     <>
+                      {visibleAcademicDeputyList.map((ad) => {
+                        const isActive = ad.status !== 'inactive' && ad.isActive !== false;
+                        const passKey = `ad_${ad.id}`;
+                        const isShown = revealedPasswords[passKey];
+                        return (
+                          <tr key={ad.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <td className="p-3 font-bold text-slate-900 dark:text-white">
+                              <div className="flex items-center gap-2">
+                                {ad.photoUrl ? (
+                                  <img
+                                    src={ad.photoUrl}
+                                    alt=""
+                                    className="w-8 h-8 rounded-full object-cover border border-amber-300 dark:border-amber-700 shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-amber-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                                    {(ad.fullName || 'م').slice(0, 1)}
+                                  </div>
+                                )}
+                                <span>{ad.fullName}</span>
+                              </div>
+                            </td>
+                            <td className="p-3 font-mono text-slate-700 dark:text-slate-300" dir="ltr">
+                              {ad.username}
+                            </td>
+                            <td className="p-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                  {isShown ? ad.password : '••••••'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleRevealPassword(passKey)}
+                                  className="p-1 text-slate-400 hover:text-amber-600 cursor-pointer"
+                                  title={isShown ? 'مخفی کردن رمز' : 'نمایش رمز'}
+                                >
+                                  {isShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
+                            </td>
+                            <td className="p-3 font-mono" dir="ltr">
+                              {ad.mobile || ad.phone || '-'}
+                            </td>
+                            <td className="p-3 space-y-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-extrabold border bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700">
+                                  معاونت آموزشی
+                                </span>
+                                <span className="font-semibold text-amber-700 dark:text-amber-300">
+                                  {ad.title || ad.department || 'معاونت آموزشی دانشگاه فرهنگیان'}
+                                </span>
+                              </div>
+                              {ad.notes && <div className="text-[11px] text-slate-400">{ad.notes}</div>}
+                            </td>
+                            <td className="p-3">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextStatus = isActive ? 'inactive' : 'active';
+                                  Storage.updateAcademicDeputyStaff(ad.id, {
+                                    status: nextStatus,
+                                    isActive: nextStatus === 'active',
+                                  });
+                                  onRefreshData();
+                                }}
+                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                                  isActive
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                    : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                                }`}
+                              >
+                                {isActive ? 'فعال' : 'غیرفعال'}
+                              </button>
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                {actorRole === 'admin' && onImpersonateUser && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onImpersonateUser({ role: 'academic_deputy', staff: ad })}
+                                    className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                                    title={`ورود مستقیم به پنل معاونت آموزشی (${ad.fullName})`}
+                                  >
+                                    <LogIn className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <label
+                                  className="p-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition cursor-pointer"
+                                  title="بارگذاری یا تغییر عکس معاون آموزشی"
+                                >
+                                  <Camera className="w-3.5 h-3.5" />
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) =>
+                                      handleQuickSinglePhotoUpload('academic_deputy', ad.id, ad.fullName, e, ad.username)
+                                    }
+                                    className="hidden"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditStaffModal('academic_deputy', ad)}
+                                  className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 transition cursor-pointer"
+                                  title="ویرایش مشخصات معاون آموزشی"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPasswordError('');
+                                    setNewPasswordInput('');
+                                    setPasswordModalTarget({
+                                      role: 'academic_deputy',
+                                      id: ad.id,
+                                      fullName: ad.fullName,
+                                      usernameOrCode: ad.username,
+                                      defaultResetValue: '123456',
+                                      defaultResetLabel: 'ریست فوری به 123456',
+                                    });
+                                  }}
+                                  className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                                  title="تغییر یا ریست رمز عبور"
+                                >
+                                  <KeyRound className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDeleteTarget({
+                                      role: 'academic_deputy',
+                                      id: ad.id,
+                                      fullName: ad.fullName,
+                                    })
+                                  }
+                                  className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition cursor-pointer"
+                                  title="حذف کاربر معاونت آموزشی"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                       {visibleEduList.map((edu) => {
                         const isActive = edu.status !== 'inactive' && edu.isActive !== false;
                         const passKey = `edu_${edu.id}`;
@@ -6262,13 +6530,18 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   </div>
                 )}
 
-                {(staffModalRole === 'counselor' || staffModalRole === 'security' || staffModalRole === 'vice_dean') && (
+                {(staffModalRole === 'counselor' ||
+                  staffModalRole === 'security' ||
+                  staffModalRole === 'vice_dean' ||
+                  staffModalRole === 'academic_deputy') && (
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       {staffModalRole === 'security'
                         ? 'کد پرسنلی / شناسه سازمانی حراست (اختیاری)'
                         : staffModalRole === 'vice_dean'
                         ? 'عنوان سازمانی (مثلاً معاون دانشجویی)'
+                        : staffModalRole === 'academic_deputy'
+                        ? 'عنوان سمت سازمانی (مثلاً معاون آموزشی)'
                         : 'دفتر / اتاق مشاوره'}
                     </label>
                     <input
@@ -6280,6 +6553,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'مثلاً SEC-101'
                           : staffModalRole === 'vice_dean'
                           ? 'معاون دانشجویی'
+                          : staffModalRole === 'academic_deputy'
+                          ? 'معاون آموزشی'
                           : 'مرکز مشاوره پردیس'
                       }
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
@@ -6296,7 +6571,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                   staffModalRole === 'vice_dean' ||
                   staffModalRole === 'library' ||
                   staffModalRole === 'smart_campus' ||
-                  staffModalRole === 'graduation') && (
+                  staffModalRole === 'graduation' ||
+                  staffModalRole === 'academic_deputy') && (
                   <div className="sm:col-span-2">
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       {staffModalRole === 'procurement'
@@ -6311,6 +6587,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                         ? 'بخش / واحد حراست و انتظامات'
                         : staffModalRole === 'vice_dean'
                         ? 'حوزه / معاونت دانشجویی'
+                        : staffModalRole === 'academic_deputy'
+                        ? 'حوزه / معاونت آموزشی'
                         : staffModalRole === 'library'
                         ? 'بخش / واحد کتابخانه و پژوهش'
                         : staffModalRole === 'smart_campus'
@@ -6336,6 +6614,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'واحد حراست و انتظامات پردیس'
                           : staffModalRole === 'vice_dean'
                           ? 'معاونت دانشجویی دانشگاه فرهنگیان'
+                          : staffModalRole === 'academic_deputy'
+                          ? 'معاونت آموزشی دانشگاه فرهنگیان'
                           : staffModalRole === 'library'
                           ? 'واحد کتابخانه و پژوهش پردیس'
                           : staffModalRole === 'smart_campus'
@@ -6373,6 +6653,8 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           ? 'کارشناس حراست و انتظامات / شیفت گشت و صیانت سراها...'
                           : staffModalRole === 'vice_dean'
                           ? 'معاونت دانشجویی — نظارت جامع بر سراها، امور دانشجویی و فرهنگی...'
+                          : staffModalRole === 'academic_deputy'
+                          ? 'معاونت آموزشی — برنامه‌ریزی درسی، نظارت بر گروه‌های آموزشی و اساتید...'
                           : staffModalRole === 'library'
                           ? 'مسئول کتابخانه و پژوهش — امانت کتب و تسویه فارغ‌التحصیلان...'
                           : staffModalRole === 'smart_campus'
@@ -6612,6 +6894,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                 staffModalRole !== 'library' &&
                 staffModalRole !== 'smart_campus' &&
                 staffModalRole !== 'graduation' &&
+                staffModalRole !== 'academic_deputy' &&
                 dorms.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">

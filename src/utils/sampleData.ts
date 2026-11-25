@@ -47,9 +47,16 @@ import {
   LibraryStaff,
   SmartCampusStaff,
   GraduationStaff,
+  AcademicDeputyStaff,
   LibraryBook,
   LibraryBookRequest,
   GraduationClearanceRequest,
+  SchedClassroom,
+  SchedProgramCohort,
+  SchedProfessor,
+  SchedCurriculumCourse,
+  SchedCourseOffering,
+  SchedRulesSettings,
 } from '../types';
 
 export const INITIAL_SETTINGS: AppSettings = {
@@ -218,4 +225,41 @@ export const INITIAL_LIBRARY_BOOK_REQUESTS: LibraryBookRequest[] = [];
 
 // پرونده‌های تسویه حساب الکترونیک فراغت از تحصیل (کاملاً خالی)
 export const INITIAL_GRADUATION_CLEARANCES: GraduationClearanceRequest[] = [];
+
+// کاربران معاونت آموزشی
+export const INITIAL_ACADEMIC_DEPUTY_STAFF: AcademicDeputyStaff[] = [];
+
+// داده‌های اولیه برنامه‌ریزی درسی (کلاس‌ها، رشته‌ها/ورودی‌ها، اساتید، دروس، برنامه‌ها)
+export const INITIAL_SCHED_CLASSROOMS: SchedClassroom[] = [];
+export const INITIAL_SCHED_PROGRAMS: SchedProgramCohort[] = [];
+export const INITIAL_SCHED_PROFESSORS: SchedProfessor[] = [];
+export const INITIAL_SCHED_COURSES: SchedCurriculumCourse[] = [];
+export const INITIAL_SCHED_OFFERINGS: SchedCourseOffering[] = [];
+
+export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
+  activeTerm: '1405-1',
+  availableTerms: ['1405-1', '1405-2', '1404-2', '1404-1'],
+  hoursPerUnit: {
+    theoretical: 1,
+    practicalNormalLab: 2,
+    practicalWorkshop: 3,
+    practicalInternship: 4,
+  },
+  equivalentPerUnit: {
+    theoretical: 1,
+    practicalNormalLab: 1.3,
+    practicalWorkshop: 1.98,
+    practicalInternshipBase: 3,
+    internshipMinStudents: 12,
+  },
+  activeDays: ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
+  timeSlots: [
+    { id: 'slot_1', label: '۰۸:۰۰ - ۱۰:۰۰', startTime: '08:00', endTime: '10:00', order: 1 },
+    { id: 'slot_2', label: '۱۰:۰۰ - ۱۲:۰۰', startTime: '10:00', endTime: '12:00', order: 2 },
+    { id: 'slot_3', label: '۱۳:۳۰ - ۱۵:۳۰', startTime: '13:30', endTime: '15:30', order: 3 },
+    { id: 'slot_4', label: '۱۵:۳۰ - ۱۷:۳۰', startTime: '15:30', endTime: '17:30', order: 4 },
+    { id: 'slot_5', label: '۱۷:۳۰ - ۱۹:۳۰', startTime: '17:30', endTime: '19:30', order: 5 },
+  ],
+};
+
 

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  AcademicDeputyStaff,
   AppSettings,
   EducationStaff,
   GraduationStaff,
@@ -13,38 +14,47 @@ import {
   isEducationDepartmentHead,
   normalizeAssignedFieldsList,
 } from '../utils/storage';
+import { calculateOfferingBreakdown } from '../utils/schedulingUtils';
 import { EducationDashboard } from './EducationDashboard';
 import { GraduationDashboard } from './GraduationDashboard';
 import { AcademicWorkflowPanel } from './AcademicWorkflowPanel';
+import { CourseSchedulingWorkspace } from './CourseSchedulingWorkspace';
 import {
   Award,
+  BookOpen,
+  Building2,
+  CalendarDays,
   GitBranch,
   GraduationCap,
   LayoutDashboard,
   Mail,
+  Maximize2,
   Phone,
   ShieldCheck,
+  Sparkles,
   UserCheck,
   Users,
 } from 'lucide-react';
 
 interface AcademicDeputyHubProps {
-  role: 'education' | 'graduation';
+  role: 'education' | 'graduation' | 'academic_deputy';
   educationStaff?: EducationStaff;
   graduationStaff?: GraduationStaff;
+  academicDeputyStaff?: AcademicDeputyStaff;
   students: Student[];
   messages: Message[];
   settings: AppSettings;
   cloudSyncTick?: number;
   onRefreshData: () => void;
   onOpenMessages: () => void;
-  onOpenUserGuide: (role?: 'education' | 'graduation') => void;
+  onOpenUserGuide: (role?: 'education' | 'graduation' | 'academic_deputy') => void;
 }
 
 export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
   role,
   educationStaff,
   graduationStaff,
+  academicDeputyStaff,
   students,
   messages,
   settings,
@@ -54,17 +64,32 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
   onOpenUserGuide,
 }) => {
   const [hubTab, setHubTab] = useState<'panel' | 'workflow' | 'directory'>('panel');
+  const [isSchedulingOpen, setIsSchedulingOpen] = useState(false);
 
   const isDeptHead = role === 'education' && educationStaff ? isEducationDepartmentHead(educationStaff) : false;
+  const canOpenCourseScheduling = role === 'academic_deputy' || isDeptHead;
   const actorWorkflowRole: 'department_head' | 'education_expert' | 'graduation' =
-    role === 'graduation' ? 'graduation' : isDeptHead ? 'department_head' : 'education_expert';
+    role === 'graduation'
+      ? 'graduation'
+      : isDeptHead || role === 'academic_deputy'
+      ? 'department_head'
+      : 'education_expert';
 
-  const currentStaff = role === 'education' ? educationStaff : graduationStaff;
+  const currentStaff =
+    role === 'academic_deputy'
+      ? academicDeputyStaff
+      : role === 'education'
+      ? educationStaff
+      : graduationStaff;
   const assignedFields = useMemo(
     () => (educationStaff ? normalizeAssignedFieldsList(educationStaff.assignedFields) : []),
     [educationStaff]
   );
 
+  const allAcademicDeputyStaff = useMemo(
+    () => Storage.getAcademicDeputyStaff().filter((a) => a.status !== 'inactive' && a.isActive !== false),
+    [cloudSyncTick, messages]
+  );
   const allEducationStaff = useMemo(
     () => Storage.getEducationStaff().filter((e) => e.status !== 'inactive' && e.isActive !== false),
     [cloudSyncTick, messages]
@@ -83,9 +108,39 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
     [allEducationStaff]
   );
 
+  const schedStats = useMemo(() => {
+    const rules = Storage.getSchedRules();
+    const activeTerm = rules.activeTerm || '4041';
+    const classrooms = Storage.getSchedClassrooms();
+    const programs = Storage.getSchedPrograms();
+    const professors = Storage.getSchedProfessors();
+    const courses = Storage.getSchedCourses();
+    const offerings = Storage.getSchedOfferings().filter((o) => o.termKey === activeTerm);
+    const totalWeeklyHours = offerings.reduce((sum, o) => sum + calculateOfferingBreakdown(o, rules).weeklyHours, 0);
+    const totalEqUnits = offerings.reduce((sum, o) => sum + calculateOfferingBreakdown(o, rules).equivalentUnits, 0);
+    return {
+      activeTerm,
+      classroomsCount: classrooms.length,
+      programsCount: programs.length,
+      professorsCount: professors.length,
+      coursesCount: courses.length,
+      offeringsCount: offerings.length,
+      totalWeeklyHours,
+      totalEqUnits: Math.round(totalEqUnits * 100) / 100,
+    };
+  }, [cloudSyncTick, isSchedulingOpen]);
+
   const pendingMyWorkflowCount = useMemo(() => {
     const all = Storage.getAcademicWorkflowRequests();
     if (!currentStaff) return 0;
+    if (role === 'academic_deputy') {
+      return all.filter(
+        (r) =>
+          r.currentStage === 'pending_dept_head' ||
+          r.currentStage === 'pending_expert_action' ||
+          r.currentStage === 'pending_graduation'
+      ).length;
+    }
     if (actorWorkflowRole === 'graduation') {
       return all.filter((r) => r.currentStage === 'pending_graduation').length;
     }
@@ -110,10 +165,13 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
       ).length;
     }
     return 0;
-  }, [actorWorkflowRole, currentStaff, educationStaff, assignedFields, cloudSyncTick, messages]);
+  }, [role, actorWorkflowRole, currentStaff, educationStaff, assignedFields, cloudSyncTick, messages]);
 
   const pendingClearanceForMeCount = useMemo(() => {
     const all = Storage.getGraduationClearances();
+    if (role === 'academic_deputy') {
+      return all.filter((c) => !c.graduationFinalized).length;
+    }
     if (role === 'graduation') {
       return all.filter((c) => c.status === 'completed' && !c.graduationFinalized).length;
     }
@@ -125,7 +183,9 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
   }, [role, educationStaff, isDeptHead, assignedFields, cloudSyncTick, messages]);
 
   const roleBadgeLabel =
-    role === 'graduation'
+    role === 'academic_deputy'
+      ? academicDeputyStaff?.title || 'معاونت آموزشی پردیس'
+      : role === 'graduation'
       ? 'کارشناس واحد فارغ‌التحصیلان'
       : educationStaff
       ? getEducationStaffRoleLabel(educationStaff)
@@ -186,7 +246,9 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
                 {pendingClearanceForMeCount.toLocaleString('fa-IR')}
               </div>
               <div className="text-[10px] font-bold text-sky-100">
-                {role === 'graduation'
+                {role === 'academic_deputy'
+                  ? 'تسویه در جریان کل'
+                  : role === 'graduation'
                   ? 'تسویه آماده خاتمه'
                   : isDeptHead
                   ? 'تسویه (گزارش ۱۰۵۰)'
@@ -199,7 +261,7 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
               className="px-3.5 py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-center transition cursor-pointer"
             >
               <div className="text-lg font-black tabular-nums text-sky-200">
-                {(deptHeads.length + educationExperts.length + allGraduationStaff.length).toLocaleString('fa-IR')}
+                {(allAcademicDeputyStaff.length + deptHeads.length + educationExperts.length + allGraduationStaff.length).toLocaleString('fa-IR')}
               </div>
               <div className="text-[10px] font-bold text-sky-100">اعضای معاونت آموزشی</div>
             </button>
@@ -256,12 +318,102 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
             <Users className="w-4 h-4" />
             <span>تبادل اطلاعات و اعضای حوزه معاونت آموزشی</span>
           </button>
+
+          {canOpenCourseScheduling && (
+            <button
+              type="button"
+              onClick={() => setIsSchedulingOpen(true)}
+              className="mr-auto px-4 py-2.5 rounded-2xl bg-gradient-to-l from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 text-xs font-black inline-flex items-center gap-2 shadow-lg shadow-amber-500/25 transition cursor-pointer"
+            >
+              <CalendarDays className="w-4 h-4" />
+              <span>برنامه‌ریزی درسی جامع (تمام‌صفحه)</span>
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* تب ۱: پنل اختصاصی هر نقش */}
       {hubTab === 'panel' && (
         <>
+          {role === 'academic_deputy' && academicDeputyStaff && (
+            <div className="space-y-5">
+              <div className="rounded-3xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-amber-900/50 p-6 shadow-sm space-y-5">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs font-black">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>میز کار مدیریتی معاونت آموزشی</span>
+                    </div>
+                    <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
+                      سامانه متمرکز برنامه‌ریزی درسی، قوانین آموزشی و گزارش‌های تحلیلی
+                    </h2>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed">
+                      از این میز کار می‌توانید به فضای تمام‌صفحه برنامه‌ریزی درسی وارد شوید و اطلاعات پایه (کلاس‌ها، رشته‌ها، ورودی‌ها، اساتید، سرفصل دروس ۷ رقمی)، برنامه هفتگی تعاملی، زمان‌بند هوشمند و ۷ گزارش تخصصی قابل چاپ را مدیریت کنید.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setIsSchedulingOpen(true)}
+                      className="px-5 py-3 rounded-2xl bg-gradient-to-l from-indigo-600 to-sky-600 hover:from-indigo-700 hover:to-sky-700 text-white text-xs sm:text-sm font-black inline-flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition cursor-pointer"
+                    >
+                      <CalendarDays className="w-5 h-5" />
+                      <span>ورود به برنامه‌ریزی درسی جامع (تمام‌صفحه)</span>
+                      <Maximize2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onOpenMessages}
+                      className="px-4 py-3 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold inline-flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+                    >
+                      <Mail className="w-4 h-4" />
+                      <span>پیام‌ها و مکاتبات</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenUserGuide('academic_deputy')}
+                      className="px-4 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-extrabold inline-flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <BookOpen className="w-4 h-4 text-indigo-600" />
+                      <span>راهنمای کاربری</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-900/60">
+                    <div className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300">ترم فعال برنامه‌ریزی</div>
+                    <div className="text-xl font-black text-indigo-950 dark:text-white mt-1 tabular-nums">{schedStats.activeTerm}</div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/70 dark:border-sky-900/60">
+                    <div className="text-[11px] font-bold text-sky-700 dark:text-sky-300">ارائه‌های ثبت‌شده ترم</div>
+                    <div className="text-xl font-black text-sky-950 dark:text-white mt-1 tabular-nums">{schedStats.offeringsCount.toLocaleString('fa-IR')}</div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-900/60">
+                    <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">ساعات هفتگی / واحد معادل</div>
+                    <div className="text-lg font-black text-emerald-950 dark:text-white mt-1 tabular-nums">
+                      {schedStats.totalWeeklyHours.toLocaleString('fa-IR')} س / {schedStats.totalEqUnits.toLocaleString('fa-IR')}
+                    </div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-900/60">
+                    <div className="text-[11px] font-bold text-amber-700 dark:text-amber-300">اساتید ثبت‌شده</div>
+                    <div className="text-xl font-black text-amber-950 dark:text-white mt-1 tabular-nums">{schedStats.professorsCount.toLocaleString('fa-IR')} نفر</div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200/70 dark:border-violet-900/60">
+                    <div className="text-[11px] font-bold text-violet-700 dark:text-violet-300">رشته‌ها و ورودی‌ها</div>
+                    <div className="text-xl font-black text-violet-950 dark:text-white mt-1 tabular-nums">{schedStats.programsCount.toLocaleString('fa-IR')}</div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/70 dark:border-teal-900/60">
+                    <div className="text-[11px] font-bold text-teal-700 dark:text-teal-300">کلاس‌ها / دروس سرفصل</div>
+                    <div className="text-lg font-black text-teal-950 dark:text-white mt-1 tabular-nums">
+                      {schedStats.classroomsCount.toLocaleString('fa-IR')} / {schedStats.coursesCount.toLocaleString('fa-IR')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {role === 'education' && educationStaff && (
             <EducationDashboard
               staff={educationStaff}
@@ -292,7 +444,7 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
         <AcademicWorkflowPanel
           mode="staff"
           actorRole={actorWorkflowRole}
-          staff={currentStaff}
+          staff={(currentStaff as EducationStaff | GraduationStaff)}
           students={students}
           cloudSyncTick={cloudSyncTick}
           onDataChange={onRefreshData}
@@ -489,6 +641,17 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {canOpenCourseScheduling && (
+        <CourseSchedulingWorkspace
+          isOpen={isSchedulingOpen}
+          onClose={() => setIsSchedulingOpen(false)}
+          userRole={role === 'academic_deputy' ? 'academic_deputy' : 'department_head'}
+          actor={{ id: currentStaff.id, name: currentStaff.fullName }}
+          allowedMajorNames={role === 'education' ? assignedFields : undefined}
+          onDataUpdated={onRefreshData}
+        />
       )}
     </div>
   );

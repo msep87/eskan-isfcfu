@@ -176,6 +176,15 @@ export const CommunityChatHub: React.FC<CommunityChatHubProps> = ({
         avatarUrl: currentUser.technician.photoUrl,
       };
     }
+    if (currentUser.role === 'professor') {
+      return {
+        id: currentUser.professor.id,
+        name: currentUser.professor.fullName,
+        role: 'professor',
+        fieldOfStudy: undefined,
+        avatarUrl: currentUser.professor.photoUrl,
+      };
+    }
     return {
       id: currentUser.staff.id,
       name: currentUser.staff.fullName,

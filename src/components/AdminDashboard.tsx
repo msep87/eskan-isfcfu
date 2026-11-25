@@ -58,6 +58,7 @@ import {
   LibraryStaff,
   SmartCampusStaff,
   GraduationStaff,
+  AcademicDeputyStaff,
   AboutCapabilityItem,
   AboutAttachmentFile,
   AboutContentSettings,
@@ -97,6 +98,7 @@ import { CloudConnectionDiagnosticsPanel } from './CloudConnectionDiagnosticsPan
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { CommunityChatHub } from './CommunityChatHub';
 import { AdminStudentPortalsEditor } from './AdminStudentPortalsEditor';
+import { CourseSchedulingWorkspace } from './CourseSchedulingWorkspace';
 import { getStudentResidenceType, getStudentAdmissionStatus } from '../utils/financeUtils';
 import {
   ARTISTIC_SKILL_OPTIONS,
@@ -243,6 +245,8 @@ interface AdminDashboardProps {
       | 'student_affairs'
       | 'security'
       | 'vice_dean'
+      | 'academic_deputy'
+      | 'professor'
       | 'student'
   ) => void;
   onImpersonateUser?: (user: NonNullable<CurrentUser>) => void;
@@ -284,6 +288,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'counseling'
     | 'surveys'
     | 'clearance'
+    | 'course_scheduling'
     | 'community_chat'
     | 'activity_log'
     | 'settings';
@@ -312,6 +317,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isAutoHideExpanded, setIsAutoHideExpanded] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
+  const [isCourseSchedulingOpen, setIsCourseSchedulingOpen] = useState(false);
   const [usersCategory, setUsersCategory] = useState<UserCategoryKey>('students');
 
   useEffect(() => {
@@ -331,6 +337,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [adminSidebarAutoHide]);
 
   const handleToggleOrSelectTab = (tab: AdminMainTabKey) => {
+    if (tab === 'course_scheduling') {
+      setIsCourseSchedulingOpen(true);
+      setIsMobileSidebarOpen(false);
+      if (adminSidebarAutoHide) {
+        setIsAutoHideExpanded(false);
+      }
+      return;
+    }
     if (tab === 'activity_log') {
       setActivityLogs(Storage.getActivityLogs());
     }
@@ -435,6 +449,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [libraryStaffList, setLibraryStaffList] = useState<LibraryStaff[]>(Storage.getLibraryStaff());
   const [smartCampusStaffList, setSmartCampusStaffList] = useState<SmartCampusStaff[]>(Storage.getSmartCampusStaff());
   const [graduationStaffList, setGraduationStaffList] = useState<GraduationStaff[]>(Storage.getGraduationStaff());
+  const [academicDeputyStaffList, setAcademicDeputyStaffList] = useState<AcademicDeputyStaff[]>(
+    Storage.getAcademicDeputyStaff()
+  );
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
   const [academicNotices, setAcademicNotices] = useState<AcademicStatusNotice[]>(Storage.getAcademicNotices());
   const [academicNoticeFilter, setAcademicNoticeFilter] = useState<'all' | 'pending' | 'reviewed' | 'action_taken'>('all');
@@ -453,6 +470,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setLibraryStaffList(Storage.getLibraryStaff());
     setSmartCampusStaffList(Storage.getSmartCampusStaff());
     setGraduationStaffList(Storage.getGraduationStaff());
+    setAcademicDeputyStaffList(Storage.getAcademicDeputyStaff());
     setAcademicNotices(Storage.getAcademicNotices());
     onRefreshData();
   };
@@ -478,6 +496,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setLibraryStaffList(Storage.getLibraryStaff());
     setSmartCampusStaffList(Storage.getSmartCampusStaff());
     setGraduationStaffList(Storage.getGraduationStaff());
+    setAcademicDeputyStaffList(Storage.getAcademicDeputyStaff());
     setAcademicNotices(Storage.getAcademicNotices());
   }, [cloudSyncTick]);
 
@@ -615,6 +634,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setWarehouseStaffList(Storage.getWarehouseStaff());
     setProcurementStaffList(Storage.getProcurementStaff());
     setFinanceStaffList(Storage.getFinanceStaff());
+    setAcademicDeputyStaffList(Storage.getAcademicDeputyStaff());
   }, [students, warnings, announcements, rooms, beds, mainTab, cartableSubTab]);
 
   // وضعیت‌های مدیریت تأسیسات در پنل مدیر کل
@@ -2808,7 +2828,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           viceDeanStaffList.length +
           libraryStaffList.length +
           smartCampusStaffList.length +
-          graduationStaffList.length;
+          graduationStaffList.length +
+          academicDeputyStaffList.length;
 
         const pendingRequestsTotal =
           pendingStudents.length +
@@ -2926,6 +2947,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             activeRing: 'border-sky-500 bg-sky-50/70 dark:bg-sky-950/40 shadow-md shadow-sky-500/10',
             badge: activeClearancesTotal > 0 ? `${activeClearancesTotal} در جریان` : undefined,
             badgeClass: 'bg-sky-100 text-sky-800 dark:bg-sky-900/70 dark:text-sky-200',
+          },
+          {
+            key: 'course_scheduling',
+            title: 'برنامه‌ریزی درسی جامع (تمام‌صفحه)',
+            desc: 'تنظیمات ترم، اطلاعات پایه، ثبت دروس، چیدمان هوشمند و ۷ گزارش تحلیلی',
+            icon: BookOpen,
+            iconTone: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800',
+            activeRing: 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/40 shadow-md shadow-indigo-500/10',
+            badge: 'تمام‌صفحه',
+            badgeClass: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/70 dark:text-indigo-200',
           },
           {
             key: 'community_chat',
@@ -3355,7 +3386,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         viceDeanStaffList.length +
                         libraryStaffList.length +
                         smartCampusStaffList.length +
-                        graduationStaffList.length
+                        graduationStaffList.length +
+                        academicDeputyStaffList.length
                       ).toLocaleString('fa-IR'),
                       badgeClass: 'bg-teal-100 text-teal-800 dark:bg-teal-900/70 dark:text-teal-200',
                     },
@@ -3440,6 +3472,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       icon: GraduationCap,
                       iconTone: 'text-sky-600 bg-sky-50 dark:bg-sky-950/50 border-sky-200 dark:border-sky-800',
                       activeRing: 'border-sky-500 bg-sky-50/70 dark:bg-sky-950/40',
+                    },
+                    {
+                      key: 'course_scheduling' as const,
+                      title: 'برنامه‌ریزی درسی جامع',
+                      desc: 'ورود اطلاعات پایه، برنامه کلاس‌ها و گزارش‌های درسی',
+                      icon: BookOpen,
+                      iconTone: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800',
+                      activeRing: 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/40',
+                      badge: 'تمام‌صفحه',
+                      badgeClass: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/70 dark:text-indigo-200',
                     },
                     {
                       key: 'community_chat' as const,
@@ -3570,6 +3612,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           libraryStaff={libraryStaffList}
           smartCampusStaff={smartCampusStaffList}
           graduationStaff={graduationStaffList}
+          academicDeputyStaff={academicDeputyStaffList}
           onRefreshData={handleUsersRefresh}
           onOpenExcelModal={onOpenExcelModal}
           onOpenReports={onOpenReports}
@@ -8588,7 +8631,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { key: 'finance' as const, label: `امور مالی (${financeStaffList.length})` },
                 {
                   key: 'education' as const,
-                  label: `حوزه معاونت آموزشی (${educationStaffList.length + graduationStaffList.length})`,
+                  label: `حوزه معاونت آموزشی (${educationStaffList.length + graduationStaffList.length + academicDeputyStaffList.length})`,
                 },
                 { key: 'cultural' as const, label: `امور فرهنگی (${culturalStaffList.length})` },
                 { key: 'student_affairs' as const, label: `امور دانشجویی (${studentAffairsStaffList.length})` },
@@ -11895,6 +11938,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         allowStudentPicker={true}
         studentsList={students}
         viewerRoleLabel="مدیریت کل سامانه"
+      />
+
+      <CourseSchedulingWorkspace
+        isOpen={isCourseSchedulingOpen}
+        onClose={() => setIsCourseSchedulingOpen(false)}
+        userRole="admin"
+        actor={{ id: 'admin', name: 'مدیر کل سامانه' }}
+        onDataUpdated={onRefreshData}
       />
 
     </div>

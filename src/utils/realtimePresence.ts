@@ -165,6 +165,9 @@ export function getRealtimeUserIdentity(user: CurrentUser): RealtimeUserIdentity
   } else if (user.role === 'maintenance') {
     id = user.technician.id;
     name = user.technician.fullName;
+  } else if (user.role === 'professor') {
+    id = user.professor.id;
+    name = user.professor.fullName;
   } else {
     id = user.staff.id;
     name = user.staff.fullName;

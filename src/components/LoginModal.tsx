@@ -53,6 +53,8 @@ interface LoginModalProps {
       | 'library'
       | 'smart_campus'
       | 'graduation'
+      | 'academic_deputy'
+      | 'professor'
       | 'student'
   ) => void;
 }
@@ -64,7 +66,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onRefreshData,
   onOpenUserGuide,
 }) => {
-  const [tab, setTab] = useState<'student' | 'staff' | 'admin'>('student');
+  const [tab, setTab] = useState<'student' | 'staff' | 'professor' | 'admin'>('student');
 
   // فرم دانشجو
   const [studentId, setStudentId] = useState('');
@@ -116,7 +118,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     onClose();
   };
 
-  const handleTabChange = (nextTab: 'student' | 'staff' | 'admin') => {
+  const handleTabChange = (nextTab: 'student' | 'staff' | 'professor' | 'admin') => {
     setTab(nextTab);
     setErrorMsg('');
     setRecoverySuccessMsg('');
@@ -304,7 +306,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     if (isAuthenticating) return;
     setErrorMsg('');
 
-    if (tab === 'staff') {
+    if (tab === 'staff' || tab === 'professor') {
       const cleanStaffUser = toEnglishDigits(username.trim()).toLowerCase();
       const hasStaffCredentials = Boolean(cleanStaffUser && password.trim());
       if (cleanStaffUser) {
@@ -455,12 +457,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">دانشگاه فرهنگیان استان اصفهان</p>
         </div>
 
-        {/* سه دسته اصلی ورود: دانشجو، کارکنان و مدیر */}
-        <div className="grid grid-cols-3 p-1.5 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-6 gap-1.5">
+        {/* چهار دسته اصلی ورود: دانشجو، کارکنان، اساتید و مدیر */}
+        <div className="grid grid-cols-4 p-1.5 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-6 gap-1">
           <button
             type="button"
             onClick={() => handleTabChange('student')}
-            className={`py-2.5 px-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+            className={`py-2.5 px-1.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1 cursor-pointer ${
               tab === 'student'
                 ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-sm'
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
@@ -473,7 +475,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <button
             type="button"
             onClick={() => handleTabChange('staff')}
-            className={`py-2.5 px-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+            className={`py-2.5 px-1.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1 cursor-pointer ${
               tab === 'staff'
                 ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-sm'
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
@@ -485,8 +487,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
           <button
             type="button"
+            onClick={() => handleTabChange('professor')}
+            className={`py-2.5 px-1.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1 cursor-pointer ${
+              tab === 'professor'
+                ? 'bg-white dark:bg-slate-700 text-amber-700 dark:text-amber-300 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+            }`}
+          >
+            <BookOpen className="w-4 h-4 shrink-0" />
+            <span>اساتید</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => handleTabChange('admin')}
-            className={`py-2.5 px-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+            className={`py-2.5 px-1.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1 cursor-pointer ${
               tab === 'admin'
                 ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-sm'
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
@@ -728,27 +743,46 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
         )}
 
-        {/* فرم ورود یکپارچه کارکنان (هدایت خودکار به پنل تخصصی بر اساس نام کاربری و رمز) و مدیر کل */}
-        {(tab === 'staff' || tab === 'admin') && (
+        {/* فرم ورود یکپارچه کارکنان، اساتید و مدیر کل */}
+        {(tab === 'staff' || tab === 'professor' || tab === 'admin') && (
           <form onSubmit={handleStaffOrAdminLogin} className="space-y-4">
             {tab === 'staff' && (
               <div className="p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-900/50 flex items-start gap-2 text-[11px] text-indigo-900 dark:text-indigo-200 leading-relaxed">
                 <Info className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400 mt-0.5" />
                 <span>
-                  همکاران گرامی (معاونت دانشجویی، حوزه معاونت آموزشی شامل مدیران گروه، کارشناسان آموزش و واحد فارغ‌التحصیلان، سرپرست سرا، حراست و انتظامات، تأسیسات، مشاور، انبار، کارپردازی، امور مالی، امور فرهنگی، امور دانشجویی، کتابخانه و پژوهش و واحد هوشمندسازی) با وارد کردن نام کاربری و کلمه عبور خود، به‌صورت خودکار به پنل کاربری اختصاصی خود هدایت می‌شوند.
+                  همکاران گرامی (معاونت آموزشی، معاونت دانشجویی، مدیران گروه، کارشناسان آموزش و واحد فارغ‌التحصیلان، سرپرست سرا، حراست و انتظامات، تأسیسات، مشاور، انبار، کارپردازی، امور مالی، امور فرهنگی، امور دانشجویی، کتابخانه و پژوهش و واحد هوشمندسازی) با وارد کردن نام کاربری و کلمه عبور خود، به‌صورت خودکار به پنل کاربری اختصاصی خود هدایت می‌شوند.
+                </span>
+              </div>
+            )}
+
+            {tab === 'professor' && (
+              <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 flex items-start gap-2 text-[11px] text-amber-900 dark:text-amber-200 leading-relaxed">
+                <Info className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                <span>
+                  ورود اساتید و مدرسان دانشگاه با <b>کد استاد (یکتا)</b> به‌عنوان نام کاربری و <b>کد ملی</b> (یا کلمه عبور تغییریافته) انجام می‌شود. پس از ورود، برنامه هفتگی، واحدهای موظف/معادل و ثبت عدم امکان حضور در دسترس است.
                 </span>
               </div>
             )}
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                {tab === 'admin' ? 'نام کاربری مدیر کل' : 'نام کاربری سازمانی'}
+                {tab === 'admin'
+                  ? 'نام کاربری مدیر کل'
+                  : tab === 'professor'
+                  ? 'کد یکتای استاد (نام کاربری)'
+                  : 'نام کاربری سازمانی'}
               </label>
               <input
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder={tab === 'admin' ? 'admin' : 'نام کاربری پرسنلی'}
+                placeholder={
+                  tab === 'admin'
+                    ? 'admin'
+                    : tab === 'professor'
+                    ? 'مثلاً 101 یا کد استاد'
+                    : 'نام کاربری پرسنلی'
+                }
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 text-left dir-ltr"
                 dir="ltr"
               />
@@ -756,13 +790,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                کلمه عبور
+                {tab === 'professor' ? 'کلمه عبور (پیش‌فرض: کد ملی)' : 'کلمه عبور'}
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={tab === 'admin' ? 'کلمه عبور مدیر کل' : 'کلمه عبور'}
+                placeholder={
+                  tab === 'admin'
+                    ? 'کلمه عبور مدیر کل'
+                    : tab === 'professor'
+                    ? 'کد ملی ۱۰ رقمی یا رمز عبور'
+                    : 'کلمه عبور'
+                }
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 text-left dir-ltr"
                 dir="ltr"
               />
@@ -786,6 +826,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               className={`w-full py-3 text-white rounded-2xl font-bold text-sm shadow-lg transition cursor-pointer mt-2 disabled:opacity-70 flex items-center justify-center gap-2 ${
                 tab === 'admin'
                   ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/25'
+                  : tab === 'professor'
+                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/25'
                   : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/25'
               }`}
             >
@@ -795,7 +837,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   <span>در حال بررسی اطلاعات کاربران...</span>
                 </>
               ) : (
-                <span>{tab === 'admin' ? 'ورود مدیر کل سامانه' : 'ورود به کارتابل تخصصی کارکنان'}</span>
+                <span>
+                  {tab === 'admin'
+                    ? 'ورود مدیر کل سامانه'
+                    : tab === 'professor'
+                    ? 'ورود به کارتابل اساتید'
+                    : 'ورود به کارتابل تخصصی کارکنان'}
+                </span>
               )}
             </button>
           </form>
@@ -809,7 +857,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <button
             type="button"
             onClick={() =>
-              onOpenUserGuide?.(tab === 'student' ? 'student' : tab === 'admin' ? 'admin' : 'supervisor')
+              onOpenUserGuide?.(
+                tab === 'student'
+                  ? 'student'
+                  : tab === 'admin'
+                  ? 'admin'
+                  : tab === 'professor'
+                  ? 'professor'
+                  : 'supervisor'
+              )
             }
             className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 dark:hover:bg-indigo-900/60 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border border-indigo-200 dark:border-indigo-800 shadow-xs shrink-0"
           >

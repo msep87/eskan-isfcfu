@@ -317,6 +317,8 @@ export function getUserNotificationKey(user: CurrentUser): string {
       return `counselor:${user.counselor.id}`;
     case 'admin':
       return `admin:${user.username}`;
+    case 'professor':
+      return `professor:${user.professor.id}`;
     default:
       return `${user.role}:${user.staff.id}`;
   }
@@ -334,6 +336,8 @@ function getCurrentActorId(user: NonNullable<CurrentUser>): string {
       return user.counselor.id;
     case 'admin':
       return user.username || 'admin';
+    case 'professor':
+      return user.professor.id;
     default:
       return user.staff.id;
   }
@@ -351,6 +355,8 @@ function getCurrentActorName(user: NonNullable<CurrentUser>): string {
       return user.counselor.fullName;
     case 'admin':
       return user.name;
+    case 'professor':
+      return user.professor.fullName;
     default:
       return user.staff.fullName;
   }
@@ -451,6 +457,30 @@ export function isMessageRelevantToUser(user: NonNullable<CurrentUser>, m: Messa
       (m.receiverType === 'graduation' ||
         m.category === 'graduation' ||
         m.senderRole === 'graduation')
+    );
+  }
+  if (user.role === 'academic_deputy') {
+    return (
+      !m.isConfidential &&
+      (m.receiverType === 'academic_deputy' ||
+        m.receiverType === 'education' ||
+        m.receiverType === 'graduation' ||
+        m.receiverType === 'professor' ||
+        m.receiverType === 'all' ||
+        m.category === 'education' ||
+        m.category === 'graduation' ||
+        m.senderRole === 'academic_deputy' ||
+        m.senderRole === 'education' ||
+        m.senderRole === 'graduation' ||
+        m.senderRole === 'professor')
+    );
+  }
+  if (user.role === 'professor') {
+    return (
+      !m.isConfidential &&
+      (m.senderId === user.professor.id ||
+        m.receiverId === user.professor.id ||
+        m.receiverType === 'professor')
     );
   }
   // admin

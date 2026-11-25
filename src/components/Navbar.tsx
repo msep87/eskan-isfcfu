@@ -92,13 +92,16 @@ export const Navbar: React.FC<NavbarProps> = ({
   const canRequestFromWarehouse =
     Boolean(currentUser) &&
     currentUser?.role !== 'student' &&
-    currentUser?.role !== 'warehouse';
+    currentUser?.role !== 'warehouse' &&
+    currentUser?.role !== 'professor';
 
   const canViewReports =
     Boolean(currentUser) &&
     currentUser?.role !== 'student' &&
     currentUser?.role !== 'finance' &&
     currentUser?.role !== 'education' &&
+    currentUser?.role !== 'academic_deputy' &&
+    currentUser?.role !== 'professor' &&
     currentUser?.role !== 'cultural' &&
     currentUser?.role !== 'library' &&
     currentUser?.role !== 'smart_campus' &&
@@ -216,6 +219,32 @@ export const Navbar: React.FC<NavbarProps> = ({
       return (
         !m.isConfidential &&
         (m.receiverType === 'graduation' || m.category === 'graduation' || m.senderRole === 'graduation') &&
+        m.status !== 'answered'
+      );
+    }
+    if (currentUser?.role === 'academic_deputy') {
+      return (
+        !m.isConfidential &&
+        (m.receiverType === 'academic_deputy' ||
+          m.receiverType === 'education' ||
+          m.receiverType === 'graduation' ||
+          m.receiverType === 'professor' ||
+          m.receiverType === 'all' ||
+          m.category === 'education' ||
+          m.category === 'graduation' ||
+          m.senderRole === 'academic_deputy' ||
+          m.senderRole === 'education' ||
+          m.senderRole === 'graduation' ||
+          m.senderRole === 'professor') &&
+        m.status !== 'answered'
+      );
+    }
+    if (currentUser?.role === 'professor') {
+      return (
+        !m.isConfidential &&
+        (m.senderId === currentUser.professor.id ||
+          m.receiverId === currentUser.professor.id ||
+          m.receiverType === 'professor') &&
         m.status !== 'answered'
       );
     }
@@ -569,6 +598,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ? currentUser.staff.photoUrl
                       : currentUser.role === 'graduation'
                       ? currentUser.staff.photoUrl
+                      : currentUser.role === 'academic_deputy'
+                      ? currentUser.staff.photoUrl
+                      : currentUser.role === 'professor'
+                      ? currentUser.professor.photoUrl
                       : currentUser.role === 'counselor'
                       ? currentUser.counselor.photoUrl
                       : undefined;
@@ -598,6 +631,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       {currentUser.role === 'library' && currentUser.staff.fullName}
                       {currentUser.role === 'smart_campus' && currentUser.staff.fullName}
                       {currentUser.role === 'graduation' && currentUser.staff.fullName}
+                      {currentUser.role === 'academic_deputy' && currentUser.staff.fullName}
+                      {currentUser.role === 'professor' && currentUser.professor.fullName}
                       {currentUser.role === 'admin' && 'مدیر کل سامانه'}
                     </span>
                     {currentUser.role === 'counselor' && (
@@ -671,6 +706,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                         واحد فارغ‌التحصیلان
                       </span>
                     )}
+                    {currentUser.role === 'academic_deputy' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold">
+                        معاونت آموزشی
+                      </span>
+                    )}
+                    {currentUser.role === 'professor' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 font-bold">
+                        استاد / مدرس
+                      </span>
+                    )}
                     {currentUser.role === 'student' && (
                       <>
                         {getStudentAdmissionStatus(currentUser.student) === 'admitted' ? (
@@ -710,6 +755,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentUser.role === 'library' && (currentUser.staff.department || 'واحد کتابخانه و پژوهش')}
                     {currentUser.role === 'smart_campus' && (currentUser.staff.department || 'واحد هوشمندسازی و فناوری')}
                     {currentUser.role === 'graduation' && (currentUser.staff.department || 'اداره امور فارغ‌التحصیلان')}
+                    {currentUser.role === 'academic_deputy' && (currentUser.staff.title || currentUser.staff.department || 'معاونت آموزشی دانشگاه فرهنگیان')}
+                    {currentUser.role === 'professor' && `کد استاد: ${currentUser.professor.professorCode}`}
                     {currentUser.role === 'admin' && 'مدیر کل سامانه جامع خدمات دانشجویی'}
                   </div>
                 </div>
@@ -790,11 +837,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentUser.role === 'library' && currentUser.staff.fullName}
                     {currentUser.role === 'smart_campus' && currentUser.staff.fullName}
                     {currentUser.role === 'graduation' && currentUser.staff.fullName}
+                    {currentUser.role === 'academic_deputy' && currentUser.staff.fullName}
+                    {currentUser.role === 'professor' && currentUser.professor.fullName}
                     {currentUser.role === 'admin' && 'مدیر کل سامانه'}
                   </div>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                     {currentUser.role === 'student'
                       ? `کد دانشجویی: ${currentUser.student.studentId}`
+                      : currentUser.role === 'professor'
+                      ? `استاد / مدرس • کد: ${currentUser.professor.professorCode}`
+                      : currentUser.role === 'academic_deputy'
+                      ? 'معاونت آموزشی دانشگاه فرهنگیان'
                       : currentUser.role === 'admin'
                       ? 'مدیر کل سامانه جامع خدمات دانشجویی'
                       : 'کاربر کادر سامانه'}

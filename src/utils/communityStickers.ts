@@ -319,6 +319,8 @@ export const STAFF_ROLE_OPTIONS: { role: string; label: string }[] = [
   { role: 'student_affairs', label: 'امور دانشجویی و تربیت بدنی' },
   { role: 'cultural', label: 'امور فرهنگی' },
   { role: 'education', label: 'واحد آموزش' },
+  { role: 'academic_deputy', label: 'معاونت آموزشی' },
+  { role: 'professor', label: 'اساتید و مدرسان' },
   { role: 'counselor', label: 'مرکز مشاوره' },
   { role: 'finance', label: 'امور مالی و حسابداری' },
   { role: 'library', label: 'کتابخانه و پژوهش' },
@@ -525,6 +527,10 @@ export function getRoleDisplayLabel(role: string): string {
       return 'هوشمندسازی';
     case 'graduation':
       return 'فارغ‌التحصیلان';
+    case 'academic_deputy':
+      return 'معاونت آموزشی';
+    case 'professor':
+      return 'استاد / مدرس';
     case 'maintenance':
       return 'تأسیسات و فنی';
     case 'warehouse':

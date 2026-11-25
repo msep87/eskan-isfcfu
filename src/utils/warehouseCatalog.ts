@@ -109,4 +109,5 @@ export const WAREHOUSE_REQUESTER_ROLE_LABELS: Record<string, string> = {
   library: 'واحد کتابخانه و پژوهش',
   smart_campus: 'واحد هوشمندسازی و فناوری',
   graduation: 'واحد فارغ‌التحصیلان',
+  academic_deputy: 'معاونت آموزشی',
 };

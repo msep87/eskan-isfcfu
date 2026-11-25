@@ -169,7 +169,7 @@ export type MessageCategory =
 export interface MessageReply {
   id: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'academic_deputy' | 'professor' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation';
   content: string;
   date: string;
 }
@@ -178,8 +178,8 @@ export interface Message {
   id: string;
   senderId: string;
   senderName: string;
-  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation';
-  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'all';
+  senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'academic_deputy' | 'professor' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation';
+  receiverType: 'supervisor' | 'admin' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'academic_deputy' | 'professor' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'all';
   receiverId?: string;
   receiverName?: string;
   senderFieldOfStudy?: string; // رشته تحصیلی دانشجوی ارسال‌کننده جهت ارجاع خودکار به کارشناس آموزش مربوطه
@@ -396,6 +396,22 @@ export interface GraduationStaff {
   notes?: string;
 }
 
+export interface AcademicDeputyStaff {
+  id: string;
+  username: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  mobile?: string;
+  photoUrl?: string; // تصویر پروفایل معاونت آموزشی
+  department?: string; // معاونت آموزشی پردیس
+  title?: string; // عنوان سازمانی (معاون آموزشی / سرپرست معاونت آموزشی)
+  role: 'academic_deputy';
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  notes?: string;
+}
+
 export type SecurityReportCategory =
   | 'disciplinary_incident'
   | 'curfew_entry_exit'
@@ -425,6 +441,7 @@ export type StaffReferralActorRole =
   | 'supervisor'
   | 'admin'
   | 'vice_dean'
+  | 'academic_deputy'
   | 'student_affairs'
   | 'security'
   | 'counselor'
@@ -434,7 +451,8 @@ export type StaffReferralActorRole =
   | 'maintenance'
   | 'library'
   | 'smart_campus'
-  | 'graduation';
+  | 'graduation'
+  | 'academic_deputy';
 
 export interface SecurityReport {
   id: string;
@@ -841,6 +859,8 @@ export type CurrentUser =
   | { role: 'finance'; staff: FinanceStaff }
   | { role: 'procurement'; staff: ProcurementStaff }
   | { role: 'education'; staff: EducationStaff }
+  | { role: 'academic_deputy'; staff: AcademicDeputyStaff }
+  | { role: 'professor'; professor: SchedProfessor }
   | { role: 'cultural'; staff: CulturalStaff }
   | { role: 'student_affairs'; staff: StudentAffairsStaff }
   | { role: 'security'; staff: SecurityStaff }
@@ -1031,7 +1051,7 @@ export interface ActivityLog {
   timestamp: string; // ISO string برای مرتب‌سازی دقیق
   date: string; // تاریخ و ساعت شمسی خوانا
   actorName: string;
-  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'system';
+  actorRole: 'admin' | 'supervisor' | 'student' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'academic_deputy' | 'professor' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'system';
   actorUsername?: string;
   category: ActivityLogCategory;
   action: string;
@@ -1786,6 +1806,166 @@ export interface StaffChatDirectoryItem {
   department?: string;
   photoUrl?: string;
 }
+
+// =============================================================
+// انواع داده‌ای سامانه جامع برنامه‌ریزی درسی دانشگاه فرهنگیان
+// =============================================================
+
+export type SchedEmploymentType =
+  | 'mamoor_amoozeshi' // مامور آموزشی
+  | 'faculty_member' // هیات علمی
+  | 'haghol_tadris_ap' // حق التدریس آموزش و پرورش
+  | 'haghol_tadris_free' // حق التدریس آزاد
+  | 'staff' // کارمند
+  | 'retired'; // بازنشسته
+
+export type SchedClassroomType = 'ordinary' | 'lab' | 'workshop' | 'computer_av';
+
+export type SchedPracticalUnitType = 'normal_lab' | 'workshop' | 'internship';
+
+export type SchedCourseType = 'theoretical' | 'theoretical_practical' | 'practical';
+
+export type SchedDayKey =
+  | 'saturday'
+  | 'sunday'
+  | 'monday'
+  | 'tuesday'
+  | 'wednesday'
+  | 'thursday'
+  | 'friday';
+
+export interface SchedClassroom {
+  id: string;
+  code: string;
+  name: string;
+  building?: string;
+  floor?: string;
+  capacity: number;
+  roomType: SchedClassroomType;
+  isActive: boolean;
+  notes?: string;
+}
+
+export interface SchedProgramSection {
+  id: string;
+  name: string; // مثلاً شعبه ۱، گروه الف
+  studentCount: number;
+}
+
+export interface SchedProgramCohort {
+  id: string;
+  majorCode: string; // کد رشته ۶ رقمی
+  majorName: string;
+  entryTerm: string; // مثلاً 4031 یا ۱۴۰۳
+  totalStudents: number;
+  sections: SchedProgramSection[];
+  notes?: string;
+}
+
+export interface SchedProfessor {
+  id: string;
+  professorCode: string; // کد استاد یکتا (تفکیک اساتید هم‌نام)
+  fullName: string;
+  nationalId: string; // کد ملی (کلمه عبور پیش‌فرض استاد)
+  password?: string; // کلمه عبور اختیاری قابل تغییر
+  degreeLevel?: string; // مقطع تحصیلی (دکتری، کارشناسی ارشد و...)
+  degreeField?: string; // رشته مدرک تحصیلی
+  degreeFull?: string; // متن کامل مدرک تحصیلی
+  employmentType: SchedEmploymentType;
+  phone?: string;
+  bankAccount?: string; // شماره حساب / شبا (فقط مدیر، معاونت آموزشی و خود استاد)
+  photoUrl?: string;
+  isActive: boolean;
+  unavailableKeys?: string[]; // کلیدهای day:slotId عدم امکان حضور استاد
+  notes?: string;
+}
+
+export interface SchedCurriculumCourse {
+  id: string;
+  courseCode: string; // کد درس ۷ رقمی یکتا
+  title: string;
+  majorCode: string; // کد رشته ۶ رقمی مالک سرفصل
+  majorName: string;
+  courseType: SchedCourseType;
+  theoreticalUnits: number;
+  practicalUnits: number;
+  practicalType: SchedPracticalUnitType;
+  recommendedTerm?: string;
+  notes?: string;
+}
+
+export interface SchedTimeSlot {
+  id: string;
+  label: string; // مثلاً 08:00 - 10:00
+  startTime: string;
+  endTime: string;
+  order: number;
+}
+
+export interface SchedRulesSettings {
+  activeTerm: string; // مثلاً 1405-1
+  availableTerms: string[];
+  hoursPerUnit: {
+    theoretical: number; // پیش‌فرض ۱ ساعت
+    practicalNormalLab: number; // پیش‌فرض ۲ ساعت
+    practicalWorkshop: number; // پیش‌فرض ۳ ساعت
+    practicalInternship: number; // پیش‌فرض ۴ ساعت
+  };
+  equivalentPerUnit: {
+    theoretical: number; // پیش‌فرض ۱
+    practicalNormalLab: number; // پیش‌فرض ۱.۳
+    practicalWorkshop: number; // پیش‌فرض ۱.۹۸
+    practicalInternshipBase: number; // پیش‌فرض ۳ واحد معادل به ازای حداقل ۱۲ دانشجو
+    internshipMinStudents: number; // پیش‌فرض ۱۲ دانشجو
+  };
+  activeDays: SchedDayKey[];
+  timeSlots: SchedTimeSlot[];
+}
+
+export interface SchedSharedTarget {
+  majorCode: string; // کد ۶ رقمی رشته مشترک
+  majorName: string;
+  cohortId: string;
+  entryTerm: string;
+  sectionId?: string;
+  sectionName?: string;
+  studentCount?: number;
+}
+
+export interface SchedCourseOffering {
+  id: string;
+  termKey: string; // نیمسال فعال مثلاً 1405-1
+  courseId: string;
+  courseCode: string; // کد درس ۷ رقمی
+  courseTitle: string;
+  courseType: SchedCourseType;
+  practicalType: SchedPracticalUnitType;
+  theoreticalUnits: number;
+  practicalUnits: number;
+  weeklyHours: number;
+  ownerMajorCode: string; // کد رشته ۶ رقمی ارائه‌دهنده
+  ownerMajorName: string;
+  cohortId: string;
+  entryTerm: string;
+  sectionId?: string;
+  sectionName?: string;
+  sharedWithTargets?: SchedSharedTarget[]; // دانشجویان سایر رشته‌ها در صورت یکسان بودن کد ۷ رقمی درس
+  enrolledCount: number; // تعداد کل دانشجویان کلاس (اثرگذار در محاسبه واحد معادل کارورزی)
+  professorId?: string;
+  professorCode?: string;
+  professorName?: string;
+  classroomId?: string;
+  classroomName?: string;
+  dayOfWeek?: SchedDayKey;
+  slotIds: string[]; // سانس‌های اشغال‌شده
+  splitPart?: 'full' | 'theory' | 'practical';
+  notes?: string;
+  createdById: string;
+  createdByName: string;
+  createdByRole: 'admin' | 'academic_deputy' | 'department_head';
+  updatedAt: string;
+}
+
 
 
 

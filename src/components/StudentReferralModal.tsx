@@ -59,6 +59,7 @@ const ROLE_LABELS: Record<StaffReferralActorRole, string> = {
   library: 'کتابخانه و پژوهش',
   smart_campus: 'واحد هوشمندسازی',
   graduation: 'واحد فارغ‌التحصیلان',
+  academic_deputy: 'معاونت آموزشی',
 };
 
 const COUNSELOR_PRESETS: Array<{ label: string; defaultTitle: string; defaultText: string }> = [

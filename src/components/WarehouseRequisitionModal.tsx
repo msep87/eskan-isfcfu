@@ -95,6 +95,14 @@ function resolveRequesterProfile(currentUser: NonNullable<CurrentUser>): {
       defaultDepartment: 'دانشجو',
     };
   }
+  if (currentUser.role === 'professor') {
+    return {
+      staffId: currentUser.professor.id,
+      staffName: currentUser.professor.fullName,
+      role: 'education',
+      defaultDepartment: 'هیئت علمی / مدرس',
+    };
+  }
   const staff = currentUser.staff;
   const roleKey = currentUser.role as WarehouseRequesterRole;
   const dept =
@@ -166,7 +174,13 @@ export const WarehouseRequisitionModal: React.FC<WarehouseRequisitionModalProps>
     [myRequests]
   );
 
-  if (!isOpen || currentUser.role === 'student' || currentUser.role === 'warehouse') return null;
+  if (
+    !isOpen ||
+    currentUser.role === 'student' ||
+    currentUser.role === 'warehouse' ||
+    currentUser.role === 'professor'
+  )
+    return null;
 
   const handleSelectPresetItem = (presetId: string) => {
     const found = DEFAULT_WAREHOUSE_CATALOG.find((i) => i.id === presetId);

@@ -319,6 +319,8 @@ const ALLOWED_ROLES = new Set([
   'library',
   'smart_campus',
   'graduation',
+  'academic_deputy',
+  'professor',
 ]);
 
 function omitPasswordField<T extends object>(obj: T): T {
@@ -346,6 +348,9 @@ export function sanitizeCurrentUserForStorage(user: CurrentUser): CurrentUser {
   }
   if (user.role === 'maintenance') {
     return { ...user, technician: omitPasswordField(user.technician) };
+  }
+  if (user.role === 'professor') {
+    return { ...user, professor: omitPasswordField(user.professor) };
   }
   if (user.role === 'admin') {
     return { role: 'admin', name: user.name, username: user.username };
@@ -384,6 +389,11 @@ export function validateStoredCurrentUser(raw: unknown): CurrentUser {
   if (role === 'maintenance') {
     const tech = candidate.technician as Record<string, unknown> | undefined;
     if (!tech || typeof tech.id !== 'string') return null;
+    return candidate as unknown as CurrentUser;
+  }
+  if (role === 'professor') {
+    const prof = candidate.professor as Record<string, unknown> | undefined;
+    if (!prof || typeof prof.id !== 'string') return null;
     return candidate as unknown as CurrentUser;
   }
   const staff = candidate.staff as Record<string, unknown> | undefined;

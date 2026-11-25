@@ -170,6 +170,9 @@ export const CommunityForumRequestModal: React.FC<CommunityForumRequestModalProp
     if (currentUser.role === 'maintenance') {
       return { id: currentUser.technician.id, name: currentUser.technician.fullName, role: 'maintenance' };
     }
+    if (currentUser.role === 'professor') {
+      return { id: currentUser.professor.id, name: currentUser.professor.fullName, role: 'professor' };
+    }
     return { id: currentUser.staff.id, name: currentUser.staff.fullName, role: currentUser.role };
   };
 

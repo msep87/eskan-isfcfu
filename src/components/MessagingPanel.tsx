@@ -58,7 +58,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const [activeTab, setActiveTab] = useState<'inbox' | 'compose'>('inbox');
 
   // فرم پیام جدید
-  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor' | 'maintenance' | 'finance' | 'warehouse' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'student' | 'all'>('supervisor');
+  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor' | 'maintenance' | 'finance' | 'warehouse' | 'procurement' | 'education' | 'academic_deputy' | 'professor' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'student' | 'all'>('supervisor');
   const [category, setCategory] = useState<Message['category']>('accommodation');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
@@ -72,8 +72,11 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const [eduSelectedEntryTerm, setEduSelectedEntryTerm] = useState('');
   const [eduSelectedColleagueId, setEduSelectedColleagueId] = useState('');
   const [studentEduTargetId, setStudentEduTargetId] = useState<string>('auto');
+  const [profTargetMode, setProfTargetMode] = useState<'education' | 'academic_deputy'>('education');
+  const [profTargetStaffId, setProfTargetStaffId] = useState<string>('');
+  const [targetProfId, setTargetProfId] = useState<string>('');
   const [secComposeMode, setSecComposeMode] = useState<'student' | 'staff'>('student');
-  const [secStaffTarget, setSecStaffTarget] = useState<'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'education' | 'cultural' | 'counselor' | 'finance' | 'warehouse' | 'procurement' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'all'>('supervisor');
+  const [secStaffTarget, setSecStaffTarget] = useState<'supervisor' | 'admin' | 'maintenance' | 'student_affairs' | 'education' | 'academic_deputy' | 'cultural' | 'counselor' | 'finance' | 'warehouse' | 'procurement' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'all'>('supervisor');
 
   // فیلتر دسته‌بندی و نقش صندوق پیام‌ها
   const [inboxCategoryFilter, setInboxCategoryFilter] = useState<string>('all');
@@ -140,6 +143,8 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const dorms = Storage.getDormitories();
   const allStudentsList = Storage.getStudents();
   const allEducationStaff = Storage.getEducationStaff();
+  const allAcademicDeputyStaff = Storage.getAcademicDeputyStaff();
+  const allSchedProfessors = Storage.getSchedProfessors();
   const maintenanceStaff = Storage.getMaintenanceStaff().filter((s) => s.status === 'active' || s.isActive !== false);
 
   const studentMatchedEducationStaff =
@@ -248,6 +253,31 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     if (currentUser.role === 'graduation') {
       return !m.isConfidential && (m.receiverType === 'graduation' || m.category === 'graduation' || m.senderRole === 'graduation' || m.receiverType === 'all');
     }
+    if (currentUser.role === 'academic_deputy') {
+      return (
+        !m.isConfidential &&
+        (m.category === 'education' ||
+          m.category === 'graduation' ||
+          m.receiverType === 'academic_deputy' ||
+          m.receiverType === 'education' ||
+          m.receiverType === 'graduation' ||
+          m.receiverType === 'professor' ||
+          m.senderRole === 'academic_deputy' ||
+          m.senderRole === 'education' ||
+          m.senderRole === 'graduation' ||
+          m.senderRole === 'professor' ||
+          m.receiverType === 'all' ||
+          m.senderId === currentUser.staff.id)
+      );
+    }
+    if (currentUser.role === 'professor') {
+      return (
+        !m.isConfidential &&
+        (m.senderId === currentUser.professor.id ||
+          m.receiverId === currentUser.professor.id ||
+          m.receiverType === 'professor')
+      );
+    }
     return true;
   });
 
@@ -259,6 +289,46 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       new Date().toLocaleDateString('fa-IR') +
       ' - ' +
       new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+
+    if (currentUser.role === 'professor') {
+      const pickedEdu =
+        profTargetMode === 'education' && profTargetStaffId
+          ? allEducationStaff.find((s) => s.id === profTargetStaffId)
+          : undefined;
+      const pickedAd =
+        profTargetMode === 'academic_deputy' && profTargetStaffId
+          ? allAcademicDeputyStaff.find((a) => a.id === profTargetStaffId)
+          : undefined;
+
+      Storage.addMessage({
+        senderId: currentUser.professor.id,
+        senderName: `${currentUser.professor.fullName} (استاد / مدرس)`,
+        senderRole: 'professor',
+        receiverType: profTargetMode,
+        receiverId: pickedEdu?.id || pickedAd?.id,
+        receiverName: pickedEdu
+          ? `${pickedEdu.fullName} (${getEducationStaffRoleLabel(pickedEdu)})`
+          : pickedAd
+          ? `${pickedAd.fullName} (معاونت آموزشی)`
+          : profTargetMode === 'academic_deputy'
+          ? 'معاونت آموزشی پردیس'
+          : 'مدیران گروه و کارشناسان آموزش',
+        targetEducationStaffId: pickedEdu?.id,
+        targetEducationStaffName: pickedEdu?.fullName,
+        category: 'education',
+        subject: subject.trim(),
+        content: content.trim(),
+        isConfidential: false,
+        date: nowDate,
+      });
+
+      setSubject('');
+      setContent('');
+      setProfTargetStaffId('');
+      setActiveTab('inbox');
+      onMessagesUpdated();
+      return;
+    }
 
     if (
       currentUser.role === 'education' ||
@@ -400,6 +470,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
           library: 'کتابخانه و پژوهش',
           smart_campus: 'واحد هوشمندسازی',
           graduation: 'واحد فارغ‌التحصیلان',
+          academic_deputy: 'معاونت آموزشی',
           all: 'همه واحدها و سرپرستان',
         };
         Storage.addMessage({
@@ -475,6 +546,10 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       senderName = `${currentUser.staff.fullName} (معاونت دانشجویی)`;
       senderId = currentUser.staff.id;
       senderRole = 'vice_dean';
+    } else if (currentUser.role === 'academic_deputy') {
+      senderName = `${currentUser.staff.fullName} (معاونت آموزشی)`;
+      senderId = currentUser.staff.id;
+      senderRole = 'academic_deputy';
     } else {
       senderName = currentUser.name;
       senderId = currentUser.username;
@@ -494,13 +569,21 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       explicitlyPickedSpecialist ||
       (routedSpecialists.length === 1 ? routedSpecialists[0] : undefined);
 
+    const pickedProfessorTarget =
+      receiverType === 'professor' && targetProfId
+        ? allSchedProfessors.find((p) => p.id === targetProfId)
+        : undefined;
+
     Storage.addMessage({
       senderId,
       senderName,
       senderRole,
       senderFieldOfStudy: currentUser.role === 'student' ? currentUser.student.fieldOfStudy : undefined,
       receiverType,
-      receiverName: isStudentToEducation
+      receiverId: pickedProfessorTarget?.id,
+      receiverName: pickedProfessorTarget
+        ? `${pickedProfessorTarget.fullName} (استاد • کد ${pickedProfessorTarget.professorCode})`
+        : isStudentToEducation
         ? singleRoutedSpecialist
           ? `${getEducationStaffRoleLabel(singleRoutedSpecialist)} (${singleRoutedSpecialist.fullName})`
           : routedSpecialists.length > 0
@@ -520,6 +603,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     setContent('');
     setIsConfidential(false);
     setStudentEduTargetId('auto');
+    setTargetProfId('');
     setActiveTab('inbox');
     onMessagesUpdated();
   };
@@ -584,6 +668,12 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     } else if (currentUser.role === 'graduation') {
       senderName = `${currentUser.staff.fullName} (واحد فارغ‌التحصیلان)`;
       senderRole = 'graduation';
+    } else if (currentUser.role === 'academic_deputy') {
+      senderName = `${currentUser.staff.fullName} (معاونت آموزشی)`;
+      senderRole = 'academic_deputy';
+    } else if (currentUser.role === 'professor') {
+      senderName = `${currentUser.professor.fullName} (استاد / مدرس)`;
+      senderRole = 'professor';
     } else {
       senderName = 'مدیریت کل سامانه';
       senderRole = 'admin';
@@ -768,7 +858,76 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
           {/* تب ارسال پیام جدید */}
           {activeTab === 'compose' && (
             <form onSubmit={handleSendMessage} className="space-y-4 max-w-xl mx-auto">
-              {currentUser.role === 'education' ||
+              {currentUser.role === 'professor' ? (
+                <div className="space-y-3 p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
+                  <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-900 dark:text-indigo-200">
+                    <GraduationCap className="w-4 h-4 text-indigo-600" />
+                    <span>مکاتبه تخصصی استاد با مدیران گروه، کارشناسان آموزش و معاونت آموزشی</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfTargetMode('education');
+                        setProfTargetStaffId('');
+                      }}
+                      className={`py-2.5 px-3 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                        profTargetMode === 'education'
+                          ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      مدیر گروه / کارشناس آموزش
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfTargetMode('academic_deputy');
+                        setProfTargetStaffId('');
+                      }}
+                      className={`py-2.5 px-3 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                        profTargetMode === 'academic_deputy'
+                          ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      معاونت آموزشی پردیس
+                    </button>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      انتخاب گیرنده مشخص (اختیاری)
+                    </label>
+                    <select
+                      value={profTargetStaffId}
+                      onChange={(e) => setProfTargetStaffId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold"
+                    >
+                      <option value="">
+                        {profTargetMode === 'education'
+                          ? '-- ارسال عمومی به مدیران گروه و کارشناسان آموزش --'
+                          : '-- ارسال عمومی به معاونت آموزشی --'}
+                      </option>
+                      {profTargetMode === 'education'
+                        ? allEducationStaff
+                            .filter((e) => e.status !== 'inactive' && e.isActive !== false)
+                            .map((e) => (
+                              <option key={e.id} value={e.id}>
+                                {e.fullName} — {getEducationStaffRoleLabel(e)}
+                                {e.assignedFields?.length ? ` (${e.assignedFields.join('، ')})` : ''}
+                              </option>
+                            ))
+                        : allAcademicDeputyStaff
+                            .filter((a) => a.status !== 'inactive' && a.isActive !== false)
+                            .map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.fullName} — {a.title || 'معاونت آموزشی'}
+                              </option>
+                            ))}
+                    </select>
+                  </div>
+                </div>
+              ) : currentUser.role === 'education' ||
               currentUser.role === 'library' ||
               currentUser.role === 'smart_campus' ||
               currentUser.role === 'graduation' ? (
@@ -1082,6 +1241,36 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                       <button
                         type="button"
                         onClick={() => {
+                          setReceiverType('academic_deputy');
+                          setCategory('education');
+                        }}
+                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                          receiverType === 'academic_deputy'
+                            ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                        }`}
+                      >
+                        معاونت آموزشی پردیس
+                      </button>
+                      {currentUser.role !== 'student' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReceiverType('professor');
+                            setCategory('education');
+                          }}
+                          className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                            receiverType === 'professor'
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                          }`}
+                        >
+                          اساتید و مدرسان
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
                           setReceiverType('graduation');
                           setCategory('graduation');
                         }}
@@ -1315,6 +1504,25 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                         ارسال و دریافت پیام مستقیم برای معاونت دانشجویی با تمامی کارکنان و واحدهای سامانه (بجز دانشجو) فعال است. تمامی پیام‌های دانشجویان در تب پایش پیام‌ها قابل مشاهده است.
                       </div>
                     )}
+                    {currentUser.role !== 'student' && receiverType === 'professor' && (
+                      <div className="mt-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 space-y-1.5">
+                        <label className="block text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                          انتخاب استاد مخاطب (یا ارسال به همه اساتید):
+                        </label>
+                        <select
+                          value={targetProfId}
+                          onChange={(e) => setTargetProfId(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-800 text-xs font-bold"
+                        >
+                          <option value="">-- همه اساتید فعال --</option>
+                          {allSchedProfessors.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.fullName} (کد {p.professorCode})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -1324,6 +1532,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                   currentUser.role !== 'library' &&
                   currentUser.role !== 'smart_campus' &&
                   currentUser.role !== 'graduation' &&
+                  currentUser.role !== 'professor' &&
                   currentUser.role !== 'security' && (
                   <>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -1380,7 +1589,11 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
               </div>
 
               {/* گزینه ارسال محرمانه ویژه حفظ حریم خصوصی (برای ارسال‌های غیرآموزشی) */}
-              {currentUser.role !== 'education' && receiverType !== 'education' && (
+              {currentUser.role !== 'education' &&
+                currentUser.role !== 'professor' &&
+                receiverType !== 'education' &&
+                receiverType !== 'academic_deputy' &&
+                receiverType !== 'professor' && (
                 <label className="flex items-start gap-2.5 p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1454,6 +1667,8 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                       <option value="student_affairs">امور دانشجویی و ورزش</option>
                       <option value="cultural">امور فرهنگی</option>
                       <option value="education">کارشناس آموزش</option>
+                      <option value="academic_deputy">معاونت آموزشی</option>
+                      <option value="professor">اساتید و مدرسان</option>
                       <option value="library">کتابخانه و پژوهش</option>
                       <option value="smart_campus">واحد هوشمندسازی</option>
                       <option value="graduation">واحد فارغ‌التحصیلان</option>
@@ -1588,6 +1803,10 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                               ? 'واحد هوشمندسازی'
                               : selectedMsg.senderRole === 'graduation'
                               ? 'واحد فارغ‌التحصیلان'
+                              : selectedMsg.senderRole === 'academic_deputy'
+                              ? 'معاونت آموزشی'
+                              : selectedMsg.senderRole === 'professor'
+                              ? 'استاد / مدرس'
                               : selectedMsg.senderRole === 'cultural'
                               ? 'امور فرهنگی'
                               : selectedMsg.senderRole === 'student_affairs'

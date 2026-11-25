@@ -115,6 +115,10 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         return <Cpu className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />;
       case 'graduation':
         return <FileCheck2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />;
+      case 'academic_deputy':
+        return <Landmark className="w-5 h-5 text-amber-600 dark:text-amber-400" />;
+      case 'professor':
+        return <BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />;
       case 'student':
         return <GraduationCap className="w-5 h-5 text-blue-600 dark:text-blue-400" />;
     }
@@ -183,6 +187,8 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                 { id: 'counselor', label: 'مشاور و روانشناس', role: 'counselor' as UserRoleType },
                 { id: 'education', label: 'معاونت آموزشی (مدیر گروه / آموزش)', role: 'education' as UserRoleType },
                 { id: 'graduation', label: 'معاونت آموزشی (فارغ‌التحصیلان)', role: 'graduation' as UserRoleType },
+                { id: 'academic_deputy', label: 'معاونت آموزشی و برنامه‌ریزی درسی', role: 'academic_deputy' as UserRoleType },
+                { id: 'professor', label: 'اساتید و مدرسان دانشگاه', role: 'professor' as UserRoleType },
                 { id: 'maintenance', label: 'تأسیسات و فنی', role: 'maintenance' as UserRoleType },
                 { id: 'warehouse', label: 'انبار و تجهیزات', role: 'warehouse' as UserRoleType },
                 { id: 'procurement', label: 'کارپرداز و خرید', role: 'procurement' as UserRoleType },

@@ -65,6 +65,13 @@ import {
   LibraryStaff,
   SmartCampusStaff,
   GraduationStaff,
+  AcademicDeputyStaff,
+  SchedClassroom,
+  SchedProgramCohort,
+  SchedProfessor,
+  SchedCurriculumCourse,
+  SchedCourseOffering,
+  SchedRulesSettings,
   LibraryBook,
   LibraryBookRequest,
   ClearanceUnitRole,
@@ -155,6 +162,13 @@ import {
   INITIAL_LIBRARY_STAFF,
   INITIAL_SMART_CAMPUS_STAFF,
   INITIAL_GRADUATION_STAFF,
+  INITIAL_ACADEMIC_DEPUTY_STAFF,
+  INITIAL_SCHED_CLASSROOMS,
+  INITIAL_SCHED_PROGRAMS,
+  INITIAL_SCHED_PROFESSORS,
+  INITIAL_SCHED_COURSES,
+  INITIAL_SCHED_OFFERINGS,
+  DEFAULT_SCHED_RULES,
   INITIAL_LIBRARY_BOOKS,
   INITIAL_LIBRARY_BOOK_REQUESTS,
   INITIAL_GRADUATION_CLEARANCES,
@@ -203,7 +217,9 @@ export type AvatarUploadRole =
   | 'vice_dean'
   | 'library'
   | 'smart_campus'
-  | 'graduation';
+  | 'graduation'
+  | 'academic_deputy'
+  | 'professor';
 
 export const CLEARANCE_UNITS_META: Array<{ role: ClearanceUnitRole; label: string; description: string }> = [
   { role: 'education', label: 'واحد آموزش', description: 'تایید گذراندن کلیه واحدهای درسی و پرونده آموزشی' },
@@ -285,6 +301,13 @@ const STORAGE_KEYS = {
   LIBRARY_STAFF: 'farhangian_dorm_library_staff_prod',
   SMART_CAMPUS_STAFF: 'farhangian_dorm_smart_campus_staff_prod',
   GRADUATION_STAFF: 'farhangian_dorm_graduation_staff_prod',
+  ACADEMIC_DEPUTY_STAFF: 'farhangian_dorm_academic_deputy_staff_prod',
+  SCHED_CLASSROOMS: 'farhangian_sched_classrooms_prod',
+  SCHED_PROGRAMS: 'farhangian_sched_programs_prod',
+  SCHED_PROFESSORS: 'farhangian_sched_professors_prod',
+  SCHED_COURSES: 'farhangian_sched_courses_prod',
+  SCHED_OFFERINGS: 'farhangian_sched_offerings_prod',
+  SCHED_RULES: 'farhangian_sched_rules_prod',
   LIBRARY_BOOKS: 'farhangian_dorm_library_books_prod',
   LIBRARY_BOOK_REQUESTS: 'farhangian_dorm_library_book_requests_prod',
   GRADUATION_CLEARANCES: 'farhangian_dorm_graduation_clearances_prod',
@@ -544,6 +567,13 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.LIBRARY_STAFF, INITIAL_LIBRARY_STAFF);
   setIfMissing(STORAGE_KEYS.SMART_CAMPUS_STAFF, INITIAL_SMART_CAMPUS_STAFF);
   setIfMissing(STORAGE_KEYS.GRADUATION_STAFF, INITIAL_GRADUATION_STAFF);
+  setIfMissing(STORAGE_KEYS.ACADEMIC_DEPUTY_STAFF, INITIAL_ACADEMIC_DEPUTY_STAFF);
+  setIfMissing(STORAGE_KEYS.SCHED_CLASSROOMS, INITIAL_SCHED_CLASSROOMS);
+  setIfMissing(STORAGE_KEYS.SCHED_PROGRAMS, INITIAL_SCHED_PROGRAMS);
+  setIfMissing(STORAGE_KEYS.SCHED_PROFESSORS, INITIAL_SCHED_PROFESSORS);
+  setIfMissing(STORAGE_KEYS.SCHED_COURSES, INITIAL_SCHED_COURSES);
+  setIfMissing(STORAGE_KEYS.SCHED_OFFERINGS, INITIAL_SCHED_OFFERINGS);
+  setIfMissing(STORAGE_KEYS.SCHED_RULES, DEFAULT_SCHED_RULES);
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOKS, INITIAL_LIBRARY_BOOKS);
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, INITIAL_LIBRARY_BOOK_REQUESTS);
   setIfMissing(STORAGE_KEYS.GRADUATION_CLEARANCES, INITIAL_GRADUATION_CLEARANCES);
@@ -797,6 +827,8 @@ const STAFF_AUTH_KEYS: string[] = [
   STORAGE_KEYS.LIBRARY_STAFF,
   STORAGE_KEYS.SMART_CAMPUS_STAFF,
   STORAGE_KEYS.GRADUATION_STAFF,
+  STORAGE_KEYS.ACADEMIC_DEPUTY_STAFF,
+  STORAGE_KEYS.SCHED_PROFESSORS,
 ];
 
 // کلیدهای بحرانی (ایجاد/ویرایش هر نوع کاربر و تنظیمات) که بلافاصله و بدون معطلی به سرور ابری ارسال می‌شوند
@@ -1163,6 +1195,13 @@ const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.LIBRARY_STAFF]: 'کاربران کتابخانه و پژوهش',
   [STORAGE_KEYS.SMART_CAMPUS_STAFF]: 'کاربران واحد هوشمندسازی',
   [STORAGE_KEYS.GRADUATION_STAFF]: 'کاربران واحد فارغ‌التحصیلان',
+  [STORAGE_KEYS.ACADEMIC_DEPUTY_STAFF]: 'کاربران معاونت آموزشی',
+  [STORAGE_KEYS.SCHED_CLASSROOMS]: 'کلاس‌های فیزیکی برنامه‌ریزی درسی',
+  [STORAGE_KEYS.SCHED_PROGRAMS]: 'رشته‌ها، ورودی‌ها و شعبه‌های برنامه‌ریزی',
+  [STORAGE_KEYS.SCHED_PROFESSORS]: 'اساتید و حساب‌های کاربری اساتید',
+  [STORAGE_KEYS.SCHED_COURSES]: 'فهرست کل دروس رشته‌ها (۷ رقمی)',
+  [STORAGE_KEYS.SCHED_OFFERINGS]: 'برنامه هفتگی و دروس ارائه‌شده',
+  [STORAGE_KEYS.SCHED_RULES]: 'تنظیمات ضرایب و سانس‌های برنامه‌ریزی',
   [STORAGE_KEYS.LIBRARY_BOOKS]: 'فهرست کتب کتابخانه',
   [STORAGE_KEYS.LIBRARY_BOOK_REQUESTS]: 'درخواست‌ها و امانات کتابخانه',
   [STORAGE_KEYS.GRADUATION_CLEARANCES]: 'تسویه حساب الکترونیک فارغ‌التحصیلان',
@@ -1392,6 +1431,8 @@ const STAFF_KEY_TO_AVATAR_ROLE: Record<string, AvatarUploadRole> = {
   [STORAGE_KEYS.LIBRARY_STAFF]: 'library',
   [STORAGE_KEYS.SMART_CAMPUS_STAFF]: 'smart_campus',
   [STORAGE_KEYS.GRADUATION_STAFF]: 'graduation',
+  [STORAGE_KEYS.ACADEMIC_DEPUTY_STAFF]: 'academic_deputy',
+  [STORAGE_KEYS.SCHED_PROFESSORS]: 'professor',
 };
 
 function sanitizeStorageSegment(raw: string): string {
@@ -4041,7 +4082,7 @@ export const Storage = {
 
   // تطبیق و اتصال دسته‌جمعی عکس‌های پرسنل و کادر بر اساس نام/کد کاربری
   batchAssignStaffPhotos: (
-    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation',
+    role: 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'academic_deputy',
     photoMap: Record<string, string>
   ): { matchedCount: number; unmatchedKeys: string[]; totalProcessed: number; saved: boolean } => {
     let matchedCount = 0;
@@ -4325,6 +4366,25 @@ export const Storage = {
           if (ref) Storage.setCurrentUser({ role: 'graduation', staff: ref });
         }
       }
+    } else if (role === 'academic_deputy') {
+      const list = Storage.getAcademicDeputyStaff();
+      Object.entries(photoMap).forEach(([key, dataUrl]) => {
+        const match = findMatch(list, key);
+        if (match) {
+          match.photoUrl = dataUrl;
+          matchedCount++;
+        } else {
+          unmatchedKeys.push(key.trim());
+        }
+      });
+      if (matchedCount > 0) {
+        saved = Storage.setAcademicDeputyStaff(list);
+        const cu = Storage.getCurrentUser();
+        if (saved && cu && cu.role === 'academic_deputy') {
+          const ref = list.find((ad) => ad.id === cu.staff.id);
+          if (ref) Storage.setCurrentUser({ role: 'academic_deputy', staff: ref });
+        }
+      }
     }
 
     if (matchedCount > 0 && saved) {
@@ -4343,6 +4403,7 @@ export const Storage = {
         library: 'کاربران کتابخانه و پژوهش',
         smart_campus: 'کاربران واحد هوشمندسازی',
         graduation: 'کاربران واحد فارغ‌التحصیلان',
+        academic_deputy: 'کاربران معاونت آموزشی',
       };
       Storage.addActivityLog({
         category: 'staff',
@@ -4424,7 +4485,7 @@ export const Storage = {
     messageId: string,
     reply: {
       senderName: string;
-      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation';
+      senderRole: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'academic_deputy' | 'professor';
       content: string;
       date: string;
     }
@@ -4767,6 +4828,13 @@ export const Storage = {
     libraryStaff: Storage.getLibraryStaff(),
     smartCampusStaff: Storage.getSmartCampusStaff(),
     graduationStaff: Storage.getGraduationStaff(),
+    academicDeputyStaff: Storage.getAcademicDeputyStaff(),
+    schedClassrooms: Storage.getSchedClassrooms(),
+    schedPrograms: Storage.getSchedPrograms(),
+    schedProfessors: Storage.getSchedProfessors(),
+    schedCourses: Storage.getSchedCourses(),
+    schedOfferings: Storage.getSchedOfferings(),
+    schedRules: Storage.getSchedRules(),
     libraryBooks: Storage.getLibraryBooks(),
     libraryBookRequests: Storage.getLibraryBookRequests(),
     graduationClearances: Storage.getGraduationClearances(),
@@ -4818,7 +4886,9 @@ export const Storage = {
       | 'vice_dean'
       | 'library'
       | 'smart_campus'
-      | 'graduation';
+      | 'graduation'
+      | 'academic_deputy'
+      | 'professor';
 
     interface ArchivedPhotoRecord {
       role: PhotoRole;
@@ -4922,6 +4992,8 @@ export const Storage = {
         'library',
         'smart_campus',
         'graduation',
+        'academic_deputy',
+        'professor',
       ]);
 
       // گام ۱: جمع‌آوری عکس‌های کاربران (لینک‌های عمومی Supabase Storage و تصاویر درون‌خطی) برای همه ۱۲ نقش کاربری
@@ -4963,6 +5035,8 @@ export const Storage = {
       registerUserPhotos('library', baseData.libraryStaff);
       registerUserPhotos('smart_campus', baseData.smartCampusStaff);
       registerUserPhotos('graduation', baseData.graduationStaff);
+      registerUserPhotos('academic_deputy', baseData.academicDeputyStaff);
+      registerUserPhotos('professor', baseData.schedProfessors);
 
       if (missingPhotoFetchQueue.length > 0) {
         onProgress?.(`در حال دریافت و ضمیمه‌کردن ${missingPhotoFetchQueue.length.toLocaleString('fa-IR')} تصویر از Supabase Storage...`);
@@ -5189,6 +5263,15 @@ export const Storage = {
     if (Array.isArray(data.libraryStaff)) writeCollection(STORAGE_KEYS.LIBRARY_STAFF, data.libraryStaff);
     if (Array.isArray(data.smartCampusStaff)) writeCollection(STORAGE_KEYS.SMART_CAMPUS_STAFF, data.smartCampusStaff);
     if (Array.isArray(data.graduationStaff)) writeCollection(STORAGE_KEYS.GRADUATION_STAFF, data.graduationStaff);
+    if (Array.isArray(data.academicDeputyStaff)) writeCollection(STORAGE_KEYS.ACADEMIC_DEPUTY_STAFF, data.academicDeputyStaff);
+    if (Array.isArray(data.schedClassrooms)) writeCollection(STORAGE_KEYS.SCHED_CLASSROOMS, data.schedClassrooms);
+    if (Array.isArray(data.schedPrograms)) writeCollection(STORAGE_KEYS.SCHED_PROGRAMS, data.schedPrograms);
+    if (Array.isArray(data.schedProfessors)) writeCollection(STORAGE_KEYS.SCHED_PROFESSORS, data.schedProfessors);
+    if (Array.isArray(data.schedCourses)) writeCollection(STORAGE_KEYS.SCHED_COURSES, data.schedCourses);
+    if (Array.isArray(data.schedOfferings)) writeCollection(STORAGE_KEYS.SCHED_OFFERINGS, data.schedOfferings);
+    if (data.schedRules && typeof data.schedRules === 'object' && !Array.isArray(data.schedRules)) {
+      writeCollection(STORAGE_KEYS.SCHED_RULES, data.schedRules);
+    }
     if (Array.isArray(data.libraryBooks)) writeCollection(STORAGE_KEYS.LIBRARY_BOOKS, data.libraryBooks);
     if (Array.isArray(data.libraryBookRequests)) writeCollection(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, data.libraryBookRequests);
     if (Array.isArray(data.graduationClearances)) writeCollection(STORAGE_KEYS.GRADUATION_CLEARANCES, data.graduationClearances);
@@ -5258,7 +5341,9 @@ export const Storage = {
       | 'vice_dean'
       | 'library'
       | 'smart_campus'
-      | 'graduation';
+      | 'graduation'
+      | 'academic_deputy'
+      | 'professor';
 
     try {
       onProgress?.('در حال خواندن و اعتبارسنجی ساختار فایل پشتیبان...');
@@ -5404,6 +5489,8 @@ export const Storage = {
         'library',
         'smart_campus',
         'graduation',
+        'academic_deputy',
+        'professor',
       ]);
 
       if (Array.isArray(data.cloudPhotos)) {
@@ -5435,6 +5522,8 @@ export const Storage = {
         { role: 'library', prop: 'libraryStaff' },
         { role: 'smart_campus', prop: 'smartCampusStaff' },
         { role: 'graduation', prop: 'graduationStaff' },
+        { role: 'academic_deputy', prop: 'academicDeputyStaff' },
+        { role: 'professor', prop: 'schedProfessors' },
       ];
 
       for (const { role, prop } of roleArrayPairs) {
@@ -5471,6 +5560,8 @@ export const Storage = {
         library: STORAGE_KEYS.LIBRARY_STAFF,
         smart_campus: STORAGE_KEYS.SMART_CAMPUS_STAFF,
         graduation: STORAGE_KEYS.GRADUATION_STAFF,
+        academic_deputy: STORAGE_KEYS.ACADEMIC_DEPUTY_STAFF,
+        professor: STORAGE_KEYS.SCHED_PROFESSORS,
       };
 
       const useBackgroundPhotoQueue = restoredPhotosCount > 45;
@@ -5831,7 +5922,7 @@ export const Storage = {
 
   // تغییر کلمه عبور برای تمام نقش‌ها
   changePassword: (
-    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation',
+    role: 'student' | 'supervisor' | 'admin' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'academic_deputy' | 'professor',
     userId: string,
     currentPasswordInput: string,
     newPasswordInput: string
@@ -6141,6 +6232,47 @@ export const Storage = {
       return { success: true, message: 'کلمه عبور واحد فارغ‌التحصیلان با موفقیت تغییر یافت.' };
     }
 
+    if (role === 'academic_deputy') {
+      const staffList = Storage.getAcademicDeputyStaff();
+      const staff = staffList.find((s) => s.id === userId || s.username === userId);
+      if (!staff) return { success: false, message: 'کاربر معاونت آموزشی یافت نشد.' };
+      if (normalizeDigits(staff.password) !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی معاونت آموزشی اشتباه است.' };
+      }
+      staff.password = cleanNewPass;
+      Storage.setAcademicDeputyStaff(staffList);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور معاونت آموزشی',
+        details: `کلمه عبور معاونت آموزشی ${staff.fullName} تغییر یافت.`,
+        targetName: staff.fullName,
+      });
+      return { success: true, message: 'کلمه عبور معاونت آموزشی با موفقیت تغییر یافت.' };
+    }
+
+    if (role === 'professor') {
+      const profList = Storage.getSchedProfessors();
+      const prof = profList.find((p) => p.id === userId || normalizeDigits(p.professorCode) === normalizeDigits(userId));
+      if (!prof) return { success: false, message: 'استاد یافت نشد.' };
+      const effectivePass = normalizeDigits(prof.password || prof.nationalId);
+      if (effectivePass !== cleanCurrentPass) {
+        return { success: false, message: 'کلمه عبور فعلی استاد اشتباه است.' };
+      }
+      prof.password = cleanNewPass;
+      Storage.setSchedProfessors(profList);
+      const cu = Storage.getCurrentUser();
+      if (cu && cu.role === 'professor' && cu.professor.id === prof.id) {
+        Storage.setCurrentUser({ role: 'professor', professor: prof });
+      }
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر کلمه عبور استاد',
+        details: `کلمه عبور استاد ${prof.fullName} (${prof.professorCode}) تغییر یافت.`,
+        targetName: prof.fullName,
+      });
+      return { success: true, message: 'کلمه عبور استاد با موفقیت تغییر یافت.' };
+    }
+
     if (role === 'student') {
       const students = Storage.getStudents();
       const idx = students.findIndex((s) => s.studentId === userId);
@@ -6447,7 +6579,7 @@ export const Storage = {
 
   // تغییر یا ریست مستقیم رمز عبور کاربران توسط مدیر کل (بدون نیاز به رمز قبلی)
   adminResetUserPassword: (
-    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation',
+    role: 'student' | 'supervisor' | 'maintenance' | 'warehouse' | 'counselor' | 'finance' | 'procurement' | 'education' | 'academic_deputy' | 'professor' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation',
     idOrStudentId: string,
     newPasswordInput: string
   ): { success: boolean; message: string } => {
@@ -6756,6 +6888,44 @@ export const Storage = {
       return {
         success: true,
         message: `رمز عبور واحد فارغ‌التحصیلان «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'academic_deputy') {
+      const list = Storage.getAcademicDeputyStaff();
+      const idx = list.findIndex((s) => s.id === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'کاربر معاونت آموزشی یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setAcademicDeputyStaff(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز معاونت آموزشی توسط مدیر',
+        details: `کلمه عبور معاونت آموزشی ${list[idx].fullName} (${list[idx].username}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور معاونت آموزشی «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
+      };
+    }
+
+    if (role === 'professor') {
+      const list = Storage.getSchedProfessors();
+      const idx = list.findIndex((p) => p.id === idOrStudentId || p.professorCode === idOrStudentId);
+      if (idx === -1) return { success: false, message: 'استاد یافت نشد.' };
+      list[idx] = { ...list[idx], password: cleanPass };
+      Storage.setSchedProfessors(list);
+      Storage.addActivityLog({
+        category: 'auth',
+        action: 'تغییر / ریست رمز استاد توسط مدیر',
+        details: `کلمه عبور استاد ${list[idx].fullName} (${list[idx].professorCode}) توسط مدیر تغییر یافت.`,
+        targetName: list[idx].fullName,
+        severity: 'warning',
+      });
+      return {
+        success: true,
+        message: `رمز عبور استاد «${list[idx].fullName}» به «${cleanPass}» تغییر یافت.`,
       };
     }
 
@@ -10399,7 +10569,8 @@ export const Storage = {
       | 'maintenance'
       | 'library'
       | 'smart_campus'
-      | 'graduation';
+      | 'graduation'
+      | 'academic_deputy';
     notifyStudentInbox?: boolean;
   }): { success: boolean; message: string; referrals?: DisciplinaryReferral[] } => {
     if (!payload.students || payload.students.length === 0) {
@@ -11979,7 +12150,7 @@ export const Storage = {
               }
             }
           }
-        } else if (effectiveScope === 'staff' && canApplyRemoteStudents) {
+        } else if (effectiveScope === 'staff' && currentUser?.role !== 'professor' && canApplyRemoteStudents) {
           // همگام‌سازی تفاضلی هوشمند دانشجویان در پنل مدیر/کارشناسان؛ فقط در صورت حذف یا اولین بار کل جدول دریافت می‌شود
           let resolvedViaStudentsDelta = false;
           const localStudentsBefore = Storage.getStudents();
@@ -12168,7 +12339,9 @@ export const Storage = {
         | 'vice_dean'
         | 'library'
         | 'smart_campus'
-        | 'graduation';
+        | 'graduation'
+        | 'academic_deputy'
+        | 'professor';
       roleLabel: string;
       fullName: string;
       username: string;
@@ -12303,6 +12476,24 @@ export const Storage = {
         password: gr.password,
         isInactive: gr.status === 'inactive' || gr.isActive === false,
         user: { role: 'graduation' as const, staff: gr },
+      })),
+      ...Storage.getAcademicDeputyStaff().map((ad) => ({
+        role: 'academic_deputy' as const,
+        roleLabel: 'معاونت آموزشی',
+        fullName: ad.fullName,
+        username: ad.username,
+        password: ad.password,
+        isInactive: ad.status === 'inactive' || ad.isActive === false,
+        user: { role: 'academic_deputy' as const, staff: ad },
+      })),
+      ...Storage.getSchedProfessors().map((prof) => ({
+        role: 'professor' as const,
+        roleLabel: 'استاد / عضو هیات علمی',
+        fullName: prof.fullName,
+        username: prof.professorCode,
+        password: prof.password || prof.nationalId,
+        isInactive: prof.isActive === false,
+        user: { role: 'professor' as const, professor: prof },
       })),
     ];
 
@@ -12492,7 +12683,8 @@ export const Storage = {
       | 'maintenance'
       | 'library'
       | 'smart_campus'
-      | 'graduation';
+      | 'graduation'
+      | 'academic_deputy';
   }): { success: boolean; message: string; report?: SecurityReport } => {
     const studentList = Array.isArray(payload.students) ? payload.students : [];
     const resolvedScope: 'student' | 'facility_campus' =
@@ -12597,7 +12789,8 @@ export const Storage = {
       | 'maintenance'
       | 'library'
       | 'smart_campus'
-      | 'graduation',
+      | 'graduation'
+      | 'academic_deputy',
       string
     > = {
       supervisor: 'سرپرست سرا',
@@ -12613,6 +12806,7 @@ export const Storage = {
       library: 'کتابخانه و پژوهش',
       smart_campus: 'واحد هوشمندسازی',
       graduation: 'واحد فارغ‌التحصیلان',
+      academic_deputy: 'معاونت آموزشی',
     };
 
     const targetDesc =
@@ -13465,6 +13659,143 @@ export const Storage = {
     }
     return { success: true, message: 'کارشناس واحد فارغ‌التحصیلان با موفقیت حذف گردید.' };
   },
+
+  // -------------------------------------------------------------
+  // متدهای مدیریت کاربران معاونت آموزشی (نقش اختصاصی academic_deputy)
+  // -------------------------------------------------------------
+  getAcademicDeputyStaff: (): AcademicDeputyStaff[] =>
+    get<AcademicDeputyStaff[]>(STORAGE_KEYS.ACADEMIC_DEPUTY_STAFF, INITIAL_ACADEMIC_DEPUTY_STAFF),
+
+  setAcademicDeputyStaff: (staff: AcademicDeputyStaff[]): boolean =>
+    set(STORAGE_KEYS.ACADEMIC_DEPUTY_STAFF, staff),
+
+  addAcademicDeputyStaff: (
+    staffData: Omit<AcademicDeputyStaff, 'id'>
+  ): { success: boolean; message: string; staff?: AcademicDeputyStaff } => {
+    const list = Storage.getAcademicDeputyStaff();
+    const cleanUsername = normalizeAsciiDigits(staffData.username).toLowerCase();
+    if (!cleanUsername) {
+      return { success: false, message: 'نام کاربری معاونت آموزشی نمی‌تواند خالی باشد.' };
+    }
+    if (list.some((s) => normalizeAsciiDigits(s.username).toLowerCase() === cleanUsername)) {
+      return { success: false, message: 'این نام کاربری قبلاً برای کاربر معاونت آموزشی دیگری ثبت شده است.' };
+    }
+    const newStaff: AcademicDeputyStaff = {
+      ...staffData,
+      id: makeUniqueId('acdep'),
+      username: cleanUsername,
+      role: 'academic_deputy',
+      department: staffData.department?.trim() || 'معاونت آموزشی پردیس',
+      status: staffData.status || 'active',
+      isActive: staffData.isActive !== false,
+    };
+    list.push(newStaff);
+    Storage.setAcademicDeputyStaff(list);
+    Storage.addActivityLog({
+      category: 'staff',
+      action: 'ثبت کاربر معاونت آموزشی',
+      details: `کاربر معاونت آموزشی «${newStaff.fullName}» (${newStaff.username}) در سامانه ثبت شد.`,
+      targetName: newStaff.fullName,
+    });
+    return {
+      success: true,
+      message: `کاربر معاونت آموزشی «${newStaff.fullName}» با موفقیت افزوده شد.`,
+      staff: newStaff,
+    };
+  },
+
+  updateAcademicDeputyStaff: (
+    id: string,
+    updates: Partial<AcademicDeputyStaff>
+  ): { success: boolean; message: string } => {
+    const list = Storage.getAcademicDeputyStaff();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return { success: false, message: 'کاربر معاونت آموزشی یافت نشد.' };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.username !== undefined) {
+      const cleanU = normalizeAsciiDigits(normalizedUpdates.username).toLowerCase();
+      if (!cleanU) return { success: false, message: 'نام کاربری نمی‌تواند خالی باشد.' };
+      if (list.some((s) => s.id !== id && normalizeAsciiDigits(s.username).toLowerCase() === cleanU)) {
+        return { success: false, message: 'این نام کاربری قبلاً برای کاربر معاونت آموزشی دیگری ثبت شده است.' };
+      }
+      normalizedUpdates.username = cleanU;
+    }
+    list[idx] = { ...list[idx], ...normalizedUpdates };
+    Storage.setAcademicDeputyStaff(list);
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'academic_deputy' && cu.staff.id === id) {
+      Storage.setCurrentUser({ role: 'academic_deputy', staff: list[idx] });
+    }
+    return { success: true, message: 'اطلاعات کاربر معاونت آموزشی با موفقیت بروزرسانی شد.' };
+  },
+
+  deleteAcademicDeputyStaff: (id: string): { success: boolean; message: string } => {
+    const list = Storage.getAcademicDeputyStaff();
+    const target = list.find((s) => s.id === id);
+    Storage.setAcademicDeputyStaff(list.filter((s) => s.id !== id));
+    if (target) {
+      Storage.addActivityLog({
+        category: 'staff',
+        action: 'حذف کاربر معاونت آموزشی',
+        details: `حساب کاربری معاونت آموزشی «${target.fullName}» حذف گردید.`,
+        targetName: target.fullName,
+        severity: 'warning',
+      });
+    }
+    return { success: true, message: 'کاربر معاونت آموزشی با موفقیت حذف گردید.' };
+  },
+
+  // -------------------------------------------------------------
+  // متدهای مدیریت داده‌های سامانه برنامه‌ریزی درسی
+  // -------------------------------------------------------------
+  getSchedClassrooms: (): SchedClassroom[] =>
+    get<SchedClassroom[]>(STORAGE_KEYS.SCHED_CLASSROOMS, INITIAL_SCHED_CLASSROOMS),
+  setSchedClassrooms: (items: SchedClassroom[]): boolean =>
+    set(STORAGE_KEYS.SCHED_CLASSROOMS, items),
+
+  getSchedPrograms: (): SchedProgramCohort[] =>
+    get<SchedProgramCohort[]>(STORAGE_KEYS.SCHED_PROGRAMS, INITIAL_SCHED_PROGRAMS),
+  setSchedPrograms: (items: SchedProgramCohort[]): boolean =>
+    set(STORAGE_KEYS.SCHED_PROGRAMS, items),
+
+  getSchedProfessors: (): SchedProfessor[] =>
+    get<SchedProfessor[]>(STORAGE_KEYS.SCHED_PROFESSORS, INITIAL_SCHED_PROFESSORS),
+  setSchedProfessors: (items: SchedProfessor[]): boolean =>
+    set(STORAGE_KEYS.SCHED_PROFESSORS, items),
+
+  getSchedCourses: (): SchedCurriculumCourse[] =>
+    get<SchedCurriculumCourse[]>(STORAGE_KEYS.SCHED_COURSES, INITIAL_SCHED_COURSES),
+  setSchedCourses: (items: SchedCurriculumCourse[]): boolean =>
+    set(STORAGE_KEYS.SCHED_COURSES, items),
+
+  getSchedOfferings: (): SchedCourseOffering[] =>
+    get<SchedCourseOffering[]>(STORAGE_KEYS.SCHED_OFFERINGS, INITIAL_SCHED_OFFERINGS),
+  setSchedOfferings: (items: SchedCourseOffering[]): boolean =>
+    set(STORAGE_KEYS.SCHED_OFFERINGS, items),
+
+  getSchedRules: (): SchedRulesSettings => {
+    const stored = get<Partial<SchedRulesSettings> | null>(STORAGE_KEYS.SCHED_RULES, null);
+    if (!stored || typeof stored !== 'object') return DEFAULT_SCHED_RULES;
+    return {
+      activeTerm: stored.activeTerm || DEFAULT_SCHED_RULES.activeTerm,
+      availableTerms:
+        Array.isArray(stored.availableTerms) && stored.availableTerms.length > 0
+          ? stored.availableTerms
+          : DEFAULT_SCHED_RULES.availableTerms,
+      hoursPerUnit: { ...DEFAULT_SCHED_RULES.hoursPerUnit, ...(stored.hoursPerUnit || {}) },
+      equivalentPerUnit: { ...DEFAULT_SCHED_RULES.equivalentPerUnit, ...(stored.equivalentPerUnit || {}) },
+      activeDays:
+        Array.isArray(stored.activeDays) && stored.activeDays.length > 0
+          ? stored.activeDays
+          : DEFAULT_SCHED_RULES.activeDays,
+      timeSlots:
+        Array.isArray(stored.timeSlots) && stored.timeSlots.length > 0
+          ? stored.timeSlots
+          : DEFAULT_SCHED_RULES.timeSlots,
+    };
+  },
+  setSchedRules: (rules: SchedRulesSettings): boolean =>
+    set(STORAGE_KEYS.SCHED_RULES, rules),
 
   // -------------------------------------------------------------
   // متدهای گردش کار و ارجاعات یکپارچه حوزه معاونت آموزشی
@@ -15312,6 +15643,26 @@ export const Storage = {
           roleLabel: 'واحد فارغ‌التحصیلان',
           department: s.department || 'فارغ‌التحصیلان',
           photoUrl: s.photoUrl,
+        })),
+      ...Storage.getAcademicDeputyStaff()
+        .filter((s) => s.status !== 'inactive' && s.isActive !== false)
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          role: 'academic_deputy',
+          roleLabel: 'معاونت آموزشی',
+          department: s.department || 'معاونت آموزشی پردیس',
+          photoUrl: s.photoUrl,
+        })),
+      ...Storage.getSchedProfessors()
+        .filter((p) => p.isActive !== false)
+        .map((p) => ({
+          id: p.id,
+          fullName: p.fullName,
+          role: 'professor',
+          roleLabel: 'استاد مدرس',
+          department: p.degreeFull || `کد استاد: ${p.professorCode}`,
+          photoUrl: p.photoUrl,
         })),
       ...Storage.getMaintenanceStaff()
         .filter((s) => s.status !== 'inactive' && s.isActive !== false)
