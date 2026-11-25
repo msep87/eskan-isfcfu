@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Student,
   Dormitory,
@@ -38,6 +38,7 @@ import { StudentGraduationClearancePanel } from './StudentGraduationClearancePan
 import { AcademicWorkflowPanel } from './AcademicWorkflowPanel';
 import { CommunityChatHub } from './CommunityChatHub';
 import { ImportantAnnouncementsWidget } from './ImportantAnnouncementsWidget';
+import { StudentTermSchedulePanel } from './StudentTermSchedulePanel';
 import {
   User,
   Bed as BedIcon,
@@ -93,6 +94,7 @@ interface StudentDashboardProps {
   announcements: Announcement[];
   warnings: RoomWarning[];
   settings: AppSettings;
+  cloudSyncTick?: number;
   onRefreshData: () => void;
   onOpenMessages: () => void;
   onOpenUserGuide?: () => void;
@@ -107,12 +109,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   announcements,
   warnings,
   settings,
+  cloudSyncTick = 0,
   onRefreshData,
   onOpenMessages,
   onOpenUserGuide,
 }) => {
   // تب‌های داشبورد
-  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections' | 'library' | 'academic_requests' | 'clearance' | 'community_chat' | 'portals'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections' | 'library' | 'term_schedule' | 'academic_requests' | 'clearance' | 'community_chat' | 'portals'>('overview');
+  const schedRules = useMemo(
+    () => Storage.getSchedRules(),
+    [cloudSyncTick, activeTab]
+  );
+  const isTermSchedulePublished = Boolean(schedRules.studentAccessEnabled);
   const myActiveAcademicRequestsCount = Storage.getAcademicWorkflowRequests().filter(
     (r) =>
       r.studentId === student.studentId &&
@@ -684,6 +692,53 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           {myActiveLibraryLoansCount > 0 && (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300 font-black">
               {myActiveLibraryLoansCount} فعال
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          disabled={!isTermSchedulePublished}
+          onClick={() => {
+            if (!isTermSchedulePublished) return;
+            setActiveTab('term_schedule');
+          }}
+          title={
+            isTermSchedulePublished
+              ? 'مشاهده و چاپ برنامه هفتگی و کلاسی ترم'
+              : 'دکمه برنامه ترم پس از فعال‌سازی تیک انتشار توسط مدیر سامانه فعال می‌شود'
+          }
+          className={`flex-1 min-w-[195px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 shadow-xs ${
+            !isTermSchedulePublished
+              ? 'bg-slate-100 dark:bg-slate-900/60 text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 cursor-not-allowed opacity-80'
+              : activeTab === 'term_schedule'
+              ? 'bg-teal-700 text-white shadow-teal-700/20 cursor-pointer'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 cursor-pointer'
+          }`}
+        >
+          {!isTermSchedulePublished ? (
+            <Lock className="w-4 h-4 text-slate-400 shrink-0" />
+          ) : (
+            <Calendar
+              className={`w-4 h-4 ${
+                activeTab === 'term_schedule' ? 'text-white' : 'text-teal-600'
+              }`}
+            />
+          )}
+          <span>برنامه ترم</span>
+          {!isTermSchedulePublished ? (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400 font-extrabold shrink-0">
+              غیرفعال (در انتظار انتشار مدیر)
+            </span>
+          ) : (
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded-full font-black shrink-0 ${
+                activeTab === 'term_schedule'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300'
+              }`}
+            >
+              ترم {schedRules.activeTerm}
             </span>
           )}
         </button>
@@ -2052,6 +2107,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       {/* تب کتابخانه و پژوهش دانشجو */}
       {activeTab === 'library' && (
         <StudentLibraryPanel student={student} onDataChange={onRefreshData} />
+      )}
+
+      {/* تب برنامه هفتگی و کلاسی ترم (صرفاً در صورت انتشار توسط مدیر سامانه) */}
+      {activeTab === 'term_schedule' && isTermSchedulePublished && (
+        <StudentTermSchedulePanel
+          student={student}
+          rules={schedRules}
+          cloudSyncTick={cloudSyncTick}
+        />
       )}
 
       {/* تب درخواست‌های آموزشی و گردش کار با مدیر گروه و کارشناس آموزش */}

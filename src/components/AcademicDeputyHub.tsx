@@ -14,7 +14,7 @@ import {
   isEducationDepartmentHead,
   normalizeAssignedFieldsList,
 } from '../utils/storage';
-import { calculateOfferingBreakdown } from '../utils/schedulingUtils';
+import { calculateOfferingBreakdown, checkScheduleViewLock } from '../utils/schedulingUtils';
 import { EducationDashboard } from './EducationDashboard';
 import { GraduationDashboard } from './GraduationDashboard';
 import { AcademicWorkflowPanel } from './AcademicWorkflowPanel';
@@ -27,6 +27,7 @@ import {
   GitBranch,
   GraduationCap,
   LayoutDashboard,
+  Lock,
   Mail,
   Maximize2,
   PackagePlus,
@@ -108,6 +109,12 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
     () => allEducationStaff.filter((e) => !isEducationDepartmentHead(e)),
     [allEducationStaff]
   );
+
+  const schedViewLock = useMemo(() => {
+    const rules = Storage.getSchedRules();
+    const mappedRole = role === 'academic_deputy' ? 'academic_deputy' : 'department_head';
+    return checkScheduleViewLock(rules, mappedRole, currentStaff?.id || '');
+  }, [role, currentStaff?.id, cloudSyncTick, isSchedulingOpen]);
 
   const schedStats = useMemo(() => {
     const rules = Storage.getSchedRules();
@@ -324,11 +331,19 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
             <button
               type="button"
               onClick={() => setIsSchedulingOpen(true)}
-              className="mr-auto px-4 py-2.5 rounded-2xl bg-gradient-to-l from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 text-xs font-black inline-flex items-center gap-2 shadow-lg shadow-amber-500/25 transition cursor-pointer"
+              className={`mr-auto px-4 py-2.5 rounded-2xl text-xs font-black inline-flex items-center gap-2 shadow-lg transition cursor-pointer ${
+                schedViewLock.locked
+                  ? 'bg-rose-500/25 hover:bg-rose-500/35 text-rose-100 border border-rose-400/50 shadow-rose-900/20'
+                  : 'bg-gradient-to-l from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 shadow-amber-500/25'
+              }`}
             >
-              <CalendarDays className="w-4 h-4" />
-              <span>برنامه‌ریزی درسی جامع (تمام‌صفحه)</span>
-              <Maximize2 className="w-3.5 h-3.5" />
+              {schedViewLock.locked ? <Lock className="w-4 h-4" /> : <CalendarDays className="w-4 h-4" />}
+              <span>
+                {schedViewLock.locked
+                  ? 'برنامه‌ریزی درسی (مسدودشده)'
+                  : 'برنامه‌ریزی درسی جامع (تمام‌صفحه)'}
+              </span>
+              {!schedViewLock.locked && <Maximize2 className="w-3.5 h-3.5" />}
             </button>
           )}
 
@@ -401,36 +416,43 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                  <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-900/60">
-                    <div className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300">ترم فعال برنامه‌ریزی</div>
-                    <div className="text-xl font-black text-indigo-950 dark:text-white mt-1 tabular-nums">{schedStats.activeTerm}</div>
+                {schedViewLock.locked ? (
+                  <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-xs font-extrabold flex items-center gap-2.5">
+                    <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>{schedViewLock.reason}</span>
                   </div>
-                  <div className="p-3.5 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/70 dark:border-sky-900/60">
-                    <div className="text-[11px] font-bold text-sky-700 dark:text-sky-300">ارائه‌های ثبت‌شده ترم</div>
-                    <div className="text-xl font-black text-sky-950 dark:text-white mt-1 tabular-nums">{schedStats.offeringsCount.toLocaleString('fa-IR')}</div>
-                  </div>
-                  <div className="p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-900/60">
-                    <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">ساعات هفتگی / واحد معادل</div>
-                    <div className="text-lg font-black text-emerald-950 dark:text-white mt-1 tabular-nums">
-                      {schedStats.totalWeeklyHours.toLocaleString('fa-IR')} س / {schedStats.totalEqUnits.toLocaleString('fa-IR')}
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                    <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-900/60">
+                      <div className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300">ترم فعال برنامه‌ریزی</div>
+                      <div className="text-xl font-black text-indigo-950 dark:text-white mt-1 tabular-nums">{schedStats.activeTerm}</div>
+                    </div>
+                    <div className="p-3.5 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/70 dark:border-sky-900/60">
+                      <div className="text-[11px] font-bold text-sky-700 dark:text-sky-300">ارائه‌های ثبت‌شده ترم</div>
+                      <div className="text-xl font-black text-sky-950 dark:text-white mt-1 tabular-nums">{schedStats.offeringsCount.toLocaleString('fa-IR')}</div>
+                    </div>
+                    <div className="p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-900/60">
+                      <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">ساعات هفتگی / واحد معادل</div>
+                      <div className="text-lg font-black text-emerald-950 dark:text-white mt-1 tabular-nums">
+                        {schedStats.totalWeeklyHours.toLocaleString('fa-IR')} س / {schedStats.totalEqUnits.toLocaleString('fa-IR')}
+                      </div>
+                    </div>
+                    <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-900/60">
+                      <div className="text-[11px] font-bold text-amber-700 dark:text-amber-300">اساتید ثبت‌شده</div>
+                      <div className="text-xl font-black text-amber-950 dark:text-white mt-1 tabular-nums">{schedStats.professorsCount.toLocaleString('fa-IR')} نفر</div>
+                    </div>
+                    <div className="p-3.5 rounded-2xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200/70 dark:border-violet-900/60">
+                      <div className="text-[11px] font-bold text-violet-700 dark:text-violet-300">رشته‌ها و ورودی‌ها</div>
+                      <div className="text-xl font-black text-violet-950 dark:text-white mt-1 tabular-nums">{schedStats.programsCount.toLocaleString('fa-IR')}</div>
+                    </div>
+                    <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/70 dark:border-teal-900/60">
+                      <div className="text-[11px] font-bold text-teal-700 dark:text-teal-300">کلاس‌ها / دروس سرفصل</div>
+                      <div className="text-lg font-black text-teal-950 dark:text-white mt-1 tabular-nums">
+                        {schedStats.classroomsCount.toLocaleString('fa-IR')} / {schedStats.coursesCount.toLocaleString('fa-IR')}
+                      </div>
                     </div>
                   </div>
-                  <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-900/60">
-                    <div className="text-[11px] font-bold text-amber-700 dark:text-amber-300">اساتید ثبت‌شده</div>
-                    <div className="text-xl font-black text-amber-950 dark:text-white mt-1 tabular-nums">{schedStats.professorsCount.toLocaleString('fa-IR')} نفر</div>
-                  </div>
-                  <div className="p-3.5 rounded-2xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200/70 dark:border-violet-900/60">
-                    <div className="text-[11px] font-bold text-violet-700 dark:text-violet-300">رشته‌ها و ورودی‌ها</div>
-                    <div className="text-xl font-black text-violet-950 dark:text-white mt-1 tabular-nums">{schedStats.programsCount.toLocaleString('fa-IR')}</div>
-                  </div>
-                  <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/70 dark:border-teal-900/60">
-                    <div className="text-[11px] font-bold text-teal-700 dark:text-teal-300">کلاس‌ها / دروس سرفصل</div>
-                    <div className="text-lg font-black text-teal-950 dark:text-white mt-1 tabular-nums">
-                      {schedStats.classroomsCount.toLocaleString('fa-IR')} / {schedStats.coursesCount.toLocaleString('fa-IR')}
-                    </div>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           )}

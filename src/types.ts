@@ -1902,6 +1902,19 @@ export interface SchedTimeSlot {
   order: number;
 }
 
+export type StudentScheduleAccessScope = 'own_cohort' | 'own_major' | 'all_programs';
+
+export interface SchedProgramLockSettings {
+  lockAllChanges: boolean; // مسدودسازی کامل تغییرات برنامه برای غیرمدیران
+  lockMessage?: string; // پیام اطلاع‌رسانی قفل برنامه
+  lockedMajorCodes?: string[]; // مسدودسازی تغییر برای رشته‌های خاص
+  lockedDays?: SchedDayKey[]; // مسدودسازی تغییر در روزهای خاص هفته
+  lockedSlotIds?: string[]; // مسدودسازی تغییر در سانس‌های خاص
+  lockedDeptHeadIds?: string[]; // مسدودسازی تغییر برای مدیران گروه خاص
+  lockedAcademicDeputyIds?: string[]; // مسدودسازی تغییر برای معاونان آموزشی خاص
+  blockedViewUserIds?: string[]; // مسدودسازی کامل مشاهده برنامه برای مدیران گروه یا معاونان خاص
+}
+
 export interface SchedRulesSettings {
   activeTerm: string; // مثلاً 1405-1
   availableTerms: string[];
@@ -1920,6 +1933,10 @@ export interface SchedRulesSettings {
   };
   activeDays: SchedDayKey[];
   timeSlots: SchedTimeSlot[];
+  studentAccessEnabled?: boolean; // انتشار و فعال‌سازی دکمه «برنامه ترم» در پنل دانشجویان (کنترل توسط مدیر سامانه)
+  studentAccessScope?: StudentScheduleAccessScope; // محدوده مجاز مشاهده: فقط رشته و ورودی خودشان | کل ورودی‌های رشته خودشان | کل رشته‌ها
+  studentPublishedTerms?: string[]; // نیمسال‌های منتشرشده برای دانشجویان
+  programLocks?: SchedProgramLockSettings; // مسدودسازی کل یا بخشی از تغییرات برنامه توسط مدیر سامانه
 }
 
 export interface SchedSharedTarget {
@@ -1933,6 +1950,11 @@ export interface SchedSharedTarget {
 }
 
 export type SchedSlotHalf = 'full' | 'first_hour' | 'second_hour';
+
+export type SchedInternshipSessionRole =
+  | 'school_attendance'
+  | 'university_orientation'
+  | 'combined';
 
 export interface SchedCourseOffering {
   id: string;
@@ -1954,6 +1976,7 @@ export interface SchedCourseOffering {
   sharedWithTargets?: SchedSharedTarget[]; // دانشجویان سایر رشته‌ها در صورت یکسان بودن کد ۷ رقمی درس
   enrolledCount: number; // تعداد کل دانشجویان کلاس (اثرگذار در محاسبه واحد معادل کارورزی)
   internshipSubGroupLabel?: string; // عنوان شعبه کارورزی (مثلاً گروه کارورزی ۱ - حداکثر ۱۲ نفر)
+  internshipSessionRole?: SchedInternshipSessionRole; // تفکیک ۶ ساعت حضور در مدرسه (۷ تا ۱۳) یا ۲ ساعت جلسه توجیهی دانشگاه
   professorId?: string;
   professorCode?: string;
   professorName?: string;
@@ -1968,6 +1991,21 @@ export interface SchedCourseOffering {
   createdByName: string;
   createdByRole: 'admin' | 'academic_deputy' | 'department_head';
   updatedAt: string;
+}
+
+export interface SchedCellComment {
+  id: string;
+  termKey: string;
+  rowKey: string; // `${cohortId}::${sectionId || 'ALL'}`
+  cohortId: string;
+  sectionId?: string;
+  dayOfWeek: SchedDayKey;
+  slotId: string;
+  authorId: string;
+  authorName: string;
+  authorRole: 'admin' | 'academic_deputy' | 'department_head';
+  text: string;
+  createdAt: string;
 }
 
 

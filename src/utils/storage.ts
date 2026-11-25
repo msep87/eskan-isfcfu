@@ -95,6 +95,7 @@ import {
   CommunityUserChatPrefs,
   PublicStudentChatProfile,
   StaffChatDirectoryItem,
+  SchedCellComment,
 } from '../types';
 import { getSchedSlotTitle } from './schedulingUtils';
 import {
@@ -169,6 +170,7 @@ import {
   INITIAL_SCHED_PROFESSORS,
   INITIAL_SCHED_COURSES,
   INITIAL_SCHED_OFFERINGS,
+  INITIAL_SCHED_CELL_COMMENTS,
   DEFAULT_SCHED_RULES,
   INITIAL_LIBRARY_BOOKS,
   INITIAL_LIBRARY_BOOK_REQUESTS,
@@ -308,6 +310,7 @@ const STORAGE_KEYS = {
   SCHED_PROFESSORS: 'farhangian_sched_professors_prod',
   SCHED_COURSES: 'farhangian_sched_courses_prod',
   SCHED_OFFERINGS: 'farhangian_sched_offerings_prod',
+  SCHED_CELL_COMMENTS: 'farhangian_sched_cell_comments_prod',
   SCHED_RULES: 'farhangian_sched_rules_prod',
   LIBRARY_BOOKS: 'farhangian_dorm_library_books_prod',
   LIBRARY_BOOK_REQUESTS: 'farhangian_dorm_library_book_requests_prod',
@@ -574,6 +577,7 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.SCHED_PROFESSORS, INITIAL_SCHED_PROFESSORS);
   setIfMissing(STORAGE_KEYS.SCHED_COURSES, INITIAL_SCHED_COURSES);
   setIfMissing(STORAGE_KEYS.SCHED_OFFERINGS, INITIAL_SCHED_OFFERINGS);
+  setIfMissing(STORAGE_KEYS.SCHED_CELL_COMMENTS, INITIAL_SCHED_CELL_COMMENTS);
   setIfMissing(STORAGE_KEYS.SCHED_RULES, DEFAULT_SCHED_RULES);
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOKS, INITIAL_LIBRARY_BOOKS);
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, INITIAL_LIBRARY_BOOK_REQUESTS);
@@ -1202,6 +1206,7 @@ const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.SCHED_PROFESSORS]: 'اساتید و حساب‌های کاربری اساتید',
   [STORAGE_KEYS.SCHED_COURSES]: 'فهرست کل دروس رشته‌ها (۷ رقمی)',
   [STORAGE_KEYS.SCHED_OFFERINGS]: 'برنامه هفتگی و دروس ارائه‌شده',
+  [STORAGE_KEYS.SCHED_CELL_COMMENTS]: 'یادداشت‌ها و کامنت‌های برنامه جامع درسی',
   [STORAGE_KEYS.SCHED_RULES]: 'تنظیمات ضرایب و سانس‌های برنامه‌ریزی',
   [STORAGE_KEYS.LIBRARY_BOOKS]: 'فهرست کتب کتابخانه',
   [STORAGE_KEYS.LIBRARY_BOOK_REQUESTS]: 'درخواست‌ها و امانات کتابخانه',
@@ -4835,6 +4840,7 @@ export const Storage = {
     schedProfessors: Storage.getSchedProfessors(),
     schedCourses: Storage.getSchedCourses(),
     schedOfferings: Storage.getSchedOfferings(),
+    schedCellComments: Storage.getSchedCellComments(),
     schedRules: Storage.getSchedRules(),
     libraryBooks: Storage.getLibraryBooks(),
     libraryBookRequests: Storage.getLibraryBookRequests(),
@@ -5270,6 +5276,7 @@ export const Storage = {
     if (Array.isArray(data.schedProfessors)) writeCollection(STORAGE_KEYS.SCHED_PROFESSORS, data.schedProfessors);
     if (Array.isArray(data.schedCourses)) writeCollection(STORAGE_KEYS.SCHED_COURSES, data.schedCourses);
     if (Array.isArray(data.schedOfferings)) writeCollection(STORAGE_KEYS.SCHED_OFFERINGS, data.schedOfferings);
+    if (Array.isArray(data.schedCellComments)) writeCollection(STORAGE_KEYS.SCHED_CELL_COMMENTS, data.schedCellComments);
     if (data.schedRules && typeof data.schedRules === 'object' && !Array.isArray(data.schedRules)) {
       writeCollection(STORAGE_KEYS.SCHED_RULES, data.schedRules);
     }
@@ -13774,6 +13781,11 @@ export const Storage = {
   setSchedOfferings: (items: SchedCourseOffering[]): boolean =>
     set(STORAGE_KEYS.SCHED_OFFERINGS, items),
 
+  getSchedCellComments: (): SchedCellComment[] =>
+    get<SchedCellComment[]>(STORAGE_KEYS.SCHED_CELL_COMMENTS, INITIAL_SCHED_CELL_COMMENTS),
+  setSchedCellComments: (items: SchedCellComment[]): boolean =>
+    set(STORAGE_KEYS.SCHED_CELL_COMMENTS, items),
+
   getSchedRules: (): SchedRulesSettings => {
     const stored = get<Partial<SchedRulesSettings> | null>(STORAGE_KEYS.SCHED_RULES, null);
     if (!stored || typeof stored !== 'object') return DEFAULT_SCHED_RULES;
@@ -13797,6 +13809,39 @@ export const Storage = {
         ...slot,
         label: getSchedSlotTitle(slot, idx),
       })),
+      studentAccessEnabled: Boolean(stored.studentAccessEnabled),
+      studentAccessScope:
+        stored.studentAccessScope === 'own_cohort' ||
+        stored.studentAccessScope === 'own_major' ||
+        stored.studentAccessScope === 'all_programs'
+          ? stored.studentAccessScope
+          : 'own_cohort',
+      studentPublishedTerms:
+        Array.isArray(stored.studentPublishedTerms) && stored.studentPublishedTerms.length > 0
+          ? stored.studentPublishedTerms
+          : [stored.activeTerm || DEFAULT_SCHED_RULES.activeTerm],
+      programLocks: {
+        lockAllChanges: Boolean(stored.programLocks?.lockAllChanges),
+        lockMessage: stored.programLocks?.lockMessage || '',
+        lockedMajorCodes: Array.isArray(stored.programLocks?.lockedMajorCodes)
+          ? stored.programLocks!.lockedMajorCodes
+          : [],
+        lockedDays: Array.isArray(stored.programLocks?.lockedDays)
+          ? stored.programLocks!.lockedDays
+          : [],
+        lockedSlotIds: Array.isArray(stored.programLocks?.lockedSlotIds)
+          ? stored.programLocks!.lockedSlotIds
+          : [],
+        lockedDeptHeadIds: Array.isArray(stored.programLocks?.lockedDeptHeadIds)
+          ? stored.programLocks!.lockedDeptHeadIds
+          : [],
+        lockedAcademicDeputyIds: Array.isArray(stored.programLocks?.lockedAcademicDeputyIds)
+          ? stored.programLocks!.lockedAcademicDeputyIds
+          : [],
+        blockedViewUserIds: Array.isArray(stored.programLocks?.blockedViewUserIds)
+          ? stored.programLocks!.blockedViewUserIds
+          : [],
+      },
     };
   },
   setSchedRules: (rules: SchedRulesSettings): boolean =>

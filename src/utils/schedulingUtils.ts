@@ -12,6 +12,7 @@ import {
   SchedRulesSettings,
   SchedSlotHalf,
   SchedTimeSlot,
+  StudentScheduleAccessScope,
 } from '../types';
 import { toEnglishDigits } from './excelUtils';
 
@@ -65,6 +66,16 @@ export const SCHED_EMPLOYMENT_LABELS: Record<SchedEmploymentType, string> = {
 
 export function normalizeSchedCode(raw: string | number | undefined | null): string {
   return toEnglishDigits(String(raw ?? '')).replace(/\s+/g, '').trim();
+}
+
+export function parseDecimalUnits(raw: string | number | undefined | null): number {
+  const clean = toEnglishDigits(String(raw ?? ''))
+    .replace(/[٫,/،]/g, '.')
+    .replace(/\s+/g, '')
+    .trim();
+  if (!clean) return 0;
+  const n = Number(clean);
+  return Number.isFinite(n) && n >= 0 ? round2(n) : 0;
 }
 
 export function normalizePersianText(raw: string | undefined | null): string {
@@ -147,6 +158,31 @@ export function buildDefaultTimeSlots(
     });
   }
   return slots;
+}
+
+export function getSlotDurationHours(slot: SchedTimeSlot): number {
+  const parseMinutes = (raw: string): number | null => {
+    const clean = toEnglishDigits(String(raw ?? '')).trim();
+    const m = /^(\d{1,2})(?::(\d{2}))?$/.exec(clean);
+    if (!m) return null;
+    const h = Number(m[1]);
+    const min = Number(m[2] || 0);
+    return h * 60 + min;
+  };
+  const s = parseMinutes(slot.startTime);
+  const e = parseMinutes(slot.endTime);
+  if (s === null || e === null || e <= s) return 2;
+  return round2((e - s) / 60);
+}
+
+export function buildSevenToEightSlot(): SchedTimeSlot {
+  return {
+    id: 'slot_07_08',
+    label: 'تک‌ساعت ۷ تا ۸',
+    startTime: '07:00',
+    endTime: '08:00',
+    order: 0,
+  };
 }
 
 export function getOfferingSlotHalf(
@@ -456,8 +492,12 @@ export function detectOfferingConflicts(
   if (!candidate.professorId) {
     warnings.push('استاد این درس هنوز تعیین نشده است.');
   }
-  if (!candidate.classroomId && candidate.practicalType !== 'internship') {
-    warnings.push('کلاس فیزیکی این درس هنوز تعیین نشده است.');
+  if (!candidate.classroomId) {
+    if (candidate.practicalType !== 'internship') {
+      warnings.push('کلاس فیزیکی این درس هنوز تعیین نشده است.');
+    } else if (candidate.internshipSessionRole === 'university_orientation') {
+      warnings.push('کلاس فیزیکی برای جلسه توجیهی کارورزی در دانشگاه هنوز تعیین نشده است.');
+    }
   }
 
   return {
@@ -1035,10 +1075,12 @@ export async function parseSchedExcelFile(
       errors.push(`ردیف ${idx + 2}: کد درس یا نام درس خالی است.`);
       return;
     }
-    const theoreticalUnits =
-      Number(normalizeSchedCode(getRowCol(row, ['واحد نظری', 'تعداد واحد نظری', 'نظری']))) || 0;
-    const practicalUnits =
-      Number(normalizeSchedCode(getRowCol(row, ['واحد عملی', 'تعداد واحد عملی', 'عملی']))) || 0;
+    const theoreticalUnits = parseDecimalUnits(
+      getRowCol(row, ['واحد نظری', 'تعداد واحد نظری', 'نظری'])
+    );
+    const practicalUnits = parseDecimalUnits(
+      getRowCol(row, ['واحد عملی', 'تعداد واحد عملی', 'عملی'])
+    );
     const practicalType = mapPracticalTypeInput(
       getRowCol(row, ['نوع واحد عملی', 'نوع عملی', 'practicaltype'])
     );
@@ -1194,4 +1236,228 @@ export function printSchedHtml(title: string, bodyHtml: string, landscape = true
     }
   }, 250);
 }
+
+// =========================================================================
+// تطبیق پروفایل دانشجو (رشته و ورودی) با برنامه درسی برای کنترل دسترسی دانشجو
+// =========================================================================
+function stripMajorPrefixes(raw: string): string {
+  return normalizePersianText(raw)
+    .toLowerCase()
+    .replace(/کارشناسی\s*(پیوسته|ناپیوسته|ارشد)?|کاردانی|رشته\s*تحصیلی|رشته/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function doesStudentMatchMajor(
+  studentFieldOfStudy: string | undefined | null,
+  majorName: string | undefined | null,
+  majorCode?: string | null
+): boolean {
+  const sNorm = normalizePersianText(studentFieldOfStudy).toLowerCase();
+  const mNorm = normalizePersianText(majorName).toLowerCase();
+  if (!sNorm || !mNorm) return false;
+
+  const sCode = normalizeSchedCode(studentFieldOfStudy);
+  const mCode = normalizeSchedCode(majorCode);
+  if (mCode && sCode && sCode === mCode) return true;
+
+  if (sNorm === mNorm) return true;
+  const sClean = stripMajorPrefixes(sNorm);
+  const mClean = stripMajorPrefixes(mNorm);
+  if (!sClean || !mClean) return false;
+  if (sClean === mClean) return true;
+
+  if (sClean.length >= 4 && mClean.length >= 4) {
+    if (sClean.includes(mClean) || mClean.includes(sClean)) return true;
+  }
+  return false;
+}
+
+export function parseEntryTermComponents(raw: string | number | undefined | null): {
+  yearShort: string;
+  semester: string;
+} {
+  const digits = toEnglishDigits(String(raw ?? '')).replace(/[^\d]/g, '');
+  if (!digits) return { yearShort: '', semester: '' };
+
+  // مثلاً 14021 یا 1402-1 یا 1402
+  if (digits.startsWith('14') || digits.startsWith('13')) {
+    const y4 = digits.slice(0, 4);
+    const yearShort = y4.slice(1); // 1402 -> 402
+    const semester = digits.length >= 5 ? digits[4] : '';
+    return { yearShort, semester };
+  }
+  // مثلاً 4021 یا 402 یا 3991
+  if (digits.length >= 3) {
+    const yearShort = digits.slice(0, 3);
+    const semester = digits.length >= 4 ? digits[3] : '';
+    return { yearShort, semester };
+  }
+  return { yearShort: digits, semester: '' };
+}
+
+export function doesStudentMatchEntryTerm(
+  studentEntryTerm: string | number | undefined | null,
+  targetEntryTerm: string | number | undefined | null
+): boolean {
+  const a = parseEntryTermComponents(studentEntryTerm);
+  const b = parseEntryTermComponents(targetEntryTerm);
+  if (!a.yearShort || !b.yearShort) return false;
+  if (a.yearShort !== b.yearShort) return false;
+  // اگر هر دو طرف نیمسال دقیق (مهر/بهمن) دارند، باید یکسان باشد؛ در غیر این صورت تطبیق سال کافی است
+  if (a.semester && b.semester && a.semester !== b.semester) return false;
+  return true;
+}
+
+export function doesProgramMatchStudentScope(
+  program: SchedProgramCohort,
+  studentFieldOfStudy: string | undefined | null,
+  studentEntryTerm: string | number | undefined | null,
+  scope: StudentScheduleAccessScope
+): boolean {
+  if (scope === 'all_programs') return true;
+  const majorOk = doesStudentMatchMajor(
+    studentFieldOfStudy,
+    program.majorName,
+    program.majorCode
+  );
+  if (!majorOk) return false;
+  if (scope === 'own_major') return true;
+  return doesStudentMatchEntryTerm(studentEntryTerm, program.entryTerm);
+}
+
+export function doesOfferingMatchStudentScope(
+  offering: SchedCourseOffering,
+  studentFieldOfStudy: string | undefined | null,
+  studentEntryTerm: string | number | undefined | null,
+  scope: StudentScheduleAccessScope
+): boolean {
+  if (scope === 'all_programs') return true;
+  const hostMajorOk = doesStudentMatchMajor(
+    studentFieldOfStudy,
+    offering.ownerMajorName,
+    offering.ownerMajorCode
+  );
+  if (hostMajorOk) {
+    if (scope === 'own_major') return true;
+    if (doesStudentMatchEntryTerm(studentEntryTerm, offering.entryTerm)) return true;
+  }
+  if (offering.sharedWithTargets && offering.sharedWithTargets.length > 0) {
+    return offering.sharedWithTargets.some((t) => {
+      const targetMajorOk = doesStudentMatchMajor(
+        studentFieldOfStudy,
+        t.majorName,
+        t.majorCode
+      );
+      if (!targetMajorOk) return false;
+      if (scope === 'own_major') return true;
+      return doesStudentMatchEntryTerm(studentEntryTerm, t.entryTerm);
+    });
+  }
+  return false;
+}
+
+export interface ScheduleLockCheckResult {
+  locked: boolean;
+  reason?: string;
+}
+
+export function checkScheduleViewLock(
+  rules: SchedRulesSettings,
+  userRole: 'admin' | 'academic_deputy' | 'department_head',
+  actorId: string
+): ScheduleLockCheckResult {
+  // مدیر سامانه دسترسی کامل دارد و هرگز مشمول مسدودسازی نمی‌شود
+  if (userRole === 'admin') return { locked: false };
+  const locks = rules.programLocks;
+  if (!locks) return { locked: false };
+  const fallbackMsg = locks.lockMessage?.trim();
+
+  if (actorId && locks.blockedViewUserIds?.includes(actorId)) {
+    return {
+      locked: true,
+      reason:
+        fallbackMsg ||
+        'دسترسی مشاهده برنامه درسی برای حساب کاربری شما توسط مدیر کل سامانه مسدود شده است.',
+    };
+  }
+  return { locked: false };
+}
+
+export function checkScheduleEditLock(
+  rules: SchedRulesSettings,
+  userRole: 'admin' | 'academic_deputy' | 'department_head',
+  actorId: string,
+  target?: {
+    majorCode?: string;
+    dayOfWeek?: SchedDayKey;
+    slotIds?: string[];
+  }
+): ScheduleLockCheckResult {
+  // مدیر سامانه دسترسی کامل دارد و هرگز مشمول مسدودسازی نمی‌شود
+  if (userRole === 'admin') return { locked: false };
+  const locks = rules.programLocks;
+  if (!locks) return { locked: false };
+
+  const fallbackMsg = locks.lockMessage?.trim();
+
+  if (actorId && locks.blockedViewUserIds?.includes(actorId)) {
+    return {
+      locked: true,
+      reason:
+        fallbackMsg ||
+        'دسترسی مشاهده و ویرایش برنامه درسی برای حساب کاربری شما توسط مدیر سامانه مسدود شده است.',
+    };
+  }
+  if (locks.lockAllChanges) {
+    return {
+      locked: true,
+      reason:
+        fallbackMsg ||
+        'امکان ایجاد تغییر در برنامه درسی برای کاربران توسط مدیر سامانه مسدود شده است.',
+    };
+  }
+  if (
+    actorId &&
+    (locks.lockedDeptHeadIds?.includes(actorId) ||
+      locks.lockedAcademicDeputyIds?.includes(actorId))
+  ) {
+    return {
+      locked: true,
+      reason:
+        fallbackMsg ||
+        'دسترسی ویرایش برنامه برای حساب کاربری شما توسط مدیر سامانه مسدود شده است.',
+    };
+  }
+  if (target?.majorCode && locks.lockedMajorCodes?.includes(target.majorCode)) {
+    return {
+      locked: true,
+      reason:
+        fallbackMsg ||
+        'تغییرات برنامه برای این رشته توسط مدیر سامانه بسته و مسدود شده است.',
+    };
+  }
+  if (target?.dayOfWeek && locks.lockedDays?.includes(target.dayOfWeek)) {
+    return {
+      locked: true,
+      reason:
+        fallbackMsg ||
+        `تغییرات برنامه در روز «${SCHED_DAY_LABELS[target.dayOfWeek]}» توسط مدیر سامانه مسدود شده است.`,
+    };
+  }
+  if (target?.slotIds && target.slotIds.length > 0 && locks.lockedSlotIds?.length) {
+    const hit = target.slotIds.find((sid) => locks.lockedSlotIds!.includes(sid));
+    if (hit) {
+      return {
+        locked: true,
+        reason:
+          fallbackMsg ||
+          'تغییرات برنامه در این سانس زمانی توسط مدیر سامانه مسدود شده است.',
+      };
+    }
+  }
+  return { locked: false };
+}
+
+
 

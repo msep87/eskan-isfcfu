@@ -1651,6 +1651,7 @@ export default function App() {
             announcements={announcements}
             warnings={warnings}
             settings={settings}
+            cloudSyncTick={cloudSyncTick}
             onRefreshData={refreshAllData}
             onOpenMessages={() => setIsMessagesModalOpen(true)}
             onOpenUserGuide={() => handleOpenUserGuide('student')}

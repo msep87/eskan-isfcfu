@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  SchedCellComment,
   SchedClassroom,
   SchedClassroomType,
   SchedCourseOffering,
@@ -7,6 +8,7 @@ import {
   SchedCurriculumCourse,
   SchedDayKey,
   SchedEmploymentType,
+  SchedInternshipSessionRole,
   SchedPracticalUnitType,
   SchedProfessor,
   SchedProgramCohort,
@@ -14,6 +16,7 @@ import {
   SchedSharedTarget,
   SchedSlotHalf,
   SchedTimeSlot,
+  StudentScheduleAccessScope,
 } from '../types';
 import { Storage, normalizeAssignedFieldsList, normalizePersianSearch } from '../utils/storage';
 import {
@@ -24,8 +27,11 @@ import {
   SCHED_PRACTICAL_TYPE_LABELS,
   SCHED_ROOM_TYPE_LABELS,
   buildDefaultTimeSlots,
+  buildSevenToEightSlot,
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
+  checkScheduleEditLock,
+  checkScheduleViewLock,
   computeInternshipSplitPlan,
   detectOfferingConflicts,
   downloadSchedExcelTemplate,
@@ -33,8 +39,10 @@ import {
   getOfferingSlotHalf,
   getSchedSlotOrdinalLabel,
   getSchedSlotTitle,
+  getSlotDurationHours,
   getSlotHalfLabel,
   normalizeSchedCode,
+  parseDecimalUnits,
   parseSchedExcelFile,
   printSchedHtml,
   round2,
@@ -45,7 +53,9 @@ import { CourseSchedulingMasterGrid } from './CourseSchedulingMasterGrid';
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   BookOpen,
   Building2,
   Calendar,
@@ -54,19 +64,27 @@ import {
   Clock,
   Download,
   Edit3,
+  Eye,
+  EyeOff,
   FileSpreadsheet,
+  Globe,
   GraduationCap,
   Layers,
   LayoutDashboard,
   LayoutGrid,
+  Lock,
   Plus,
   Printer,
+  School,
   Search,
   Settings2,
   Share2,
+  ShieldAlert,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  Unlock,
   Upload,
   Users,
   X,
@@ -88,6 +106,7 @@ type WorkspaceSection =
   | 'professors'
   | 'courses'
   | 'rules'
+  | 'locks'
   | 'master_grid'
   | 'schedule'
   | 'auto_wizard'
@@ -101,6 +120,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   allowedMajorNames = [],
   onDataUpdated,
 }) => {
+  const isSystemAdmin = userRole === 'admin';
   const canManageMasterData = userRole === 'admin' || userRole === 'academic_deputy';
   const canViewSensitiveProfInfo = userRole === 'admin' || userRole === 'academic_deputy';
 
@@ -123,6 +143,15 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     Storage.getSchedOfferings()
   );
   const [rules, setRules] = useState<SchedRulesSettings>(() => Storage.getSchedRules());
+  const [cellComments, setCellComments] = useState<SchedCellComment[]>(() =>
+    Storage.getSchedCellComments()
+  );
+
+  const deptHeadUsers = useMemo(
+    () => Storage.getEducationStaff().filter((s) => s.educationRole === 'department_head'),
+    []
+  );
+  const academicDeputyUsers = useMemo(() => Storage.getAcademicDeputyStaff(), []);
 
   const [activeTerm, setActiveTerm] = useState<string>(rules.activeTerm || '4041');
   const [newTermInput, setNewTermInput] = useState('');
@@ -170,6 +199,20 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     Storage.setSchedRules(next);
     onDataUpdated?.();
   };
+  const persistCellComments = (next: SchedCellComment[]) => {
+    setCellComments(next);
+    Storage.setSchedCellComments(next);
+    onDataUpdated?.();
+  };
+
+  const globalLockStatus = useMemo(
+    () => checkScheduleEditLock(rules, userRole, actor.id),
+    [rules, userRole, actor.id]
+  );
+  const viewLockStatus = useMemo(
+    () => checkScheduleViewLock(rules, userRole, actor.id),
+    [rules, userRole, actor.id]
+  );
 
   // =====================================================
   // محدوده رشته‌های مدیر گروه
@@ -616,8 +659,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       notify('error', 'لطفاً عنوان درس، کد رشته ۶ رقمی و نام رشته را وارد نمایید.');
       return;
     }
-    const th = Math.max(0, Number(normalizeSchedCode(crsThUnits)) || 0);
-    const pr = Math.max(0, Number(normalizeSchedCode(crsPrUnits)) || 0);
+    const th = Math.max(0, parseDecimalUnits(crsThUnits));
+    const pr = Math.max(0, parseDecimalUnits(crsPrUnits));
 
     if (editingCourseId) {
       persistCourses(
@@ -728,6 +771,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [offSlotIds, setOffSlotIds] = useState<string[]>([]);
   const [offSlotParts, setOffSlotParts] = useState<Record<string, SchedSlotHalf>>({});
   const [offSplitPart, setOffSplitPart] = useState<'full' | 'theory' | 'practical'>('full');
+  const [offInternshipSessionRole, setOffInternshipSessionRole] =
+    useState<SchedInternshipSessionRole>('combined');
   const [offInternshipSubLabel, setOffInternshipSubLabel] = useState('');
   const [offInternshipGroups, setOffInternshipGroups] = useState<
     Array<{ id: string; label: string; studentCount: number; professorId: string }>
@@ -796,6 +841,16 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       ? programs.find((p) => p.id === opts.cohortId)
       : undefined;
 
+    const lockCheck = checkScheduleEditLock(rules, userRole, actor.id, {
+      majorCode: targetCohort?.majorCode,
+      dayOfWeek: opts.dayOfWeek,
+      slotIds: opts.slotId ? [opts.slotId] : undefined,
+    });
+    if (lockCheck.locked) {
+      notify('error', lockCheck.reason || 'امکان ثبت تغییر در این بخش مسدود شده است.');
+      return;
+    }
+
     const visibleCourses = canManageMasterData
       ? courses
       : allowCrossMajorView
@@ -836,6 +891,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setOffSlotIds(initSlotId ? [initSlotId] : []);
     setOffSlotParts(initSlotId ? { [initSlotId]: initHalf } : {});
     setOffSplitPart('full');
+    setOffInternshipSessionRole('combined');
     setOffInternshipSubLabel('');
     initInternshipGroupsForCourse(firstCourse, baseEnrolled, '');
     setOffSharedTargets([]);
@@ -862,6 +918,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     });
     setOffSlotParts(parts);
     setOffSplitPart(o.splitPart || 'full');
+    setOffInternshipSessionRole(o.internshipSessionRole || 'combined');
     setOffInternshipSubLabel(o.internshipSubGroupLabel || '');
     setOffInternshipGroups([]);
     setOffSharedTargets([...(o.sharedWithTargets || [])]);
@@ -919,6 +976,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       slotIds: offSlotIds,
       slotParts: Object.keys(offSlotParts).length > 0 ? offSlotParts : undefined,
       splitPart: offSplitPart,
+      internshipSessionRole:
+        selectedOffCourse.practicalType === 'internship' ? offInternshipSessionRole : undefined,
       notes: offNotes.trim() || undefined,
       createdById: actor.id,
       createdByName: actor.name,
@@ -936,6 +995,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     offClassroomId,
     offEnrolledCount,
     offInternshipSubLabel,
+    offInternshipSessionRole,
     offSplitPart,
     rules,
     editingOffId,
@@ -948,6 +1008,25 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     actor,
     userRole,
   ]);
+
+  const modalLockStatus = useMemo(() => {
+    if (!offModalOpen) return { locked: false };
+    const cohort = programs.find((p) => p.id === offCohortId);
+    const originalOff = editingOffId ? offerings.find((x) => x.id === editingOffId) : undefined;
+    const origCheck = originalOff
+      ? checkScheduleEditLock(rules, userRole, actor.id, {
+          majorCode: originalOff.ownerMajorCode,
+          dayOfWeek: originalOff.dayOfWeek,
+          slotIds: originalOff.slotIds,
+        })
+      : { locked: false };
+    if (origCheck.locked) return origCheck;
+    return checkScheduleEditLock(rules, userRole, actor.id, {
+      majorCode: cohort?.majorCode,
+      dayOfWeek: offDay || undefined,
+      slotIds: offSlotIds,
+    });
+  }, [offModalOpen, programs, offCohortId, editingOffId, offerings, rules, userRole, actor.id, offDay, offSlotIds]);
 
   const candidateConflictReport = useMemo(() => {
     if (!candidateOffering) return { hasHardConflict: false, errors: [], warnings: [] };
@@ -1005,6 +1084,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const handleSaveOffering = (e: React.FormEvent) => {
     e.preventDefault();
     if (!candidateOffering) return;
+
+    if (modalLockStatus.locked) {
+      notify('error', modalLockStatus.reason || 'امکان ذخیره تغییر در این برنامه مسدود شده است.');
+      return;
+    }
 
     // حالت ثبت چند شعبه کارورزی (مثلاً تقسیم ۲۴ نفر به دو شعبه ۱۲ نفره یا ۲۳ نفر به ۱۲+۱۱)
     if (
@@ -1095,44 +1179,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     }>;
   }> = [
     {
-      groupTitle: 'پیشخوان و پیکربندی',
-      items: [
-        { key: 'overview', label: 'نمای کلی و وضعیت ترم', icon: LayoutDashboard },
-        { key: 'rules', label: 'قوانین، ضرایب و سانس‌ها', icon: Settings2 },
-      ],
-    },
-    {
-      groupTitle: 'ورود اطلاعات اولیه',
-      items: [
-        {
-          key: 'classrooms',
-          label: 'کلاس‌های فیزیکی',
-          icon: Building2,
-          badge: String(classrooms.length),
-        },
-        {
-          key: 'programs',
-          label: 'رشته‌ها، ورودی‌ها و شعب',
-          icon: Layers,
-          badge: String(programs.length),
-        },
-        {
-          key: 'professors',
-          label: 'اساتید و عدم حضور',
-          icon: Users,
-          badge: String(professors.length),
-        },
-        {
-          key: 'courses',
-          label: 'لیست دروس (کد ۷ رقمی)',
-          icon: BookOpen,
-          badge: String(courses.length),
-        },
-      ],
-    },
-    {
       groupTitle: 'برنامه‌ریزی و گزارش‌ها',
       items: [
+        { key: 'overview', label: 'نمای کلی و وضعیت ترم', icon: LayoutDashboard },
         {
           key: 'master_grid',
           label: 'برنامه جامع و فراگیر (کل رشته‌ها)',
@@ -1149,7 +1198,55 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         { key: 'reports', label: 'گزارش‌گیری و فیلتر جامع', icon: FileSpreadsheet },
       ],
     },
+    ...(isSystemAdmin
+      ? [
+          {
+            groupTitle: 'تنظیمات برنامه (فقط مدیر سامانه)',
+            items: [
+              { key: 'rules' as WorkspaceSection, label: 'قوانین، سانس‌ها و دانشجویان', icon: Settings2 },
+              {
+                key: 'locks' as WorkspaceSection,
+                label: 'مسدودسازی و قفل برنامه',
+                icon: Lock,
+                badge: rules.programLocks?.lockAllChanges ? 'قفل' : undefined,
+              },
+              {
+                key: 'classrooms' as WorkspaceSection,
+                label: 'کلاس‌های فیزیکی',
+                icon: Building2,
+                badge: String(classrooms.length),
+              },
+              {
+                key: 'programs' as WorkspaceSection,
+                label: 'رشته‌ها، ورودی‌ها و شعب',
+                icon: Layers,
+                badge: String(programs.length),
+              },
+              {
+                key: 'professors' as WorkspaceSection,
+                label: 'اساتید و عدم حضور',
+                icon: Users,
+                badge: String(professors.length),
+              },
+              {
+                key: 'courses' as WorkspaceSection,
+                label: 'لیست دروس (کد ۷ رقمی)',
+                icon: BookOpen,
+                badge: String(courses.length),
+              },
+            ],
+          },
+        ]
+      : []),
   ];
+
+  const isAdminSettingsSection =
+    section === 'rules' ||
+    section === 'locks' ||
+    section === 'classrooms' ||
+    section === 'programs' ||
+    section === 'professors' ||
+    section === 'courses';
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-50 dark:bg-slate-950 flex flex-col overflow-hidden text-slate-900 dark:text-slate-100">
@@ -1186,7 +1283,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               onChange={(e) => {
                 const nextT = e.target.value;
                 setActiveTerm(nextT);
-                if (canManageMasterData) {
+                if (isSystemAdmin) {
                   persistRules({ ...rules, activeTerm: nextT });
                 }
               }}
@@ -1198,7 +1295,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 </option>
               ))}
             </select>
-            {canManageMasterData && (
+            {isSystemAdmin && (
               <button
                 type="button"
                 onClick={() => setShowNewTermBox((v) => !v)}
@@ -1210,7 +1307,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
             )}
           </div>
 
-          {showNewTermBox && canManageMasterData && (
+          {showNewTermBox && isSystemAdmin && (
             <div className="flex items-center gap-1 bg-slate-800 border border-teal-500/50 rounded-xl px-2 py-1">
               <input
                 type="text"
@@ -1236,6 +1333,35 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 ثبت
               </button>
             </div>
+          )}
+
+          {isSystemAdmin && (
+            <button
+              type="button"
+              onClick={() => setSection('rules')}
+              className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold border inline-flex items-center gap-1.5 cursor-pointer transition ${
+                rules.studentAccessEnabled
+                  ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25'
+                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+              }`}
+              title="مدیریت انتشار برنامه ترم برای دانشجویان"
+            >
+              {rules.studentAccessEnabled ? (
+                <Unlock className="w-3.5 h-3.5 text-emerald-300" />
+              ) : (
+                <Lock className="w-3.5 h-3.5 text-amber-300" />
+              )}
+              <span>
+                برنامه دانشجویان:{' '}
+                {rules.studentAccessEnabled
+                  ? rules.studentAccessScope === 'all_programs'
+                    ? 'فعال (کل رشته‌ها)'
+                    : rules.studentAccessScope === 'own_major'
+                    ? 'فعال (رشته خودشان)'
+                    : 'فعال (رشته و ورودی خودشان)'
+                  : 'بسته'}
+              </span>
+            </button>
           )}
 
           <button
@@ -1276,7 +1402,32 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         </div>
       )}
 
-      {/* بدنه اصلی: سایدبار ساختارمند + محتوای اصلی */}
+      {/* بدنه اصلی: مسدودیت مشاهده یا سایدبار ساختارمند + محتوای اصلی */}
+      {!isSystemAdmin && viewLockStatus.locked ? (
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-lg w-full p-7 rounded-3xl bg-white dark:bg-slate-900 border-2 border-rose-200 dark:border-rose-900 shadow-xl text-center space-y-4">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center">
+              <EyeOff className="w-7 h-7" />
+            </div>
+            <h2 className="text-base font-black text-slate-900 dark:text-white">
+              دسترسی مشاهده و تغییر برنامه درسی مسدود شده است
+            </h2>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-bold">
+              {viewLockStatus.reason ||
+                'دسترسی مشاهده جدول برنامه جامع، استودیو و گزارش‌های این بخش برای حساب کاربری شما توسط مدیر کل سامانه محدود شده است.'}
+            </p>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold cursor-pointer transition"
+              >
+                بازگشت به پنل کاربری
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* منوی کناری ساختارمند */}
         <aside className="lg:w-64 shrink-0 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-l border-slate-200 dark:border-slate-800 p-3 overflow-x-auto lg:overflow-y-auto">
@@ -1325,6 +1476,68 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
         {/* محوطه کاری اسکرول‌پذیر */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+          {/* بنر هشدار قفل شدن ویرایش برنامه برای کاربران غیر از مدیر سامانه */}
+          {!isSystemAdmin && globalLockStatus.locked && (
+            <div className="max-w-7xl mx-auto p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-xs font-extrabold flex items-center gap-2.5">
+              <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{globalLockStatus.reason}</span>
+            </div>
+          )}
+
+          {/* دسترسی غیرمجاز به بخش تنظیمات برنامه (صرفاً مدیر سامانه) */}
+          {isAdminSettingsSection && !isSystemAdmin && (
+            <div className="max-w-3xl mx-auto p-6 rounded-2xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 text-center space-y-3">
+              <ShieldAlert className="w-10 h-10 text-rose-600 mx-auto" />
+              <div className="font-black text-sm text-slate-900 dark:text-white">
+                دسترسی محدود به مدیر کل سامانه
+              </div>
+              <p className="text-xs text-slate-500">
+                بخش «تنظیمات برنامه، قوانین، سانس‌ها، قفل‌گذاری و اطلاعات اولیه» منحصراً در اختیار مدیر کل سامانه است.
+              </p>
+              <button
+                type="button"
+                onClick={() => setSection('master_grid')}
+                className="px-4 py-2 rounded-xl bg-teal-600 text-white text-xs font-bold cursor-pointer"
+              >
+                بازگشت به برنامه جامع و فراگیر
+              </button>
+            </div>
+          )}
+
+          {/* نوار تب یکپارچه بخش تنظیمات برنامه (فقط مدیر سامانه) */}
+          {isAdminSettingsSection && isSystemAdmin && (
+            <div className="max-w-6xl mx-auto rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { key: 'rules', label: 'قوانین، ضرایب، سانس‌ها و دانشجویان', icon: Settings2 },
+                  { key: 'locks', label: 'قفل و مسدودسازی برنامه', icon: Lock },
+                  { key: 'classrooms', label: 'کلاس‌های فیزیکی', icon: Building2 },
+                  { key: 'programs', label: 'رشته‌ها، ورودی و شعب', icon: Layers },
+                  { key: 'professors', label: 'اساتید و عدم حضور', icon: Users },
+                  { key: 'courses', label: 'لیست دروس (کد ۷ رقمی)', icon: BookOpen },
+                ] as const
+              ).map((tab) => {
+                const TabIcon = tab.icon;
+                const active = section === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setSection(tab.key)}
+                    className={`px-3 py-2 rounded-xl text-xs font-extrabold inline-flex items-center gap-1.5 transition cursor-pointer ${
+                      active
+                        ? 'bg-slate-900 dark:bg-teal-600 text-white'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <TabIcon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* ۱. پیشخوان و نمای کلی */}
           {section === 'overview' && (
             <div className="space-y-5 max-w-6xl mx-auto">
@@ -1367,8 +1580,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 tabular-nums">
                 <button
                   type="button"
-                  onClick={() => setSection('classrooms')}
-                  className="text-right rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 hover:border-teal-400 transition cursor-pointer"
+                  disabled={!isSystemAdmin}
+                  onClick={() => isSystemAdmin && setSection('classrooms')}
+                  className={`text-right rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 transition ${
+                    isSystemAdmin ? 'hover:border-teal-400 cursor-pointer' : 'cursor-default'
+                  }`}
                 >
                   <div className="text-xs text-slate-500">کلاس‌های فیزیکی فعال</div>
                   <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
@@ -1377,8 +1593,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSection('programs')}
-                  className="text-right rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 hover:border-teal-400 transition cursor-pointer"
+                  disabled={!isSystemAdmin}
+                  onClick={() => isSystemAdmin && setSection('programs')}
+                  className={`text-right rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 transition ${
+                    isSystemAdmin ? 'hover:border-teal-400 cursor-pointer' : 'cursor-default'
+                  }`}
                 >
                   <div className="text-xs text-slate-500">رشته‌ها / ورودی‌ها و شعب</div>
                   <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
@@ -1390,8 +1609,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSection('professors')}
-                  className="text-right rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 hover:border-teal-400 transition cursor-pointer"
+                  disabled={!isSystemAdmin}
+                  onClick={() => isSystemAdmin && setSection('professors')}
+                  className={`text-right rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 transition ${
+                    isSystemAdmin ? 'hover:border-teal-400 cursor-pointer' : 'cursor-default'
+                  }`}
                 >
                   <div className="text-xs text-slate-500">اساتید ثبت‌شده</div>
                   <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
@@ -1400,8 +1622,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSection('courses')}
-                  className="text-right rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 hover:border-teal-400 transition cursor-pointer"
+                  disabled={!isSystemAdmin}
+                  onClick={() => isSystemAdmin && setSection('courses')}
+                  className={`text-right rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 transition ${
+                    isSystemAdmin ? 'hover:border-teal-400 cursor-pointer' : 'cursor-default'
+                  }`}
                 >
                   <div className="text-xs text-slate-500">عناوین سرفصل دروس</div>
                   <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
@@ -1446,7 +1671,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
                     ضرایب جاری محاسبه ساعات و واحد معادل اساتید
                   </h3>
-                  {canManageMasterData && (
+                  {isSystemAdmin && (
                     <button
                       type="button"
                       onClick={() => setSection('rules')}
@@ -1491,8 +1716,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
             </div>
           )}
 
-          {/* ۲. مدیریت کلاس‌های فیزیکی */}
-          {section === 'classrooms' && (
+          {/* ۲. مدیریت کلاس‌های فیزیکی (فقط مدیر سامانه) */}
+          {section === 'classrooms' && isSystemAdmin && (
             <div className="space-y-4 max-w-6xl mx-auto">
               <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
@@ -1606,8 +1831,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
             </div>
           )}
 
-          {/* ۳. رشته‌ها (۶ رقمی)، ورودی‌ها و شعب/گروه‌ها */}
-          {section === 'programs' && (
+          {/* ۳. رشته‌ها (۶ رقمی)، ورودی‌ها و شعب/گروه‌ها (فقط مدیر سامانه) */}
+          {section === 'programs' && isSystemAdmin && (
             <div className="space-y-4 max-w-6xl mx-auto">
               <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
@@ -1704,8 +1929,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
             </div>
           )}
 
-          {/* ۴. اساتید */}
-          {section === 'professors' && (
+          {/* ۴. اساتید (فقط مدیر سامانه) */}
+          {section === 'professors' && isSystemAdmin && (
             <div className="space-y-4 max-w-6xl mx-auto">
               <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
@@ -1855,8 +2080,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
             </div>
           )}
 
-          {/* ۵. لیست دروس رشته‌ها با کد ۷ رقمی */}
-          {section === 'courses' && (
+          {/* ۵. لیست دروس رشته‌ها با کد ۷ رقمی (فقط مدیر سامانه) */}
+          {section === 'courses' && isSystemAdmin && (
             <div className="space-y-4 max-w-6xl mx-auto">
               <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
@@ -2013,8 +2238,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
             </div>
           )}
 
-          {/* ۶. قوانین محاسبه ساعت، واحد معادل و زمان‌بندی سانس‌ها */}
-          {section === 'rules' && (
+          {/* ۶. قوانین محاسبه ساعت، واحد معادل و زمان‌بندی سانس‌ها (فقط مدیر سامانه) */}
+          {section === 'rules' && isSystemAdmin && (
             <div className="space-y-5 max-w-5xl mx-auto">
               <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
@@ -2289,30 +2514,31 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <span className="font-extrabold text-slate-900 dark:text-white block">
-                        سانس‌های زمانی کلاس‌ها (عنوان استاندارد «سانس اول، دوم...» + ساعت قابل ویرایش)
+                        مدیریت عناوین، تعداد و زمان سانس‌های کلاسی (به‌همراه تک‌ساعت ۷ تا ۸ صبح کارورزی)
                       </span>
                       <span className="text-[11px] text-slate-500">
-                        پیش‌فرض سیستم ۶ سانس دو ساعتی از ۰۸:۰۰ تا ۲۰:۰۰ است؛ با تغییر ساعت، عنوان سانس در تمام جداول به‌صورت «سانس اول»، «سانس دوم» و... و ساعت جدید در زیر آن نمایش داده می‌شود.
+                        پیش‌فرض ۶ سانس دو ساعتی از ۰۸:۰۰ تا ۲۰:۰۰ است؛ می‌توانید عنوان هر سانس را به دلخواه تغییر دهید، ترتیب سانس‌ها را جابجا کنید یا تک‌ساعت ۷ تا ۸ صبح را برای کارورزی اضافه نمایید.
                       </span>
                     </div>
-                    {canManageMasterData && (
+                    {isSystemAdmin && (
                       <div className="flex flex-wrap items-center gap-1.5">
                         <label className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
                           <span className="text-[11px] font-bold">تعداد سانس روزانه:</span>
                           <select
                             value={draftRules.timeSlots.length}
                             onChange={(e) => {
-                              const cnt = Math.max(1, Math.min(10, Number(e.target.value) || 6));
+                              const cnt = Math.max(1, Math.min(12, Number(e.target.value) || 6));
                               const generated = buildDefaultTimeSlots(cnt, 8, 2);
-                              // حفظ ساعت‌های قبلی در صورت وجود
+                              const existingSorted = [...draftRules.timeSlots].sort(
+                                (a, b) => a.order - b.order
+                              );
                               const merged = generated.map((g, idx) => {
-                                const old = [...draftRules.timeSlots].sort(
-                                  (a, b) => a.order - b.order
-                                )[idx];
+                                const old = existingSorted[idx];
                                 return old
                                   ? {
                                       ...g,
                                       id: old.id,
+                                      label: old.label || g.label,
                                       startTime: old.startTime,
                                       endTime: old.endTime,
                                     }
@@ -2322,13 +2548,36 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             }}
                             className="bg-transparent font-mono font-black focus:outline-none cursor-pointer"
                           >
-                            {[3, 4, 5, 6, 7, 8].map((n) => (
+                            {[3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
                               <option key={n} value={n} className="bg-white dark:bg-slate-900">
                                 {n} سانس
                               </option>
                             ))}
                           </select>
                         </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const hasSevenToEight = draftRules.timeSlots.some(
+                              (s) => s.startTime.trim() === '07:00' && s.endTime.trim() === '08:00'
+                            );
+                            if (hasSevenToEight) {
+                              notify('error', 'تک‌ساعت ۰۷:۰۰ تا ۰۸:۰۰ از قبل در لیست سانس‌ها وجود دارد.');
+                              return;
+                            }
+                            const sevenSlot = buildSevenToEightSlot();
+                            const reordered = [
+                              sevenSlot,
+                              ...[...draftRules.timeSlots].sort((a, b) => a.order - b.order),
+                            ].map((s, idx) => ({ ...s, order: idx }));
+                            setDraftRules((prev) => ({ ...prev, timeSlots: reordered }));
+                            notify('success', 'تک‌ساعت ۷ تا ۸ صبح به ابتدای جدول اضافه شد. برای ثبت نهایی ذخیره کنید.');
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-violet-100 dark:bg-violet-950/50 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 font-bold cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <Clock className="w-3 h-3" />
+                          <span>+ افزودن تک‌ساعت ۷ تا ۸ صبح</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() =>
@@ -2367,79 +2616,762 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                     {[...draftRules.timeSlots]
                       .sort((a, b) => a.order - b.order)
-                      .map((slot, sIdx) => (
-                        <div
-                          key={slot.id}
-                          className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 space-y-1.5"
-                        >
-                          <div className="flex items-center justify-between gap-1">
-                            <input
-                              type="text"
-                              disabled={!canManageMasterData}
-                              value={getSchedSlotTitle(slot, sIdx)}
-                              onChange={(e) =>
-                                setDraftRules((prev) => ({
-                                  ...prev,
-                                  timeSlots: prev.timeSlots.map((s) =>
-                                    s.id === slot.id ? { ...s, label: e.target.value } : s
-                                  ),
-                                }))
-                              }
-                              className="font-bold bg-transparent border-b border-transparent focus:border-teal-500 focus:outline-none w-full"
-                            />
-                            {canManageMasterData && draftRules.timeSlots.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() =>
+                      .map((slot, sIdx, arr) => {
+                        const dur = getSlotDurationHours(slot);
+                        const moveSlot = (dir: -1 | 1) => {
+                          const targetIdx = sIdx + dir;
+                          if (targetIdx < 0 || targetIdx >= arr.length) return;
+                          const copy = [...arr];
+                          const [moved] = copy.splice(sIdx, 1);
+                          copy.splice(targetIdx, 0, moved);
+                          setDraftRules((prev) => ({
+                            ...prev,
+                            timeSlots: copy.map((s, idx) => ({ ...s, order: idx + 1 })),
+                          }));
+                        };
+                        return (
+                          <div
+                            key={slot.id}
+                            className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 space-y-1.5"
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <input
+                                type="text"
+                                disabled={!isSystemAdmin}
+                                value={slot.label}
+                                placeholder={getSchedSlotOrdinalLabel(sIdx)}
+                                onChange={(e) =>
                                   setDraftRules((prev) => ({
                                     ...prev,
-                                    timeSlots: prev.timeSlots.filter((s) => s.id !== slot.id),
+                                    timeSlots: prev.timeSlots.map((s) =>
+                                      s.id === slot.id ? { ...s, label: e.target.value } : s
+                                    ),
                                   }))
                                 }
-                                className="text-rose-500 hover:text-rose-700 cursor-pointer"
+                                onBlur={() => {
+                                  if (!slot.label.trim()) {
+                                    setDraftRules((prev) => ({
+                                      ...prev,
+                                      timeSlots: prev.timeSlots.map((s) =>
+                                        s.id === slot.id
+                                          ? { ...s, label: getSchedSlotOrdinalLabel(sIdx) }
+                                          : s
+                                      ),
+                                    }));
+                                  }
+                                }}
+                                className="font-bold bg-white/80 dark:bg-slate-900/70 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 focus:border-teal-500 focus:outline-none w-full"
+                              />
+                              {isSystemAdmin && (
+                                <div className="inline-flex items-center gap-0.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    disabled={sIdx === 0}
+                                    onClick={() => moveSlot(-1)}
+                                    title="انتقال به جلو"
+                                    className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
+                                  >
+                                    <ArrowUp className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={sIdx === arr.length - 1}
+                                    onClick={() => moveSlot(1)}
+                                    title="انتقال به عقب"
+                                    className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
+                                  >
+                                    <ArrowDown className="w-3 h-3" />
+                                  </button>
+                                  {draftRules.timeSlots.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setDraftRules((prev) => ({
+                                          ...prev,
+                                          timeSlots: prev.timeSlots.filter((s) => s.id !== slot.id),
+                                        }))
+                                      }
+                                      className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 font-mono" dir="ltr">
+                                <input
+                                  type="text"
+                                  disabled={!isSystemAdmin}
+                                  value={slot.startTime}
+                                  onChange={(e) =>
+                                    setDraftRules((prev) => ({
+                                      ...prev,
+                                      timeSlots: prev.timeSlots.map((s) =>
+                                        s.id === slot.id ? { ...s, startTime: e.target.value } : s
+                                      ),
+                                    }))
+                                  }
+                                  className="w-16 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-center"
+                                />
+                                <span>-</span>
+                                <input
+                                  type="text"
+                                  disabled={!isSystemAdmin}
+                                  value={slot.endTime}
+                                  onChange={(e) =>
+                                    setDraftRules((prev) => ({
+                                      ...prev,
+                                      timeSlots: prev.timeSlots.map((s) =>
+                                        s.id === slot.id ? { ...s, endTime: e.target.value } : s
+                                      ),
+                                    }))
+                                  }
+                                  className="w-16 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-center"
+                                />
+                              </div>
+                              <span
+                                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
+                                  dur <= 1
+                                    ? 'bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-200'
+                                    : 'bg-slate-200/80 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
+                                }`}
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                                {dur} ساعته
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1.5 font-mono" dir="ltr">
-                            <input
-                              type="text"
-                              disabled={!canManageMasterData}
-                              value={slot.startTime}
-                              onChange={(e) =>
-                                setDraftRules((prev) => ({
-                                  ...prev,
-                                  timeSlots: prev.timeSlots.map((s) =>
-                                    s.id === slot.id ? { ...s, startTime: e.target.value } : s
-                                  ),
-                                }))
-                              }
-                              className="w-16 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-center"
-                            />
-                            <span>-</span>
-                            <input
-                              type="text"
-                              disabled={!canManageMasterData}
-                              value={slot.endTime}
-                              onChange={(e) =>
-                                setDraftRules((prev) => ({
-                                  ...prev,
-                                  timeSlots: prev.timeSlots.map((s) =>
-                                    s.id === slot.id ? { ...s, endTime: e.target.value } : s
-                                  ),
-                                }))
-                              }
-                              className="w-16 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-center"
-                            />
-                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* کنترل انتشار و سطح دسترسی مشاهده «برنامه ترم» برای دانشجویان (ویژه مدیر سامانه) */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-l from-indigo-50/80 via-sky-50/70 to-teal-50/70 dark:from-indigo-950/30 dark:via-sky-950/20 dark:to-teal-950/20 border border-indigo-200 dark:border-indigo-800 space-y-4 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-indigo-200/70 dark:border-indigo-800/60">
+                    <div className="flex items-start gap-2.5">
+                      <div className="p-2 rounded-xl bg-indigo-600 text-white shrink-0">
+                        <ShieldCheck className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="font-black text-sm text-indigo-950 dark:text-indigo-100">
+                          انتشار و دسترسی مشاهده «برنامه ترم» برای دانشجویان
+                        </h3>
+                        <p className="text-[11px] text-indigo-800/80 dark:text-indigo-300 mt-0.5 leading-relaxed">
+                          دکمه «برنامه ترم» همواره در پنل دانشجویان نمایش داده می‌شود، اما صرفاً زمانی فعال می‌گردد که مدیر سامانه تیک انتشار را فعال کرده و محدوده نمایش را تعیین نماید.
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={`self-start sm:self-center inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black border shrink-0 ${
+                        draftRules.studentAccessEnabled
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-700'
+                          : 'bg-rose-100 text-rose-900 border-rose-300 dark:bg-rose-950/60 dark:text-rose-200 dark:border-rose-700'
+                      }`}
+                    >
+                      {draftRules.studentAccessEnabled ? (
+                        <>
+                          <Unlock className="w-3.5 h-3.5" />
+                          <span>منتشر شده (فعال برای دانشجویان)</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>غیرفعال (بسته در پنل دانشجویان)</span>
+                        </>
+                      )}
+                    </span>
+                  </div>
+
+                  {!isSystemAdmin && (
+                    <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-[11px] font-bold">
+                      تغییر وضعیت انتشار و تعیین محدوده دسترسی دانشجویان به «برنامه ترم» صرفاً توسط «مدیر کل سامانه» قابل انجام است.
+                    </div>
+                  )}
+
+                  {/* تیک فعال‌سازی انتشار برای دانشجویان */}
+                  <label
+                    className={`flex items-center justify-between gap-3 p-3.5 rounded-xl border transition ${
+                      isSystemAdmin ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'
+                    } ${
+                      draftRules.studentAccessEnabled
+                        ? 'bg-white dark:bg-slate-900 border-emerald-400 dark:border-emerald-700 shadow-xs'
+                        : 'bg-white/80 dark:bg-slate-900/70 border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        disabled={!isSystemAdmin}
+                        checked={Boolean(draftRules.studentAccessEnabled)}
+                        onChange={(e) => {
+                          if (!isSystemAdmin) return;
+                          const checked = e.target.checked;
+                          const next: SchedRulesSettings = {
+                            ...draftRules,
+                            studentAccessEnabled: checked,
+                            studentAccessScope: draftRules.studentAccessScope || 'own_cohort',
+                            studentPublishedTerms:
+                              draftRules.studentPublishedTerms &&
+                              draftRules.studentPublishedTerms.length > 0
+                                ? draftRules.studentPublishedTerms
+                                : [activeTerm],
+                          };
+                          setDraftRules(next);
+                          persistRules(next);
+                          notify(
+                            'success',
+                            checked
+                              ? 'دسترسی دانشجویان به دکمه «برنامه ترم» فعال و منتشر شد.'
+                              : 'دسترسی دانشجویان به «برنامه ترم» غیرفعال (قفل) شد.'
+                          );
+                        }}
+                        className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                      />
+                      <div>
+                        <div className="font-black text-slate-900 dark:text-white">
+                          فعال‌سازی و انتشار دسترسی مشاهده «برنامه ترم» برای دانشجویان
                         </div>
-                      ))}
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          در صورت عدم انتخاب این گزینه، دکمه برنامه ترم در کاربری دانشجویان به‌صورت قفل و غیرفعال خواهد بود.
+                        </div>
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* تعیین محدوده مجاز مشاهده برنامه توسط دانشجویان */}
+                  <div className="space-y-2">
+                    <div className="font-extrabold text-slate-900 dark:text-white">
+                      محدوده مجاز مشاهده برنامه برای دانشجویان:
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                      {(
+                        [
+                          {
+                            value: 'own_cohort' as StudentScheduleAccessScope,
+                            title: 'فقط رشته و ورودی خود دانشجو',
+                            desc: 'هر دانشجو منحصراً برنامه رشته تحصیلی و سال ورودی ثبت‌شده در پرونده خود (و دروس مشترک مربوطه) را می‌بیند.',
+                            icon: Users,
+                          },
+                          {
+                            value: 'own_major' as StudentScheduleAccessScope,
+                            title: 'کل ورودی‌های رشته خود دانشجو',
+                            desc: 'هر دانشجو برنامه تمامی ورودی‌ها و شعبه‌های رشته تحصیلی خودش را با امکان فیلتر ورودی مشاهده می‌کند.',
+                            icon: Eye,
+                          },
+                          {
+                            value: 'all_programs' as StudentScheduleAccessScope,
+                            title: 'برنامه جامع کل رشته‌ها و ورودی‌ها',
+                            desc: 'دانشجو امکان مشاهده کل برنامه دانشگاهی همه رشته‌ها و ورودی‌ها را با قابلیت جستجو و فیلتر دارد.',
+                            icon: Globe,
+                          },
+                        ] as const
+                      ).map((opt) => {
+                        const Icon = opt.icon;
+                        const active = (draftRules.studentAccessScope || 'own_cohort') === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            disabled={!isSystemAdmin}
+                            onClick={() => {
+                              if (!isSystemAdmin) return;
+                              const next: SchedRulesSettings = {
+                                ...draftRules,
+                                studentAccessScope: opt.value,
+                              };
+                              setDraftRules(next);
+                              persistRules(next);
+                              notify('success', `محدوده مشاهده دانشجویان به «${opt.title}» تغییر یافت.`);
+                            }}
+                            className={`p-3 rounded-xl border text-right transition space-y-1.5 ${
+                              isSystemAdmin ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'
+                            } ${
+                              active
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-black text-xs">{opt.title}</span>
+                              <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-white' : 'text-indigo-600'}`} />
+                            </div>
+                            <div
+                              className={`text-[10.5px] leading-relaxed ${
+                                active ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'
+                              }`}
+                            >
+                              {opt.desc}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ترم‌های منتشرشده برای دانشجویان */}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-extrabold text-slate-900 dark:text-white">
+                        نیمسال‌های قابل مشاهده برای دانشجویان:
+                      </span>
+                      {isSystemAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next: SchedRulesSettings = {
+                              ...draftRules,
+                              studentPublishedTerms: [activeTerm],
+                            };
+                            setDraftRules(next);
+                            persistRules(next);
+                            notify('success', `تنها ترم فعال (${activeTerm}) برای دانشجویان منتشر شد.`);
+                          }}
+                          className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 hover:underline cursor-pointer"
+                        >
+                          تنظیم صرفاً روی ترم فعال ({activeTerm})
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {draftRules.availableTerms.map((termItem) => {
+                        const publishedList =
+                          draftRules.studentPublishedTerms &&
+                          draftRules.studentPublishedTerms.length > 0
+                            ? draftRules.studentPublishedTerms
+                            : [activeTerm];
+                        const isChecked = publishedList.includes(termItem);
+                        return (
+                          <button
+                            key={termItem}
+                            type="button"
+                            disabled={!isSystemAdmin}
+                            onClick={() => {
+                              if (!isSystemAdmin) return;
+                              const nextTerms = isChecked
+                                ? publishedList.filter((t) => t !== termItem)
+                                : [...publishedList, termItem];
+                              const finalTerms =
+                                nextTerms.length > 0 ? nextTerms : [activeTerm];
+                              const next: SchedRulesSettings = {
+                                ...draftRules,
+                                studentPublishedTerms: finalTerms,
+                              };
+                              setDraftRules(next);
+                              persistRules(next);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl border font-mono text-xs font-bold transition ${
+                              isSystemAdmin ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'
+                            } ${
+                              isChecked
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                            }`}
+                          >
+                            ترم {termItem} {termItem === activeTerm ? '(فعال)' : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           )}
+
+          {/* ۶.۲ مسدودسازی و قفل‌گذاری تغییرات برنامه (فقط مدیر سامانه) */}
+          {section === 'locks' && isSystemAdmin && (() => {
+            const locks = rules.programLocks || {
+              lockAllChanges: false,
+              lockMessage: '',
+              lockedMajorCodes: [],
+              lockedDays: [],
+              lockedSlotIds: [],
+              lockedDeptHeadIds: [],
+              lockedAcademicDeputyIds: [],
+              blockedViewUserIds: [],
+            };
+            const updateLocks = (
+              patch: Partial<NonNullable<SchedRulesSettings['programLocks']>>
+            ) => {
+              const nextLocks = { ...locks, ...patch };
+              const nextRules: SchedRulesSettings = {
+                ...rules,
+                programLocks: nextLocks,
+              };
+              setDraftRules(nextRules);
+              persistRules(nextRules);
+            };
+            const toggleArrayItem = <T,>(arr: T[] | undefined, val: T): T[] => {
+              const base = arr || [];
+              return base.includes(val) ? base.filter((x) => x !== val) : [...base, val];
+            };
+
+            return (
+              <div className="space-y-4 max-w-5xl mx-auto text-xs">
+                <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                    <div>
+                      <h2 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                        <Lock className="w-4 h-4 text-rose-600" />
+                        <span>قفل و مسدودسازی دسترسی و تغییرات برنامه (مدیران گروه و معاونت)</span>
+                      </h2>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        مدیر کل سامانه در هر شرایطی دسترسی کامل دارد. در این بخش می‌توانید تغییرات کل یا بخشی از برنامه را مسدود کنید یا دسترسی ویرایش و حتی مشاهده کامل برنامه را برای هر مدیر گروه یا معاون آموزشی ببندید.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateLocks({
+                          lockAllChanges: false,
+                          lockedMajorCodes: [],
+                          lockedDays: [],
+                          lockedSlotIds: [],
+                          lockedDeptHeadIds: [],
+                          lockedAcademicDeputyIds: [],
+                          blockedViewUserIds: [],
+                        });
+                        notify('success', 'تمام قفل‌ها و محدودیت‌های ویرایش و مشاهده برنامه آزاد شدند.');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 font-bold cursor-pointer shrink-0"
+                    >
+                      باز کردن همه قفل‌ها
+                    </button>
+                  </div>
+
+                  {/* قفل سراسری کل برنامه */}
+                  <label
+                    className={`flex items-center justify-between gap-3 p-4 rounded-xl border cursor-pointer transition ${
+                      locks.lockAllChanges
+                        ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-400 dark:border-rose-700'
+                        : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(locks.lockAllChanges)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          updateLocks({ lockAllChanges: checked });
+                          notify(
+                            'success',
+                            checked
+                              ? 'تغییرات کل برنامه درسی برای کاربران غیر از مدیر سامانه مسدود شد.'
+                              : 'قفل سراسری برنامه برداشته شد.'
+                          );
+                        }}
+                        className="w-4 h-4 accent-rose-600 rounded cursor-pointer"
+                      />
+                      <div>
+                        <div className="font-black text-slate-900 dark:text-white">
+                          مسدودسازی کامل تغییرات کل برنامه (بستن کامل برنامه پس از اتمام مهلت)
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          با فعال‌سازی این گزینه، هیچ مدیر گروه یا کاربری غیر از مدیر سامانه نمی‌تواند درسی اضافه، جابجا، ویرایش یا حذف کند.
+                        </div>
+                      </div>
+                    </div>
+                    <span
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-black shrink-0 ${
+                        locks.lockAllChanges
+                          ? 'bg-rose-600 text-white'
+                          : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                      }`}
+                    >
+                      {locks.lockAllChanges ? 'بسته شده' : 'باز'}
+                    </span>
+                  </label>
+
+                  {/* پیام اختصاصی قفل */}
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-700 dark:text-slate-200 block">
+                      پیام نمایشی هنگام مسدود بودن تغییر (اختیاری):
+                    </label>
+                    <input
+                      type="text"
+                      value={locks.lockMessage || ''}
+                      onChange={(e) => updateLocks({ lockMessage: e.target.value })}
+                      placeholder="مثال: با اتمام زمان ارائه دروس، برنامه بسته شده است و هرگونه تغییر می‌بایست به اطلاع کارشناسان برسد."
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    />
+                  </div>
+
+                  {/* قفل رشته‌ها */}
+                  <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <div className="font-extrabold text-slate-900 dark:text-white">
+                      مسدودسازی ویرایش رشته‌های خاص:
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {uniqueMajors.map((m) => {
+                        const locked = locks.lockedMajorCodes?.includes(m.majorCode);
+                        return (
+                          <button
+                            key={m.majorCode}
+                            type="button"
+                            onClick={() =>
+                              updateLocks({
+                                lockedMajorCodes: toggleArrayItem(
+                                  locks.lockedMajorCodes,
+                                  m.majorCode
+                                ),
+                              })
+                            }
+                            className={`px-3 py-1.5 rounded-xl border font-bold inline-flex items-center gap-1.5 cursor-pointer transition ${
+                              locked
+                                ? 'bg-rose-600 text-white border-rose-600'
+                                : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            {locked && <Lock className="w-3 h-3" />}
+                            <span>
+                              {m.majorName} ({m.majorCode})
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* قفل روزهای هفته */}
+                  <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <div className="font-extrabold text-slate-900 dark:text-white">
+                      مسدودسازی ویرایش روزهای خاص هفته:
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {activeDays.map((d) => {
+                        const locked = locks.lockedDays?.includes(d);
+                        return (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() =>
+                              updateLocks({
+                                lockedDays: toggleArrayItem(locks.lockedDays, d),
+                              })
+                            }
+                            className={`px-3 py-1.5 rounded-xl border font-bold inline-flex items-center gap-1.5 cursor-pointer transition ${
+                              locked
+                                ? 'bg-rose-600 text-white border-rose-600'
+                                : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            {locked && <Lock className="w-3 h-3" />}
+                            <span>{SCHED_DAY_LABELS[d]}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* قفل سانس‌های زمانی */}
+                  <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <div className="font-extrabold text-slate-900 dark:text-white">
+                      مسدودسازی ویرایش سانس‌های زمانی خاص:
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {sortedSlots.map((slot, sIdx) => {
+                        const locked = locks.lockedSlotIds?.includes(slot.id);
+                        return (
+                          <button
+                            key={slot.id}
+                            type="button"
+                            onClick={() =>
+                              updateLocks({
+                                lockedSlotIds: toggleArrayItem(locks.lockedSlotIds, slot.id),
+                              })
+                            }
+                            className={`px-3 py-1.5 rounded-xl border font-bold inline-flex items-center gap-1.5 cursor-pointer transition ${
+                              locked
+                                ? 'bg-rose-600 text-white border-rose-600'
+                                : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            {locked && <Lock className="w-3 h-3" />}
+                            <span>
+                              {getSchedSlotTitle(slot, sIdx)} ({slot.startTime}-{slot.endTime})
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* مسدودسازی دسترسی ویرایش و مشاهده برای مدیران گروه و معاونان آموزشی */}
+                  {(deptHeadUsers.length > 0 || academicDeputyUsers.length > 0) && (
+                    <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                      <div>
+                        <div className="font-extrabold text-slate-900 dark:text-white">
+                          مسدودسازی دسترسی ویرایش یا مشاهده برای هر مدیر گروه و معاون آموزشی:
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          «مسدودیت ویرایش» صرفاً مانع ثبت، حذف و جابجایی دروس توسط آن کاربر می‌شود؛ اما «مسدودیت مشاهده کامل» ورود کاربر به جداول برنامه جامع، استودیو و گزارش‌ها را به‌طور کامل می‌بندد.
+                        </p>
+                      </div>
+
+                      {deptHeadUsers.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[11px] font-black text-indigo-700 dark:text-indigo-300">
+                            مدیران گروه‌های آموزشی ({deptHeadUsers.length.toLocaleString('fa-IR')} نفر):
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {deptHeadUsers.map((head) => {
+                              const editLocked = Boolean(locks.lockedDeptHeadIds?.includes(head.id));
+                              const viewBlocked = Boolean(locks.blockedViewUserIds?.includes(head.id));
+                              return (
+                                <div
+                                  key={head.id}
+                                  className={`p-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 transition ${
+                                    viewBlocked
+                                      ? 'bg-rose-50/90 dark:bg-rose-950/35 border-rose-300 dark:border-rose-800'
+                                      : editLocked
+                                      ? 'bg-amber-50/80 dark:bg-amber-950/25 border-amber-300 dark:border-amber-800'
+                                      : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <div className="font-extrabold text-slate-900 dark:text-white truncate">
+                                      {head.fullName}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                                      رشته‌ها: {head.assignedFields || '---'}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateLocks({
+                                          lockedDeptHeadIds: toggleArrayItem(
+                                            locks.lockedDeptHeadIds,
+                                            head.id
+                                          ),
+                                        })
+                                      }
+                                      className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer transition ${
+                                        editLocked
+                                          ? 'bg-amber-600 text-white border-amber-600'
+                                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300'
+                                      }`}
+                                      title="مسدود کردن امکان تغییر یا جابجایی درس"
+                                    >
+                                      <Lock className="w-3 h-3" />
+                                      <span>{editLocked ? 'ویرایش مسدود' : 'قفل ویرایش'}</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateLocks({
+                                          blockedViewUserIds: toggleArrayItem(
+                                            locks.blockedViewUserIds,
+                                            head.id
+                                          ),
+                                        })
+                                      }
+                                      className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer transition ${
+                                        viewBlocked
+                                          ? 'bg-rose-600 text-white border-rose-600'
+                                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300'
+                                      }`}
+                                      title="مسدود کردن کامل مشاهده برنامه درسی"
+                                    >
+                                      <EyeOff className="w-3 h-3" />
+                                      <span>{viewBlocked ? 'مشاهده مسدود' : 'مسدودیت مشاهده'}</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {academicDeputyUsers.length > 0 && (
+                        <div className="space-y-2 pt-1">
+                          <div className="text-[11px] font-black text-teal-700 dark:text-teal-300">
+                            معاونت‌های آموزشی ({academicDeputyUsers.length.toLocaleString('fa-IR')} نفر):
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {academicDeputyUsers.map((dep) => {
+                              const editLocked = Boolean(
+                                locks.lockedAcademicDeputyIds?.includes(dep.id)
+                              );
+                              const viewBlocked = Boolean(locks.blockedViewUserIds?.includes(dep.id));
+                              return (
+                                <div
+                                  key={dep.id}
+                                  className={`p-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 transition ${
+                                    viewBlocked
+                                      ? 'bg-rose-50/90 dark:bg-rose-950/35 border-rose-300 dark:border-rose-800'
+                                      : editLocked
+                                      ? 'bg-amber-50/80 dark:bg-amber-950/25 border-amber-300 dark:border-amber-800'
+                                      : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <div className="font-extrabold text-slate-900 dark:text-white truncate">
+                                      {dep.fullName}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                                      {dep.title || 'معاونت آموزشی'}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateLocks({
+                                          lockedAcademicDeputyIds: toggleArrayItem(
+                                            locks.lockedAcademicDeputyIds,
+                                            dep.id
+                                          ),
+                                        })
+                                      }
+                                      className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer transition ${
+                                        editLocked
+                                          ? 'bg-amber-600 text-white border-amber-600'
+                                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300'
+                                      }`}
+                                      title="مسدود کردن امکان تغییر یا ویرایش برنامه"
+                                    >
+                                      <Lock className="w-3 h-3" />
+                                      <span>{editLocked ? 'ویرایش مسدود' : 'قفل ویرایش'}</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateLocks({
+                                          blockedViewUserIds: toggleArrayItem(
+                                            locks.blockedViewUserIds,
+                                            dep.id
+                                          ),
+                                        })
+                                      }
+                                      className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer transition ${
+                                        viewBlocked
+                                          ? 'bg-rose-600 text-white border-rose-600'
+                                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300'
+                                      }`}
+                                      title="مسدود کردن کامل مشاهده برنامه درسی"
+                                    >
+                                      <EyeOff className="w-3 h-3" />
+                                      <span>{viewBlocked ? 'مشاهده مسدود' : 'مسدودیت مشاهده'}</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ۶.۵ برنامه جامع و فراگیر (ماتریس شیت متمرکز همه رشته‌ها) */}
           {section === 'master_grid' && (
@@ -2458,6 +3390,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               userRole={userRole}
               actor={actor}
               isOwnMajorName={isOwnMajorName}
+              cellComments={cellComments}
+              onPersistCellComments={persistCellComments}
               onPersistOfferings={persistOfferings}
               onOpenNewOffering={(opts) => openNewOfferingModal(opts)}
               onOpenEditOffering={(o) => openEditOfferingModal(o)}
@@ -2829,9 +3763,26 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    persistOfferings(offerings.filter((x) => x.id !== o.id))
-                                  }
+                                  onClick={() => {
+                                    const lockRes = checkScheduleEditLock(
+                                      rules,
+                                      userRole,
+                                      actor.id,
+                                      {
+                                        majorCode: o.ownerMajorCode,
+                                        dayOfWeek: o.dayOfWeek,
+                                        slotIds: o.slotIds,
+                                      }
+                                    );
+                                    if (lockRes.locked) {
+                                      notify(
+                                        'error',
+                                        lockRes.reason || 'امکان حذف در بخش مسدودشده وجود ندارد.'
+                                      );
+                                      return;
+                                    }
+                                    persistOfferings(offerings.filter((x) => x.id !== o.id));
+                                  }}
                                   className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-600 border border-rose-200 dark:border-rose-800 cursor-pointer"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -2862,6 +3813,23 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 actor={{ id: actor.id, name: actor.name, role: userRole }}
                 allowedMajorFilter={canManageMasterData ? undefined : allowedMajorNames}
                 onApplyScheduledOfferings={(newOfferings) => {
+                  const lockedHit = newOfferings
+                    .map((item) =>
+                      checkScheduleEditLock(rules, userRole, actor.id, {
+                        majorCode: item.ownerMajorCode,
+                        dayOfWeek: item.dayOfWeek,
+                        slotIds: item.slotIds,
+                      })
+                    )
+                    .find((r) => r.locked);
+                  if (lockedHit) {
+                    notify(
+                      'error',
+                      lockedHit.reason ||
+                        'برخی از دروس تولیدشده در بازه یا رشته مسدودشده قرار دارند و ثبت نشدند.'
+                    );
+                    return;
+                  }
                   persistOfferings([...offerings, ...newOfferings]);
                   notify(
                     'success',
@@ -2889,13 +3857,14 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           )}
         </main>
       </div>
+      )}
 
       {/* ================================================================= */}
       {/* مودال‌ها: کلاس فیزیکی، رشته، استاد، عدم حضور استاد، درس و ثبت ارائه */}
       {/* ================================================================= */}
 
       {roomModalOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-5 border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="font-extrabold text-sm">
@@ -2981,7 +3950,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       )}
 
       {progModalOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-5 border border-slate-200 dark:border-slate-800 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="font-extrabold text-sm">
@@ -3117,7 +4086,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       )}
 
       {profModalOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-5 border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="font-extrabold text-sm">
@@ -3228,7 +4197,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
       {/* مودال جدول عدم امکان حضور استاد */}
       {unavailProfModal && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-3xl w-full p-5 border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="font-extrabold text-sm">
@@ -3323,7 +4292,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
       {/* مودال افزودن/ویرایش سرفصل درس */}
       {courseModalOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-5 border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="font-extrabold text-sm">
@@ -3338,6 +4307,24 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               </button>
             </div>
             <form onSubmit={handleSaveCourse} className="space-y-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-teal-50/80 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800">
+                <span className="text-[11px] text-teal-900 dark:text-teal-200 font-bold">
+                  دروس نیم‌واحدی (مانند تربیت بدنی: ۰.۵ نظری + ۰.۵ عملی عادی) پشتیبانی می‌شوند.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!crsTitle.trim()) setCrsTitle('تربیت بدنی');
+                    setCrsType('theoretical_practical');
+                    setCrsThUnits('0.5');
+                    setCrsPrUnits('0.5');
+                    setCrsPrType('normal_lab');
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-extrabold cursor-pointer transition"
+                >
+                  درج الگوی تربیت بدنی (۰.۵ نظری + ۰.۵ عملی)
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <label className="space-y-1">
                   <span className="font-bold">کد درس ۷ رقمی *</span>
@@ -3470,7 +4457,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
       {/* مودال ثبت و ویرایش درس در برنامه (توسط مدیر سامانه، معاونت و مدیر گروه) */}
       {offModalOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full p-5 border border-slate-200 dark:border-slate-800 space-y-4 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="font-extrabold text-sm">
@@ -3486,6 +4473,13 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {modalLockStatus.locked && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs font-extrabold flex items-center gap-2">
+                <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{modalLockStatus.reason}</span>
+              </div>
+            )}
 
             <form onSubmit={handleSaveOffering} className="space-y-3.5 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3635,9 +4629,129 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 </label>
               </div>
 
-              {/* مدیریت اختصاصی شعبه‌های کارورزی (مثلاً تقسیم ۲۴ نفر به ۱۲+۱۲ یا ۲۳ به ۱۲+۱۱ یا ۲۵ به ۱۲+۱۳) */}
+              {/* مدیریت اختصاصی شعبه‌های کارورزی و تفکیک ۸ ساعت (۶ ساعت مدرسه ۷ تا ۱۳ + ۲ ساعت توجیهی دانشگاه) */}
               {selectedOffCourse?.practicalType === 'internship' && (
-                <div className="p-3.5 rounded-xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 space-y-2.5">
+                <div className="p-3.5 rounded-xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 space-y-3">
+                  {/* انتخاب نقش جلسه کارورزی (۶ ساعت حضور در مدرسه + ۲ ساعت توجیهی دانشگاه) */}
+                  <div className="space-y-1.5 pb-2.5 border-b border-violet-200/80 dark:border-violet-800/60">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-black text-violet-950 dark:text-violet-100 inline-flex items-center gap-1.5">
+                        <School className="w-3.5 h-3.5 text-violet-700 dark:text-violet-300" />
+                        <span>نوع جلسه کارورزی (۸ ساعت هفتگی = ۶ ساعت حضور مدرسه + ۲ ساعت توجیهی دانشگاه):</span>
+                      </span>
+                      {offInternshipSessionRole === 'school_attendance' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            let workingSlots = [...rules.timeSlots];
+                            let slot07_08 = workingSlots.find(
+                              (s) => s.startTime.trim() === '07:00' && s.endTime.trim() === '08:00'
+                            );
+                            if (!slot07_08 && isSystemAdmin) {
+                              slot07_08 = buildSevenToEightSlot();
+                              const nextRules: SchedRulesSettings = {
+                                ...rules,
+                                timeSlots: [slot07_08, ...workingSlots].map((s, idx) => ({
+                                  ...s,
+                                  order: idx,
+                                })),
+                              };
+                              workingSlots = nextRules.timeSlots;
+                              persistRules(nextRules);
+                            }
+                            const findByStart = (h: string) =>
+                              workingSlots.find((s) => s.startTime.trim().startsWith(h));
+                            const s08 = findByStart('08');
+                            const s10 = findByStart('10');
+                            const s12 = findByStart('12');
+                            const pickedIds: string[] = [];
+                            const pickedParts: Record<string, SchedSlotHalf> = {};
+                            if (slot07_08) {
+                              pickedIds.push(slot07_08.id);
+                              pickedParts[slot07_08.id] = 'full';
+                            }
+                            if (s08) {
+                              pickedIds.push(s08.id);
+                              pickedParts[s08.id] = 'full';
+                            }
+                            if (s10) {
+                              pickedIds.push(s10.id);
+                              pickedParts[s10.id] = 'full';
+                            }
+                            if (s12) {
+                              pickedIds.push(s12.id);
+                              pickedParts[s12.id] = getSlotDurationHours(s12) <= 1 ? 'full' : 'first_hour';
+                            }
+                            if (pickedIds.length > 0) {
+                              setOffSlotIds(pickedIds);
+                              setOffSlotParts(pickedParts);
+                              setOffClassroomId('');
+                              if (!slot07_08) {
+                                notify(
+                                  'error',
+                                  'ساعات ۸ تا ۱۳ انتخاب شد؛ برای ثبت تک‌ساعت ۷ تا ۸ صبح از مدیر سامانه بخواهید آن را در تنظیمات سانس‌ها فعال کند.'
+                                );
+                              } else {
+                                notify('success', 'بازه ۶ ساعته ۰۷:۰۰ تا ۱۳:۰۰ حضور در مدرسه انتخاب شد.');
+                              }
+                            }
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold cursor-pointer"
+                        >
+                          چیدمان خودکار ۷ تا ۱۳ (۶ ساعت)
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {(
+                        [
+                          {
+                            value: 'school_attendance' as SchedInternshipSessionRole,
+                            title: 'حضور در مدرسه (۶ ساعت · ۷ تا ۱۳)',
+                            desc: 'بدون نیاز به کلاس فیزیکی دانشگاه',
+                          },
+                          {
+                            value: 'university_orientation' as SchedInternshipSessionRole,
+                            title: 'جلسه توجیهی دانشگاه (۲ ساعت)',
+                            desc: 'برگزاری در کلاس‌های دانشگاه',
+                          },
+                          {
+                            value: 'combined' as SchedInternshipSessionRole,
+                            title: 'کل کارورزی یکجا (۸ ساعت)',
+                            desc: 'ثبت یکباره کل ساعت کارورزی',
+                          },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            setOffInternshipSessionRole(opt.value);
+                            if (opt.value === 'school_attendance') {
+                              setOffClassroomId('');
+                            }
+                          }}
+                          className={`p-2 rounded-lg border text-right transition cursor-pointer ${
+                            offInternshipSessionRole === opt.value
+                              ? 'bg-violet-700 text-white border-violet-700 shadow-xs'
+                              : 'bg-white dark:bg-slate-900 border-violet-200 dark:border-violet-800 text-slate-800 dark:text-slate-200'
+                          }`}
+                        >
+                          <div className="font-black text-[11px]">{opt.title}</div>
+                          <div
+                            className={`text-[10px] ${
+                              offInternshipSessionRole === opt.value
+                                ? 'text-violet-100'
+                                : 'text-slate-500'
+                            }`}
+                          >
+                            {opt.desc}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="font-black text-violet-900 dark:text-violet-200">
@@ -4006,18 +5120,57 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
               {/* پیش‌نمایش محاسبه ساعات و واحد معادل + خطاهای تداخل */}
               {candidateBreakdown && (
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 tabular-nums">
-                  <span>
-                    واحد کل: <strong>{candidateBreakdown.rawUnits}</strong> (نظری:{' '}
-                    {candidateBreakdown.activeTheoryUnits} + عملی:{' '}
-                    {candidateBreakdown.activePracticalUnits})
-                  </span>
-                  <span>
-                    ساعت هفتگی کلاس: <strong>{candidateBreakdown.weeklyHours} ساعت</strong>
-                  </span>
-                  <span className="text-teal-700 dark:text-teal-400 font-black">
-                    واحد معادل استاد: {candidateBreakdown.equivalentUnits}
-                  </span>
+                <div className="space-y-2">
+                  {(candidateBreakdown.weeklyHours % 1 !== 0 ||
+                    candidateBreakdown.activeTheoryUnits % 1 !== 0 ||
+                    candidateBreakdown.activePracticalUnits % 1 !== 0) && (
+                    <div className="p-3 rounded-xl bg-sky-50/90 dark:bg-sky-950/35 border border-sky-300 dark:border-sky-800 text-sky-950 dark:text-sky-100 text-[11px] space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-black">
+                          درس نیم‌واحدی / ساعتی کسری (مانند تربیت بدنی: ۱ ساعت عملی + ۱ ساعت نظری در جدول):
+                        </span>
+                        {offSlotIds.length > 0 &&
+                          (offSplitPart !== 'full' ||
+                            offSlotParts[offSlotIds[0]] !== 'full') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOffSplitPart('full');
+                                setOffSlotParts((prev) => ({
+                                  ...prev,
+                                  [offSlotIds[0]]: 'full',
+                                }));
+                              }}
+                              className="px-2 py-0.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[10px] font-extrabold cursor-pointer"
+                            >
+                              تنظیم خودکار رزرو ۱ سانس (۲ ساعته)
+                            </button>
+                          )}
+                      </div>
+                      <p className="text-sky-800 dark:text-sky-200 leading-relaxed">
+                        بدون تغییر ساختار جدول، برای ارائه این درس یک سانس کامل ۲ ساعته (معادل ۱ ساعت نظری + ۱ ساعت عملی روی جدول) رزرو می‌شود، اما سامانه در محاسبه ساعت هفتگی و بار استاد مقادیر واقعی ({candidateBreakdown.weeklyHours} ساعت واقعی و {candidateBreakdown.equivalentUnits} واحد معادل) را اعمال می‌کند.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 tabular-nums">
+                    <span>
+                      واحد کل: <strong>{candidateBreakdown.rawUnits}</strong> (نظری:{' '}
+                      {candidateBreakdown.activeTheoryUnits} + عملی:{' '}
+                      {candidateBreakdown.activePracticalUnits})
+                    </span>
+                    <span>
+                      ساعت هفتگی واقعی: <strong>{candidateBreakdown.weeklyHours} ساعت</strong>
+                      {candidateBreakdown.weeklyHours % 1 !== 0 && (
+                        <span className="text-[10px] text-sky-700 dark:text-sky-300 font-bold mr-1">
+                          (رزرو جدول: ۲ ساعته)
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-teal-700 dark:text-teal-400 font-black">
+                      واحد معادل استاد: {candidateBreakdown.equivalentUnits}
+                    </span>
+                  </div>
                 </div>
               )}
 
@@ -4049,12 +5202,17 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 {editingOffId ? (
                   <button
                     type="button"
+                    disabled={modalLockStatus.locked}
                     onClick={() => {
+                      if (modalLockStatus.locked) {
+                        notify('error', modalLockStatus.reason || 'این بخش قفل است.');
+                        return;
+                      }
                       persistOfferings(offerings.filter((x) => x.id !== editingOffId));
                       setOffModalOpen(false);
                       notify('success', 'درس از برنامه ترم حذف شد.');
                     }}
-                    className="px-4 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 border border-rose-200 dark:border-rose-800 font-bold cursor-pointer"
+                    className="px-4 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 border border-rose-200 dark:border-rose-800 disabled:opacity-50 font-bold cursor-pointer"
                   >
                     حذف از برنامه
                   </button>
@@ -4064,11 +5222,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 <button
                   type="submit"
                   disabled={
-                    !editingOffId &&
+                    modalLockStatus.locked ||
+                    (!editingOffId &&
                     selectedOffCourse?.practicalType === 'internship' &&
                     offInternshipGroups.length > 0
                       ? false
-                      : candidateConflictReport.hasHardConflict
+                      : candidateConflictReport.hasHardConflict)
                   }
                   className="px-6 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-extrabold cursor-pointer"
                 >

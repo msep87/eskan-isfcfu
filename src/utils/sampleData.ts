@@ -57,6 +57,7 @@ import {
   SchedCurriculumCourse,
   SchedCourseOffering,
   SchedRulesSettings,
+  SchedCellComment,
 } from '../types';
 
 export const INITIAL_SETTINGS: AppSettings = {
@@ -235,6 +236,7 @@ export const INITIAL_SCHED_PROGRAMS: SchedProgramCohort[] = [];
 export const INITIAL_SCHED_PROFESSORS: SchedProfessor[] = [];
 export const INITIAL_SCHED_COURSES: SchedCurriculumCourse[] = [];
 export const INITIAL_SCHED_OFFERINGS: SchedCourseOffering[] = [];
+export const INITIAL_SCHED_CELL_COMMENTS: SchedCellComment[] = [];
 
 export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
   activeTerm: '1405-1',
@@ -261,6 +263,19 @@ export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
     { id: 'slot_5', label: 'سانس پنجم', startTime: '16:00', endTime: '18:00', order: 5 },
     { id: 'slot_6', label: 'سانس ششم', startTime: '18:00', endTime: '20:00', order: 6 },
   ],
+  studentAccessEnabled: false,
+  studentAccessScope: 'own_cohort',
+  studentPublishedTerms: ['1405-1'],
+  programLocks: {
+    lockAllChanges: false,
+    lockMessage: '',
+    lockedMajorCodes: [],
+    lockedDays: [],
+    lockedSlotIds: [],
+    lockedDeptHeadIds: [],
+    lockedAcademicDeputyIds: [],
+    blockedViewUserIds: [],
+  },
 };
 
 
