@@ -96,6 +96,7 @@ import {
   PublicStudentChatProfile,
   StaffChatDirectoryItem,
   SchedCellComment,
+  SchedUserHistoryState,
 } from '../types';
 import { getSchedSlotTitle } from './schedulingUtils';
 import {
@@ -13809,6 +13810,8 @@ export const Storage = {
         ...slot,
         label: getSchedSlotTitle(slot, idx),
       })),
+      examSettings: stored.examSettings || DEFAULT_SCHED_RULES.examSettings,
+      examSettingsByTerm: stored.examSettingsByTerm || {},
       studentAccessEnabled: Boolean(stored.studentAccessEnabled),
       studentAccessScope:
         stored.studentAccessScope === 'own_cohort' ||
@@ -13838,6 +13841,9 @@ export const Storage = {
         lockedAcademicDeputyIds: Array.isArray(stored.programLocks?.lockedAcademicDeputyIds)
           ? stored.programLocks!.lockedAcademicDeputyIds
           : [],
+        lockedExpertIds: Array.isArray(stored.programLocks?.lockedExpertIds)
+          ? stored.programLocks!.lockedExpertIds
+          : [],
         blockedViewUserIds: Array.isArray(stored.programLocks?.blockedViewUserIds)
           ? stored.programLocks!.blockedViewUserIds
           : [],
@@ -13846,6 +13852,26 @@ export const Storage = {
   },
   setSchedRules: (rules: SchedRulesSettings): boolean =>
     set(STORAGE_KEYS.SCHED_RULES, rules),
+
+  getSchedUserHistory: (actorId: string): SchedUserHistoryState => {
+    if (!actorId) return { undoStack: [], redoStack: [] };
+    const stored = get<Partial<SchedUserHistoryState> | null>(
+      `sched_user_history_${actorId}`,
+      null
+    );
+    if (!stored || typeof stored !== 'object') return { undoStack: [], redoStack: [] };
+    return {
+      undoStack: Array.isArray(stored.undoStack) ? stored.undoStack : [],
+      redoStack: Array.isArray(stored.redoStack) ? stored.redoStack : [],
+    };
+  },
+  setSchedUserHistory: (actorId: string, state: SchedUserHistoryState): boolean => {
+    if (!actorId) return false;
+    return set(`sched_user_history_${actorId}`, {
+      undoStack: state.undoStack.slice(-50),
+      redoStack: state.redoStack.slice(-50),
+    });
+  },
 
   // -------------------------------------------------------------
   // متدهای گردش کار و ارجاعات یکپارچه حوزه معاونت آموزشی
@@ -15711,7 +15737,7 @@ export const Storage = {
           fullName: p.fullName,
           role: 'professor',
           roleLabel: 'استاد مدرس',
-          department: p.degreeFull || `کد استاد: ${p.professorCode}`,
+          department: p.departmentName || p.degreeFull || `کد استاد: ${p.professorCode}`,
           photoUrl: p.photoUrl,
         })),
       ...Storage.getMaintenanceStaff()

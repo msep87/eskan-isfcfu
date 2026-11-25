@@ -1864,15 +1864,28 @@ export interface SchedProgramCohort {
 
 export interface SchedProfessor {
   id: string;
-  professorCode: string; // کد استاد یکتا (تفکیک اساتید هم‌نام)
-  fullName: string;
-  nationalId: string; // کد ملی (کلمه عبور پیش‌فرض استاد)
+  professorCode: string; // کد استاد یکتا / شماره شناسایی در گلستان (تفکیک اساتید هم‌نام)
+  firstName?: string; // نام استاد
+  lastName?: string; // نام خانوادگی استاد
+  fullName: string; // نام و نام خانوادگی کامل
+  gender?: string; // جنس
+  fatherName?: string; // نام پدر
+  nationalId: string; // شماره ملی / کد ملی (کلمه عبور پیش‌فرض استاد)
   password?: string; // کلمه عبور اختیاری قابل تغییر
-  degreeLevel?: string; // مقطع تحصیلی (دکتری، کارشناسی ارشد و...)
-  degreeField?: string; // رشته مدرک تحصیلی
-  degreeFull?: string; // متن کامل مدرک تحصیلی
+  departmentName?: string; // نام فارسی گروه آموزشی
+  unitCenterName?: string; // نام واحد/مرکز
+  degreeLevel?: string; // مقطع / آخرین مدرک تحصیلی (جدا از رشته)
+  degreeField?: string; // رشته تحصیلی (جدا از مقطع)
+  degreeSpecialization?: string; // گرایش تحصیلی
+  degreeFull?: string; // متن ترکیبی مدرک تحصیلی (مقطع + رشته + گرایش)
+  academicStep?: string; // پایه
+  academicRank?: string; // مرتبه علمی
   employmentType: SchedEmploymentType;
-  phone?: string;
+  employmentStatusRaw?: string; // وضعیت استخدام خام از گزارش ۴۵ گلستان
+  phone?: string; // شماره تماس اصلی (ترجیحاً همراه یا تلفن ثابت)
+  mobile?: string; // تلفن همراه
+  landlinePhone?: string; // تلفن ثابت
+  bankName?: string; // نام بانک
   bankAccount?: string; // شماره حساب / شبا (فقط مدیر، معاونت آموزشی و خود استاد)
   photoUrl?: string;
   isActive: boolean;
@@ -1902,6 +1915,32 @@ export interface SchedTimeSlot {
   order: number;
 }
 
+export interface SchedExamDay {
+  id: string; // مثلاً exam_day_1
+  dayNumber: number; // 1..12+
+  label: string; // مثلاً روز ۱
+  date: string; // تاریخ شمسی مثلاً 1404/10/20
+  weekdayLabel: string; // مثلاً شنبه
+  isActive: boolean;
+}
+
+export interface SchedExamSlot {
+  id: string; // مثلاً exam_slot_1
+  label: string; // مثلاً سانس اول امتحان
+  startTime: string; // مثلاً 08:30
+  endTime: string; // مثلاً 10:30
+  order: number;
+}
+
+export interface SchedExamSettings {
+  startDate: string; // تاریخ شروع بازه امتحانی (شمسی)
+  startDayOfWeek: SchedDayKey; // پیش‌فرض saturday
+  daysCount: number; // پیش‌فرض 12 روز (دو هفته)
+  skipFridays: boolean; // پیش‌فرض true
+  examDays: SchedExamDay[];
+  examSlots: SchedExamSlot[];
+}
+
 export type StudentScheduleAccessScope = 'own_cohort' | 'own_major' | 'all_programs';
 
 export interface SchedProgramLockSettings {
@@ -1912,7 +1951,8 @@ export interface SchedProgramLockSettings {
   lockedSlotIds?: string[]; // مسدودسازی تغییر در سانس‌های خاص
   lockedDeptHeadIds?: string[]; // مسدودسازی تغییر برای مدیران گروه خاص
   lockedAcademicDeputyIds?: string[]; // مسدودسازی تغییر برای معاونان آموزشی خاص
-  blockedViewUserIds?: string[]; // مسدودسازی کامل مشاهده برنامه برای مدیران گروه یا معاونان خاص
+  lockedExpertIds?: string[]; // مسدودسازی تغییر برای کارشناسان آموزش خاص
+  blockedViewUserIds?: string[]; // مسدودسازی کامل مشاهده برنامه برای مدیران گروه، معاونان یا کارشناسان خاص
 }
 
 export interface SchedRulesSettings {
@@ -1933,6 +1973,8 @@ export interface SchedRulesSettings {
   };
   activeDays: SchedDayKey[];
   timeSlots: SchedTimeSlot[];
+  examSettings?: SchedExamSettings;
+  examSettingsByTerm?: Record<string, SchedExamSettings>;
   studentAccessEnabled?: boolean; // انتشار و فعال‌سازی دکمه «برنامه ترم» در پنل دانشجویان (کنترل توسط مدیر سامانه)
   studentAccessScope?: StudentScheduleAccessScope; // محدوده مجاز مشاهده: فقط رشته و ورودی خودشان | کل ورودی‌های رشته خودشان | کل رشته‌ها
   studentPublishedTerms?: string[]; // نیمسال‌های منتشرشده برای دانشجویان
@@ -1955,6 +1997,12 @@ export type SchedInternshipSessionRole =
   | 'school_attendance'
   | 'university_orientation'
   | 'combined';
+
+export type SchedWorkspaceRole =
+  | 'admin'
+  | 'academic_deputy'
+  | 'department_head'
+  | 'education_expert';
 
 export interface SchedCourseOffering {
   id: string;
@@ -1986,11 +2034,36 @@ export interface SchedCourseOffering {
   slotIds: string[]; // سانس‌های اشغال‌شده
   slotParts?: Record<string, SchedSlotHalf>; // تفکیک ساعت اول (راست) / ساعت دوم (چپ) / کل سانس
   splitPart?: 'full' | 'theory' | 'practical';
+  examDayId?: string; // روز امتحان پایان ترم (صرفاً برای دروس نظری)
+  examSlotId?: string; // سانس امتحان پایان ترم (صرفاً برای دروس نظری)
   notes?: string;
   createdById: string;
   createdByName: string;
-  createdByRole: 'admin' | 'academic_deputy' | 'department_head';
+  createdByRole: SchedWorkspaceRole;
+  updatedById?: string;
+  updatedByName?: string;
   updatedAt: string;
+}
+
+export interface SchedOfferingHistoryDelta {
+  offeringId: string;
+  before?: SchedCourseOffering;
+  after?: SchedCourseOffering;
+}
+
+export interface SchedOfferingHistoryEntry {
+  id: string;
+  termKey: string;
+  actorId: string;
+  actorName: string;
+  label: string;
+  timestamp: string;
+  deltas: SchedOfferingHistoryDelta[];
+}
+
+export interface SchedUserHistoryState {
+  undoStack: SchedOfferingHistoryEntry[];
+  redoStack: SchedOfferingHistoryEntry[];
 }
 
 export interface SchedCellComment {
@@ -2003,7 +2076,7 @@ export interface SchedCellComment {
   slotId: string;
   authorId: string;
   authorName: string;
-  authorRole: 'admin' | 'academic_deputy' | 'department_head';
+  authorRole: SchedWorkspaceRole;
   text: string;
   createdAt: string;
 }

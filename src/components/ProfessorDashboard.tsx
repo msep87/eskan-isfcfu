@@ -188,18 +188,31 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
             </div>
             <h1 className="text-lg sm:text-xl font-black">{professor.fullName}</h1>
             <div className="text-xs text-slate-300 flex flex-wrap items-center gap-2">
-              <span>{SCHED_EMPLOYMENT_LABELS[professor.employmentType]}</span>
-              {professor.degreeFull && (
+              <span>{professor.academicRank || SCHED_EMPLOYMENT_LABELS[professor.employmentType]}</span>
+              {(professor.degreeLevel || professor.degreeField || professor.degreeFull) && (
                 <>
                   <span>·</span>
-                  <span>{professor.degreeFull}</span>
+                  <span>
+                    {professor.degreeLevel || professor.degreeField
+                      ? [professor.degreeLevel, professor.degreeField, professor.degreeSpecialization ? `گرایش ${professor.degreeSpecialization}` : '']
+                          .filter(Boolean)
+                          .join(' — ')
+                      : professor.degreeFull}
+                  </span>
+                </>
+              )}
+              {professor.departmentName && (
+                <>
+                  <span>·</span>
+                  <span>گروه: {professor.departmentName}</span>
                 </>
               )}
               {professor.bankAccount && (
                 <>
                   <span>·</span>
                   <span className="font-mono" dir="ltr">
-                    شماره حساب: {professor.bankAccount}
+                    {professor.bankName ? `${professor.bankName} — ` : 'حساب: '}
+                    {professor.bankAccount}
                   </span>
                 </>
               )}

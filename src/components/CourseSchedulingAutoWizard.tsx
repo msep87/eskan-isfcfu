@@ -6,6 +6,7 @@ import {
   SchedProfessor,
   SchedProgramCohort,
   SchedRulesSettings,
+  SchedWorkspaceRole,
 } from '../types';
 import {
   SCHED_DAY_LABELS,
@@ -36,7 +37,7 @@ interface CourseSchedulingAutoWizardProps {
   courses: SchedCurriculumCourse[];
   existingOfferings: SchedCourseOffering[];
   rules: SchedRulesSettings;
-  actor: { id: string; name: string; role: 'admin' | 'academic_deputy' | 'department_head' };
+  actor: { id: string; name: string; role: SchedWorkspaceRole };
   allowedMajorFilter?: string[]; // اگر مدیر گروه رشته‌های مشخصی دارد
   onApplyScheduledOfferings: (newOfferings: SchedCourseOffering[]) => void;
 }

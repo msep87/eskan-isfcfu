@@ -10,19 +10,24 @@ import {
   SchedRulesSettings,
   SchedSlotHalf,
   SchedTimeSlot,
+  SchedWorkspaceRole,
 } from '../types';
 import {
   SCHED_DAY_LABELS,
   SCHED_ROOM_TYPE_LABELS,
+  buildTermExamConflictMap,
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
   checkScheduleEditLock,
   detectOfferingConflicts,
   exportJsonRowsToExcel,
+  formatExamAssignmentShort,
+  getExamSettingsForTerm,
   getOfferingSlotHalf,
   getSchedSlotTitle,
   getSlotDurationHours,
   getSlotHalfLabel,
+  isCourseEligibleForExam,
   normalizePersianText,
   printSchedHtml,
   round2,
@@ -32,6 +37,7 @@ import {
   AlertCircle,
   AlertTriangle,
   Building2,
+  CalendarClock,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -46,11 +52,13 @@ import {
   MessageSquarePlus,
   Minimize2,
   Printer,
+  Redo2,
   RotateCcw,
   Scan,
   Search,
   Send,
   Trash2,
+  Undo2,
   Users,
   X,
   ZoomIn,
@@ -69,12 +77,19 @@ interface CourseSchedulingMasterGridProps {
   activeDays: SchedDayKey[];
   sortedSlots: SchedTimeSlot[];
   canManageMasterData: boolean;
-  userRole: 'admin' | 'academic_deputy' | 'department_head';
+  userRole: SchedWorkspaceRole;
   actor: { id: string; name: string };
   isOwnMajorName: (majorName: string) => boolean;
   cellComments: SchedCellComment[];
   onPersistCellComments: (next: SchedCellComment[]) => void;
-  onPersistOfferings: (next: SchedCourseOffering[]) => void;
+  onCommitOfferings: (next: SchedCourseOffering[], actionLabel: string) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  undoLabel?: string;
+  redoLabel?: string;
+  onUndo: () => void;
+  onRedo: () => void;
+  onOpenCommonExamModal: () => void;
   onOpenNewOffering: (opts: {
     cohortId: string;
     sectionId?: string;
@@ -192,10 +207,11 @@ const ENTRY_DISTINCT_PALETTES = [
   'bg-amber-50/90 dark:bg-amber-950/40 text-amber-950 dark:text-amber-100',
 ];
 
-const ROLE_LABELS_FA: Record<'admin' | 'academic_deputy' | 'department_head', string> = {
+const ROLE_LABELS_FA: Record<SchedWorkspaceRole, string> = {
   admin: 'مدیر سامانه',
   academic_deputy: 'معاونت آموزشی',
   department_head: 'مدیر گروه',
+  education_expert: 'کارشناس آموزش',
 };
 
 export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProps> = ({
@@ -215,7 +231,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   isOwnMajorName,
   cellComments,
   onPersistCellComments,
-  onPersistOfferings,
+  onCommitOfferings,
+  canUndo,
+  canRedo,
+  undoLabel,
+  redoLabel,
+  onUndo,
+  onRedo,
+  onOpenCommonExamModal,
   onOpenNewOffering,
   onOpenEditOffering,
   onNotify,
@@ -257,12 +280,6 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     targetSlotParts?: Record<string, SchedSlotHalf>;
     pickedProfessorId: string;
     pickedClassroomId: string;
-  } | null>(null);
-
-  // بازگردانی آخرین حرکت (Undo)
-  const [undoSnapshot, setUndoSnapshot] = useState<{
-    prevOfferings: SchedCourseOffering[];
-    label: string;
   } | null>(null);
 
   // مودال کامنت‌های هر سلول
@@ -314,6 +331,16 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   const globalLockStatus = useMemo(
     () => checkScheduleEditLock(rules, userRole, actor.id),
     [rules, userRole, actor.id]
+  );
+
+  const examSettings = useMemo(
+    () => getExamSettingsForTerm(rules, activeTerm),
+    [rules, activeTerm]
+  );
+
+  const examConflictMap = useMemo(
+    () => buildTermExamConflictMap(termOfferings, rules),
+    [termOfferings, rules]
   );
 
   const uniqueMajors = useMemo(() => {
@@ -781,18 +808,19 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       dayOfWeek: targetDay,
       slotIds: newSlotIds,
       slotParts: newSlotParts,
+      updatedById: actor.id,
+      updatedByName: actor.name,
       updatedAt: new Date().toISOString(),
     };
 
-    const report = detectOfferingConflicts(candidate, termOfferings, classrooms, professors);
+    const report = detectOfferingConflicts(candidate, termOfferings, classrooms, professors, rules);
     const hasProfUnavail = report.warnings.some((w) => w.includes('عدم امکان حضور'));
 
     if (!report.hasHardConflict && !hasProfUnavail) {
-      setUndoSnapshot({
-        prevOfferings: offerings,
-        label: `جابجایی «${dragged.courseTitle}» به ${SCHED_DAY_LABELS[targetDay]}`,
-      });
-      onPersistOfferings(offerings.map((o) => (o.id === dragged.id ? candidate : o)));
+      onCommitOfferings(
+        offerings.map((o) => (o.id === dragged.id ? candidate : o)),
+        `جابجایی «${dragged.courseTitle}» به ${SCHED_DAY_LABELS[targetDay]}`
+      );
       onNotify(
         'success',
         `درس «${dragged.courseTitle}» بدون تداخل به ${SCHED_DAY_LABELS[targetDay]} (${newSlotIds
@@ -830,10 +858,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       professorName: prof?.fullName,
       classroomId: room?.id,
       classroomName: room?.name,
+      updatedById: actor.id,
+      updatedByName: actor.name,
       updatedAt: new Date().toISOString(),
     };
 
-    const report = detectOfferingConflicts(candidate, termOfferings, classrooms, professors);
+    const report = detectOfferingConflicts(candidate, termOfferings, classrooms, professors, rules);
 
     const professorOptions = professors
       .filter((p) => p.isActive)
@@ -1015,7 +1045,11 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       : o.internshipSessionRole === 'university_orientation'
                       ? ' [توجیهی دانشگاه]'
                       : '';
-                  return `<div class="cell-item"><strong>${escapeHtml(o.courseTitle)}${escapeHtml(internTag)}${escapeHtml(roleTag)}${escapeHtml(halfTag)}</strong><div class="muted">${escapeHtml(o.professorName || 'بدون استاد')}${o.classroomName ? ` · ${escapeHtml(o.classroomName)}` : ''}</div></div>`;
+                  const examTag =
+                    isCourseEligibleForExam(o) && o.examDayId && o.examSlotId
+                      ? ` | آزمون: ${formatExamAssignmentShort(o, examSettings)}`
+                      : '';
+                  return `<div class="cell-item"><strong>${escapeHtml(o.courseTitle)}${escapeHtml(internTag)}${escapeHtml(roleTag)}${escapeHtml(halfTag)}</strong><div class="muted">${escapeHtml(o.professorName || 'بدون استاد')}${o.classroomName ? ` · ${escapeHtml(o.classroomName)}` : ''}${escapeHtml(examTag)}</div></div>`;
                 })
                 .join('');
               return `<td>${htmlItems}</td>`;
@@ -1094,7 +1128,11 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         : '';
                     const intern =
                       o.practicalType === 'internship' ? ` (ظرفیت ${o.enrolledCount})` : '';
-                    return `${hLabel}${o.courseTitle}${intern} - ${o.professorName || 'بدون استاد'}${o.classroomName ? ` [${o.classroomName}]` : ''}`;
+                    const examStr =
+                      isCourseEligibleForExam(o) && o.examDayId && o.examSlotId
+                        ? ` {آزمون: ${formatExamAssignmentShort(o, examSettings)}}`
+                        : '';
+                    return `${hLabel}${o.courseTitle}${intern} - ${o.professorName || 'بدون استاد'}${o.classroomName ? ` [${o.classroomName}]` : ''}${examStr}`;
                   })
                   .join(' | ');
         });
@@ -1158,20 +1196,43 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           )}
 
           <div className="flex flex-wrap items-center gap-1.5">
-            {undoSnapshot && (
+            <div className="inline-flex items-center rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5">
               <button
                 type="button"
-                onClick={() => {
-                  onPersistOfferings(undoSnapshot.prevOfferings);
-                  onNotify('success', `حرکت قبلی («${undoSnapshot.label}») بازگردانی شد.`);
-                  setUndoSnapshot(null);
-                }}
-                className="px-2.5 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                disabled={!canUndo}
+                onClick={onUndo}
+                className="px-2 py-1 rounded-lg text-[11px] font-extrabold inline-flex items-center gap-1 disabled:opacity-40 hover:bg-white dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 cursor-pointer disabled:cursor-not-allowed transition"
+                title={undoLabel ? `بازگشت تغییرات خودتان: ${undoLabel}` : 'بازگشت آخرین تغییر شما (Undo)'}
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>بازگردانی جابجایی</span>
+                <Undo2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>بازگشت</span>
               </button>
-            )}
+              <button
+                type="button"
+                disabled={!canRedo}
+                onClick={onRedo}
+                className="px-2 py-1 rounded-lg text-[11px] font-extrabold inline-flex items-center gap-1 disabled:opacity-40 hover:bg-white dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 cursor-pointer disabled:cursor-not-allowed transition"
+                title={redoLabel ? `انجام مجدد: ${redoLabel}` : 'انجام مجدد (Redo)'}
+              >
+                <Redo2 className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                <span>انجام مجدد</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={onOpenCommonExamModal}
+              className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-700 text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer transition"
+              title="چیدمان یکجای تاریخ و سانس امتحانات دروس عمومی و مشترک"
+            >
+              <CalendarClock className="w-3.5 h-3.5" />
+              <span>امتحانات مشترک / عمومی</span>
+              {examConflictMap.size > 0 && (
+                <span className="px-1.5 py-0.2 rounded-md bg-amber-500 text-slate-950 text-[10px] font-black">
+                  {examConflictMap.size.toLocaleString('fa-IR')} تداخل
+                </span>
+              )}
+            </button>
 
             <button
               type="button"
@@ -1825,8 +1886,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             o,
                             termOfferings,
                             classrooms,
-                            professors
+                            professors,
+                            rules
                           );
+                          const examWarns = examConflictMap.get(o.id) || [];
+                          const examLabel =
+                            isCourseEligibleForExam(o) && o.examDayId && o.examSlotId
+                              ? formatExamAssignmentShort(o, examSettings)
+                              : '';
                           const isSharedHost = o.cohortId !== row.cohortId;
                           const matchedFocus = doesOfferingMatchFocus(o);
                           const dimmed = isFocusActive && !matchedFocus;
@@ -1952,6 +2019,24 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                 );
                               })()}
 
+                              {examLabel && (
+                                <div
+                                  className={`text-[8.5px] font-bold mt-0.5 truncate px-1 py-0.2 rounded ${
+                                    examWarns.length > 0
+                                      ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
+                                      : 'bg-indigo-100/70 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200'
+                                  }`}
+                                  title={
+                                    examWarns.length > 0
+                                      ? `اخطار تداخل امتحان: ${examWarns.join(' | ')}`
+                                      : `زمان امتحان: ${examLabel}`
+                                  }
+                                >
+                                  {examWarns.length > 0 ? '⚠️ ' : '📝 '}
+                                  {examLabel}
+                                </div>
+                              )}
+
                               {conf.hasHardConflict && (
                                 <div className="text-[8.5px] font-black text-rose-600 dark:text-rose-400 flex items-center gap-0.5 mt-0.5">
                                   <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
@@ -1992,8 +2077,9 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      onPersistOfferings(
-                                        offerings.filter((x) => x.id !== o.id)
+                                      onCommitOfferings(
+                                        offerings.filter((x) => x.id !== o.id),
+                                        `حذف «${o.courseTitle}»`
                                       );
                                       onNotify('success', `درس «${o.courseTitle}» حذف شد.`);
                                     }}
@@ -2552,11 +2638,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 disabled={pendingResolutionEval.report.hasHardConflict}
                 onClick={() => {
                   const saved = pendingResolutionEval.candidate;
-                  setUndoSnapshot({
-                    prevOfferings: offerings,
-                    label: `جابجایی «${saved.courseTitle}»`,
-                  });
-                  onPersistOfferings(offerings.map((o) => (o.id === saved.id ? saved : o)));
+                  onCommitOfferings(
+                    offerings.map((o) => (o.id === saved.id ? saved : o)),
+                    `جابجایی «${saved.courseTitle}»`
+                  );
                   setPendingDrop(null);
                   onNotify('success', `درس «${saved.courseTitle}» با تنظیمات جدید جابجا شد.`);
                 }}

@@ -8,7 +8,11 @@ import {
   SchedCurriculumCourse,
   SchedDayKey,
   SchedEmploymentType,
+  SchedExamDay,
+  SchedExamSettings,
+  SchedExamSlot,
   SchedInternshipSessionRole,
+  SchedOfferingHistoryEntry,
   SchedPracticalUnitType,
   SchedProfessor,
   SchedProgramCohort,
@@ -16,6 +20,8 @@ import {
   SchedSharedTarget,
   SchedSlotHalf,
   SchedTimeSlot,
+  SchedUserHistoryState,
+  SchedWorkspaceRole,
   StudentScheduleAccessScope,
 } from '../types';
 import { Storage, normalizeAssignedFieldsList, normalizePersianSearch } from '../utils/storage';
@@ -26,21 +32,29 @@ import {
   SCHED_EMPLOYMENT_LABELS,
   SCHED_PRACTICAL_TYPE_LABELS,
   SCHED_ROOM_TYPE_LABELS,
+  applyOfferingHistoryStep,
+  buildDefaultExamSlots,
   buildDefaultTimeSlots,
+  buildExamDaysSequence,
   buildSevenToEightSlot,
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
   checkScheduleEditLock,
   checkScheduleViewLock,
   computeInternshipSplitPlan,
+  computeOfferingDeltas,
   detectOfferingConflicts,
   downloadSchedExcelTemplate,
   exportJsonRowsToExcel,
+  formatExamAssignmentShort,
+  formatProfessorDegreeFull,
+  getExamSettingsForTerm,
   getOfferingSlotHalf,
   getSchedSlotOrdinalLabel,
   getSchedSlotTitle,
   getSlotDurationHours,
   getSlotHalfLabel,
+  isCourseEligibleForExam,
   normalizeSchedCode,
   parseDecimalUnits,
   parseSchedExcelFile,
@@ -50,6 +64,7 @@ import {
 import { CourseSchedulingAutoWizard } from './CourseSchedulingAutoWizard';
 import { CourseSchedulingReports } from './CourseSchedulingReports';
 import { CourseSchedulingMasterGrid } from './CourseSchedulingMasterGrid';
+import { CourseSchedulingCommonExamModal } from './CourseSchedulingCommonExamModal';
 import {
   AlertCircle,
   AlertTriangle,
@@ -59,6 +74,7 @@ import {
   BookOpen,
   Building2,
   Calendar,
+  CalendarClock,
   CalendarDays,
   CheckCircle2,
   Clock,
@@ -75,6 +91,7 @@ import {
   Lock,
   Plus,
   Printer,
+  Redo2,
   School,
   Search,
   Settings2,
@@ -84,6 +101,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  Undo2,
   Unlock,
   Upload,
   Users,
@@ -93,7 +111,7 @@ import {
 interface CourseSchedulingWorkspaceProps {
   isOpen: boolean;
   onClose: () => void;
-  userRole: 'admin' | 'academic_deputy' | 'department_head';
+  userRole: SchedWorkspaceRole;
   actor: { id: string; name: string };
   allowedMajorNames?: string[];
   onDataUpdated?: () => void;
@@ -151,11 +169,23 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     () => Storage.getEducationStaff().filter((s) => s.educationRole === 'department_head'),
     []
   );
+  const expertUsers = useMemo(
+    () => Storage.getEducationStaff().filter((s) => s.educationRole !== 'department_head'),
+    []
+  );
   const academicDeputyUsers = useMemo(() => Storage.getAcademicDeputyStaff(), []);
 
   const [activeTerm, setActiveTerm] = useState<string>(rules.activeTerm || '4041');
   const [newTermInput, setNewTermInput] = useState('');
   const [showNewTermBox, setShowNewTermBox] = useState(false);
+  const [commonExamModalOpen, setCommonExamModalOpen] = useState(false);
+
+  const [historyState, setHistoryState] = useState<SchedUserHistoryState>(() =>
+    Storage.getSchedUserHistory(actor.id)
+  );
+  React.useEffect(() => {
+    setHistoryState(Storage.getSchedUserHistory(actor.id));
+  }, [actor.id]);
 
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error';
@@ -166,7 +196,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setFeedback({ type, text });
     window.setTimeout(() => {
       setFeedback((prev) => (prev?.text === text ? null : prev));
-    }, 5000);
+    }, 6000);
   };
 
   const persistClassrooms = (next: SchedClassroom[]) => {
@@ -204,6 +234,113 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     Storage.setSchedCellComments(next);
     onDataUpdated?.();
   };
+
+  const commitOfferingsWithHistory = (
+    nextOfferings: SchedCourseOffering[],
+    actionLabel: string
+  ) => {
+    const rawDeltas = computeOfferingDeltas(offerings, nextOfferings);
+    const changedIds = new Set(rawDeltas.map((d) => d.offeringId));
+    const nowIso = new Date().toISOString();
+    const finalizedNext = nextOfferings.map((item) =>
+      changedIds.has(item.id)
+        ? {
+            ...item,
+            updatedById: actor.id,
+            updatedByName: actor.name,
+            updatedAt: item.updatedAt || nowIso,
+          }
+        : item
+    );
+    const deltas = computeOfferingDeltas(offerings, finalizedNext);
+    if (deltas.length > 0) {
+      const entry: SchedOfferingHistoryEntry = {
+        id: `hist_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        termKey: activeTerm,
+        actorId: actor.id,
+        actorName: actor.name,
+        label: actionLabel,
+        timestamp: nowIso,
+        deltas,
+      };
+      const nextHist: SchedUserHistoryState = {
+        undoStack: [...historyState.undoStack, entry].slice(-50),
+        redoStack: [],
+      };
+      setHistoryState(nextHist);
+      Storage.setSchedUserHistory(actor.id, nextHist);
+    }
+    persistOfferings(finalizedNext);
+  };
+
+  const handleUndoOfferings = () => {
+    const stack = historyState.undoStack;
+    if (stack.length === 0) return;
+    const entry = stack[stack.length - 1];
+    const latestOfferings = Storage.getSchedOfferings();
+    const res = applyOfferingHistoryStep({
+      direction: 'undo',
+      entry,
+      latestOfferings,
+      rules,
+      userRole,
+      actor,
+      classrooms,
+      professors,
+    });
+    if (!res.ok || !res.nextOfferings) {
+      notify(
+        'error',
+        res.error || 'بازگشت به تغییر قبلی به دلیل تداخل یا ویرایش همزمان مجاز نیست.'
+      );
+      return;
+    }
+    const nextHist: SchedUserHistoryState = {
+      undoStack: stack.slice(0, -1),
+      redoStack: [...historyState.redoStack, entry].slice(-50),
+    };
+    setHistoryState(nextHist);
+    Storage.setSchedUserHistory(actor.id, nextHist);
+    persistOfferings(res.nextOfferings);
+    notify('success', `بازگشت انجام شد: ${entry.label}`);
+  };
+
+  const handleRedoOfferings = () => {
+    const stack = historyState.redoStack;
+    if (stack.length === 0) return;
+    const entry = stack[stack.length - 1];
+    const latestOfferings = Storage.getSchedOfferings();
+    const res = applyOfferingHistoryStep({
+      direction: 'redo',
+      entry,
+      latestOfferings,
+      rules,
+      userRole,
+      actor,
+      classrooms,
+      professors,
+    });
+    if (!res.ok || !res.nextOfferings) {
+      notify(
+        'error',
+        res.error || 'انجام مجدد تغییر به دلیل تداخل یا ویرایش همزمان مجاز نیست.'
+      );
+      return;
+    }
+    const nextHist: SchedUserHistoryState = {
+      undoStack: [...historyState.undoStack, entry].slice(-50),
+      redoStack: stack.slice(0, -1),
+    };
+    setHistoryState(nextHist);
+    Storage.setSchedUserHistory(actor.id, nextHist);
+    persistOfferings(res.nextOfferings);
+    notify('success', `تغییر مجدداً اعمال شد: ${entry.label}`);
+  };
+
+  const activeTermExamSettings = useMemo(
+    () => getExamSettingsForTerm(rules, activeTerm),
+    [rules, activeTerm]
+  );
 
   const globalLockStatus = useMemo(
     () => checkScheduleEditLock(rules, userRole, actor.id),
@@ -512,12 +649,24 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [profModalOpen, setProfModalOpen] = useState(false);
   const [editingProfId, setEditingProfId] = useState<string | null>(null);
   const [profCode, setProfCode] = useState('');
-  const [profName, setProfName] = useState('');
+  const [profFirstName, setProfFirstName] = useState('');
+  const [profLastName, setProfLastName] = useState('');
+  const [profGender, setProfGender] = useState('');
+  const [profFatherName, setProfFatherName] = useState('');
   const [profNationalId, setProfNationalId] = useState('');
-  const [profDegree, setProfDegree] = useState('');
+  const [profDepartmentName, setProfDepartmentName] = useState('');
+  const [profUnitCenterName, setProfUnitCenterName] = useState('');
+  const [profDegreeLevel, setProfDegreeLevel] = useState('');
+  const [profDegreeField, setProfDegreeField] = useState('');
+  const [profDegreeSpecialization, setProfDegreeSpecialization] = useState('');
+  const [profAcademicStep, setProfAcademicStep] = useState('');
+  const [profAcademicRank, setProfAcademicRank] = useState('');
   const [profEmployment, setProfEmployment] =
     useState<SchedEmploymentType>('faculty_member');
-  const [profPhone, setProfPhone] = useState('');
+  const [profEmploymentStatusRaw, setProfEmploymentStatusRaw] = useState('');
+  const [profMobile, setProfMobile] = useState('');
+  const [profLandlinePhone, setProfLandlinePhone] = useState('');
+  const [profBankName, setProfBankName] = useState('');
   const [profBank, setProfBank] = useState('');
   const [unavailProfModal, setUnavailProfModal] = useState<SchedProfessor | null>(null);
   const [unavailDraft, setUnavailDraft] = useState<string[]>([]);
@@ -526,20 +675,49 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     if (prof) {
       setEditingProfId(prof.id);
       setProfCode(prof.professorCode);
-      setProfName(prof.fullName);
+      const nameParts = prof.fullName.trim().split(/\s+/);
+      setProfFirstName(
+        prof.firstName ?? (nameParts.length > 1 ? nameParts[0] : prof.fullName)
+      );
+      setProfLastName(
+        prof.lastName ?? (nameParts.length > 1 ? nameParts.slice(1).join(' ') : '')
+      );
+      setProfGender(prof.gender || '');
+      setProfFatherName(prof.fatherName || '');
       setProfNationalId(prof.nationalId);
-      setProfDegree(prof.degreeFull || '');
+      setProfDepartmentName(prof.departmentName || '');
+      setProfUnitCenterName(prof.unitCenterName || '');
+      setProfDegreeLevel(prof.degreeLevel || (!prof.degreeField ? prof.degreeFull || '' : ''));
+      setProfDegreeField(prof.degreeField || '');
+      setProfDegreeSpecialization(prof.degreeSpecialization || '');
+      setProfAcademicStep(prof.academicStep || '');
+      setProfAcademicRank(prof.academicRank || '');
       setProfEmployment(prof.employmentType);
-      setProfPhone(prof.phone || '');
+      setProfEmploymentStatusRaw(prof.employmentStatusRaw || '');
+      setProfMobile(prof.mobile || prof.phone || '');
+      setProfLandlinePhone(prof.landlinePhone || '');
+      setProfBankName(prof.bankName || '');
       setProfBank(prof.bankAccount || '');
     } else {
       setEditingProfId(null);
       setProfCode('');
-      setProfName('');
+      setProfFirstName('');
+      setProfLastName('');
+      setProfGender('');
+      setProfFatherName('');
       setProfNationalId('');
-      setProfDegree('');
+      setProfDepartmentName('');
+      setProfUnitCenterName('');
+      setProfDegreeLevel('');
+      setProfDegreeField('');
+      setProfDegreeSpecialization('');
+      setProfAcademicStep('');
+      setProfAcademicRank('');
       setProfEmployment('haghol_tadris_free');
-      setProfPhone('');
+      setProfEmploymentStatusRaw('');
+      setProfMobile('');
+      setProfLandlinePhone('');
+      setProfBankName('');
       setProfBank('');
     }
     setProfModalOpen(true);
@@ -548,7 +726,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const handleSaveProf = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanCode = normalizeSchedCode(profCode);
-    const cleanName = profName.trim();
+    const cleanFirst = profFirstName.trim();
+    const cleanLast = profLastName.trim();
+    const cleanName = [cleanFirst, cleanLast].filter(Boolean).join(' ').trim();
     const cleanNat = normalizeSchedCode(profNationalId) || cleanCode;
     if (!cleanCode || !cleanName) return;
     const dup = professors.find(
@@ -562,6 +742,15 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       return;
     }
 
+    const cleanLevel = profDegreeLevel.trim();
+    const cleanField = profDegreeField.trim();
+    const cleanSpec = profDegreeSpecialization.trim();
+    const cleanDegreeFull =
+      formatProfessorDegreeFull(cleanLevel, cleanField, cleanSpec) || cleanLevel;
+    const cleanMobile = normalizeSchedCode(profMobile);
+    const cleanLandline = normalizeSchedCode(profLandlinePhone);
+    const cleanPhone = cleanMobile || cleanLandline;
+
     if (editingProfId) {
       persistProfessors(
         professors.map((p) =>
@@ -569,13 +758,30 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
             ? {
                 ...p,
                 professorCode: cleanCode,
+                firstName: cleanFirst || undefined,
+                lastName: cleanLast || undefined,
                 fullName: cleanName,
+                gender: profGender.trim() || undefined,
+                fatherName: profFatherName.trim() || undefined,
                 nationalId: cleanNat,
-                degreeFull: profDegree.trim(),
+                departmentName: profDepartmentName.trim() || undefined,
+                unitCenterName: profUnitCenterName.trim() || undefined,
+                degreeLevel: cleanLevel || undefined,
+                degreeField: cleanField || undefined,
+                degreeSpecialization: cleanSpec || undefined,
+                degreeFull: cleanDegreeFull,
+                academicStep: normalizeSchedCode(profAcademicStep) || profAcademicStep.trim() || undefined,
+                academicRank: profAcademicRank.trim() || undefined,
                 employmentType: profEmployment,
-                phone: normalizeSchedCode(profPhone),
+                employmentStatusRaw: profEmploymentStatusRaw.trim() || undefined,
+                phone: cleanPhone || undefined,
+                mobile: cleanMobile || undefined,
+                landlinePhone: cleanLandline || undefined,
+                bankName: canViewSensitiveProfInfo
+                  ? profBankName.trim() || undefined
+                  : p.bankName,
                 bankAccount: canViewSensitiveProfInfo
-                  ? normalizeSchedCode(profBank)
+                  ? normalizeSchedCode(profBank) || undefined
                   : p.bankAccount,
               }
             : p
@@ -588,12 +794,27 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         {
           id: `prof_${Date.now()}`,
           professorCode: cleanCode,
+          firstName: cleanFirst || undefined,
+          lastName: cleanLast || undefined,
           fullName: cleanName,
+          gender: profGender.trim() || undefined,
+          fatherName: profFatherName.trim() || undefined,
           nationalId: cleanNat,
-          degreeFull: profDegree.trim(),
+          departmentName: profDepartmentName.trim() || undefined,
+          unitCenterName: profUnitCenterName.trim() || undefined,
+          degreeLevel: cleanLevel || undefined,
+          degreeField: cleanField || undefined,
+          degreeSpecialization: cleanSpec || undefined,
+          degreeFull: cleanDegreeFull,
+          academicStep: normalizeSchedCode(profAcademicStep) || profAcademicStep.trim() || undefined,
+          academicRank: profAcademicRank.trim() || undefined,
           employmentType: profEmployment,
-          phone: normalizeSchedCode(profPhone),
-          bankAccount: normalizeSchedCode(profBank),
+          employmentStatusRaw: profEmploymentStatusRaw.trim() || undefined,
+          phone: cleanPhone || undefined,
+          mobile: cleanMobile || undefined,
+          landlinePhone: cleanLandline || undefined,
+          bankName: profBankName.trim() || undefined,
+          bankAccount: normalizeSchedCode(profBank) || undefined,
           isActive: true,
           unavailableKeys: [],
         },
@@ -780,6 +1001,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [modalAllChartCourses, setModalAllChartCourses] = useState(false);
   const [offSharedTargets, setOffSharedTargets] = useState<SchedSharedTarget[]>([]);
   const [offNotes, setOffNotes] = useState('');
+  const [offExamDayId, setOffExamDayId] = useState('');
+  const [offExamSlotId, setOffExamSlotId] = useState('');
   const [sharePickerCohortId, setSharePickerCohortId] = useState('');
   const [sharePickerSectionId, setSharePickerSectionId] = useState('');
 
@@ -896,6 +1119,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     initInternshipGroupsForCourse(firstCourse, baseEnrolled, '');
     setOffSharedTargets([]);
     setOffNotes('');
+    setOffExamDayId('');
+    setOffExamSlotId('');
     setSharePickerCohortId('');
     setSharePickerSectionId('');
     setOffModalOpen(true);
@@ -923,6 +1148,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setOffInternshipGroups([]);
     setOffSharedTargets([...(o.sharedWithTargets || [])]);
     setOffNotes(o.notes || '');
+    setOffExamDayId(o.examDayId || '');
+    setOffExamSlotId(o.examSlotId || '');
     setSharePickerCohortId('');
     setSharePickerSectionId('');
     setOffModalOpen(true);
@@ -978,10 +1205,20 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       splitPart: offSplitPart,
       internshipSessionRole:
         selectedOffCourse.practicalType === 'internship' ? offInternshipSessionRole : undefined,
+      examDayId:
+        isCourseEligibleForExam(selectedOffCourse) && offExamDayId && offExamSlotId
+          ? offExamDayId
+          : undefined,
+      examSlotId:
+        isCourseEligibleForExam(selectedOffCourse) && offExamDayId && offExamSlotId
+          ? offExamSlotId
+          : undefined,
       notes: offNotes.trim() || undefined,
       createdById: actor.id,
       createdByName: actor.name,
       createdByRole: userRole,
+      updatedById: actor.id,
+      updatedByName: actor.name,
       updatedAt: new Date().toISOString(),
     };
   }, [
@@ -1005,6 +1242,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     offSlotIds,
     offSlotParts,
     offNotes,
+    offExamDayId,
+    offExamSlotId,
     actor,
     userRole,
   ]);
@@ -1030,8 +1269,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
   const candidateConflictReport = useMemo(() => {
     if (!candidateOffering) return { hasHardConflict: false, errors: [], warnings: [] };
-    return detectOfferingConflicts(candidateOffering, termOfferings, classrooms, professors);
-  }, [candidateOffering, termOfferings, classrooms, professors]);
+    return detectOfferingConflicts(candidateOffering, termOfferings, classrooms, professors, rules);
+  }, [candidateOffering, termOfferings, classrooms, professors, rules]);
 
   const candidateBreakdown = useMemo(() => {
     if (!candidateOffering) return null;
@@ -1121,9 +1360,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           professorId: grpProf?.id,
           professorCode: grpProf?.professorCode,
           professorName: grpProf?.fullName,
+          updatedById: actor.id,
+          updatedByName: actor.name,
           updatedAt: new Date().toISOString(),
         };
-        const rep = detectOfferingConflicts(item, workingTerm, classrooms, professors);
+        const rep = detectOfferingConflicts(item, workingTerm, classrooms, professors, rules);
         if (rep.hasHardConflict) {
           notify('error', `تداخل در ${item.internshipSubGroupLabel}: ${rep.errors[0]}`);
           return;
@@ -1131,7 +1372,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         created.push(item);
         workingTerm.push(item);
       }
-      persistOfferings([...offerings, ...created]);
+      commitOfferingsWithHistory(
+        [...offerings, ...created],
+        `ثبت ${created.length} شعبه کارورزی «${selectedOffCourse.title}»`
+      );
       notify(
         'success',
         `${created.length} شعبه کارورزی برای درس «${selectedOffCourse.title}» با موفقیت ثبت شد.`
@@ -1147,13 +1391,21 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     const saved: SchedCourseOffering = {
       ...candidateOffering,
       id: editingOffId || `off_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      updatedById: actor.id,
+      updatedByName: actor.name,
       updatedAt: new Date().toISOString(),
     };
     if (editingOffId) {
-      persistOfferings(offerings.map((o) => (o.id === editingOffId ? saved : o)));
+      commitOfferingsWithHistory(
+        offerings.map((o) => (o.id === editingOffId ? saved : o)),
+        `ویرایش درس «${saved.courseTitle}»`
+      );
       notify('success', `برنامه درس «${saved.courseTitle}» بروزرسانی شد.`);
     } else {
-      persistOfferings([...offerings, saved]);
+      commitOfferingsWithHistory(
+        [...offerings, saved],
+        `ثبت درس «${saved.courseTitle}»`
+      );
       notify('success', `درس «${saved.courseTitle}» با موفقیت در برنامه ترم ${activeTerm} ثبت شد.`);
     }
     setOffModalOpen(false);
@@ -1265,6 +1517,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   ? 'مدیر کل سامانه'
                   : userRole === 'academic_deputy'
                   ? 'معاونت آموزشی'
+                  : userRole === 'education_expert'
+                  ? `کارشناس آموزش${allowedMajorNames.length > 0 ? ` (${allowedMajorNames.join('، ')})` : ''}`
                   : `مدیر گروه آموزشی${allowedMajorNames.length > 0 ? ` (${allowedMajorNames.join('، ')})` : ''}`}
               </span>
             </div>
@@ -1333,6 +1587,56 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 ثبت
               </button>
             </div>
+          )}
+
+          {!viewLockStatus.locked && (
+            <>
+              <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-xl p-1">
+                <button
+                  type="button"
+                  disabled={historyState.undoStack.length === 0}
+                  onClick={handleUndoOfferings}
+                  title={
+                    historyState.undoStack.length > 0
+                      ? `بازگشت تغییر من: ${historyState.undoStack[historyState.undoStack.length - 1].label}`
+                      : 'تغییری برای بازگشت توسط شما ثبت نشده است'
+                  }
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-100 hover:bg-slate-700 disabled:opacity-35 inline-flex items-center gap-1 cursor-pointer transition"
+                >
+                  <Undo2 className="w-3.5 h-3.5 text-amber-300" />
+                  <span>بازگشت</span>
+                  {historyState.undoStack.length > 0 && (
+                    <span className="text-[10px] font-mono text-amber-300">
+                      ({historyState.undoStack.length.toLocaleString('fa-IR')})
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={historyState.redoStack.length === 0}
+                  onClick={handleRedoOfferings}
+                  title={
+                    historyState.redoStack.length > 0
+                      ? `انجام مجدد تغییر من: ${historyState.redoStack[historyState.redoStack.length - 1].label}`
+                      : 'موردی برای انجام مجدد وجود ندارد'
+                  }
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-100 hover:bg-slate-700 disabled:opacity-35 inline-flex items-center gap-1 cursor-pointer transition"
+                >
+                  <Redo2 className="w-3.5 h-3.5 text-sky-300" />
+                  <span>انجام مجدد</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setCommonExamModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-extrabold inline-flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                title="تنظیم یکجای روز و سانس امتحانات دروس مشترک و عمومی و رصد تداخل ردیف‌ها"
+              >
+                <CalendarClock className="w-3.5 h-3.5" />
+                <span>برنامه امتحانات مشترک / عمومی</span>
+              </button>
+            </>
           )}
 
           {isSystemAdmin && (
@@ -1931,19 +2235,18 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
           {/* ۴. اساتید (فقط مدیر سامانه) */}
           {section === 'professors' && isSystemAdmin && (
-            <div className="space-y-4 max-w-6xl mx-auto">
-              <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="space-y-4 max-w-7xl mx-auto">
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div>
                   <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
-                    بانک اساتید (کد استاد یکتا، مشخصات استخدامی و زمان عدم حضور)
+                    بانک اساتید (پشتیبانی مستقیم از گزارش ۴۵ گلستان با تفکیک مقطع و رشته)
                   </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    تمایز قطعی اساتید هم‌نام با کد استاد یکتا · دسترسی ورود اساتید با کد استاد و کد ملی
-                    {!canViewSensitiveProfInfo && ' · شماره حساب و کدملی نزد مدیران گروه مخفی است'}
+                  <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                    فایل اکسل خروجی <strong className="text-indigo-700 dark:text-indigo-300">گزارش ۴۵ سامانه گلستان</strong> را مستقیماً و بدون هیچ تغییری بارگذاری کنید تا ستون‌های شماره شناسایی، نام و نام خانوادگی، جنس، نام پدر، شماره ملی، گروه آموزشی، واحد/مرکز، تلفن همراه و ثابت، آخرین مدرک تحصیلی، رشته و گرایش تحصیلی، پایه، مرتبه علمی، وضعیت استخدام، بانک و شماره حساب استخراج شوند.
                   </p>
                 </div>
                 {canManageMasterData && (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 shrink-0">
                     <button
                       type="button"
                       onClick={() => void downloadSchedExcelTemplate('professors')}
@@ -1954,7 +2257,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     </button>
                     <label className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer">
                       <Upload className="w-3.5 h-3.5" />
-                      <span>ورود از اکسل</span>
+                      <span>ورود مستقیم اکسل / گزارش ۴۵ گلستان</span>
                       <input
                         type="file"
                         accept=".xlsx,.xls,.csv"
@@ -1962,6 +2265,37 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         className="hidden"
                       />
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rows = professors.map((p) => ({
+                          'شماره شناسایی': p.professorCode,
+                          'نام استاد': p.firstName || '',
+                          'نام خانوادگی استاد': p.lastName || '',
+                          'نام و نام خانوادگی': p.fullName,
+                          'جنس': p.gender || '',
+                          'نام پدر': p.fatherName || '',
+                          'شماره ملی': p.nationalId || '',
+                          'نام فارسی گروه آموزشی': p.departmentName || '',
+                          'نام واحد/مرکز': p.unitCenterName || '',
+                          'تلفن همراه': p.mobile || p.phone || '',
+                          'تلفن': p.landlinePhone || '',
+                          'آخرین مدرک تحصیلی': p.degreeLevel || '',
+                          'رشته تحصیلی': p.degreeField || '',
+                          'گرایش تحصیلی': p.degreeSpecialization || '',
+                          'پایه': p.academicStep || '',
+                          'مرتبه علمی': p.academicRank || '',
+                          'وضعیت استخدام': p.employmentStatusRaw || SCHED_EMPLOYMENT_LABELS[p.employmentType],
+                          'بانک': p.bankName || '',
+                          'شماره حساب': p.bankAccount || '',
+                        }));
+                        void exportJsonRowsToExcel(rows, 'اساتید', `بانک_اساتید_${activeTerm}.xlsx`);
+                      }}
+                      className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>خروجی اکسل اساتید</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => openProfModal()}
@@ -1975,13 +2309,13 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="relative flex-1 max-w-sm">
+                <div className="relative flex-1 max-w-md">
                   <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
                   <input
                     type="text"
                     value={profSearch}
                     onChange={(e) => setProfSearch(e.target.value)}
-                    placeholder="جستجوی نام، کد استاد یا مدرک تحصیلی..."
+                    placeholder="جستجوی نام، شماره شناسایی، مقطع، رشته، گروه آموزشی یا مرتبه علمی..."
                     className="w-full pr-9 pl-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
                   />
                 </div>
@@ -1991,12 +2325,13 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-right">
-                      <th className="p-3">کد استاد</th>
-                      <th className="p-3">نام و نام خانوادگی</th>
-                      <th className="p-3">مدرک و رشته</th>
-                      <th className="p-3">نوع استخدام</th>
-                      <th className="p-3">شماره تماس</th>
-                      {canViewSensitiveProfInfo && <th className="p-3">کدملی / حساب بانکی</th>}
+                      <th className="p-3">شماره شناسایی</th>
+                      <th className="p-3">نام و مشخصات فردی</th>
+                      <th className="p-3">مقطع و رشته (جداگانه)</th>
+                      <th className="p-3">گروه آموزشی / مرکز</th>
+                      <th className="p-3">مرتبه، پایه و استخدام</th>
+                      <th className="p-3">تماس (همراه / ثابت)</th>
+                      {canViewSensitiveProfInfo && <th className="p-3">کدملی / بانک و حساب</th>}
                       <th className="p-3 text-center">واحد معادل ترم {activeTerm}</th>
                       <th className="p-3 text-center">عملیات</th>
                     </tr>
@@ -2006,7 +2341,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       .filter((p) => {
                         const q = profSearch.trim().toLowerCase();
                         if (!q) return true;
-                        return `${p.fullName} ${p.professorCode} ${p.degreeFull}`
+                        return `${p.fullName} ${p.firstName || ''} ${p.lastName || ''} ${p.professorCode} ${p.nationalId || ''} ${p.degreeLevel || ''} ${p.degreeField || ''} ${p.degreeSpecialization || ''} ${p.degreeFull || ''} ${p.departmentName || ''} ${p.unitCenterName || ''} ${p.academicRank || ''} ${p.employmentStatusRaw || ''}`
                           .toLowerCase()
                           .includes(q);
                       })
@@ -2017,20 +2352,75 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             <td className="p-3 font-mono font-bold text-teal-700 dark:text-teal-400">
                               {p.professorCode}
                             </td>
-                            <td className="p-3 font-bold text-slate-900 dark:text-white">
-                              {p.fullName}
+                            <td className="p-3">
+                              <div className="font-bold text-slate-900 dark:text-white">
+                                {p.fullName}
+                              </div>
+                              {(p.fatherName || p.gender) && (
+                                <div className="text-[10.5px] text-slate-500 mt-0.5">
+                                  {p.gender ? `${p.gender}` : ''}
+                                  {p.gender && p.fatherName ? ' · ' : ''}
+                                  {p.fatherName ? `فرزند ${p.fatherName}` : ''}
+                                </div>
+                              )}
                             </td>
-                            <td className="p-3 text-slate-600 dark:text-slate-300">
-                              {p.degreeFull || '—'}
+                            <td className="p-3 text-slate-700 dark:text-slate-300 space-y-0.5">
+                              {(p.degreeLevel || p.degreeField) ? (
+                                <>
+                                  {p.degreeLevel && (
+                                    <div className="text-[11px]">
+                                      <span className="text-slate-400">مقطع:</span>{' '}
+                                      <span className="font-bold">{p.degreeLevel}</span>
+                                    </div>
+                                  )}
+                                  {p.degreeField && (
+                                    <div className="text-[11px]">
+                                      <span className="text-slate-400">رشته:</span>{' '}
+                                      <span className="font-semibold">{p.degreeField}</span>
+                                    </div>
+                                  )}
+                                  {p.degreeSpecialization && (
+                                    <div className="text-[10.5px] text-slate-500">
+                                      گرایش: {p.degreeSpecialization}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <span>{p.degreeFull || '—'}</span>
+                              )}
                             </td>
-                            <td className="p-3">{SCHED_EMPLOYMENT_LABELS[p.employmentType]}</td>
-                            <td className="p-3 font-mono" dir="ltr">
-                              {p.phone || '—'}
+                            <td className="p-3 text-slate-700 dark:text-slate-300">
+                              <div className="font-semibold">{p.departmentName || '—'}</div>
+                              {p.unitCenterName && (
+                                <div className="text-[10.5px] text-slate-500 mt-0.5">
+                                  {p.unitCenterName}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              <div className="font-bold text-slate-800 dark:text-slate-200">
+                                {p.academicRank || SCHED_EMPLOYMENT_LABELS[p.employmentType]}
+                                {p.academicStep ? ` (پایه ${p.academicStep})` : ''}
+                              </div>
+                              <div className="text-[10.5px] text-slate-500 mt-0.5">
+                                {p.employmentStatusRaw || SCHED_EMPLOYMENT_LABELS[p.employmentType]}
+                              </div>
+                            </td>
+                            <td className="p-3 font-mono text-[11px]" dir="ltr">
+                              <div>{p.mobile || p.phone || '—'}</div>
+                              {p.landlinePhone && (
+                                <div className="text-slate-400">ثابت: {p.landlinePhone}</div>
+                              )}
                             </td>
                             {canViewSensitiveProfInfo && (
                               <td className="p-3 font-mono text-[11px]" dir="ltr">
                                 <div>{p.nationalId || '—'}</div>
-                                <div className="text-slate-400">{p.bankAccount || 'بدون حساب'}</div>
+                                <div className="text-slate-500" dir="rtl">
+                                  {p.bankName ? `${p.bankName} · ` : ''}
+                                  <span className="font-mono" dir="ltr">
+                                    {p.bankAccount || 'بدون حساب'}
+                                  </span>
+                                </div>
                               </td>
                             )}
                             <td className="p-3 text-center font-bold">
@@ -2747,6 +3137,398 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   </div>
                 </div>
 
+                {/* تنظیمات بازه امتحانات پایان ترم و سانس‌های امتحانی (ترم فعال) */}
+                {(() => {
+                  const draftExam = getExamSettingsForTerm(draftRules, activeTerm);
+                  const updateDraftExam = (nextExam: SchedExamSettings) => {
+                    setDraftRules((prev) => ({
+                      ...prev,
+                      examSettings: nextExam,
+                      examSettingsByTerm: {
+                        ...(prev.examSettingsByTerm || {}),
+                        [activeTerm]: nextExam,
+                      },
+                    }));
+                  };
+                  return (
+                    <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-l from-violet-50/80 via-fuchsia-50/50 to-sky-50/60 dark:from-violet-950/30 dark:via-fuchsia-950/15 dark:to-sky-950/20 border border-violet-200 dark:border-violet-800 space-y-4 text-xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-violet-200/70 dark:border-violet-800/60">
+                        <div className="flex items-start gap-2.5">
+                          <div className="p-2 rounded-xl bg-violet-600 text-white shrink-0">
+                            <CalendarClock className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-sm text-violet-950 dark:text-violet-100">
+                              بازه امتحانات پایان ترم و سانس‌های امتحانی (ترم {activeTerm})
+                            </h3>
+                            <p className="text-[11px] text-violet-800/85 dark:text-violet-300 mt-0.5 leading-relaxed">
+                              تاریخ شروع امتحانات را مشخص کنید تا روزهای امتحان (پیش‌فرض ۱۲ روزکاری ۲ هفته‌ای بدون جمعه‌ها با عنوان روز ۱ تا روز ۱۲ + تاریخ شمسی) و سانس‌های امتحان ساخته شوند. فقط دروس نظری دارای امتحان هستند.
+                            </p>
+                          </div>
+                        </div>
+                        {isSystemAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextRules: SchedRulesSettings = {
+                                ...draftRules,
+                                examSettings: draftExam,
+                                examSettingsByTerm: {
+                                  ...(draftRules.examSettingsByTerm || {}),
+                                  [activeTerm]: draftExam,
+                                },
+                              };
+                              setDraftRules(nextRules);
+                              persistRules(nextRules);
+                              notify('success', `بازه و سانس‌های امتحانی ترم ${activeTerm} ذخیره شد.`);
+                            }}
+                            className="px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-extrabold cursor-pointer shrink-0"
+                          >
+                            ذخیره تنظیمات امتحان ترم {activeTerm}
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                        <label className="space-y-1">
+                          <span className="font-bold text-slate-700 dark:text-slate-200 block">
+                            تاریخ شروع بازه امتحانات (شمسی):
+                          </span>
+                          <input
+                            type="text"
+                            dir="ltr"
+                            placeholder="1404/10/20"
+                            disabled={!isSystemAdmin}
+                            value={draftExam.startDate}
+                            onChange={(e) =>
+                              updateDraftExam({ ...draftExam, startDate: e.target.value })
+                            }
+                            className="w-full px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-slate-900 font-mono text-center"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="font-bold text-slate-700 dark:text-slate-200 block">
+                            روز شروع پیش‌فرض (در صورت نبود تاریخ):
+                          </span>
+                          <select
+                            disabled={!isSystemAdmin}
+                            value={draftExam.startDayOfWeek || 'saturday'}
+                            onChange={(e) =>
+                              updateDraftExam({
+                                ...draftExam,
+                                startDayOfWeek: e.target.value as SchedDayKey,
+                              })
+                            }
+                            className="w-full px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-slate-900 font-bold"
+                          >
+                            {SCHED_DAYS_ORDER.map((dk) => (
+                              <option key={dk} value={dk}>
+                                {SCHED_DAY_LABELS[dk]}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-1">
+                          <span className="font-bold text-slate-700 dark:text-slate-200 block">
+                            تعداد روزهای امتحانی:
+                          </span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={30}
+                            disabled={!isSystemAdmin}
+                            value={draftExam.daysCount}
+                            onChange={(e) =>
+                              updateDraftExam({
+                                ...draftExam,
+                                daysCount: Math.max(1, Math.min(30, Number(e.target.value) || 12)),
+                              })
+                            }
+                            className="w-full px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-slate-900 font-mono text-center"
+                          />
+                        </label>
+                        <div className="flex flex-col gap-2">
+                          <label className="inline-flex items-center gap-2 font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              disabled={!isSystemAdmin}
+                              checked={draftExam.skipFridays}
+                              onChange={(e) =>
+                                updateDraftExam({ ...draftExam, skipFridays: e.target.checked })
+                              }
+                              className="w-4 h-4 accent-violet-600 rounded"
+                            />
+                            <span>حذف خودکار روزهای جمعه</span>
+                          </label>
+                          {isSystemAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const seq = buildExamDaysSequence({
+                                  startDate: draftExam.startDate,
+                                  startDayOfWeek: draftExam.startDayOfWeek,
+                                  daysCount: draftExam.daysCount,
+                                  skipFridays: draftExam.skipFridays,
+                                  existingDays: draftExam.examDays,
+                                });
+                                updateDraftExam({ ...draftExam, examDays: seq });
+                                notify('success', `${seq.length.toLocaleString('fa-IR')} روز امتحانی بر اساس تاریخ شروع بازتولید شد.`);
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-violet-700 text-white font-extrabold text-[11px] cursor-pointer transition"
+                            >
+                              تولید / بروزرسانی خودکار روزهای امتحان
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* جدول روزهای امتحانی (روز ۱ تا روز N با تاریخ و عنوان) */}
+                      <div className="space-y-2">
+                        <div className="font-extrabold text-slate-800 dark:text-slate-200">
+                          روزهای امتحانی تعریف‌شده ({draftExam.examDays.length.toLocaleString('fa-IR')} روز):
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {draftExam.examDays.map((day, dIdx) => (
+                            <div
+                              key={day.id}
+                              className={`p-2.5 rounded-xl border flex flex-col gap-1.5 ${
+                                day.isActive
+                                  ? 'bg-white dark:bg-slate-900 border-violet-200 dark:border-violet-800'
+                                  : 'bg-slate-100/80 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 opacity-65'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <input
+                                  type="text"
+                                  disabled={!isSystemAdmin}
+                                  value={day.label}
+                                  onChange={(e) =>
+                                    updateDraftExam({
+                                      ...draftExam,
+                                      examDays: draftExam.examDays.map((x, i) =>
+                                        i === dIdx ? { ...x, label: e.target.value } : x
+                                      ),
+                                    })
+                                  }
+                                  className="font-black text-xs bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 w-24"
+                                />
+                                <input
+                                  type="text"
+                                  disabled={!isSystemAdmin}
+                                  value={day.weekdayLabel}
+                                  onChange={(e) =>
+                                    updateDraftExam({
+                                      ...draftExam,
+                                      examDays: draftExam.examDays.map((x, i) =>
+                                        i === dIdx ? { ...x, weekdayLabel: e.target.value } : x
+                                      ),
+                                    })
+                                  }
+                                  className="text-[11px] font-bold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 w-24 text-center"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={!isSystemAdmin}
+                                  onClick={() =>
+                                    updateDraftExam({
+                                      ...draftExam,
+                                      examDays: draftExam.examDays.map((x, i) =>
+                                        i === dIdx ? { ...x, isActive: !x.isActive } : x
+                                      ),
+                                    })
+                                  }
+                                  className={`px-2 py-1 rounded text-[10px] font-extrabold cursor-pointer ${
+                                    day.isActive
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200'
+                                      : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-200'
+                                  }`}
+                                >
+                                  {day.isActive ? 'فعال' : 'تعطیل'}
+                                </button>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-slate-500">تاریخ:</span>
+                                <input
+                                  type="text"
+                                  dir="ltr"
+                                  disabled={!isSystemAdmin}
+                                  value={day.date}
+                                  onChange={(e) =>
+                                    updateDraftExam({
+                                      ...draftExam,
+                                      examDays: draftExam.examDays.map((x, i) =>
+                                        i === dIdx ? { ...x, date: e.target.value } : x
+                                      ),
+                                    })
+                                  }
+                                  placeholder="1404/10/20"
+                                  className="flex-1 font-mono text-[11px] px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-center"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* سانس‌های امتحانی */}
+                      <div className="space-y-2 pt-2 border-t border-violet-200/70 dark:border-violet-800/60">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-extrabold text-slate-800 dark:text-slate-200">
+                            سانس‌های برگزاری امتحانات:
+                          </span>
+                          {isSystemAdmin && (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateDraftExam({
+                                    ...draftExam,
+                                    examSlots: buildDefaultExamSlots(),
+                                  })
+                                }
+                                className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-bold text-[11px] cursor-pointer"
+                              >
+                                بازنشانی ۳ سانس پیش‌فرض
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextOrder = draftExam.examSlots.length + 1;
+                                  const newEs: SchedExamSlot = {
+                                    id: `exam_slot_${Date.now()}`,
+                                    label: `سانس ${nextOrder.toLocaleString('fa-IR')} امتحان`,
+                                    startTime: '16:30',
+                                    endTime: '18:30',
+                                    order: nextOrder,
+                                  };
+                                  updateDraftExam({
+                                    ...draftExam,
+                                    examSlots: [...draftExam.examSlots, newEs],
+                                  });
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold text-[11px] cursor-pointer"
+                              >
+                                + افزودن سانس امتحانی
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                          {[...draftExam.examSlots]
+                            .sort((a, b) => a.order - b.order)
+                            .map((es, esIdx, arr) => {
+                              const moveExamSlot = (dir: -1 | 1) => {
+                                const targetIdx = esIdx + dir;
+                                if (targetIdx < 0 || targetIdx >= arr.length) return;
+                                const copy = [...arr];
+                                const [moved] = copy.splice(esIdx, 1);
+                                copy.splice(targetIdx, 0, moved);
+                                updateDraftExam({
+                                  ...draftExam,
+                                  examSlots: copy.map((s, idx) => ({ ...s, order: idx + 1 })),
+                                });
+                              };
+                              return (
+                                <div
+                                  key={es.id}
+                                  className="p-2.5 rounded-xl border border-violet-200 dark:border-violet-800 bg-white dark:bg-slate-900 space-y-1.5"
+                                >
+                                  <div className="flex items-center justify-between gap-1">
+                                    <input
+                                      type="text"
+                                      disabled={!isSystemAdmin}
+                                      value={es.label}
+                                      onChange={(e) =>
+                                        updateDraftExam({
+                                          ...draftExam,
+                                          examSlots: draftExam.examSlots.map((x) =>
+                                            x.id === es.id ? { ...x, label: e.target.value } : x
+                                          ),
+                                        })
+                                      }
+                                      className="font-bold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 w-full"
+                                    />
+                                    {isSystemAdmin && (
+                                      <div className="inline-flex items-center gap-0.5 shrink-0">
+                                        <button
+                                          type="button"
+                                          disabled={esIdx === 0}
+                                          onClick={() => moveExamSlot(-1)}
+                                          className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
+                                        >
+                                          <ArrowUp className="w-3 h-3" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={esIdx === arr.length - 1}
+                                          onClick={() => moveExamSlot(1)}
+                                          className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
+                                        >
+                                          <ArrowDown className="w-3 h-3" />
+                                        </button>
+                                        {draftExam.examSlots.length > 1 && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              updateDraftExam({
+                                                ...draftExam,
+                                                examSlots: draftExam.examSlots.filter(
+                                                  (x) => x.id !== es.id
+                                                ),
+                                              })
+                                            }
+                                            className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 font-mono" dir="ltr">
+                                    <input
+                                      type="text"
+                                      disabled={!isSystemAdmin}
+                                      value={es.startTime}
+                                      onChange={(e) =>
+                                        updateDraftExam({
+                                          ...draftExam,
+                                          examSlots: draftExam.examSlots.map((x) =>
+                                            x.id === es.id
+                                              ? { ...x, startTime: e.target.value }
+                                              : x
+                                          ),
+                                        })
+                                      }
+                                      className="w-16 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-center"
+                                    />
+                                    <span>-</span>
+                                    <input
+                                      type="text"
+                                      disabled={!isSystemAdmin}
+                                      value={es.endTime}
+                                      onChange={(e) =>
+                                        updateDraftExam({
+                                          ...draftExam,
+                                          examSlots: draftExam.examSlots.map((x) =>
+                                            x.id === es.id
+                                              ? { ...x, endTime: e.target.value }
+                                              : x
+                                          ),
+                                        })
+                                      }
+                                      className="w-16 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-center"
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* کنترل انتشار و سطح دسترسی مشاهده «برنامه ترم» برای دانشجویان (ویژه مدیر سامانه) */}
                 <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-l from-indigo-50/80 via-sky-50/70 to-teal-50/70 dark:from-indigo-950/30 dark:via-sky-950/20 dark:to-teal-950/20 border border-indigo-200 dark:border-indigo-800 space-y-4 text-xs">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-indigo-200/70 dark:border-indigo-800/60">
@@ -2990,6 +3772,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               lockedSlotIds: [],
               lockedDeptHeadIds: [],
               lockedAcademicDeputyIds: [],
+              lockedExpertIds: [],
               blockedViewUserIds: [],
             };
             const updateLocks = (
@@ -3015,10 +3798,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     <div>
                       <h2 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
                         <Lock className="w-4 h-4 text-rose-600" />
-                        <span>قفل و مسدودسازی دسترسی و تغییرات برنامه (مدیران گروه و معاونت)</span>
+                        <span>قفل و مسدودسازی دسترسی و تغییرات برنامه (مدیران گروه، کارشناسان و معاونت)</span>
                       </h2>
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        مدیر کل سامانه در هر شرایطی دسترسی کامل دارد. در این بخش می‌توانید تغییرات کل یا بخشی از برنامه را مسدود کنید یا دسترسی ویرایش و حتی مشاهده کامل برنامه را برای هر مدیر گروه یا معاون آموزشی ببندید.
+                        مدیر کل سامانه در هر شرایطی دسترسی کامل دارد. در این بخش می‌توانید تغییرات کل یا بخشی از برنامه را مسدود کنید یا دسترسی ویرایش و حتی مشاهده کامل برنامه را برای هر مدیر گروه، کارشناس آموزش یا معاون آموزشی ببندید.
                       </p>
                     </div>
                     <button
@@ -3031,6 +3814,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                           lockedSlotIds: [],
                           lockedDeptHeadIds: [],
                           lockedAcademicDeputyIds: [],
+                          lockedExpertIds: [],
                           blockedViewUserIds: [],
                         });
                         notify('success', 'تمام قفل‌ها و محدودیت‌های ویرایش و مشاهده برنامه آزاد شدند.');
@@ -3199,12 +3983,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     </div>
                   </div>
 
-                  {/* مسدودسازی دسترسی ویرایش و مشاهده برای مدیران گروه و معاونان آموزشی */}
-                  {(deptHeadUsers.length > 0 || academicDeputyUsers.length > 0) && (
+                  {/* مسدودسازی دسترسی ویرایش و مشاهده برای مدیران گروه، کارشناسان آموزش و معاونان آموزشی */}
+                  {(deptHeadUsers.length > 0 || academicDeputyUsers.length > 0 || expertUsers.length > 0) && (
                     <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
                       <div>
                         <div className="font-extrabold text-slate-900 dark:text-white">
-                          مسدودسازی دسترسی ویرایش یا مشاهده برای هر مدیر گروه و معاون آموزشی:
+                          مسدودسازی دسترسی ویرایش یا مشاهده برای هر مدیر گروه، کارشناس و معاون آموزشی:
                         </div>
                         <p className="text-[11px] text-slate-500 mt-0.5">
                           «مسدودیت ویرایش» صرفاً مانع ثبت، حذف و جابجایی دروس توسط آن کاربر می‌شود؛ اما «مسدودیت مشاهده کامل» ورود کاربر به جداول برنامه جامع، استودیو و گزارش‌ها را به‌طور کامل می‌بندد.
@@ -3267,6 +4051,83 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                           blockedViewUserIds: toggleArrayItem(
                                             locks.blockedViewUserIds,
                                             head.id
+                                          ),
+                                        })
+                                      }
+                                      className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer transition ${
+                                        viewBlocked
+                                          ? 'bg-rose-600 text-white border-rose-600'
+                                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300'
+                                      }`}
+                                      title="مسدود کردن کامل مشاهده برنامه درسی"
+                                    >
+                                      <EyeOff className="w-3 h-3" />
+                                      <span>{viewBlocked ? 'مشاهده مسدود' : 'مسدودیت مشاهده'}</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {expertUsers.length > 0 && (
+                        <div className="space-y-2 pt-1">
+                          <div className="text-[11px] font-black text-sky-700 dark:text-sky-300">
+                            کارشناسان آموزش ({expertUsers.length.toLocaleString('fa-IR')} نفر):
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {expertUsers.map((exp) => {
+                              const editLocked = Boolean(locks.lockedExpertIds?.includes(exp.id));
+                              const viewBlocked = Boolean(locks.blockedViewUserIds?.includes(exp.id));
+                              return (
+                                <div
+                                  key={exp.id}
+                                  className={`p-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 transition ${
+                                    viewBlocked
+                                      ? 'bg-rose-50/90 dark:bg-rose-950/35 border-rose-300 dark:border-rose-800'
+                                      : editLocked
+                                      ? 'bg-amber-50/80 dark:bg-amber-950/25 border-amber-300 dark:border-amber-800'
+                                      : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <div className="font-extrabold text-slate-900 dark:text-white truncate">
+                                      {exp.fullName}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                                      رشته‌ها: {exp.assignedFields || '---'}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateLocks({
+                                          lockedExpertIds: toggleArrayItem(
+                                            locks.lockedExpertIds,
+                                            exp.id
+                                          ),
+                                        })
+                                      }
+                                      className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer transition ${
+                                        editLocked
+                                          ? 'bg-amber-600 text-white border-amber-600'
+                                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300'
+                                      }`}
+                                      title="مسدود کردن امکان تغییر یا جابجایی درس"
+                                    >
+                                      <Lock className="w-3 h-3" />
+                                      <span>{editLocked ? 'ویرایش مسدود' : 'قفل ویرایش'}</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateLocks({
+                                          blockedViewUserIds: toggleArrayItem(
+                                            locks.blockedViewUserIds,
+                                            exp.id
                                           ),
                                         })
                                       }
@@ -3392,7 +4253,22 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               isOwnMajorName={isOwnMajorName}
               cellComments={cellComments}
               onPersistCellComments={persistCellComments}
-              onPersistOfferings={persistOfferings}
+              onCommitOfferings={commitOfferingsWithHistory}
+              canUndo={historyState.undoStack.length > 0}
+              canRedo={historyState.redoStack.length > 0}
+              undoLabel={
+                historyState.undoStack.length > 0
+                  ? historyState.undoStack[historyState.undoStack.length - 1].label
+                  : undefined
+              }
+              redoLabel={
+                historyState.redoStack.length > 0
+                  ? historyState.redoStack[historyState.redoStack.length - 1].label
+                  : undefined
+              }
+              onUndo={handleUndoOfferings}
+              onRedo={handleRedoOfferings}
+              onOpenCommonExamModal={() => setCommonExamModalOpen(true)}
               onOpenNewOffering={(opts) => openNewOfferingModal(opts)}
               onOpenEditOffering={(o) => openEditOfferingModal(o)}
               onNotify={notify}
@@ -3422,6 +4298,14 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     >
                       <Plus className="w-4 h-4" />
                       <span>ثبت / ارائه درس جدید در برنامه</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCommonExamModalOpen(true)}
+                      className="px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <CalendarClock className="w-3.5 h-3.5" />
+                      <span>امتحانات مشترک / عمومی</span>
                     </button>
                     <button
                       type="button"
@@ -3466,6 +4350,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                 return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : id;
                               })
                               .join(' + '),
+                            'زمان امتحان': isCourseEligibleForExam(o)
+                              ? formatExamAssignmentShort(o, activeTermExamSettings) || 'تعیین‌نشده'
+                              : 'ندارد (عملی/نظری-عملی)',
                             'واحد کل': bd.rawUnits,
                             'ساعت هفتگی': bd.weeklyHours,
                             'واحد معادل استاد': bd.equivalentUnits,
@@ -3627,7 +4514,14 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                       o,
                                       termOfferings,
                                       classrooms,
-                                      professors
+                                      professors,
+                                      rules
+                                    );
+                                    const examLabel = isCourseEligibleForExam(o)
+                                      ? formatExamAssignmentShort(o, activeTermExamSettings)
+                                      : '';
+                                    const hasExamWarn = conf.warnings.some((w) =>
+                                      w.includes('تداخل امتحان')
                                     );
                                     const bd = calculateOfferingBreakdown(o, rules);
                                     return (
@@ -3657,6 +4551,17 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                         {o.sharedWithTargets && o.sharedWithTargets.length > 0 && (
                                           <div className="text-[10px] text-indigo-700 dark:text-indigo-300 font-bold mt-0.5">
                                             مشترک با {o.sharedWithTargets.length} گروه دیگر
+                                          </div>
+                                        )}
+                                        {examLabel && (
+                                          <div
+                                            className={`text-[10px] font-bold mt-0.5 ${
+                                              hasExamWarn
+                                                ? 'text-amber-700 dark:text-amber-300'
+                                                : 'text-violet-700 dark:text-violet-300'
+                                            }`}
+                                          >
+                                            {hasExamWarn ? '⚠ ' : ''}امتحان: {examLabel}
                                           </div>
                                         )}
                                         {conf.hasHardConflict && (
@@ -3704,8 +4609,13 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                           o,
                           termOfferings,
                           classrooms,
-                          professors
+                          professors,
+                          rules
                         );
+                        const examLabel = isCourseEligibleForExam(o)
+                          ? formatExamAssignmentShort(o, activeTermExamSettings)
+                          : '';
+                        const examWarns = conf.warnings.filter((w) => w.includes('تداخل امتحان'));
                         return (
                           <tr key={o.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                             <td className="p-3 font-mono font-bold text-indigo-700 dark:text-indigo-400">
@@ -3716,6 +4626,18 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                               {conf.hasHardConflict && (
                                 <div className="text-[10px] text-rose-600 font-extrabold">
                                   دارای تداخل زمانی
+                                </div>
+                              )}
+                              {examLabel && (
+                                <div
+                                  className={`text-[10px] font-bold mt-0.5 ${
+                                    examWarns.length > 0
+                                      ? 'text-amber-700 dark:text-amber-300'
+                                      : 'text-violet-700 dark:text-violet-300'
+                                  }`}
+                                >
+                                  امتحان: {examLabel}
+                                  {examWarns.length > 0 ? ' (دارای اخطار تداخل امتحان)' : ''}
                                 </div>
                               )}
                             </td>
@@ -3781,7 +4703,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                       );
                                       return;
                                     }
-                                    persistOfferings(offerings.filter((x) => x.id !== o.id));
+                                    commitOfferingsWithHistory(
+                                      offerings.filter((x) => x.id !== o.id),
+                                      `حذف درس «${o.courseTitle}»`
+                                    );
                                   }}
                                   className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-600 border border-rose-200 dark:border-rose-800 cursor-pointer"
                                 >
@@ -3830,7 +4755,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     );
                     return;
                   }
-                  persistOfferings([...offerings, ...newOfferings]);
+                  commitOfferingsWithHistory(
+                    [...offerings, ...newOfferings],
+                    `چینش هوشمند (${newOfferings.length} درس)`
+                  );
                   notify(
                     'success',
                     `${newOfferings.length} درس تولیدشده توسط ویزارد هوشمند در برنامه ترم ${activeTerm} ثبت شد.`
@@ -4087,10 +5015,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
       {profModalOpen && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-5 border border-slate-200 dark:border-slate-800 space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full p-5 border border-slate-200 dark:border-slate-800 space-y-4 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="font-extrabold text-sm">
-                {editingProfId ? 'ویرایش مشخصات استاد' : 'ثبت استاد جدید'}
+                {editingProfId ? 'ویرایش مشخصات استاد' : 'ثبت استاد جدید (با تفکیک مقطع و رشته)'}
               </h3>
               <button
                 type="button"
@@ -4101,9 +5029,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               </button>
             </div>
             <form onSubmit={handleSaveProf} className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <label className="space-y-1">
-                  <span className="font-bold">کد استاد یکتا *</span>
+                  <span className="font-bold">شماره شناسایی / کد استاد *</span>
                   <input
                     type="text"
                     required
@@ -4114,19 +5042,32 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="font-bold">نام و نام خانوادگی *</span>
+                  <span className="font-bold">نام استاد *</span>
                   <input
                     type="text"
                     required
-                    value={profName}
-                    onChange={(e) => setProfName(e.target.value)}
+                    value={profFirstName}
+                    onChange={(e) => setProfFirstName(e.target.value)}
+                    placeholder="مثلاً: علی"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="font-bold">نام خانوادگی استاد *</span>
+                  <input
+                    type="text"
+                    required
+                    value={profLastName}
+                    onChange={(e) => setProfLastName(e.target.value)}
+                    placeholder="مثلاً: محمدی"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </label>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <label className="space-y-1">
-                  <span className="font-bold">کد ملی (رمز ورود پیش‌فرض) *</span>
+                  <span className="font-bold">شماره ملی (رمز ورود پیش‌فرض) *</span>
                   <input
                     type="text"
                     required
@@ -4137,7 +5078,102 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="font-bold">نوع استخدام</span>
+                  <span className="font-bold">جنس</span>
+                  <select
+                    value={profGender}
+                    onChange={(e) => setProfGender(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  >
+                    <option value="">-- انتخاب --</option>
+                    <option value="مرد">مرد</option>
+                    <option value="زن">زن</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="font-bold">نام پدر</span>
+                  <input
+                    type="text"
+                    value={profFatherName}
+                    onChange={(e) => setProfFatherName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </label>
+              </div>
+
+              <div className="p-3 rounded-xl bg-teal-50/70 dark:bg-teal-950/25 border border-teal-200 dark:border-teal-800 space-y-2.5">
+                <div className="font-extrabold text-teal-900 dark:text-teal-200">
+                  مشخصات تحصیلی (به‌صورت مجزا: مقطع، رشته و گرایش)
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label className="space-y-1">
+                    <span className="font-bold">مقطع / آخرین مدرک تحصیلی</span>
+                    <input
+                      type="text"
+                      list="prof-degree-level-list"
+                      value={profDegreeLevel}
+                      onChange={(e) => setProfDegreeLevel(e.target.value)}
+                      placeholder="مثلاً: دکتری تخصصی"
+                      className="w-full px-3 py-2 rounded-xl border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-900"
+                    />
+                    <datalist id="prof-degree-level-list">
+                      <option value="دکتری تخصصی" />
+                      <option value="دکتری" />
+                      <option value="دانشجوی دکتری" />
+                      <option value="کارشناسی ارشد" />
+                      <option value="کارشناسی" />
+                      <option value="حوزوی سطح ۳" />
+                      <option value="حوزوی سطح ۴" />
+                    </datalist>
+                  </label>
+                  <label className="space-y-1">
+                    <span className="font-bold">رشته تحصیلی</span>
+                    <input
+                      type="text"
+                      value={profDegreeField}
+                      onChange={(e) => setProfDegreeField(e.target.value)}
+                      placeholder="مثلاً: برنامه‌ریزی درسی"
+                      className="w-full px-3 py-2 rounded-xl border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-900"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="font-bold">گرایش تحصیلی (اختیاری)</span>
+                    <input
+                      type="text"
+                      value={profDegreeSpecialization}
+                      onChange={(e) => setProfDegreeSpecialization(e.target.value)}
+                      placeholder="مثلاً: آموزش ابتدایی"
+                      className="w-full px-3 py-2 rounded-xl border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-900"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="space-y-1">
+                  <span className="font-bold">نام فارسی گروه آموزشی</span>
+                  <input
+                    type="text"
+                    value={profDepartmentName}
+                    onChange={(e) => setProfDepartmentName(e.target.value)}
+                    placeholder="مثلاً: علوم تربیتی"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="font-bold">نام واحد / مرکز</span>
+                  <input
+                    type="text"
+                    value={profUnitCenterName}
+                    onChange={(e) => setProfUnitCenterName(e.target.value)}
+                    placeholder="مثلاً: پردیس شهید باهنر"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className="space-y-1">
+                  <span className="font-bold">نوع استخدام (محاسباتی)</span>
                   <select
                     value={profEmployment}
                     onChange={(e) => setProfEmployment(e.target.value as SchedEmploymentType)}
@@ -4150,28 +5186,83 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     ))}
                   </select>
                 </label>
-              </div>
-              <label className="block space-y-1">
-                <span className="font-bold">مدرک تحصیلی و گرایش</span>
-                <input
-                  type="text"
-                  value={profDegree}
-                  onChange={(e) => setProfDegree(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
                 <label className="space-y-1">
-                  <span className="font-bold">شماره تماس</span>
+                  <span className="font-bold">مرتبه علمی</span>
                   <input
                     type="text"
-                    value={profPhone}
-                    onChange={(e) => setProfPhone(e.target.value)}
+                    list="prof-rank-list"
+                    value={profAcademicRank}
+                    onChange={(e) => setProfAcademicRank(e.target.value)}
+                    placeholder="مثلاً: استادیار"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                  <datalist id="prof-rank-list">
+                    <option value="استاد" />
+                    <option value="دانشیار" />
+                    <option value="استادیار" />
+                    <option value="مربی" />
+                    <option value="مدرس مدعو" />
+                    <option value="معلم مدعو" />
+                  </datalist>
+                </label>
+                <label className="space-y-1">
+                  <span className="font-bold">پایه</span>
+                  <input
+                    type="text"
+                    value={profAcademicStep}
+                    onChange={(e) => setProfAcademicStep(e.target.value)}
+                    placeholder="مثلاً: ۱۲"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
                     dir="ltr"
                   />
                 </label>
-                {canViewSensitiveProfInfo && (
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className="space-y-1">
+                  <span className="font-bold">وضعیت استخدام (عنوان گلستان)</span>
+                  <input
+                    type="text"
+                    value={profEmploymentStatusRaw}
+                    onChange={(e) => setProfEmploymentStatusRaw(e.target.value)}
+                    placeholder="مثلاً: رسمی قطعی / حق‌التدریس"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="font-bold">تلفن همراه</span>
+                  <input
+                    type="text"
+                    value={profMobile}
+                    onChange={(e) => setProfMobile(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                    dir="ltr"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="font-bold">تلفن ثابت</span>
+                  <input
+                    type="text"
+                    value={profLandlinePhone}
+                    onChange={(e) => setProfLandlinePhone(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                    dir="ltr"
+                  />
+                </label>
+              </div>
+
+              {canViewSensitiveProfInfo && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="space-y-1">
+                    <span className="font-bold">نام بانک</span>
+                    <input
+                      type="text"
+                      value={profBankName}
+                      onChange={(e) => setProfBankName(e.target.value)}
+                      placeholder="مثلاً: ملی / سپه"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    />
+                  </label>
                   <label className="space-y-1">
                     <span className="font-bold">شماره حساب بانکی (محرمانه)</span>
                     <input
@@ -4182,8 +5273,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       dir="ltr"
                     />
                   </label>
-                )}
-              </div>
+                </div>
+              )}
+
               <button
                 type="submit"
                 className="w-full py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold cursor-pointer"
@@ -5118,6 +6210,84 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 )}
               </div>
 
+              {/* روز و سانس امتحان پایان ترم (صرفاً برای دروس نظری) */}
+              {selectedOffCourse && (
+                isCourseEligibleForExam(selectedOffCourse) ? (
+                  <div className="p-3 rounded-xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-extrabold text-violet-950 dark:text-violet-100 inline-flex items-center gap-1.5">
+                        <CalendarClock className="w-3.5 h-3.5 text-violet-600 dark:text-violet-300" />
+                        <span>تعیین روز و سانس امتحان پایان ترم (ویژه دروس نظری)</span>
+                      </span>
+                      {(offExamDayId || offExamSlotId) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOffExamDayId('');
+                            setOffExamSlotId('');
+                          }}
+                          className="text-[10.5px] font-bold text-rose-600 hover:underline cursor-pointer"
+                        >
+                          پاک کردن زمان امتحان
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <label className="space-y-1">
+                        <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                          روز امتحان
+                        </span>
+                        <select
+                          value={offExamDayId}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setOffExamDayId(v);
+                            if (v && !offExamSlotId && activeTermExamSettings.examSlots[0]) {
+                              setOffExamSlotId(activeTermExamSettings.examSlots[0].id);
+                            }
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-slate-900 font-bold"
+                        >
+                          <option value="">-- تعیین‌نشده --</option>
+                          {activeTermExamSettings.examDays
+                            .filter((d) => d.isActive)
+                            .map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.label} — {d.weekdayLabel}
+                                {d.date ? ` (${d.date})` : ''}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                          سانس امتحان
+                        </span>
+                        <select
+                          value={offExamSlotId}
+                          onChange={(e) => setOffExamSlotId(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-slate-900 font-bold"
+                        >
+                          <option value="">-- انتخاب سانس امتحانی --</option>
+                          {activeTermExamSettings.examSlots.map((es) => (
+                            <option key={es.id} value={es.id}>
+                              {es.label} ({es.startTime} تا {es.endTime})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <div className="text-[10.5px] text-violet-800/80 dark:text-violet-300">
+                      در صورت هم‌زمانی امتحان دو درس در یک رشته/ورودی/شعبه، سامانه صرفاً اخطار نمایش می‌دهد و مانع ثبت نمی‌شود.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-300">
+                    این درس از نوع <strong>{SCHED_COURSE_TYPE_LABELS[selectedOffCourse.courseType]}</strong> است و فاقد امتحان پایان ترم متمرکز می‌باشد.
+                  </div>
+                )
+              )}
+
               {/* پیش‌نمایش محاسبه ساعات و واحد معادل + خطاهای تداخل */}
               {candidateBreakdown && (
                 <div className="space-y-2">
@@ -5208,7 +6378,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         notify('error', modalLockStatus.reason || 'این بخش قفل است.');
                         return;
                       }
-                      persistOfferings(offerings.filter((x) => x.id !== editingOffId));
+                      commitOfferingsWithHistory(
+                        offerings.filter((x) => x.id !== editingOffId),
+                        `حذف درس «${selectedOffCourse?.title || ''}»`
+                      );
                       setOffModalOpen(false);
                       notify('success', 'درس از برنامه ترم حذف شد.');
                     }}
@@ -5243,6 +6416,31 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           </div>
         </div>
       )}
+
+      {/* مودال برنامه‌ریزی امتحانات دروس مشترک و عمومی */}
+      <CourseSchedulingCommonExamModal
+        isOpen={commonExamModalOpen}
+        onClose={() => setCommonExamModalOpen(false)}
+        activeTerm={activeTerm}
+        offerings={offerings}
+        termOfferings={termOfferings}
+        rules={rules}
+        userRole={userRole}
+        actor={actor}
+        canManageMasterData={canManageMasterData}
+        isOwnMajorName={isOwnMajorName}
+        onCommitOfferings={commitOfferingsWithHistory}
+        onOpenEditOffering={(o) => openEditOfferingModal(o)}
+        onOpenExamSettings={
+          isSystemAdmin
+            ? () => {
+                setCommonExamModalOpen(false);
+                setSection('rules');
+              }
+            : undefined
+        }
+        onNotify={notify}
+      />
     </div>
   );
 };

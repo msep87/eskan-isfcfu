@@ -356,7 +356,7 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
           return false;
         }
         if (q) {
-          const hay = `${p.fullName} ${p.professorCode} ${p.degreeFull}`.toLowerCase();
+          const hay = `${p.fullName} ${p.professorCode} ${p.degreeLevel || ''} ${p.degreeField || ''} ${p.degreeSpecialization || ''} ${p.degreeFull || ''} ${p.departmentName || ''} ${p.academicRank || ''}`.toLowerCase();
           if (!hay.includes(q)) return false;
         }
         if (profMajorFilter !== 'all') {
@@ -1242,13 +1242,13 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
               <button
                 type="button"
                 onClick={() => {
-                  const html = `<table><thead><tr><th>کد استاد</th><th>نام و نام خانوادگی</th><th>مدرک</th><th>نوع استخدام</th>${
-                    canViewSensitiveProfInfo ? '<th>شماره حساب</th>' : ''
+                  const html = `<table><thead><tr><th>کد استاد</th><th>نام و نام خانوادگی</th><th>مقطع</th><th>رشته و گرایش</th><th>گروه آموزشی</th><th>مرتبه / وضعیت استخدام</th>${
+                    canViewSensitiveProfInfo ? '<th>بانک / شماره حساب</th>' : ''
                   }<th>تعداد درس</th><th>واحد خام</th><th>ساعت هفتگی</th><th>واحد معادل</th><th>روزهای حضور</th></tr></thead><tbody>${professorRows
                     .map(
                       ({ prof, summary }) =>
-                        `<tr><td class="mono">${escapeHtml(prof.professorCode)}</td><td><strong>${escapeHtml(prof.fullName)}</strong></td><td>${escapeHtml(prof.degreeFull || '-')}</td><td>${escapeHtml(SCHED_EMPLOYMENT_LABELS[prof.employmentType])}</td>${
-                          canViewSensitiveProfInfo ? `<td class="mono">${escapeHtml(prof.bankAccount || '-')}</td>` : ''
+                        `<tr><td class="mono">${escapeHtml(prof.professorCode)}</td><td><strong>${escapeHtml(prof.fullName)}</strong></td><td>${escapeHtml(prof.degreeLevel || '-')}</td><td>${escapeHtml([prof.degreeField, prof.degreeSpecialization].filter(Boolean).join(' - ') || prof.degreeFull || '-')}</td><td>${escapeHtml(prof.departmentName || '-')}</td><td>${escapeHtml([prof.academicRank, prof.employmentStatusRaw || SCHED_EMPLOYMENT_LABELS[prof.employmentType]].filter(Boolean).join(' · '))}</td>${
+                          canViewSensitiveProfInfo ? `<td class="mono">${escapeHtml([prof.bankName, prof.bankAccount].filter(Boolean).join(' - ') || '-')}</td>` : ''
                         }<td>${summary.offeringCount}</td><td>${summary.rawUnits}</td><td>${summary.weeklyHours}</td><td><strong>${summary.equivalentUnits}</strong></td><td>${escapeHtml(summary.activeDays.map((d) => SCHED_DAY_LABELS[d]).join('، ') || '-')}</td></tr>`
                     )
                     .join('')}</tbody></table>`;
@@ -1264,13 +1264,23 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                 onClick={() => {
                   const rows = professorRows.map(({ prof, summary }) => {
                     const base: Record<string, unknown> = {
-                      'کد استاد': prof.professorCode,
+                      'شماره شناسایی (کد استاد)': prof.professorCode,
                       'نام و نام خانوادگی': prof.fullName,
-                      'مدرک تحصیلی': prof.degreeFull || '-',
-                      'وضعیت استخدامی': SCHED_EMPLOYMENT_LABELS[prof.employmentType],
-                      'شماره تماس': prof.phone || '-',
+                      'جنس': prof.gender || '-',
+                      'نام پدر': prof.fatherName || '-',
+                      'گروه آموزشی': prof.departmentName || '-',
+                      'واحد/مرکز': prof.unitCenterName || '-',
+                      'مقطع (آخرین مدرک تحصیلی)': prof.degreeLevel || '-',
+                      'رشته تحصیلی': prof.degreeField || '-',
+                      'گرایش تحصیلی': prof.degreeSpecialization || '-',
+                      'پایه': prof.academicStep || '-',
+                      'مرتبه علمی': prof.academicRank || '-',
+                      'وضعیت استخدامی': prof.employmentStatusRaw || SCHED_EMPLOYMENT_LABELS[prof.employmentType],
+                      'تلفن همراه': prof.mobile || prof.phone || '-',
+                      'تلفن ثابت': prof.landlinePhone || '-',
                     };
                     if (canViewSensitiveProfInfo) {
+                      base['بانک'] = prof.bankName || '-';
                       base['شماره حساب'] = prof.bankAccount || '-';
                     }
                     base['تعداد دروس'] = summary.offeringCount;
@@ -1323,15 +1333,25 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                     </td>
                     <td className="p-3">
                       <div className="font-extrabold text-slate-900 dark:text-white">{prof.fullName}</div>
-                      <div className="text-[11px] text-slate-500">{prof.degreeFull || '-'}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {prof.degreeLevel || prof.degreeField
+                          ? `مقطع: ${prof.degreeLevel || '—'} · رشته: ${prof.degreeField || '—'}${prof.degreeSpecialization ? ` (${prof.degreeSpecialization})` : ''}`
+                          : prof.degreeFull || '-'}
+                      </div>
                     </td>
                     <td className="p-3 text-slate-700 dark:text-slate-300">
-                      {SCHED_EMPLOYMENT_LABELS[prof.employmentType]}
+                      <div>{prof.academicRank || SCHED_EMPLOYMENT_LABELS[prof.employmentType]}</div>
+                      {prof.departmentName && (
+                        <div className="text-[10.5px] text-slate-400">{prof.departmentName}</div>
+                      )}
                     </td>
                     {canViewSensitiveProfInfo && (
                       <td className="p-3 font-mono text-[11px] text-slate-600 dark:text-slate-300" dir="ltr">
-                        <div>{prof.bankAccount || 'بدون شماره حساب'}</div>
-                        <div className="text-slate-400">{prof.phone || '-'}</div>
+                        <div>
+                          {prof.bankName ? `${prof.bankName}: ` : ''}
+                          {prof.bankAccount || 'بدون شماره حساب'}
+                        </div>
+                        <div className="text-slate-400">{prof.mobile || prof.phone || '-'}</div>
                       </td>
                     )}
                     <td className="p-3 text-center">{summary.offeringCount}</td>

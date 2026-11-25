@@ -69,7 +69,7 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
   const [isSchedulingOpen, setIsSchedulingOpen] = useState(false);
 
   const isDeptHead = role === 'education' && educationStaff ? isEducationDepartmentHead(educationStaff) : false;
-  const canOpenCourseScheduling = role === 'academic_deputy' || isDeptHead;
+  const canOpenCourseScheduling = role === 'academic_deputy' || role === 'education';
   const actorWorkflowRole: 'department_head' | 'education_expert' | 'graduation' =
     role === 'graduation'
       ? 'graduation'
@@ -112,9 +112,14 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
 
   const schedViewLock = useMemo(() => {
     const rules = Storage.getSchedRules();
-    const mappedRole = role === 'academic_deputy' ? 'academic_deputy' : 'department_head';
+    const mappedRole =
+      role === 'academic_deputy'
+        ? 'academic_deputy'
+        : isDeptHead
+        ? 'department_head'
+        : 'education_expert';
     return checkScheduleViewLock(rules, mappedRole, currentStaff?.id || '');
-  }, [role, currentStaff?.id, cloudSyncTick, isSchedulingOpen]);
+  }, [role, isDeptHead, currentStaff?.id, cloudSyncTick, isSchedulingOpen]);
 
   const schedStats = useMemo(() => {
     const rules = Storage.getSchedRules();
@@ -689,7 +694,13 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
         <CourseSchedulingWorkspace
           isOpen={isSchedulingOpen}
           onClose={() => setIsSchedulingOpen(false)}
-          userRole={role === 'academic_deputy' ? 'academic_deputy' : 'department_head'}
+          userRole={
+            role === 'academic_deputy'
+              ? 'academic_deputy'
+              : isDeptHead
+              ? 'department_head'
+              : 'education_expert'
+          }
           actor={{ id: currentStaff.id, name: currentStaff.fullName }}
           allowedMajorNames={role === 'education' ? assignedFields : undefined}
           onDataUpdated={onRefreshData}

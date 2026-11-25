@@ -263,6 +263,19 @@ export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
     { id: 'slot_5', label: 'سانس پنجم', startTime: '16:00', endTime: '18:00', order: 5 },
     { id: 'slot_6', label: 'سانس ششم', startTime: '18:00', endTime: '20:00', order: 6 },
   ],
+  examSettings: {
+    startDate: '1404/10/20',
+    startDayOfWeek: 'saturday',
+    daysCount: 12,
+    skipFridays: true,
+    examDays: [],
+    examSlots: [
+      { id: 'exam_slot_1', label: 'سانس اول امتحان', startTime: '08:30', endTime: '10:30', order: 1 },
+      { id: 'exam_slot_2', label: 'سانس دوم امتحان', startTime: '11:00', endTime: '13:00', order: 2 },
+      { id: 'exam_slot_3', label: 'سانس سوم امتحان', startTime: '14:00', endTime: '16:00', order: 3 },
+    ],
+  },
+  examSettingsByTerm: {},
   studentAccessEnabled: false,
   studentAccessScope: 'own_cohort',
   studentPublishedTerms: ['1405-1'],
@@ -274,6 +287,7 @@ export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
     lockedSlotIds: [],
     lockedDeptHeadIds: [],
     lockedAcademicDeputyIds: [],
+    lockedExpertIds: [],
     blockedViewUserIds: [],
   },
 };

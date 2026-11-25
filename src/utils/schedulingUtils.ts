@@ -6,15 +6,27 @@ import {
   SchedCurriculumCourse,
   SchedDayKey,
   SchedEmploymentType,
+  SchedExamDay,
+  SchedExamSettings,
+  SchedExamSlot,
+  SchedOfferingHistoryDelta,
+  SchedOfferingHistoryEntry,
   SchedPracticalUnitType,
   SchedProfessor,
   SchedProgramCohort,
   SchedRulesSettings,
   SchedSlotHalf,
   SchedTimeSlot,
+  SchedWorkspaceRole,
   StudentScheduleAccessScope,
 } from '../types';
 import { toEnglishDigits } from './excelUtils';
+import {
+  addDaysToJalaliDate,
+  getJalaliDayOfWeekKey,
+  getJalaliWeekdayLabelFromDate,
+  parseJalaliDate,
+} from './jalaliCalendar';
 
 export const SCHED_DAYS_ORDER: SchedDayKey[] = [
   'saturday',
@@ -396,7 +408,8 @@ export function detectOfferingConflicts(
   candidate: SchedCourseOffering,
   allOfferings: SchedCourseOffering[],
   classrooms: SchedClassroom[],
-  professors: SchedProfessor[]
+  professors: SchedProfessor[],
+  rules?: SchedRulesSettings
 ): OfferingConflictReport {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -500,6 +513,12 @@ export function detectOfferingConflicts(
     }
   }
 
+  // اخطار تداخل امتحان پایان ترم در همان ردیف (رشته/ورودی/شعبه) - صرفاً هشدار (مسدودکننده نیست)
+  if (candidate.examDayId && candidate.examSlotId && isCourseEligibleForExam(candidate)) {
+    const examWarns = detectOfferingExamConflicts(candidate, allOfferings, rules);
+    warnings.push(...examWarns);
+  }
+
   return {
     hasHardConflict: errors.length > 0,
     errors,
@@ -551,7 +570,7 @@ export function runSmartAutoScheduler(
   classrooms: SchedClassroom[],
   professors: SchedProfessor[],
   rules: SchedRulesSettings,
-  actor: { id: string; name: string; role: 'admin' | 'academic_deputy' | 'department_head' }
+  actor: { id: string; name: string; role: SchedWorkspaceRole }
 ): SmartSchedulerResult {
   const activeRooms = classrooms.filter((r) => r.isActive);
   const activeDays: SchedDayKey[] =
@@ -814,24 +833,46 @@ export async function downloadSchedExcelTemplate(kind: SchedExcelKind): Promise<
     ];
   } else if (kind === 'professors') {
     sheetName = 'اساتید';
-    fileName = 'نمونه_اکسل_اساتید.xlsx';
+    fileName = 'نمونه_اکسل_اساتید_گلستان45.xlsx';
     rows = [
       {
-        'کد استاد': '10045',
-        'نام و نام خانوادگی': 'دکتر علی محمدی',
-        'کد ملی': '1280123456',
-        'مدرک تحصیلی': 'دکتری برنامه‌ریزی درسی',
-        'نوع استخدام': 'هیات علمی',
-        'شماره تماس': '09131112233',
+        'شماره شناسایی': '10045',
+        'نام استاد': 'علی',
+        'نام خانوادگی استاد': 'محمدی',
+        'جنس': 'مرد',
+        'نام پدر': 'حسین',
+        'شماره ملی': '1280123456',
+        'نام فارسی گروه آموزشی': 'آموزش ابتدایی',
+        'نام واحد/مرکز': 'پردیس شهید باهنر اصفهان',
+        'تلفن همراه': '09131112233',
+        'تلفن': '03134445566',
+        'آخرین مدرک تحصیلی': 'دکتری تخصصی',
+        'رشته تحصیلی': 'برنامه‌ریزی درسی',
+        'گرایش تحصیلی': 'آموزش ابتدایی',
+        'پایه': '12',
+        'مرتبه علمی': 'استادیار',
+        'وضعیت استخدام': 'هیات علمی رسمی قطعی',
+        'بانک': 'ملی',
         'شماره حساب': '6037991122334455',
       },
       {
-        'کد استاد': '10046',
-        'نام و نام خانوادگی': 'مهدی رضایی',
-        'کد ملی': '1280654321',
-        'مدرک تحصیلی': 'کارشناسی ارشد آموزش ریاضی',
-        'نوع استخدام': 'مامور آموزشی',
-        'شماره تماس': '09132223344',
+        'شماره شناسایی': '10046',
+        'نام استاد': 'مهدی',
+        'نام خانوادگی استاد': 'رضایی',
+        'جنس': 'مرد',
+        'نام پدر': 'اکبر',
+        'شماره ملی': '1280654321',
+        'نام فارسی گروه آموزشی': 'آموزش ریاضی',
+        'نام واحد/مرکز': 'پردیس شهید باهنر اصفهان',
+        'تلفن همراه': '09132223344',
+        'تلفن': '',
+        'آخرین مدرک تحصیلی': 'کارشناسی ارشد',
+        'رشته تحصیلی': 'آموزش ریاضی',
+        'گرایش تحصیلی': '',
+        'پایه': '',
+        'مرتبه علمی': 'مدرس مدعو',
+        'وضعیت استخدام': 'مامور آموزشی',
+        'بانک': 'سپه',
         'شماره حساب': '',
       },
     ];
@@ -870,18 +911,155 @@ export async function downloadSchedExcelTemplate(kind: SchedExcelKind): Promise<
   XLSX.writeFile(wb, fileName);
 }
 
-function getRowCol(row: Record<string, unknown>, candidates: string[]): string {
-  const entries = Object.entries(row);
+export function formatProfessorDegreeFull(
+  level?: string,
+  field?: string,
+  specialization?: string
+): string {
+  const l = (level || '').trim();
+  const f = (field || '').trim();
+  const s = (specialization || '').trim();
+  const main = [l, f].filter(Boolean).join(' · ');
+  if (main && s) return `${main} (گرایش ${s})`;
+  if (main) return main;
+  if (s) return `گرایش ${s}`;
+  return '';
+}
+
+function normalizeHeaderKey(raw: string): string {
+  return normalizePersianText(raw)
+    .replace(/[\u200c\u200d\u200e\u200f\u064b-\u065f\u0670\u0654]/g, '')
+    .replace(/[\/\\\-_()（）\[\]،,:؛.]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function getRowCol(
+  row: Record<string, unknown>,
+  candidates: string[],
+  options?: { exactOnly?: boolean; exclude?: string[] }
+): string {
+  const entries = Object.entries(row).map(([k, v]) => ({
+    rawKey: k,
+    normKey: normalizeHeaderKey(k),
+    value: String(v ?? '').trim(),
+  }));
+  const cleanExcludes = (options?.exclude || []).map((ex) => normalizeHeaderKey(ex)).filter(Boolean);
+  const isExcluded = (normKey: string) =>
+    cleanExcludes.some((ex) => ex && normKey.includes(ex));
+
+  // گذر اول: تطبیق دقیق روی همه کاندیداها
   for (const cand of candidates) {
-    const cleanCand = normalizePersianText(cand).toLowerCase();
-    for (const [k, v] of entries) {
-      const cleanK = normalizePersianText(k).toLowerCase();
-      if (cleanK === cleanCand || cleanK.includes(cleanCand)) {
-        return String(v ?? '').trim();
+    const cleanCand = normalizeHeaderKey(cand);
+    if (!cleanCand) continue;
+    for (const ent of entries) {
+      if (!ent.normKey || isExcluded(ent.normKey)) continue;
+      if (ent.normKey === cleanCand) {
+        return ent.value;
+      }
+    }
+  }
+  if (options?.exactOnly) return '';
+
+  // گذر دوم: تطبیق جزئی روی کلیدهای غیرمبهم
+  for (const cand of candidates) {
+    const cleanCand = normalizeHeaderKey(cand);
+    if (!cleanCand) continue;
+    for (const ent of entries) {
+      if (!ent.normKey || isExcluded(ent.normKey)) continue;
+      if (ent.normKey.includes(cleanCand)) {
+        return ent.value;
       }
     }
   }
   return '';
+}
+
+function extractRowsWithSmartHeader(
+  XLSX: typeof import('xlsx'),
+  sheet: import('xlsx').WorkSheet,
+  kind: SchedExcelKind
+): Record<string, unknown>[] {
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    raw: false,
+    defval: '',
+  });
+  if (!matrix || matrix.length === 0) return [];
+
+  const markerMap: Record<SchedExcelKind, string[]> = {
+    professors: [
+      'شماره شناسایی',
+      'کد استاد',
+      'نام خانوادگی استاد',
+      'نام خانوادگی',
+      'نام استاد',
+      'شماره ملی',
+      'کد ملی',
+      'نام فارسی گروه آموزشی',
+      'گروه آموزشی',
+      'نام واحد مرکز',
+      'تلفن همراه',
+      'آخرین مدرک تحصیلی',
+      'رشته تحصیلی',
+      'گرایش تحصیلی',
+      'مرتبه علمی',
+      'وضعیت استخدام',
+      'شماره حساب',
+    ],
+    classrooms: ['کد کلاس', 'نام کلاس', 'ظرفیت', 'ساختمان'],
+    programs: ['کد رشته', 'نام رشته', 'ورودی', 'شعبه'],
+    courses: ['کد درس', 'نام درس', 'واحد نظری', 'واحد عملی'],
+  };
+
+  const markers = markerMap[kind].map((m) => normalizeHeaderKey(m));
+  let bestRowIdx = 0;
+  let bestScore = -1;
+  const maxScan = Math.min(matrix.length, 30);
+
+  for (let r = 0; r < maxScan; r++) {
+    const row = matrix[r];
+    if (!Array.isArray(row)) continue;
+    let score = 0;
+    for (const cell of row) {
+      const normCell = normalizeHeaderKey(String(cell ?? ''));
+      if (!normCell) continue;
+      if (markers.some((m) => normCell === m || normCell.includes(m))) {
+        score++;
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestRowIdx = r;
+    }
+  }
+
+  // اگر ردیف سرستون استاندارد یا گزارش ۴۵ شناسایی شد، از همان ردیف سرستون‌ها را می‌سازیم
+  const headerRowIdx = bestScore >= 2 ? bestRowIdx : 0;
+  const headerCells = (matrix[headerRowIdx] || []).map((h, colIdx) => {
+    const txt = String(h ?? '').replace(/\s+/g, ' ').trim();
+    return txt || `__EMPTY_${colIdx}`;
+  });
+
+  const outRows: Record<string, unknown>[] = [];
+  for (let r = headerRowIdx + 1; r < matrix.length; r++) {
+    const cells = matrix[r];
+    if (!Array.isArray(cells)) continue;
+    const obj: Record<string, unknown> = {};
+    let hasAnyValue = false;
+    headerCells.forEach((headerName, colIdx) => {
+      const val = cells[colIdx] !== undefined && cells[colIdx] !== null ? String(cells[colIdx]).trim() : '';
+      if (val) hasAnyValue = true;
+      if (!(headerName in obj) || (!obj[headerName] && val)) {
+        obj[headerName] = val;
+      }
+    });
+    if (hasAnyValue) {
+      outRows.push(obj);
+    }
+  }
+  return outRows;
 }
 
 export function mapRoomTypeInput(raw: string): SchedClassroomType {
@@ -892,14 +1070,40 @@ export function mapRoomTypeInput(raw: string): SchedClassroomType {
   return 'ordinary';
 }
 
-export function mapEmploymentTypeInput(raw: string): SchedEmploymentType {
-  const norm = normalizePersianText(raw).toLowerCase();
-  if (norm.includes('هیات علمی') || norm.includes('هیأت علمی')) return 'faculty_member';
-  if (norm.includes('مامور')) return 'mamoor_amoozeshi';
-  if (norm.includes('آموزش و پرورش') || norm.includes('ا.پ')) return 'haghol_tadris_ap';
-  if (norm.includes('آزاد')) return 'haghol_tadris_free';
-  if (norm.includes('کارمند')) return 'staff';
+export function mapEmploymentTypeInput(raw: string, academicRank?: string): SchedEmploymentType {
+  const norm = normalizeHeaderKey(raw);
+  const rankNorm = normalizeHeaderKey(academicRank || '');
+  if (norm.includes('آموزش و پرورش') || norm.includes('ا پ') || norm.includes('فرهنگی شاغل')) {
+    return 'haghol_tadris_ap';
+  }
   if (norm.includes('بازنشسته')) return 'retired';
+  if (norm.includes('مامور')) return 'mamoor_amoozeshi';
+  if (norm.includes('کارمند') || norm.includes('اداری')) return 'staff';
+  if (norm.includes('حق التدریس') || norm.includes('آزاد') || norm.includes('مدعو')) {
+    return 'haghol_tadris_free';
+  }
+  if (
+    norm.includes('هیات علمی') ||
+    norm.includes('هیئت علمی') ||
+    norm.includes('رسمی قطعی') ||
+    norm.includes('رسمی ازمایشی') ||
+    norm.includes('رسمی آزمایشی') ||
+    norm.includes('پیمانی')
+  ) {
+    return 'faculty_member';
+  }
+  if (
+    norm.includes('رسمی') &&
+    (rankNorm.includes('استاد') || rankNorm.includes('دانشیار') || rankNorm.includes('مربی'))
+  ) {
+    return 'faculty_member';
+  }
+  if (
+    !norm &&
+    (rankNorm.includes('استادیار') || rankNorm.includes('دانشیار') || rankNorm.includes('استاد تمام'))
+  ) {
+    return 'faculty_member';
+  }
   return 'haghol_tadris_free';
 }
 
@@ -935,7 +1139,7 @@ export async function parseSchedExcelFile(
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array' });
   const firstSheet = wb.Sheets[wb.SheetNames[0]];
-  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: '' });
+  const rawRows = extractRowsWithSmartHeader(XLSX, firstSheet, kind);
 
   let skippedRows = 0;
   const errors: string[] = [];
@@ -1029,31 +1233,126 @@ export async function parseSchedExcelFile(
     const professors: SchedProfessor[] = [];
     rawRows.forEach((row, idx) => {
       const professorCode = normalizeSchedCode(
-        getRowCol(row, ['کد استاد', 'کد استادی', 'کد پرسنلی', 'code'])
+        getRowCol(row, ['شماره شناسایی', 'کد استاد', 'کد استادی', 'کد پرسنلی', 'code'])
       );
-      const fullName = getRowCol(row, ['نام و نام خانوادگی', 'نام استاد', 'نام', 'fullname']);
-      const nationalId = normalizeSchedCode(getRowCol(row, ['کد ملی', 'کدملی', 'nationalid']));
-      if (!professorCode || !fullName) {
+      const firstName = getRowCol(row, ['نام استاد', 'نام'], {
+        exclude: ['خانوادگی', 'پدر', 'گروه', 'واحد', 'مرکز', 'بانک', 'مدرک', 'رشته'],
+      });
+      const lastName = getRowCol(row, ['نام خانوادگی استاد', 'نام خانوادگی', 'فامیلی']);
+      const combinedName = getRowCol(row, ['نام و نام خانوادگی', 'fullname']);
+      const fullName =
+        firstName && lastName
+          ? `${firstName} ${lastName}`.replace(/\s+/g, ' ').trim()
+          : combinedName || [firstName, lastName].filter(Boolean).join(' ').trim();
+
+      // نادیده گرفتن ردیف‌های جمع کل یا پاورقی گزارش گلستان
+      const joinedRowText = `${professorCode} ${fullName}`.trim();
+      if (
+        !joinedRowText ||
+        joinedRowText.includes('جمع کل') ||
+        joinedRowText.includes('تعداد کل')
+      ) {
         skippedRows++;
-        errors.push(`ردیف ${idx + 2}: کد استاد یا نام و نام خانوادگی خالی است.`);
         return;
       }
-      const degreeFull = getRowCol(row, ['مدرک تحصیلی', 'مدرک', 'مقطع و رشته', 'degree']);
-      const employmentType = mapEmploymentTypeInput(
-        getRowCol(row, ['نوع استخدام', 'وضعیت استخدام', 'employment'])
+
+      const nationalId = normalizeSchedCode(
+        getRowCol(row, ['شماره ملی', 'کد ملی', 'کدملی', 'nationalid'])
       );
+      if (!professorCode || !fullName) {
+        skippedRows++;
+        errors.push(`ردیف ${idx + 2}: شماره شناسایی (کد استاد) یا نام استاد خالی است.`);
+        return;
+      }
+
+      const gender = getRowCol(row, ['جنس', 'جنسیت']);
+      const fatherName = getRowCol(row, ['نام پدر', 'پدر']);
+      const departmentName = getRowCol(row, [
+        'نام فارسی گروه آموزشی',
+        'گروه آموزشی',
+        'نام گروه آموزشی',
+      ]);
+      const unitCenterName = getRowCol(row, [
+        'نام واحد/مرکز',
+        'نام واحد / مرکز',
+        'نام واحد مرکز',
+        'واحد/مرکز',
+        'واحد مرکز',
+        'نام واحد',
+      ]);
+      const mobile = normalizeSchedCode(
+        getRowCol(row, ['تلفن همراه', 'شماره همراه', 'موبایل', 'همراه', 'mobile'])
+      );
+      const landlinePhone = normalizeSchedCode(
+        getRowCol(row, ['تلفن', 'تلفن ثابت', 'تلفن منزل', 'phone'], {
+          exclude: ['همراه', 'موبایل'],
+        })
+      );
+      const phone = mobile || landlinePhone;
+
+      const degreeLevel = getRowCol(row, [
+        'آخرین مدرک تحصیلی',
+        'مقطع تحصیلی',
+        'مقطع',
+        'مدرک تحصیلی',
+        'مدرک',
+        'degree',
+      ]);
+      const degreeField = getRowCol(
+        row,
+        ['رشته تحصیلی', 'رشته مدرک', 'رشته'],
+        { exclude: ['گروه', 'کد رشته'] }
+      );
+      const degreeSpecialization = getRowCol(row, ['گرایش تحصیلی', 'گرایش']);
+      const degreeFull =
+        formatProfessorDegreeFull(degreeLevel, degreeField, degreeSpecialization) || degreeLevel;
+
+      const academicStep =
+        normalizeSchedCode(getRowCol(row, ['پایه', 'پایه علمی', 'پایه استحقاقی'])) ||
+        getRowCol(row, ['پایه']);
+      const academicRank = getRowCol(row, ['مرتبه علمی', 'مرتبه']);
+      const employmentStatusRaw = getRowCol(row, [
+        'وضعیت استخدام',
+        'نوع استخدام',
+        'وضعیت استخدامی',
+        'employment',
+      ]);
+      const employmentType = mapEmploymentTypeInput(employmentStatusRaw, academicRank);
+
+      const bankName = getRowCol(row, ['بانک', 'نام بانک'], {
+        exclude: ['شماره حساب', 'حساب', 'شبا'],
+      });
+      const bankAccount = normalizeSchedCode(
+        getRowCol(row, ['شماره حساب', 'شماره حساب بانکی', 'شبا', 'حساب', 'bank'])
+      );
+
       professors.push({
         id: `prof_${Date.now()}_${idx}`,
         professorCode,
+        firstName: firstName || undefined,
+        lastName: lastName || undefined,
         fullName,
+        gender: gender || undefined,
+        fatherName: fatherName || undefined,
         nationalId: nationalId || professorCode,
+        departmentName: departmentName || undefined,
+        unitCenterName: unitCenterName || undefined,
+        degreeLevel: degreeLevel || undefined,
+        degreeField: degreeField || undefined,
+        degreeSpecialization: degreeSpecialization || undefined,
         degreeFull,
+        academicStep: academicStep || undefined,
+        academicRank: academicRank || undefined,
         employmentType,
-        phone: normalizeSchedCode(getRowCol(row, ['شماره تماس', 'تلفن', 'موبایل', 'phone'])),
-        bankAccount: normalizeSchedCode(getRowCol(row, ['شماره حساب', 'شبا', 'حساب', 'bank'])),
+        employmentStatusRaw: employmentStatusRaw || undefined,
+        phone: phone || undefined,
+        mobile: mobile || undefined,
+        landlinePhone: landlinePhone || undefined,
+        bankName: bankName || undefined,
+        bankAccount: bankAccount || undefined,
         isActive: true,
         unavailableKeys: [],
-        notes: getRowCol(row, ['توضیحات', 'notes']),
+        notes: getRowCol(row, ['توضیحات', 'notes']) || undefined,
       });
     });
     return { professors, skippedRows, errors };
@@ -1364,7 +1663,7 @@ export interface ScheduleLockCheckResult {
 
 export function checkScheduleViewLock(
   rules: SchedRulesSettings,
-  userRole: 'admin' | 'academic_deputy' | 'department_head',
+  userRole: SchedWorkspaceRole,
   actorId: string
 ): ScheduleLockCheckResult {
   // مدیر سامانه دسترسی کامل دارد و هرگز مشمول مسدودسازی نمی‌شود
@@ -1386,7 +1685,7 @@ export function checkScheduleViewLock(
 
 export function checkScheduleEditLock(
   rules: SchedRulesSettings,
-  userRole: 'admin' | 'academic_deputy' | 'department_head',
+  userRole: SchedWorkspaceRole,
   actorId: string,
   target?: {
     majorCode?: string;
@@ -1420,7 +1719,8 @@ export function checkScheduleEditLock(
   if (
     actorId &&
     (locks.lockedDeptHeadIds?.includes(actorId) ||
-      locks.lockedAcademicDeputyIds?.includes(actorId))
+      locks.lockedAcademicDeputyIds?.includes(actorId) ||
+      locks.lockedExpertIds?.includes(actorId))
   ) {
     return {
       locked: true,
@@ -1457,6 +1757,337 @@ export function checkScheduleEditLock(
     }
   }
   return { locked: false };
+}
+
+// =============================================================
+// مدیریت بازه امتحانی، سانس‌های امتحان، واجدشرایط بودن دروس نظری و اخطار تداخل
+// =============================================================
+
+export function buildDefaultExamSlots(): SchedExamSlot[] {
+  return [
+    { id: 'exam_slot_1', label: 'سانس اول امتحان', startTime: '08:30', endTime: '10:30', order: 1 },
+    { id: 'exam_slot_2', label: 'سانس دوم امتحان', startTime: '11:00', endTime: '13:00', order: 2 },
+    { id: 'exam_slot_3', label: 'سانس سوم امتحان', startTime: '14:00', endTime: '16:00', order: 3 },
+  ];
+}
+
+export function buildExamDaysSequence(params: {
+  startDate: string;
+  startDayOfWeek?: SchedDayKey;
+  daysCount: number;
+  skipFridays: boolean;
+  existingDays?: SchedExamDay[];
+}): SchedExamDay[] {
+  const count = Math.max(1, Math.min(30, Math.floor(params.daysCount || 12)));
+  const cleanDate = toEnglishDigits(params.startDate || '').trim();
+  const parsed = parseJalaliDate(cleanDate);
+  const startDay: SchedDayKey = parsed
+    ? getJalaliDayOfWeekKey(parsed.jy, parsed.jm, parsed.jd)
+    : params.startDayOfWeek || 'saturday';
+  const startDayOrderIdx = Math.max(0, SCHED_DAYS_ORDER.indexOf(startDay));
+
+  const result: SchedExamDay[] = [];
+  let offset = 0;
+  let guard = 0;
+  while (result.length < count && guard < 90) {
+    guard++;
+    const dayKey = SCHED_DAYS_ORDER[(startDayOrderIdx + offset) % 7];
+    const isoDate = parsed ? addDaysToJalaliDate(cleanDate, offset, 'en') : '';
+    const weekdayLabel = parsed
+      ? getJalaliWeekdayLabelFromDate(isoDate) || SCHED_DAY_LABELS[dayKey]
+      : SCHED_DAY_LABELS[dayKey];
+    offset++;
+    if (params.skipFridays && dayKey === 'friday') {
+      continue;
+    }
+    const dayNumber = result.length + 1;
+    const prev = params.existingDays?.[dayNumber - 1];
+    result.push({
+      id: prev?.id || `exam_day_${dayNumber}`,
+      dayNumber,
+      label: `روز ${dayNumber.toLocaleString('fa-IR')}`,
+      date: isoDate || prev?.date || '',
+      weekdayLabel,
+      isActive: prev ? prev.isActive : true,
+    });
+  }
+  return result;
+}
+
+export function buildDefaultExamSettings(termKey?: string): SchedExamSettings {
+  const defaultStart =
+    termKey && termKey.endsWith('2') ? '1405/03/23' : '1404/10/20';
+  return {
+    startDate: defaultStart,
+    startDayOfWeek: 'saturday',
+    daysCount: 12,
+    skipFridays: true,
+    examDays: buildExamDaysSequence({
+      startDate: defaultStart,
+      startDayOfWeek: 'saturday',
+      daysCount: 12,
+      skipFridays: true,
+    }),
+    examSlots: buildDefaultExamSlots(),
+  };
+}
+
+export function getExamSettingsForTerm(
+  rules: SchedRulesSettings,
+  termKey?: string
+): SchedExamSettings {
+  const effectiveTerm = termKey || rules.activeTerm;
+  const termCfg = effectiveTerm ? rules.examSettingsByTerm?.[effectiveTerm] : undefined;
+  const raw = termCfg || rules.examSettings;
+  if (!raw) return buildDefaultExamSettings(effectiveTerm);
+  const examDays =
+    Array.isArray(raw.examDays) && raw.examDays.length > 0
+      ? raw.examDays
+      : buildExamDaysSequence({
+          startDate: raw.startDate || '1404/10/20',
+          startDayOfWeek: raw.startDayOfWeek || 'saturday',
+          daysCount: raw.daysCount || 12,
+          skipFridays: raw.skipFridays !== false,
+        });
+  const examSlots =
+    Array.isArray(raw.examSlots) && raw.examSlots.length > 0
+      ? [...raw.examSlots].sort((a, b) => a.order - b.order)
+      : buildDefaultExamSlots();
+  return {
+    startDate: raw.startDate || '1404/10/20',
+    startDayOfWeek: raw.startDayOfWeek || 'saturday',
+    daysCount: raw.daysCount || examDays.length || 12,
+    skipFridays: raw.skipFridays !== false,
+    examDays,
+    examSlots,
+  };
+}
+
+/**
+ * صرفاً دروس نظری دارای امتحان پایان ترم هستند؛ دروس عملی و نظری-عملی فاقد امتحان متمرکزند.
+ */
+export function isCourseEligibleForExam(item: {
+  courseType: SchedCourseType;
+  theoreticalUnits?: number;
+  practicalUnits?: number;
+}): boolean {
+  return item.courseType === 'theoretical';
+}
+
+export function formatExamAssignmentShort(
+  offering: Pick<SchedCourseOffering, 'examDayId' | 'examSlotId'>,
+  examSettings: SchedExamSettings
+): string {
+  if (!offering.examDayId || !offering.examSlotId) return '';
+  const day = examSettings.examDays.find((d) => d.id === offering.examDayId);
+  const slot = examSettings.examSlots.find((s) => s.id === offering.examSlotId);
+  const dayPart = day
+    ? `${day.label}${day.date ? ` (${day.weekdayLabel} ${day.date})` : ` (${day.weekdayLabel})`}`
+    : offering.examDayId;
+  const slotPart = slot ? `${slot.label} (${slot.startTime}-${slot.endTime})` : offering.examSlotId;
+  return `${dayPart} · ${slotPart}`;
+}
+
+export function detectOfferingExamConflicts(
+  candidate: SchedCourseOffering,
+  allOfferings: SchedCourseOffering[],
+  rules?: SchedRulesSettings
+): string[] {
+  if (!isCourseEligibleForExam(candidate) || !candidate.examDayId || !candidate.examSlotId) {
+    return [];
+  }
+  const examSettings = rules ? getExamSettingsForTerm(rules, candidate.termKey) : undefined;
+  const examSummary = examSettings
+    ? formatExamAssignmentShort(candidate, examSettings)
+    : '';
+  const warnings: string[] = [];
+
+  for (const other of allOfferings) {
+    if (other.id === candidate.id) continue;
+    if (other.termKey !== candidate.termKey) continue;
+    if (!isCourseEligibleForExam(other)) continue;
+    if (other.examDayId !== candidate.examDayId || other.examSlotId !== candidate.examSlotId) {
+      continue;
+    }
+    const overlap = doTargetsOverlap(candidate, other);
+    if (overlap) {
+      warnings.push(
+        `هشدار تداخل امتحان (${overlap}): درس «${other.courseTitle}» نیز در همین زمان (${examSummary || 'روز و سانس امتحانی یکسان'}) تنظیم شده است.`
+      );
+    }
+  }
+  return warnings;
+}
+
+export function buildTermExamConflictMap(
+  termOfferings: SchedCourseOffering[],
+  rules?: SchedRulesSettings
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const o of termOfferings) {
+    if (!isCourseEligibleForExam(o) || !o.examDayId || !o.examSlotId) continue;
+    const warns = detectOfferingExamConflicts(o, termOfferings, rules);
+    if (warns.length > 0) {
+      map.set(o.id, warns);
+    }
+  }
+  return map;
+}
+
+// =============================================================
+// موتور Undo / Redo اختصاصی هر کاربر با اعتبارسنجی تداخل و قفل
+// =============================================================
+
+export function computeOfferingDeltas(
+  prevOfferings: SchedCourseOffering[],
+  nextOfferings: SchedCourseOffering[]
+): SchedOfferingHistoryDelta[] {
+  const prevMap = new Map(prevOfferings.map((o) => [o.id, o]));
+  const nextMap = new Map(nextOfferings.map((o) => [o.id, o]));
+  const deltas: SchedOfferingHistoryDelta[] = [];
+
+  for (const prev of prevOfferings) {
+    const next = nextMap.get(prev.id);
+    if (!next) {
+      deltas.push({ offeringId: prev.id, before: prev, after: undefined });
+    } else if (JSON.stringify(prev) !== JSON.stringify(next)) {
+      deltas.push({ offeringId: prev.id, before: prev, after: next });
+    }
+  }
+  for (const next of nextOfferings) {
+    if (!prevMap.has(next.id)) {
+      deltas.push({ offeringId: next.id, before: undefined, after: next });
+    }
+  }
+  return deltas;
+}
+
+export interface HistoryApplyResult {
+  ok: boolean;
+  nextOfferings?: SchedCourseOffering[];
+  error?: string;
+}
+
+export function applyOfferingHistoryStep(params: {
+  direction: 'undo' | 'redo';
+  entry: SchedOfferingHistoryEntry;
+  latestOfferings: SchedCourseOffering[];
+  rules: SchedRulesSettings;
+  userRole: SchedWorkspaceRole;
+  actor: { id: string; name: string };
+  classrooms: SchedClassroom[];
+  professors: SchedProfessor[];
+}): HistoryApplyResult {
+  const { direction, entry, latestOfferings, rules, userRole, actor, classrooms, professors } =
+    params;
+
+  if (entry.actorId !== actor.id) {
+    return {
+      ok: false,
+      error: 'امکان بازگشت تغییرات متعلق به سایر کاربران وجود ندارد.',
+    };
+  }
+
+  const globalLock = checkScheduleEditLock(rules, userRole, actor.id);
+  if (globalLock.locked) {
+    return {
+      ok: false,
+      error: `امکان ${direction === 'undo' ? 'بازگشت' : 'انجام مجدد'} وجود ندارد: ${globalLock.reason}`,
+    };
+  }
+
+  const working = [...latestOfferings];
+  const restoredIds: string[] = [];
+
+  for (const delta of entry.deltas) {
+    const expectedNow = direction === 'undo' ? delta.after : delta.before;
+    const targetState = direction === 'undo' ? delta.before : delta.after;
+
+    const curIdx = working.findIndex((o) => o.id === delta.offeringId);
+    const cur = curIdx >= 0 ? working[curIdx] : undefined;
+
+    // بررسی اینکه آیا کاربر دیگری بعد از تغییر ما روی همین درس تغییر داده یا آن را حذف کرده است
+    if (expectedNow && !cur) {
+      return {
+        ok: false,
+        error: `بازگشت ممکن نیست: درس «${expectedNow.courseTitle}» پس از اقدام شما توسط کاربر دیگری از جدول حذف شده است.`,
+      };
+    }
+    if (expectedNow && cur) {
+      const modifiedByOther =
+        cur.updatedAt !== expectedNow.updatedAt &&
+        cur.updatedById &&
+        cur.updatedById !== actor.id;
+      if (modifiedByOther) {
+        return {
+          ok: false,
+          error: `بازگشت ممکن نیست: درس «${cur.courseTitle}» پس از تغییر شما توسط «${cur.updatedByName || 'کاربر دیگری'}» ویرایش شده است.`,
+        };
+      }
+    }
+
+    // بررسی قفل رشته/روز/سانس برای وضعیت فعلی و وضعیت مقصد
+    if (expectedNow) {
+      const lockCur = checkScheduleEditLock(rules, userRole, actor.id, {
+        majorCode: expectedNow.ownerMajorCode,
+        dayOfWeek: expectedNow.dayOfWeek,
+        slotIds: expectedNow.slotIds,
+      });
+      if (lockCur.locked) {
+        return {
+          ok: false,
+          error: `بازگشت ممکن نیست: ${lockCur.reason}`,
+        };
+      }
+    }
+    if (targetState) {
+      const lockTarget = checkScheduleEditLock(rules, userRole, actor.id, {
+        majorCode: targetState.ownerMajorCode,
+        dayOfWeek: targetState.dayOfWeek,
+        slotIds: targetState.slotIds,
+      });
+      if (lockTarget.locked) {
+        return {
+          ok: false,
+          error: `بازگشت به وضعیت قبلی ممکن نیست: ${lockTarget.reason}`,
+        };
+      }
+    }
+
+    // اعمال تغییر در آرایه موقت
+    if (!targetState) {
+      if (curIdx >= 0) working.splice(curIdx, 1);
+    } else {
+      const stamped: SchedCourseOffering = {
+        ...targetState,
+        updatedById: actor.id,
+        updatedByName: actor.name,
+        updatedAt: new Date().toISOString(),
+      };
+      if (curIdx >= 0) {
+        working[curIdx] = stamped;
+      } else {
+        working.push(stamped);
+      }
+      restoredIds.push(stamped.id);
+    }
+  }
+
+  // بررسی تداخل زمانی، استاد، کلاس و دانشجویان در کل ترم پس از بازگشت
+  for (const rid of restoredIds) {
+    const restored = working.find((o) => o.id === rid);
+    if (!restored) continue;
+    const termSlice = working.filter((o) => o.termKey === restored.termKey);
+    const conflict = detectOfferingConflicts(restored, termSlice, classrooms, professors, rules);
+    if (conflict.hasHardConflict) {
+      return {
+        ok: false,
+        error: `${direction === 'undo' ? 'بازگشت (Undo)' : 'انجام مجدد (Redo)'} به دلیل تداخل با تغییرات جدید جدول ممکن نیست — ${conflict.errors[0]}`,
+      };
+    }
+  }
+
+  return { ok: true, nextOfferings: working };
 }
 
 
