@@ -54,6 +54,8 @@ import {
   SchedClassroom,
   SchedProgramCohort,
   SchedProfessor,
+  SchedEmploymentType,
+  SchedProfessorUnitLimit,
   SchedCurriculumCourse,
   SchedCourseOffering,
   SchedMasterGridLayoutSettings,
@@ -256,6 +258,14 @@ export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
     practicalInternshipBase: 3,
     internshipMinStudents: 12,
   },
+  professorUnitLimits: {
+    faculty_member: { minEquivalentUnits: 10, maxEquivalentUnits: 24 },
+    mamoor_amoozeshi: { minEquivalentUnits: 0, maxEquivalentUnits: 24 },
+    haghol_tadris_ap: { minEquivalentUnits: 0, maxEquivalentUnits: 12 },
+    haghol_tadris_free: { minEquivalentUnits: 0, maxEquivalentUnits: 12 },
+    staff: { minEquivalentUnits: 0, maxEquivalentUnits: 12 },
+    retired: { minEquivalentUnits: 0, maxEquivalentUnits: 12 },
+  } as Record<SchedEmploymentType, SchedProfessorUnitLimit>,
   activeDays: ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
   timeSlots: [
     { id: 'slot_1', label: 'سانس اول', startTime: '08:00', endTime: '10:00', order: 1 },

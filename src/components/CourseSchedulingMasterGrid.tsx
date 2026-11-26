@@ -32,11 +32,13 @@ import {
   checkScheduleEditLock,
   detectOfferingConflicts,
   evaluateOfferingCompleteness,
+  evaluateProfessorEquivalentUnitStatus,
   exportJsonRowsToExcel,
   formatExamAssignmentShort,
   formatProfessorDepartmentAndField,
   getExamSettingsForTerm,
   getOfferingSlotHalf,
+  getProfessorEquivalentUnitBounds,
   getSchedSlotTitle,
   getSlotDurationHours,
   getSlotHalfLabel,
@@ -1564,14 +1566,19 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           professorCode: p.professorCode,
           professorName: p.fullName,
         };
-        const testRep = detectOfferingConflicts(testCand, termOfferings, classrooms, professors);
+        const testRep = detectOfferingConflicts(testCand, termOfferings, classrooms, professors, rules);
         const profErr = testRep.errors.find((err) => err.includes('تداخل استاد'));
-        const profWarn = testRep.warnings.find((w) => w.includes('عدم امکان حضور'));
+        const profWarn = testRep.warnings.find(
+          (w) => w.includes('عدم امکان حضور') || w.includes('واحد معادل')
+        );
+        const load = calculateProfessorLoadSummary(p.id, termOfferings, rules);
+        const bounds = getProfessorEquivalentUnitBounds(p, rules);
         return {
           prof: p,
           isFree: !profErr && !profWarn,
           issue: profErr || profWarn || '',
-          load: calculateProfessorLoadSummary(p.id, termOfferings, rules),
+          load,
+          bounds,
         };
       })
       .sort((a, b) => Number(b.isFree) - Number(a.isFree));
@@ -1584,7 +1591,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           classroomId: r.id,
           classroomName: r.name,
         };
-        const testRep = detectOfferingConflicts(testCand, termOfferings, classrooms, professors);
+        const testRep = detectOfferingConflicts(testCand, termOfferings, classrooms, professors, rules);
         const roomErr = testRep.errors.find((err) => err.includes('تداخل مکان'));
         const capOk = r.capacity >= candidate.enrolledCount;
         return {
@@ -4227,11 +4234,21 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 <option value="">-- بدون استاد --</option>
                 {pendingResolutionEval.professorOptions.map((opt) => {
                   const df = formatProfessorDepartmentAndField(opt.prof);
+                  const limitStatus = evaluateProfessorEquivalentUnitStatus(
+                    opt.prof,
+                    opt.load.equivalentUnits,
+                    rules
+                  );
                   return (
                     <option key={opt.prof.id} value={opt.prof.id}>
-                      {opt.isFree ? '✅ آزاد' : '⚠️ تداخل/محدودیت'} — {opt.prof.fullName} (کد{' '}
+                      {opt.isFree ? '✅ آزاد' : '⚠️ تداخل/هشدار'} — {opt.prof.fullName} (کد{' '}
                       {opt.prof.professorCode}
-                      {df ? ` · ${df}` : ''} · بار: {opt.load.equivalentUnits} معادل)
+                      {df ? ` · ${df}` : ''} · بار: {opt.load.equivalentUnits}
+                      {opt.bounds.maxEquivalentUnits > 0
+                        ? `/${opt.bounds.maxEquivalentUnits}`
+                        : ''}{' '}
+                      معادل
+                      {limitStatus.status === 'above_max' ? ' ⚠️ سقف پر' : ''})
                       {opt.issue ? ` [${opt.issue}]` : ''}
                     </option>
                   );
@@ -4243,7 +4260,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
               <div className="flex items-center justify-between">
                 <span className="font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                   <Building2 className="w-4 h-4 text-indigo-600" />
-                  <span>یافتن و جایگزینی کلاس فیزیکی خالی در همین سانس</span>
+                  <span>
+                    یافتن و جایگزینی کلاس فیزیکی خالی در همین سانس (
+                    {pendingResolutionEval.classroomOptions.filter((o) => o.isFree).length} کلاس خالی)
+                  </span>
                 </span>
                 <button
                   type="button"
@@ -4265,17 +4285,21 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
               >
                 <option value="">-- بدون کلاس فیزیکی --</option>
-                {pendingResolutionEval.classroomOptions.map((opt) => (
-                  <option key={opt.room.id} value={opt.room.id}>
-                    {opt.isFree
-                      ? opt.capOk
-                        ? '✅ خالی و مناسب'
-                        : '🟡 خالی (ظرفیت کمتر)'
-                      : '⛔ اشغال'}{' '}
-                    — {opt.room.name} (ظرفیت {opt.room.capacity} ·{' '}
-                    {SCHED_ROOM_TYPE_LABELS[opt.room.roomType]})
-                  </option>
-                ))}
+                {pendingResolutionEval.classroomOptions
+                  .filter(
+                    (opt) => opt.isFree || opt.room.id === pendingDrop.pickedClassroomId
+                  )
+                  .map((opt) => (
+                    <option key={opt.room.id} value={opt.room.id}>
+                      {opt.isFree
+                        ? opt.capOk
+                          ? '✅ خالی و مناسب'
+                          : '🟡 خالی (ظرفیت کمتر)'
+                        : '⛔ اشغال‌شده در این سانس (تداخل فعلی)'}{' '}
+                      — {opt.room.name} (ظرفیت {opt.room.capacity} ·{' '}
+                      {SCHED_ROOM_TYPE_LABELS[opt.room.roomType]})
+                    </option>
+                  ))}
               </select>
               <div className="flex flex-wrap gap-1.5">
                 {pendingResolutionEval.classroomOptions

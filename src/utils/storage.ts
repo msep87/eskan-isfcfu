@@ -69,6 +69,8 @@ import {
   SchedClassroom,
   SchedProgramCohort,
   SchedProfessor,
+  SchedEmploymentType,
+  SchedProfessorUnitLimit,
   SchedCurriculumCourse,
   SchedCourseOffering,
   SchedRulesSettings,
@@ -13875,6 +13877,25 @@ export const Storage = {
           : DEFAULT_SCHED_RULES.availableTerms,
       hoursPerUnit: { ...DEFAULT_SCHED_RULES.hoursPerUnit, ...(stored.hoursPerUnit || {}) },
       equivalentPerUnit: { ...DEFAULT_SCHED_RULES.equivalentPerUnit, ...(stored.equivalentPerUnit || {}) },
+      professorUnitLimits: (() => {
+        const def = DEFAULT_SCHED_RULES.professorUnitLimits!;
+        const s = stored.professorUnitLimits;
+        const result = { ...def } as Record<SchedEmploymentType, SchedProfessorUnitLimit>;
+        (Object.keys(def) as SchedEmploymentType[]).forEach((empKey) => {
+          const item = s?.[empKey];
+          result[empKey] = {
+            minEquivalentUnits:
+              item && typeof item.minEquivalentUnits === 'number' && Number.isFinite(item.minEquivalentUnits) && item.minEquivalentUnits >= 0
+                ? item.minEquivalentUnits
+                : def[empKey].minEquivalentUnits,
+            maxEquivalentUnits:
+              item && typeof item.maxEquivalentUnits === 'number' && Number.isFinite(item.maxEquivalentUnits) && item.maxEquivalentUnits >= 0
+                ? item.maxEquivalentUnits
+                : def[empKey].maxEquivalentUnits,
+          };
+        });
+        return result;
+      })(),
       activeDays:
         Array.isArray(stored.activeDays) && stored.activeDays.length > 0
           ? stored.activeDays

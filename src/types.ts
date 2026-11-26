@@ -1892,6 +1892,8 @@ export interface SchedProfessor {
   unavailableKeys?: string[]; // کلیدهای day:slotId عدم امکان حضور استاد
   availabilitySubmitted?: boolean; // آیا استاد زمان‌بندی حضور خود را ثبت/تأیید کرده است (در غیر این صورت پیش‌فرض همه سانس‌ها آزادند)
   availabilityUpdatedAt?: string;
+  minEquivalentUnitsOverride?: number; // حداقل واحد معادل اختصاصی استاد (اختیاری؛ جایگزین قانون نوع استخدام)
+  maxEquivalentUnitsOverride?: number; // حداکثر واحد معادل اختصاصی استاد (اختیاری؛ جایگزین قانون نوع استخدام)
   notes?: string;
 }
 
@@ -2030,6 +2032,11 @@ export interface SchedMasterPrintSettings {
   printScope: 'current_view' | 'populated_only' | 'all_rows_and_days';
 }
 
+export interface SchedProfessorUnitLimit {
+  minEquivalentUnits: number; // ۰ = بدون الزام حداقل
+  maxEquivalentUnits: number; // ۰ = بدون سقف
+}
+
 export interface SchedRulesSettings {
   activeTerm: string; // مثلاً 1405-1
   availableTerms: string[];
@@ -2046,6 +2053,7 @@ export interface SchedRulesSettings {
     practicalInternshipBase: number; // پیش‌فرض ۳ واحد معادل به ازای حداقل ۱۲ دانشجو
     internshipMinStudents: number; // پیش‌فرض ۱۲ دانشجو
   };
+  professorUnitLimits?: Record<SchedEmploymentType, SchedProfessorUnitLimit>;
   activeDays: SchedDayKey[];
   timeSlots: SchedTimeSlot[];
   examSettings?: SchedExamSettings;

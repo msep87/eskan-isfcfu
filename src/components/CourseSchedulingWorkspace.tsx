@@ -16,6 +16,7 @@ import {
   SchedOfferingHistoryEntry,
   SchedPracticalUnitType,
   SchedProfessor,
+  SchedProfessorUnitLimit,
   SchedProgramCohort,
   SchedRulesSettings,
   SchedSharedTarget,
@@ -28,6 +29,7 @@ import {
 import { Storage, normalizeAssignedFieldsList, normalizePersianSearch } from '../utils/storage';
 import { addDaysToJalaliDate, formatJalaliDate, getTodayJalali } from '../utils/jalaliCalendar';
 import {
+  DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS,
   SCHED_COURSE_TYPE_LABELS,
   SCHED_DAY_LABELS,
   SCHED_DAYS_ORDER,
@@ -43,6 +45,7 @@ import {
   buildSevenToEightSlot,
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
+  checkClassroomAvailabilityAtSlots,
   checkScheduleEditLock,
   checkScheduleViewLock,
   computeInternshipSplitPlan,
@@ -51,6 +54,7 @@ import {
   detectOfferingConflicts,
   downloadSchedExcelTemplate,
   evaluateOfferingCompleteness,
+  evaluateProfessorEquivalentUnitStatus,
   exportJsonRowsToExcel,
   formatExamAssignmentShort,
   formatProfessorDegreeFull,
@@ -58,6 +62,7 @@ import {
   getExamSettingsForTerm,
   getOfferingSlotHalf,
   getProfessorAvailabilityWindowStatus,
+  getProfessorEquivalentUnitBounds,
   getSchedSlotOrdinalLabel,
   getSchedSlotTitle,
   getSlotDurationHours,
@@ -914,6 +919,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [profLandlinePhone, setProfLandlinePhone] = useState('');
   const [profBankName, setProfBankName] = useState('');
   const [profBank, setProfBank] = useState('');
+  const [profMinEqOverride, setProfMinEqOverride] = useState('');
+  const [profMaxEqOverride, setProfMaxEqOverride] = useState('');
   const [unavailProfModal, setUnavailProfModal] = useState<SchedProfessor | null>(null);
   const [unavailDraft, setUnavailDraft] = useState<string[]>([]);
 
@@ -944,6 +951,16 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       setProfLandlinePhone(prof.landlinePhone || '');
       setProfBankName(prof.bankName || '');
       setProfBank(prof.bankAccount || '');
+      setProfMinEqOverride(
+        typeof prof.minEquivalentUnitsOverride === 'number'
+          ? String(prof.minEquivalentUnitsOverride)
+          : ''
+      );
+      setProfMaxEqOverride(
+        typeof prof.maxEquivalentUnitsOverride === 'number'
+          ? String(prof.maxEquivalentUnitsOverride)
+          : ''
+      );
     } else {
       setEditingProfId(null);
       setProfCode('');
@@ -965,6 +982,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       setProfLandlinePhone('');
       setProfBankName('');
       setProfBank('');
+      setProfMinEqOverride('');
+      setProfMaxEqOverride('');
     }
     setProfModalOpen(true);
   };
@@ -996,6 +1015,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     const cleanMobile = normalizeSchedCode(profMobile);
     const cleanLandline = normalizeSchedCode(profLandlinePhone);
     const cleanPhone = cleanMobile || cleanLandline;
+    const minEqOv =
+      profMinEqOverride.trim() !== '' ? parseDecimalUnits(profMinEqOverride) : undefined;
+    const maxEqOv =
+      profMaxEqOverride.trim() !== '' ? parseDecimalUnits(profMaxEqOverride) : undefined;
 
     if (editingProfId) {
       persistProfessors(
@@ -1029,6 +1052,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 bankAccount: canViewSensitiveProfInfo
                   ? normalizeSchedCode(profBank) || undefined
                   : p.bankAccount,
+                minEquivalentUnitsOverride: minEqOv,
+                maxEquivalentUnitsOverride: maxEqOv,
               }
             : p
         )
@@ -1061,6 +1086,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           landlinePhone: cleanLandline || undefined,
           bankName: profBankName.trim() || undefined,
           bankAccount: normalizeSchedCode(profBank) || undefined,
+          minEquivalentUnitsOverride: minEqOv,
+          maxEquivalentUnitsOverride: maxEqOv,
           isActive: true,
           unavailableKeys: [],
         },
@@ -1551,6 +1578,54 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       rules
     );
   }, [candidateOffering, rules]);
+
+  const modalClassroomAvailability = useMemo(() => {
+    const enrolled = Math.max(1, Number(normalizeSchedCode(offEnrolledCount)) || 1);
+    const activeRooms = classrooms.filter((r) => r.isActive);
+    const evaluated = activeRooms.map((r) => {
+      const avail = checkClassroomAvailabilityAtSlots(
+        r.id,
+        activeTerm,
+        offDay || undefined,
+        offSlotIds,
+        offSlotParts,
+        termOfferings,
+        editingOffId || undefined
+      );
+      const capOk = r.capacity >= enrolled;
+      return {
+        room: r,
+        isFree: avail.isFree,
+        occupiedBy: avail.occupiedBy,
+        capOk,
+      };
+    });
+    const freeRooms = evaluated
+      .filter((item) => item.isFree)
+      .sort((a, b) => {
+        if (a.capOk !== b.capOk) return Number(b.capOk) - Number(a.capOk);
+        return a.room.capacity - b.room.capacity;
+      });
+    const selectedItem = offClassroomId
+      ? evaluated.find((item) => item.room.id === offClassroomId)
+      : undefined;
+    return {
+      totalActiveCount: activeRooms.length,
+      freeRooms,
+      selectedOccupiedItem:
+        selectedItem && !selectedItem.isFree ? selectedItem : undefined,
+    };
+  }, [
+    classrooms,
+    activeTerm,
+    offDay,
+    offSlotIds,
+    offSlotParts,
+    termOfferings,
+    editingOffId,
+    offEnrolledCount,
+    offClassroomId,
+  ]);
 
   const isMultiInternshipMode = Boolean(
     !editingOffId &&
@@ -2871,6 +2946,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       })
                       .map((p) => {
                         const summary = calculateProfessorLoadSummary(p.id, termOfferings, rules);
+                        const unitStatus = evaluateProfessorEquivalentUnitStatus(
+                          p,
+                          summary.equivalentUnits,
+                          rules
+                        );
                         return (
                           <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                             <td className="p-3 font-mono font-bold text-teal-700 dark:text-teal-400">
@@ -2948,7 +3028,37 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                               </td>
                             )}
                             <td className="p-3 text-center font-bold">
-                              {summary.equivalentUnits} معادل ({summary.weeklyHours} ساعت)
+                              <div>
+                                {summary.equivalentUnits} معادل ({summary.weeklyHours} ساعت)
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-semibold mt-0.5">
+                                {unitStatus.bounds.minEquivalentUnits > 0
+                                  ? `حداقل ${unitStatus.bounds.minEquivalentUnits}`
+                                  : 'بدون حداقل'}{' '}
+                                ·{' '}
+                                {unitStatus.bounds.maxEquivalentUnits > 0
+                                  ? `سقف ${unitStatus.bounds.maxEquivalentUnits}`
+                                  : 'سقف نامحدود'}
+                                {(unitStatus.bounds.minSource === 'professor' ||
+                                  unitStatus.bounds.maxSource === 'professor') && (
+                                  <span className="text-indigo-600 dark:text-indigo-400 mr-1">
+                                    (اختصاصی)
+                                  </span>
+                                )}
+                              </div>
+                              {unitStatus.status !== 'ok' && (
+                                <div
+                                  className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[9.5px] font-extrabold"
+                                  title={unitStatus.message || ''}
+                                >
+                                  <AlertTriangle className="w-3 h-3" />
+                                  <span>
+                                    {unitStatus.status === 'above_max'
+                                      ? 'بیش از سقف مجاز'
+                                      : 'کمتر از حداقل موظفی'}
+                                  </span>
+                                </div>
+                              )}
                             </td>
                             <td className="p-3 text-center">
                               <div className="inline-flex flex-col items-center gap-1">
@@ -3401,6 +3511,128 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         </label>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* قوانین حداقل و حداکثر واحد معادل اساتید بر اساس نوع استخدام */}
+                <div className="p-4 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 space-y-3 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h3 className="font-extrabold text-slate-900 dark:text-white">
+                        قوانین حداقل و حداکثر واحد معادل قابل اخذ اساتید (بر اساس نوع استخدام)
+                      </h3>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                        پیش‌فرض: هیات علمی (حداقل ۱۰ · حداکثر ۲۴)، مامور آموزشی (حداکثر ۲۴)، سایر اساتید غیرهیات‌علمی (حداکثر ۱۲). عدم رعایت این حدود در زمان ثبت درس صرفاً به صورت <strong>اخطار</strong> نمایش داده می‌شود و مانع ثبت نخواهد شد. امکان تعیین محدوده اختصاصی برای هر استاد نیز در فرم ویرایش استاد وجود دارد.
+                      </p>
+                    </div>
+                    {canManageMasterData && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDraftRules((prev) => ({
+                            ...prev,
+                            professorUnitLimits: { ...DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS },
+                          }))
+                        }
+                        className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 font-bold text-[11px] hover:bg-amber-100/60 shrink-0 cursor-pointer"
+                      >
+                        بازنشانی پیش‌فرض‌ها (۱۰ / ۲۴ / ۱۲)
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 tabular-nums">
+                    {(Object.keys(SCHED_EMPLOYMENT_LABELS) as SchedEmploymentType[]).map((empKey) => {
+                      const defLimit = DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS[empKey];
+                      const currentLimit =
+                        draftRules.professorUnitLimits?.[empKey] || defLimit;
+                      return (
+                        <div
+                          key={empKey}
+                          className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-extrabold text-slate-900 dark:text-white">
+                              {SCHED_EMPLOYMENT_LABELS[empKey]}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-semibold">
+                              پیش‌فرض: {defLimit.minEquivalentUnits} تا {defLimit.maxEquivalentUnits}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="space-y-1">
+                              <span className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold block">
+                                حداقل واحد معادل:
+                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.5"
+                                disabled={!canManageMasterData}
+                                value={currentLimit.minEquivalentUnits}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  setDraftRules((prev) => {
+                                    const base = {
+                                      ...DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS,
+                                      ...(prev.professorUnitLimits || {}),
+                                    } as Record<SchedEmploymentType, SchedProfessorUnitLimit>;
+                                    return {
+                                      ...prev,
+                                      professorUnitLimits: {
+                                        ...base,
+                                        [empKey]: {
+                                          ...(base[empKey] || defLimit),
+                                          minEquivalentUnits: val,
+                                        },
+                                      },
+                                    };
+                                  });
+                                }}
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
+                                dir="ltr"
+                              />
+                            </label>
+                            <label className="space-y-1">
+                              <span className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold block">
+                                حداکثر واحد معادل:
+                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.5"
+                                disabled={!canManageMasterData}
+                                value={currentLimit.maxEquivalentUnits}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  setDraftRules((prev) => {
+                                    const base = {
+                                      ...DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS,
+                                      ...(prev.professorUnitLimits || {}),
+                                    } as Record<SchedEmploymentType, SchedProfessorUnitLimit>;
+                                    return {
+                                      ...prev,
+                                      professorUnitLimits: {
+                                        ...base,
+                                        [empKey]: {
+                                          ...(base[empKey] || defLimit),
+                                          maxEquivalentUnits: val,
+                                        },
+                                      },
+                                    };
+                                  });
+                                }}
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
+                                dir="ltr"
+                              />
+                            </label>
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            عدد ۰ در حداقل = بدون الزام حداقل · عدد ۰ در حداکثر = بدون سقف
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -6274,6 +6506,67 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 </div>
               )}
 
+              <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-800 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-extrabold text-amber-900 dark:text-amber-200">
+                    محدوده واحد معادل اختصاصی استاد (اختیاری)
+                  </span>
+                  <span className="text-[10.5px] text-amber-800 dark:text-amber-300 font-semibold">
+                    قانون فعلی «{SCHED_EMPLOYMENT_LABELS[profEmployment]}»: حداقل{' '}
+                    {(
+                      rules.professorUnitLimits?.[profEmployment] ||
+                      DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS[profEmployment]
+                    ).minEquivalentUnits}{' '}
+                    · حداکثر{' '}
+                    {(
+                      rules.professorUnitLimits?.[profEmployment] ||
+                      DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS[profEmployment]
+                    ).maxEquivalentUnits}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="space-y-1">
+                    <span className="font-bold">حداقل واحد معادل اختصاصی</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.5"
+                      value={profMinEqOverride}
+                      onChange={(e) => setProfMinEqOverride(e.target.value)}
+                      placeholder={`خالی = استفاده از قانون (${
+                        (
+                          rules.professorUnitLimits?.[profEmployment] ||
+                          DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS[profEmployment]
+                        ).minEquivalentUnits
+                      })`}
+                      className="w-full px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 font-mono"
+                      dir="ltr"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="font-bold">حداکثر واحد معادل اختصاصی</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.5"
+                      value={profMaxEqOverride}
+                      onChange={(e) => setProfMaxEqOverride(e.target.value)}
+                      placeholder={`خالی = استفاده از قانون (${
+                        (
+                          rules.professorUnitLimits?.[profEmployment] ||
+                          DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS[profEmployment]
+                        ).maxEquivalentUnits
+                      })`}
+                      className="w-full px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 font-mono"
+                      dir="ltr"
+                    />
+                  </label>
+                </div>
+                <div className="text-[10.5px] text-slate-500">
+                  در صورت خالی گذاشتن هر فیلد، مقدار مصوب نوع استخدام اعمال می‌شود؛ ثبت عدد ۰ به معنای بدون محدودیت است.
+                </div>
+              </div>
+
               <button
                 type="submit"
                 className="w-full py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold cursor-pointer"
@@ -7107,10 +7400,22 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       .map((p) => {
                         const ld = calculateProfessorLoadSummary(p.id, termOfferings, rules);
                         const deptField = formatProfessorDepartmentAndField(p);
+                        const bounds = getProfessorEquivalentUnitBounds(p, rules);
+                        const limitEval = evaluateProfessorEquivalentUnitStatus(
+                          p,
+                          ld.equivalentUnits,
+                          rules
+                        );
                         return (
                           <option key={p.id} value={p.id}>
-                            {p.fullName} (کد {p.professorCode}){deptField ? ` · ${deptField}` : ''} — بار فعلی:{' '}
-                            {ld.equivalentUnits} معادل
+                            {p.fullName} (کد {p.professorCode}
+                            {deptField ? ` · ${deptField}` : ''} — بار فعلی:{' '}
+                            {ld.equivalentUnits}
+                            {bounds.maxEquivalentUnits > 0
+                              ? ` از ${bounds.maxEquivalentUnits}`
+                              : ''}{' '}
+                            معادل
+                            {limitEval.status === 'above_max' ? ' ⚠️ سقف پر' : ''})
                           </option>
                         );
                       })}
@@ -7122,6 +7427,13 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       selectedProf.degreeLevel,
                       selectedProf.degreeField,
                       selectedProf.degreeSpecialization
+                    );
+                    const ld = calculateProfessorLoadSummary(selectedProf.id, termOfferings, rules);
+                    const bounds = getProfessorEquivalentUnitBounds(selectedProf, rules);
+                    const limitStatus = evaluateProfessorEquivalentUnitStatus(
+                      selectedProf,
+                      ld.equivalentUnits,
+                      rules
                     );
                     return (
                       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-600 dark:text-slate-300">
@@ -7140,27 +7452,78 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             مرتبه: {selectedProf.academicRank}
                           </span>
                         )}
+                        <span
+                          className={`px-2 py-0.5 rounded border font-bold ${
+                            limitStatus.status !== 'ok'
+                              ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200'
+                              : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                          }`}
+                        >
+                          بار فعلی: {ld.equivalentUnits} معادل (مجاز:{' '}
+                          {bounds.minEquivalentUnits > 0 ? `${bounds.minEquivalentUnits} تا ` : 'حداکثر '}
+                          {bounds.maxEquivalentUnits > 0 ? bounds.maxEquivalentUnits : 'نامحدود'})
+                        </span>
                       </div>
                     );
                   })()}
                 </label>
 
                 <label className="space-y-1">
-                  <span className="font-bold">تخصیص کلاس فیزیکی</span>
+                  <div className="flex flex-wrap items-center justify-between gap-1">
+                    <span className="font-bold">تخصیص کلاس فیزیکی</span>
+                    <span className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300">
+                      {offDay && offSlotIds.length > 0
+                        ? `فقط کلاس‌های خالی (${modalClassroomAvailability.freeRooms.length.toLocaleString('fa-IR')} از ${modalClassroomAvailability.totalActiveCount.toLocaleString('fa-IR')})`
+                        : `(${modalClassroomAvailability.totalActiveCount.toLocaleString('fa-IR')} کلاس فعال)`}
+                    </span>
+                  </div>
                   <select
                     value={offClassroomId}
                     onChange={(e) => setOffClassroomId(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                   >
                     <option value="">-- بدون کلاس فیزیکی --</option>
-                    {classrooms
-                      .filter((r) => r.isActive)
-                      .map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name} (کد {r.code} · ظرفیت {r.capacity})
-                        </option>
-                      ))}
+                    {modalClassroomAvailability.selectedOccupiedItem && (
+                      <option value={modalClassroomAvailability.selectedOccupiedItem.room.id}>
+                        ⛔ اشغال‌شده در این ساعت —{' '}
+                        {modalClassroomAvailability.selectedOccupiedItem.room.name} (توسط «
+                        {modalClassroomAvailability.selectedOccupiedItem.occupiedBy?.courseTitle ||
+                          'درس دیگر'}
+                        »)
+                      </option>
+                    )}
+                    {modalClassroomAvailability.freeRooms.map(({ room, capOk }) => (
+                      <option key={room.id} value={room.id}>
+                        {capOk ? '✅' : '🟡 ظرفیت کمتر —'} {room.name} (کد {room.code} · ظرفیت{' '}
+                        {room.capacity} · {SCHED_ROOM_TYPE_LABELS[room.roomType]})
+                      </option>
+                    ))}
                   </select>
+                  {modalClassroomAvailability.selectedOccupiedItem && (
+                    <div className="mt-1 p-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[10.5px] text-rose-700 dark:text-rose-200 flex flex-wrap items-center justify-between gap-1.5">
+                      <span>
+                        کلاس انتخاب‌شده قبلی در این روز و سانس اشغال است؛ یکی از کلاس‌های خالی را انتخاب کنید.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOffClassroomId(modalClassroomAvailability.freeRooms[0]?.room.id || '')
+                        }
+                        className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
+                      >
+                        {modalClassroomAvailability.freeRooms[0]
+                          ? `انتخاب ${modalClassroomAvailability.freeRooms[0].room.name}`
+                          : 'پاک کردن کلاس'}
+                      </button>
+                    </div>
+                  )}
+                  {offDay &&
+                    offSlotIds.length > 0 &&
+                    modalClassroomAvailability.freeRooms.length === 0 && (
+                      <div className="mt-1 text-[10.5px] font-bold text-amber-700 dark:text-amber-300">
+                        در این روز و سانس هیچ کلاس فیزیکی خالی یافت نشد.
+                      </div>
+                    )}
                 </label>
               </div>
 

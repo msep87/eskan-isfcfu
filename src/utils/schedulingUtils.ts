@@ -15,6 +15,7 @@ import {
   SchedPracticalUnitType,
   SchedPrintColorMode,
   SchedProfessor,
+  SchedProfessorUnitLimit,
   SchedProgramCohort,
   SchedRulesSettings,
   SchedSlotHalf,
@@ -80,6 +81,18 @@ export const SCHED_EMPLOYMENT_LABELS: Record<SchedEmploymentType, string> = {
   haghol_tadris_free: 'حق التدریس آزاد',
   staff: 'کارمند',
   retired: 'بازنشسته',
+};
+
+export const DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS: Record<
+  SchedEmploymentType,
+  SchedProfessorUnitLimit
+> = {
+  faculty_member: { minEquivalentUnits: 10, maxEquivalentUnits: 24 },
+  mamoor_amoozeshi: { minEquivalentUnits: 0, maxEquivalentUnits: 24 },
+  haghol_tadris_ap: { minEquivalentUnits: 0, maxEquivalentUnits: 12 },
+  haghol_tadris_free: { minEquivalentUnits: 0, maxEquivalentUnits: 12 },
+  staff: { minEquivalentUnits: 0, maxEquivalentUnits: 12 },
+  retired: { minEquivalentUnits: 0, maxEquivalentUnits: 12 },
 };
 
 export function normalizeSchedCode(raw: string | number | undefined | null): string {
@@ -703,6 +716,128 @@ export function calculateProfessorLoadSummary(
   };
 }
 
+export interface ProfessorEquivalentUnitBounds {
+  minEquivalentUnits: number;
+  maxEquivalentUnits: number;
+  minSource: 'professor' | 'employment';
+  maxSource: 'professor' | 'employment';
+}
+
+export function getProfessorEquivalentUnitBounds(
+  prof: Pick<
+    SchedProfessor,
+    'employmentType' | 'minEquivalentUnitsOverride' | 'maxEquivalentUnitsOverride'
+  >,
+  rules?: SchedRulesSettings
+): ProfessorEquivalentUnitBounds {
+  const empDefaults =
+    rules?.professorUnitLimits?.[prof.employmentType] ||
+    DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS[prof.employmentType] || {
+      minEquivalentUnits: 0,
+      maxEquivalentUnits: 12,
+    };
+
+  const hasProfMin =
+    typeof prof.minEquivalentUnitsOverride === 'number' &&
+    Number.isFinite(prof.minEquivalentUnitsOverride) &&
+    prof.minEquivalentUnitsOverride >= 0;
+  const hasProfMax =
+    typeof prof.maxEquivalentUnitsOverride === 'number' &&
+    Number.isFinite(prof.maxEquivalentUnitsOverride) &&
+    prof.maxEquivalentUnitsOverride >= 0;
+
+  return {
+    minEquivalentUnits: hasProfMin
+      ? round2(prof.minEquivalentUnitsOverride!)
+      : round2(Math.max(0, empDefaults.minEquivalentUnits || 0)),
+    maxEquivalentUnits: hasProfMax
+      ? round2(prof.maxEquivalentUnitsOverride!)
+      : round2(Math.max(0, empDefaults.maxEquivalentUnits || 0)),
+    minSource: hasProfMin ? 'professor' : 'employment',
+    maxSource: hasProfMax ? 'professor' : 'employment',
+  };
+}
+
+export interface ProfessorUnitLimitStatus {
+  bounds: ProfessorEquivalentUnitBounds;
+  status: 'ok' | 'below_min' | 'above_max';
+  message: string | null;
+}
+
+export function evaluateProfessorEquivalentUnitStatus(
+  prof: Pick<
+    SchedProfessor,
+    'fullName' | 'employmentType' | 'minEquivalentUnitsOverride' | 'maxEquivalentUnitsOverride'
+  >,
+  equivalentUnits: number,
+  rules?: SchedRulesSettings
+): ProfessorUnitLimitStatus {
+  const bounds = getProfessorEquivalentUnitBounds(prof, rules);
+  const rounded = round2(equivalentUnits);
+
+  if (bounds.maxEquivalentUnits > 0 && rounded > bounds.maxEquivalentUnits + 0.001) {
+    return {
+      bounds,
+      status: 'above_max',
+      message: `اخطار سقف واحد معادل: مجموع واحد معادل استاد «${prof.fullName}» (${rounded.toLocaleString('fa-IR')} معادل) از حداکثر مجاز (${bounds.maxEquivalentUnits.toLocaleString('fa-IR')} معادل${
+        bounds.maxSource === 'professor'
+          ? ' — سقف اختصاصی استاد'
+          : ` — قانون ${SCHED_EMPLOYMENT_LABELS[prof.employmentType]}`
+      }) بیشتر است (ثبت درس همچنان مجاز است).`,
+    };
+  }
+
+  if (bounds.minEquivalentUnits > 0 && rounded < bounds.minEquivalentUnits - 0.001) {
+    return {
+      bounds,
+      status: 'below_min',
+      message: `اخطار حداقل واحد معادل: مجموع واحد معادل استاد «${prof.fullName}» (${rounded.toLocaleString('fa-IR')} معادل) کمتر از حداقل موظفی (${bounds.minEquivalentUnits.toLocaleString('fa-IR')} معادل${
+        bounds.minSource === 'professor'
+          ? ' — حداقل اختصاصی استاد'
+          : ` — قانون ${SCHED_EMPLOYMENT_LABELS[prof.employmentType]}`
+      }) است (ثبت درس همچنان مجاز است).`,
+    };
+  }
+
+  return {
+    bounds,
+    status: 'ok',
+    message: null,
+  };
+}
+
+export function checkClassroomAvailabilityAtSlots(
+  classroomId: string,
+  termKey: string,
+  dayOfWeek: SchedDayKey | undefined,
+  slotIds: string[],
+  slotParts: Record<string, SchedSlotHalf> | undefined,
+  offerings: SchedCourseOffering[],
+  excludeOfferingId?: string
+): { isFree: boolean; occupiedBy?: SchedCourseOffering } {
+  if (!classroomId || !dayOfWeek || slotIds.length === 0) {
+    return { isFree: true };
+  }
+  const hit = offerings.find(
+    (o) =>
+      o.id !== excludeOfferingId &&
+      !o.isDisabled &&
+      !o.isProvisional &&
+      o.termKey === termKey &&
+      o.classroomId === classroomId &&
+      o.dayOfWeek === dayOfWeek &&
+      o.slotIds.some(
+        (sid) =>
+          slotIds.includes(sid) &&
+          doSlotHalvesOverlap(slotParts?.[sid] || 'full', getOfferingSlotHalf(o, sid))
+      )
+  );
+  return {
+    isFree: !hit,
+    occupiedBy: hit,
+  };
+}
+
 export interface OfferingConflictReport {
   hasHardConflict: boolean;
   errors: string[];
@@ -863,6 +998,48 @@ export function detectOfferingConflicts(
   if (candidate.examDayId && candidate.examSlotId && isCourseEligibleForExam(candidate)) {
     const examWarns = detectOfferingExamConflicts(candidate, allOfferings, rules);
     warnings.push(...examWarns);
+  }
+
+  // اخطار رعایت حداقل و حداکثر واحد معادل استاد (صرفاً هشدار؛ مانع ثبت نمی‌شود)
+  if (candidate.professorId && !candidate.isDisabled && !candidate.isProvisional) {
+    const prof = professors.find((p) => p.id === candidate.professorId);
+    if (prof) {
+      const effectiveRules: SchedRulesSettings = rules || {
+        activeTerm: candidate.termKey,
+        availableTerms: [candidate.termKey],
+        hoursPerUnit: {
+          theoretical: 1,
+          practicalNormalLab: 2,
+          practicalWorkshop: 3,
+          practicalInternship: 4,
+        },
+        equivalentPerUnit: {
+          theoretical: 1,
+          practicalNormalLab: 1.3,
+          practicalWorkshop: 1.98,
+          practicalInternshipBase: 3,
+          internshipMinStudents: 12,
+        },
+        professorUnitLimits: DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS,
+        activeDays: ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday'],
+        timeSlots: [],
+      };
+      const existingProfEq = allOfferings
+        .filter(
+          (o) =>
+            o.id !== candidate.id &&
+            o.termKey === candidate.termKey &&
+            o.professorId === prof.id &&
+            isOfferingEffectivelyActive(o, effectiveRules)
+        )
+        .reduce((acc, o) => acc + calculateOfferingBreakdown(o, effectiveRules).equivalentUnits, 0);
+      const candidateEq = calculateOfferingBreakdown(candidate, effectiveRules).equivalentUnits;
+      const projectedEq = round2(existingProfEq + candidateEq);
+      const limitCheck = evaluateProfessorEquivalentUnitStatus(prof, projectedEq, effectiveRules);
+      if (limitCheck.message) {
+        warnings.push(limitCheck.message);
+      }
+    }
   }
 
   return {

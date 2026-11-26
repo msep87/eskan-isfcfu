@@ -17,6 +17,7 @@ import {
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
   detectOfferingConflicts,
+  evaluateProfessorEquivalentUnitStatus,
   exportJsonRowsToExcel,
   getSchedSlotTitle,
   isOfferingEffectivelyActive,
@@ -1263,13 +1264,18 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                 onClick={() => {
                   const html = `<table><thead><tr><th>کد استاد</th><th>نام و نام خانوادگی</th><th>مقطع</th><th>رشته و گرایش</th><th>گروه آموزشی</th><th>مرتبه / وضعیت استخدام</th>${
                     canViewSensitiveProfInfo ? '<th>بانک / شماره حساب</th>' : ''
-                  }<th>تعداد درس</th><th>واحد خام</th><th>ساعت هفتگی</th><th>واحد معادل</th><th>روزهای حضور</th></tr></thead><tbody>${professorRows
-                    .map(
-                      ({ prof, summary }) =>
-                        `<tr><td class="mono">${escapeHtml(prof.professorCode)}</td><td><strong>${escapeHtml(prof.fullName)}</strong></td><td>${escapeHtml(prof.degreeLevel || '-')}</td><td>${escapeHtml([prof.degreeField, prof.degreeSpecialization].filter(Boolean).join(' - ') || prof.degreeFull || '-')}</td><td>${escapeHtml(prof.departmentName || '-')}</td><td>${escapeHtml([prof.academicRank, prof.employmentStatusRaw || SCHED_EMPLOYMENT_LABELS[prof.employmentType]].filter(Boolean).join(' · '))}</td>${
-                          canViewSensitiveProfInfo ? `<td class="mono">${escapeHtml([prof.bankName, prof.bankAccount].filter(Boolean).join(' - ') || '-')}</td>` : ''
-                        }<td>${summary.offeringCount}</td><td>${summary.rawUnits}</td><td>${summary.weeklyHours}</td><td><strong>${summary.equivalentUnits}</strong></td><td>${escapeHtml(summary.activeDays.map((d) => SCHED_DAY_LABELS[d]).join('، ') || '-')}</td></tr>`
-                    )
+                  }<th>تعداد درس</th><th>واحد خام</th><th>ساعت هفتگی</th><th>واحد معادل (حد مجاز)</th><th>روزهای حضور</th></tr></thead><tbody>${professorRows
+                    .map(({ prof, summary }) => {
+                      const ls = evaluateProfessorEquivalentUnitStatus(
+                        prof,
+                        summary.equivalentUnits,
+                        rules
+                      );
+                      const rangeLabel = `${ls.bounds.minEquivalentUnits > 0 ? `حداقل ${ls.bounds.minEquivalentUnits}` : '۰'} تا ${ls.bounds.maxEquivalentUnits > 0 ? ls.bounds.maxEquivalentUnits : 'نامحدود'}`;
+                      return `<tr><td class="mono">${escapeHtml(prof.professorCode)}</td><td><strong>${escapeHtml(prof.fullName)}</strong></td><td>${escapeHtml(prof.degreeLevel || '-')}</td><td>${escapeHtml([prof.degreeField, prof.degreeSpecialization].filter(Boolean).join(' - ') || prof.degreeFull || '-')}</td><td>${escapeHtml(prof.departmentName || '-')}</td><td>${escapeHtml([prof.academicRank, prof.employmentStatusRaw || SCHED_EMPLOYMENT_LABELS[prof.employmentType]].filter(Boolean).join(' · '))}</td>${
+                        canViewSensitiveProfInfo ? `<td class="mono">${escapeHtml([prof.bankName, prof.bankAccount].filter(Boolean).join(' - ') || '-')}</td>` : ''
+                      }<td>${summary.offeringCount}</td><td>${summary.rawUnits}</td><td>${summary.weeklyHours}</td><td><strong>${summary.equivalentUnits}</strong> <span class="muted">(${escapeHtml(rangeLabel)})</span>${ls.status === 'above_max' ? ' [بیش از سقف]' : ls.status === 'below_min' ? ' [زیر حداقل]' : ''}</td><td>${escapeHtml(summary.activeDays.map((d) => SCHED_DAY_LABELS[d]).join('، ') || '-')}</td></tr>`;
+                    })
                     .join('')}</tbody></table>`;
                   printSchedHtml(`گزارش جامع اساتید، ساعات تدریس و واحد معادل - ${termLabel}`, html);
                 }}
@@ -1282,6 +1288,11 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                 type="button"
                 onClick={() => {
                   const rows = professorRows.map(({ prof, summary }) => {
+                    const ls = evaluateProfessorEquivalentUnitStatus(
+                      prof,
+                      summary.equivalentUnits,
+                      rules
+                    );
                     const base: Record<string, unknown> = {
                       'شماره شناسایی (کد استاد)': prof.professorCode,
                       'نام و نام خانوادگی': prof.fullName,
@@ -1308,6 +1319,15 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                     base['جمع واحد خام'] = summary.rawUnits;
                     base['مجموع ساعات تدریس هفتگی'] = summary.weeklyHours;
                     base['جمع واحد معادل'] = summary.equivalentUnits;
+                    base['حداقل واحد معادل مجاز'] = ls.bounds.minEquivalentUnits;
+                    base['حداکثر واحد معادل مجاز'] =
+                      ls.bounds.maxEquivalentUnits > 0 ? ls.bounds.maxEquivalentUnits : 'نامحدود';
+                    base['وضعیت سقف/کف'] =
+                      ls.status === 'above_max'
+                        ? 'اخطار: بیش از سقف مجاز'
+                        : ls.status === 'below_min'
+                        ? 'اخطار: کمتر از حداقل موظفی'
+                        : 'مجاز';
                     base['روزهای تدریس'] = summary.activeDays
                       .map((d) => SCHED_DAY_LABELS[d])
                       .join('، ');
@@ -1340,7 +1360,13 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 tabular-nums">
-                {professorRows.map(({ prof, summary }) => (
+                {professorRows.map(({ prof, summary }) => {
+                  const limitStatus = evaluateProfessorEquivalentUnitStatus(
+                    prof,
+                    summary.equivalentUnits,
+                    rules
+                  );
+                  return (
                   <tr
                     key={prof.id}
                     className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 ${
@@ -1381,8 +1407,30 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                       </span>
                     </td>
                     <td className="p-3 text-center font-bold">{summary.weeklyHours} ساعت</td>
-                    <td className="p-3 text-center font-black text-teal-700 dark:text-teal-400 text-sm">
-                      {summary.equivalentUnits}
+                    <td className="p-3 text-center">
+                      <div className="font-black text-teal-700 dark:text-teal-400 text-sm">
+                        {summary.equivalentUnits}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-semibold">
+                        {limitStatus.bounds.minEquivalentUnits > 0
+                          ? `حداقل ${limitStatus.bounds.minEquivalentUnits}`
+                          : '۰'}{' '}
+                        تا{' '}
+                        {limitStatus.bounds.maxEquivalentUnits > 0
+                          ? limitStatus.bounds.maxEquivalentUnits
+                          : 'نامحدود'}
+                      </div>
+                      {limitStatus.status !== 'ok' && (
+                        <div
+                          className="inline-flex items-center gap-0.5 mt-0.5 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[9.5px] font-bold"
+                          title={limitStatus.message || ''}
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5" />
+                          <span>
+                            {limitStatus.status === 'above_max' ? 'بیش از سقف' : 'زیر حداقل'}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="p-3 text-[11px] text-slate-600 dark:text-slate-300">
                       {summary.activeDays.map((d) => SCHED_DAY_LABELS[d]).join('، ') || '—'}
@@ -1397,7 +1445,8 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

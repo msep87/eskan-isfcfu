@@ -8,6 +8,7 @@ import {
   SCHED_PRACTICAL_TYPE_LABELS,
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
+  evaluateProfessorEquivalentUnitStatus,
   exportJsonRowsToExcel,
   getProfessorAvailabilityWindowStatus,
   getSchedSlotTitle,
@@ -96,6 +97,11 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
   const loadSummary = useMemo(
     () => calculateProfessorLoadSummary(professor.id, myOfferings, rules),
     [professor.id, myOfferings, rules]
+  );
+
+  const unitLimitStatus = useMemo(
+    () => evaluateProfessorEquivalentUnitStatus(professor, loadSummary.equivalentUnits, rules),
+    [professor, loadSummary.equivalentUnits, rules]
   );
 
   const unreadMessagesCount = useMemo(
@@ -357,6 +363,23 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
           <div className="text-2xl font-black text-teal-700 dark:text-teal-400 mt-1">
             {loadSummary.equivalentUnits} معادل
           </div>
+          <div className="text-[10.5px] text-slate-500 mt-1">
+            {unitLimitStatus.bounds.minEquivalentUnits > 0
+              ? `حداقل ${unitLimitStatus.bounds.minEquivalentUnits}`
+              : 'بدون حداقل'}{' '}
+            ·{' '}
+            {unitLimitStatus.bounds.maxEquivalentUnits > 0
+              ? `سقف ${unitLimitStatus.bounds.maxEquivalentUnits}`
+              : 'سقف نامحدود'}
+          </div>
+          {unitLimitStatus.status !== 'ok' && (
+            <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 text-[10px] font-bold">
+              <AlertTriangle className="w-3 h-3 shrink-0" />
+              <span>
+                {unitLimitStatus.status === 'above_max' ? 'بیش از سقف مجاز' : 'کمتر از حداقل موظفی'}
+              </span>
+            </div>
+          )}
         </div>
         <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
           <div className="text-xs text-slate-500">روزهای حضور در دانشگاه</div>
