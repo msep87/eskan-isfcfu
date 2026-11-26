@@ -23,9 +23,13 @@ import {
 import { toEnglishDigits } from './excelUtils';
 import {
   addDaysToJalaliDate,
+  formatJalaliDate,
   getJalaliDayOfWeekKey,
   getJalaliWeekdayLabelFromDate,
+  getTodayJalali,
+  jalaliToGregorian,
   parseJalaliDate,
+  parseTimeString,
 } from './jalaliCalendar';
 
 export const SCHED_DAYS_ORDER: SchedDayKey[] = [
@@ -414,6 +418,13 @@ export function detectOfferingConflicts(
   const errors: string[] = [];
   const warnings: string[] = [];
 
+  if (candidate.isDisabled) {
+    warnings.push(
+      candidate.disabledReason ||
+        'این درس به دلیل حذف استاد غیرفعال و بدون استاد است؛ با تخصیص استاد جدید مجدداً فعال خواهد شد.'
+    );
+  }
+
   // بررسی قانون یکسان بودن کد ۷ رقمی برای رشته‌های مشترک
   if (candidate.sharedWithTargets && candidate.sharedWithTargets.length > 0) {
     const cleanCode = normalizeSchedCode(candidate.courseCode);
@@ -422,11 +433,12 @@ export function detectOfferingConflicts(
     }
   }
 
-  // بررسی تداخل زمانی فقط در صورتی که روز و حداقل یک سانس انتخاب شده باشد
-  if (candidate.dayOfWeek && candidate.slotIds.length > 0) {
+  // بررسی تداخل زمانی فقط در صورتی که روز و حداقل یک سانس انتخاب شده باشد (دروس غیرفعال تداخل ایجاد نمی‌کنند)
+  if (!candidate.isDisabled && candidate.dayOfWeek && candidate.slotIds.length > 0) {
     const sameTermOthers = allOfferings.filter(
       (o) =>
         o.id !== candidate.id &&
+        !o.isDisabled &&
         o.termKey === candidate.termKey &&
         o.dayOfWeek === candidate.dayOfWeek &&
         o.slotIds.some(
@@ -1893,7 +1905,12 @@ export function detectOfferingExamConflicts(
   allOfferings: SchedCourseOffering[],
   rules?: SchedRulesSettings
 ): string[] {
-  if (!isCourseEligibleForExam(candidate) || !candidate.examDayId || !candidate.examSlotId) {
+  if (
+    candidate.isDisabled ||
+    !isCourseEligibleForExam(candidate) ||
+    !candidate.examDayId ||
+    !candidate.examSlotId
+  ) {
     return [];
   }
   const examSettings = rules ? getExamSettingsForTerm(rules, candidate.termKey) : undefined;
@@ -1903,7 +1920,7 @@ export function detectOfferingExamConflicts(
   const warnings: string[] = [];
 
   for (const other of allOfferings) {
-    if (other.id === candidate.id) continue;
+    if (other.id === candidate.id || other.isDisabled) continue;
     if (other.termKey !== candidate.termKey) continue;
     if (!isCourseEligibleForExam(other)) continue;
     if (other.examDayId !== candidate.examDayId || other.examSlotId !== candidate.examSlotId) {
@@ -2089,6 +2106,156 @@ export function applyOfferingHistoryStep(params: {
 
   return { ok: true, nextOfferings: working };
 }
+
+// =============================================================
+// مدیریت بازه زمانی اعلام حضور/عدم حضور اساتید و غیرفعال‌سازی دروس استاد حذف‌شده
+// =============================================================
+
+export interface ProfessorAvailabilityWindowStatus {
+  isOpen: boolean;
+  status: 'disabled' | 'not_started' | 'open' | 'expired';
+  startsAtLabel?: string;
+  endsAtLabel?: string;
+  remainingText?: string;
+  message: string;
+}
+
+function parseJalaliDateTimeToDate(
+  jalaliDateStr: string | undefined,
+  timeStr: string | undefined,
+  defaultHour: number,
+  defaultMinute: number,
+  isEnd: boolean
+): Date | null {
+  const parsedDate = parseJalaliDate(jalaliDateStr || '');
+  if (!parsedDate) return null;
+  const { gy, gm, gd } = jalaliToGregorian(parsedDate.jy, parsedDate.jm, parsedDate.jd);
+  const parsedTime = parseTimeString(timeStr || '');
+  const hour = parsedTime ? parsedTime.hour : defaultHour;
+  const minute = parsedTime ? parsedTime.minute : defaultMinute;
+  return new Date(gy, gm - 1, gd, hour, minute, isEnd ? 59 : 0);
+}
+
+export function buildDefaultProfessorAvailabilityWindowDates(): {
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+} {
+  const today = getTodayJalali();
+  const startDate = formatJalaliDate(today.jy, today.jm, today.jd, 'en');
+  const endDate = addDaysToJalaliDate(startDate, 3, 'en') || startDate;
+  return {
+    startDate,
+    startTime: '00:00',
+    endDate,
+    endTime: '23:59',
+  };
+}
+
+export function getProfessorAvailabilityWindowStatus(
+  rules: SchedRulesSettings,
+  now: Date = new Date()
+): ProfessorAvailabilityWindowStatus {
+  const cfg = rules.professorAvailabilityWindow;
+  if (!cfg || !cfg.enabled) {
+    return {
+      isOpen: false,
+      status: 'disabled',
+      message:
+        'ثبت زمان‌بندی حضور و عدم امکان حضور اساتید در حال حاضر توسط مدیر کل سامانه فعال نشده یا بسته شده است.',
+    };
+  }
+
+  const startDateObj = parseJalaliDateTimeToDate(cfg.startDate, cfg.startTime, 0, 0, false);
+  const endDateObj = parseJalaliDateTimeToDate(cfg.endDate, cfg.endTime, 23, 59, true);
+
+  const startsAtLabel = cfg.startDate
+    ? `${cfg.startDate}${cfg.startTime ? ` ساعت ${cfg.startTime}` : ''}`
+    : undefined;
+  const endsAtLabel = cfg.endDate
+    ? `${cfg.endDate}${cfg.endTime ? ` ساعت ${cfg.endTime}` : ''}`
+    : undefined;
+
+  if (startDateObj && now.getTime() < startDateObj.getTime()) {
+    return {
+      isOpen: false,
+      status: 'not_started',
+      startsAtLabel,
+      endsAtLabel,
+      message: `بازه زمانی ثبت ساعات حضور اساتید از تاریخ ${startsAtLabel} آغاز خواهد شد.`,
+    };
+  }
+
+  if (endDateObj && now.getTime() > endDateObj.getTime()) {
+    return {
+      isOpen: false,
+      status: 'expired',
+      startsAtLabel,
+      endsAtLabel,
+      message: `مهلت ثبت ساعات حضور و عدم امکان حضور اساتید (${endsAtLabel}) به پایان رسید و دسترسی به‌صورت خودکار بسته شد.`,
+    };
+  }
+
+  let remainingText: string | undefined;
+  if (endDateObj) {
+    const diffMs = Math.max(0, endDateObj.getTime() - now.getTime());
+    const totalMinutes = Math.floor(diffMs / 60000);
+    const days = Math.floor(totalMinutes / (60 * 24));
+    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+    const mins = totalMinutes % 60;
+    if (days > 0) {
+      remainingText = `${days.toLocaleString('fa-IR')} روز و ${hours.toLocaleString('fa-IR')} ساعت مانده`;
+    } else if (hours > 0) {
+      remainingText = `${hours.toLocaleString('fa-IR')} ساعت و ${mins.toLocaleString('fa-IR')} دقیقه مانده`;
+    } else {
+      remainingText = `${Math.max(1, mins).toLocaleString('fa-IR')} دقیقه مانده`;
+    }
+  }
+
+  return {
+    isOpen: true,
+    status: 'open',
+    startsAtLabel,
+    endsAtLabel,
+    remainingText,
+    message: endsAtLabel
+      ? `بازه ثبت زمان‌بندی حضور اساتید تا ${endsAtLabel} باز است (${remainingText || 'فعال'}).`
+      : 'بازه ثبت زمان‌بندی حضور اساتید هم‌اکنون باز و فعال است.',
+  };
+}
+
+export function deactivateOfferingsForRemovedProfessors(
+  offerings: SchedCourseOffering[],
+  removedProfIds: Iterable<string>,
+  actor?: { id: string; name: string },
+  profNameById?: Map<string, string>
+): { nextOfferings: SchedCourseOffering[]; affectedCount: number } {
+  const idSet = new Set(removedProfIds);
+  if (idSet.size === 0) {
+    return { nextOfferings: offerings, affectedCount: 0 };
+  }
+  const nowIso = new Date().toISOString();
+  let affectedCount = 0;
+  const nextOfferings = offerings.map((o) => {
+    if (!o.professorId || !idSet.has(o.professorId)) return o;
+    affectedCount += 1;
+    const prevName = profNameById?.get(o.professorId) || o.professorName || 'استاد حذف‌شده';
+    return {
+      ...o,
+      professorId: undefined,
+      professorCode: undefined,
+      professorName: undefined,
+      isDisabled: true,
+      disabledReason: `استاد پیشین (${prevName}) از لیست اساتید حذف شده است`,
+      updatedById: actor?.id || o.updatedById,
+      updatedByName: actor?.name || o.updatedByName,
+      updatedAt: nowIso,
+    };
+  });
+  return { nextOfferings, affectedCount };
+}
+
 
 
 

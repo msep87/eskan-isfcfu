@@ -493,6 +493,16 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
         }
       });
 
+      if (replaceMode) {
+        const importedIds = new Set(previewStudents.map((s) => s.studentId));
+        beds.forEach((b) => {
+          if (b.studentId && !importedIds.has(b.studentId)) {
+            b.studentId = null;
+            b.assignmentStatus = undefined;
+          }
+        });
+      }
+
       if (dormsCreated) {
         Storage.setDormitories(dorms);
       }

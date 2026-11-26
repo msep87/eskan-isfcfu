@@ -143,11 +143,12 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
     [allPrograms, student.fieldOfStudy, student.entryTerm, scope]
   );
 
-  // دروس مجاز بر اساس ترم منتشرشده + سطح دسترسی تعیین‌شده توسط مدیر سامانه
+  // دروس مجاز بر اساس ترم منتشرشده + سطح دسترسی تعیین‌شده توسط مدیر سامانه (بدون دروس غیرفعال)
   const scopeOfferings = useMemo(
     () =>
       allOfferings.filter(
         (o) =>
+          !o.isDisabled &&
           o.termKey === selectedTerm &&
           doesOfferingMatchStudentScope(o, student.fieldOfStudy, student.entryTerm, scope)
       ),

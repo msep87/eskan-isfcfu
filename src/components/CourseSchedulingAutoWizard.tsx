@@ -174,7 +174,7 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
         strictRoomCapacity,
         strictRoomType,
       },
-      existingOfferings,
+      existingOfferings.filter((o) => !o.isDisabled),
       classrooms,
       professors,
       rules,

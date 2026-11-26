@@ -1,17 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   SchedCellComment,
+  SchedCellTextFit,
   SchedClassroom,
   SchedCourseOffering,
   SchedCurriculumCourse,
   SchedDayKey,
+  SchedMasterColumnStyle,
+  SchedMasterGridLayoutSettings,
+  SchedMetaColumnKey,
   SchedProfessor,
   SchedProgramCohort,
   SchedRulesSettings,
   SchedSlotHalf,
+  SchedTextOrientation,
   SchedTimeSlot,
   SchedWorkspaceRole,
 } from '../types';
+import { DEFAULT_MASTER_GRID_LAYOUT } from '../utils/sampleData';
 import {
   SCHED_DAY_LABELS,
   SCHED_ROOM_TYPE_LABELS,
@@ -38,9 +44,13 @@ import {
   AlertTriangle,
   Building2,
   CalendarClock,
+  Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  Columns3,
   Download,
   Eye,
   Filter,
@@ -51,15 +61,22 @@ import {
   MessageSquare,
   MessageSquarePlus,
   Minimize2,
+  Monitor,
+  MoveHorizontal,
   Printer,
   Redo2,
   RotateCcw,
   Scan,
   Search,
   Send,
+  Settings2,
+  SlidersHorizontal,
+  Smartphone,
+  Table2,
   Trash2,
   Undo2,
   Users,
+  WrapText,
   X,
   ZoomIn,
   ZoomOut,
@@ -98,6 +115,7 @@ interface CourseSchedulingMasterGridProps {
     slotHalf?: SchedSlotHalf;
   }) => void;
   onOpenEditOffering: (offering: SchedCourseOffering) => void;
+  onPersistRules?: (next: SchedRulesSettings) => void;
   onNotify: (type: 'success' | 'error', text: string) => void;
 }
 
@@ -214,6 +232,113 @@ const ROLE_LABELS_FA: Record<SchedWorkspaceRole, string> = {
   education_expert: 'کارشناس آموزش',
 };
 
+const META_COL_LABELS: Record<SchedMetaColumnKey, string> = {
+  major: 'رشته',
+  entry: 'ورودی',
+  totalStudents: 'تعداد کل',
+  section: 'شعبه / گروه',
+};
+
+const TEXT_FIT_LABELS: Record<SchedCellTextFit, string> = {
+  wrap: 'شکستن خط (Wrap)',
+  shrink: 'کوچک‌سازی فونت (Shrink)',
+  clip: 'تک‌خطی با برش (...)',
+};
+
+const ORIENTATION_LABELS: Record<SchedTextOrientation, string> = {
+  horizontal: 'افقی (عادی)',
+  vertical_up: 'عمودی ↑ (پایین به بالا)',
+  vertical_down: 'عمودی ↓ (بالا به پایین)',
+};
+
+const cloneDefaultLayout = (): SchedMasterGridLayoutSettings => ({
+  metaColumns: {
+    major: { ...DEFAULT_MASTER_GRID_LAYOUT.metaColumns.major },
+    entry: { ...DEFAULT_MASTER_GRID_LAYOUT.metaColumns.entry },
+    totalStudents: { ...DEFAULT_MASTER_GRID_LAYOUT.metaColumns.totalStudents },
+    section: { ...DEFAULT_MASTER_GRID_LAYOUT.metaColumns.section },
+  },
+  defaultSlotWidth: DEFAULT_MASTER_GRID_LAYOUT.defaultSlotWidth,
+  slotWidthsBySlotId: {},
+  scheduleCells: { ...DEFAULT_MASTER_GRID_LAYOUT.scheduleCells },
+  columnOverrides: {},
+});
+
+const mergeMasterGridLayout = (
+  incoming?: SchedMasterGridLayoutSettings
+): SchedMasterGridLayoutSettings => {
+  const def = cloneDefaultLayout();
+  if (!incoming) return def;
+  return {
+    metaColumns: {
+      major: { ...def.metaColumns.major, ...(incoming.metaColumns?.major || {}) },
+      entry: { ...def.metaColumns.entry, ...(incoming.metaColumns?.entry || {}) },
+      totalStudents: {
+        ...def.metaColumns.totalStudents,
+        ...(incoming.metaColumns?.totalStudents || {}),
+      },
+      section: { ...def.metaColumns.section, ...(incoming.metaColumns?.section || {}) },
+    },
+    defaultSlotWidth:
+      typeof incoming.defaultSlotWidth === 'number' && incoming.defaultSlotWidth >= 60
+        ? incoming.defaultSlotWidth
+        : def.defaultSlotWidth,
+    slotWidthsBySlotId: { ...(incoming.slotWidthsBySlotId || {}) },
+    scheduleCells: {
+      ...def.scheduleCells,
+      ...(incoming.scheduleCells || {}),
+    },
+    columnOverrides: { ...(incoming.columnOverrides || {}) },
+  };
+};
+
+const getOrientationStyleObj = (orientation?: SchedTextOrientation): React.CSSProperties => {
+  if (orientation === 'vertical_up') {
+    return {
+      writingMode: 'vertical-rl',
+      transform: 'rotate(180deg)',
+    };
+  }
+  if (orientation === 'vertical_down') {
+    return {
+      writingMode: 'vertical-rl',
+    };
+  }
+  return {};
+};
+
+const getOrientationPrintCss = (orientation?: SchedTextOrientation): string => {
+  if (orientation === 'vertical_up') {
+    return 'writing-mode:vertical-rl;transform:rotate(180deg);display:inline-block;margin:0 auto;';
+  }
+  if (orientation === 'vertical_down') {
+    return 'writing-mode:vertical-rl;display:inline-block;margin:0 auto;';
+  }
+  return '';
+};
+
+const computeAdaptiveShrinkFontPx = (
+  textLength: number,
+  colWidthPx: number,
+  basePx: number,
+  minPx: number,
+  isVertical: boolean,
+  rowSpan = 1
+): number => {
+  if (isVertical) {
+    const approxAvailHeight = Math.max(48, rowSpan * 62 - 10);
+    if (textLength <= Math.floor(approxAvailHeight / 7)) return basePx;
+    return Math.max(
+      minPx,
+      Math.min(basePx, Number((approxAvailHeight / Math.max(1, textLength) * 1.45).toFixed(1)))
+    );
+  }
+  const availWidth = Math.max(20, colWidthPx - 8);
+  const charsPerLine = Math.max(1, textLength);
+  const est = (availWidth / charsPerLine) * 1.9;
+  return Math.max(minPx, Math.min(basePx, Number(est.toFixed(1))));
+};
+
 export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProps> = ({
   activeTerm,
   offerings,
@@ -241,9 +366,17 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   onOpenCommonExamModal,
   onOpenNewOffering,
   onOpenEditOffering,
+  onPersistRules,
   onNotify,
 }) => {
+  const isSystemAdmin = userRole === 'admin';
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [immersiveFullscreen, setImmersiveFullscreen] = useState(false);
+  const [immersiveHudOpen, setImmersiveHudOpen] = useState(false);
+  const [mobileLandscape, setMobileLandscape] = useState(false);
+  const [isPortraitViewport, setIsPortraitViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerHeight > window.innerWidth : false
+  );
   const [rowGrouping, setRowGrouping] = useState<RowGroupingMode>('by_major');
   const [onlyPopulatedView, setOnlyPopulatedView] = useState(false);
   const [zoomPercent, setZoomPercent] = useState<number>(100);
@@ -291,42 +424,292 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   } | null>(null);
   const [newCommentText, setNewCommentText] = useState('');
 
-  // رفرنس اسکرول افقی و کلیدهای Alt / Shift / Ctrl + چرخ ماوس + اندازه‌گیری عرض برای جاگیری کل
+  // تنظیمات نمایش اکسل‌مانند ستون‌ها و سلول‌ها (پهنا، جهت عمودی/افقی، Wrap/Shrink)
+  const [liveLayout, setLiveLayout] = useState<SchedMasterGridLayoutSettings>(() =>
+    mergeMasterGridLayout(rules.masterGridLayout)
+  );
+  useEffect(() => {
+    setLiveLayout(mergeMasterGridLayout(rules.masterGridLayout));
+  }, [rules.masterGridLayout]);
+
+  const liveLayoutRef = useRef<SchedMasterGridLayoutSettings>(liveLayout);
+  liveLayoutRef.current = liveLayout;
+
+  const commitLayoutSettings = (nextLayout: SchedMasterGridLayoutSettings, toastMsg?: string) => {
+    setLiveLayout(nextLayout);
+    liveLayoutRef.current = nextLayout;
+    if (onPersistRules) {
+      onPersistRules({
+        ...rules,
+        masterGridLayout: nextLayout,
+      });
+    }
+    if (toastMsg) {
+      onNotify('success', toastMsg);
+    }
+  };
+
+  const [layoutModalOpen, setLayoutModalOpen] = useState(false);
+  const [layoutTab, setLayoutTab] = useState<'presets_meta' | 'slots_batch' | 'individual_col'>(
+    'presets_meta'
+  );
+  const [selectedBatchMetaKeys, setSelectedBatchMetaKeys] = useState<SchedMetaColumnKey[]>([
+    'major',
+    'entry',
+    'totalStudents',
+    'section',
+  ]);
+  const [batchMetaWidthInput, setBatchMetaWidthInput] = useState('42');
+  const [batchMetaBodyOri, setBatchMetaBodyOri] = useState<SchedTextOrientation>('vertical_up');
+  const [batchMetaApplyToHeader, setBatchMetaApplyToHeader] = useState<boolean>(false);
+  const [batchMetaTextFit, setBatchMetaTextFit] = useState<SchedCellTextFit>('wrap');
+
+  const [selectedBatchSlotKeys, setSelectedBatchSlotKeys] = useState<string[]>([]);
+  const [batchSlotColWidthInput, setBatchSlotColWidthInput] = useState('140');
+  const [batchSlotHeaderOri, setBatchSlotHeaderOri] = useState<SchedTextOrientation>('horizontal');
+  const [batchSlotBodyOri, setBatchSlotBodyOri] = useState<SchedTextOrientation>('horizontal');
+  const [batchSlotTextFit, setBatchSlotTextFit] = useState<SchedCellTextFit>('shrink');
+
+  const [indDay, setIndDay] = useState<SchedDayKey>(() => activeDays[0] || 'saturday');
+  const [indSlotId, setIndSlotId] = useState<string>(() => sortedSlots[0]?.id || '');
+
+  // وضعیت کشیدن بصری مرز ستون با ماوس
+  const [resizeIndicator, setResizeIndicator] = useState<{
+    label: string;
+    width: number;
+    allSameSlot: boolean;
+  } | null>(null);
+  const resizeSessionRef = useRef<{
+    kind: 'meta' | 'slot';
+    metaKey?: SchedMetaColumnKey;
+    day?: SchedDayKey;
+    slotId?: string;
+    label: string;
+    startX: number;
+    startY: number;
+    startWidth: number;
+    latestWidth: number;
+    zoomScale: number;
+    rotatedCss: boolean;
+    shiftKey: boolean;
+  } | null>(null);
+
+  // رفرنس کل پنل تمام‌صفحه + اسکرول‌باکس ماتریس
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const gridScrollRef = useRef<HTMLDivElement | null>(null);
+  const hadNativeFullscreenRef = useRef(false);
+  const fitStateRef = useRef<{ fitToScreen: boolean; fitZoomPercent: number }>({
+    fitToScreen: false,
+    fitZoomPercent: 100,
+  });
+
+  // پایش جهت صفحه برای پشتیبانی از حالت افقی گوشی
+  useEffect(() => {
+    const checkViewport = () => {
+      if (typeof window !== 'undefined') {
+        setIsPortraitViewport(window.innerHeight > window.innerWidth);
+      }
+    };
+    checkViewport();
+    window.addEventListener('resize', checkViewport);
+    return () => window.removeEventListener('resize', checkViewport);
+  }, []);
+
+  const enterImmersiveFullscreen = async (withLandscape = false) => {
+    setImmersiveFullscreen(true);
+    setIsFullscreen(false);
+    setImmersiveHudOpen(false);
+    if (withLandscape) {
+      setMobileLandscape(true);
+    }
+    const el = wrapperRef.current;
+    if (el && typeof el.requestFullscreen === 'function') {
+      try {
+        await el.requestFullscreen();
+        hadNativeFullscreenRef.current = Boolean(document.fullscreenElement);
+      } catch {
+        hadNativeFullscreenRef.current = false;
+      }
+    }
+    const orientationObj = (window.screen as unknown as {
+      orientation?: { lock?: (mode: string) => Promise<void> };
+    })?.orientation;
+    if (withLandscape && orientationObj && typeof orientationObj.lock === 'function') {
+      try {
+        await orientationObj.lock('landscape');
+      } catch {
+        // در برخی مرورگرها و آیفریم‌ها چرخش CSS به صورت خودکار اعمال می‌شود
+      }
+    }
+  };
+
+  const exitImmersiveFullscreen = async () => {
+    setImmersiveFullscreen(false);
+    setImmersiveHudOpen(false);
+    setMobileLandscape(false);
+    hadNativeFullscreenRef.current = false;
+    if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // چشم‌پوشی از خطای خروج بومی
+      }
+    }
+    const orientationObj = (window.screen as unknown as {
+      orientation?: { unlock?: () => void };
+    })?.orientation;
+    if (orientationObj && typeof orientationObj.unlock === 'function') {
+      try {
+        orientationObj.unlock();
+      } catch {
+        // خطا نادیده گرفته می‌شود
+      }
+    }
+  };
+
+  const toggleMobileLandscapeMode = async () => {
+    const next = !mobileLandscape;
+    setMobileLandscape(next);
+    if (next && !immersiveFullscreen) {
+      await enterImmersiveFullscreen(true);
+      return;
+    }
+    const orientationObj = (window.screen as unknown as {
+      orientation?: { lock?: (mode: string) => Promise<void>; unlock?: () => void };
+    })?.orientation;
+    if (orientationObj) {
+      try {
+        if (next && typeof orientationObj.lock === 'function') {
+          await orientationObj.lock('landscape');
+        } else if (!next && typeof orientationObj.unlock === 'function') {
+          orientationObj.unlock();
+        }
+      } catch {
+        // پشتیبانی خودکار CSS rotation فعال می‌ماند
+      }
+    }
+  };
 
   useEffect(() => {
-    const el = gridScrollRef.current;
-    if (!el) return;
-    const updateWidth = () => setContainerWidth(el.clientWidth);
-    updateWidth();
-    const ro = new ResizeObserver(updateWidth);
-    ro.observe(el);
+    const handleFsChange = () => {
+      const isNativeFs = Boolean(document.fullscreenElement);
+      if (isNativeFs) {
+        hadNativeFullscreenRef.current = true;
+      } else if (hadNativeFullscreenRef.current) {
+        hadNativeFullscreenRef.current = false;
+        setImmersiveFullscreen(false);
+        setImmersiveHudOpen(false);
+        setMobileLandscape(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
 
-    const handleWheel = (e: WheelEvent) => {
-      if (e.shiftKey || e.altKey || e.ctrlKey) {
+  // مدیریت چرخ ماوس: Ctrl + چرخ ماوس => زوم جدول | Shift / Alt + چرخ ماوس => اسکرول افقی چپ و راست
+  useEffect(() => {
+    const el = gridScrollRef.current;
+    const wrapper = wrapperRef.current;
+    if (!el && !wrapper) return;
+
+    let ro: ResizeObserver | null = null;
+    if (el) {
+      const updateWidth = () => setContainerWidth(el.clientWidth);
+      updateWidth();
+      ro = new ResizeObserver(updateWidth);
+      ro.observe(el);
+    }
+
+    const handleScrollAndZoomWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+        if (delta === 0) return;
+        const step = delta < 0 ? 8 : -8;
+        const curFit = fitStateRef.current;
+        setFitToScreen(false);
+        setZoomPercent((prev) => {
+          const base = curFit.fitToScreen ? curFit.fitZoomPercent : prev;
+          return Math.max(28, Math.min(150, base + step));
+        });
+        return;
+      }
+      if ((e.shiftKey || e.altKey) && el) {
         e.preventDefault();
         const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
         el.scrollLeft -= delta * 1.4;
       }
     };
-    el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => {
-      el.removeEventListener('wheel', handleWheel);
-      ro.disconnect();
-    };
-  }, [isFullscreen, programs.length, rowGrouping, onlyPopulatedView]);
 
-  // خروج از تمام‌صفحه با کلید Escape (در صورتی که مدال دیگری باز نباشد)
+    const targetEl = wrapper || el;
+    targetEl?.addEventListener('wheel', handleScrollAndZoomWheel, { passive: false });
+    return () => {
+      targetEl?.removeEventListener('wheel', handleScrollAndZoomWheel);
+      ro?.disconnect();
+    };
+  }, [isFullscreen, immersiveFullscreen, mobileLandscape, programs.length, rowGrouping, onlyPopulatedView]);
+
+  // کلیدهای ترکیبی Ctrl+Z (Undo) و Ctrl+Y / Ctrl+Shift+Z (Redo) و خروج با Esc
   useEffect(() => {
-    if (!isFullscreen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !pendingDrop && !commentModalCell) {
-        setIsFullscreen(false);
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toUpperCase();
+      const isEditingText =
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        Boolean(target?.isContentEditable);
+
+      if (e.key === 'Escape') {
+        if (commentModalCell) {
+          setCommentModalCell(null);
+          return;
+        }
+        if (pendingDrop) {
+          setPendingDrop(null);
+          return;
+        }
+        if (immersiveFullscreen) {
+          void exitImmersiveFullscreen();
+          return;
+        }
+        if (isFullscreen) {
+          setIsFullscreen(false);
+          return;
+        }
+      }
+
+      if (isEditingText || pendingDrop || commentModalCell) return;
+
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const keyLower = e.key.toLowerCase();
+        const isRedo =
+          e.code === 'KeyY' ||
+          keyLower === 'y' ||
+          ((e.code === 'KeyZ' || keyLower === 'z') && e.shiftKey);
+        const isUndo = (e.code === 'KeyZ' || keyLower === 'z') && !e.shiftKey;
+
+        if (isRedo && canRedo) {
+          e.preventDefault();
+          onRedo();
+        } else if (isUndo && canUndo) {
+          e.preventDefault();
+          onUndo();
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isFullscreen, pendingDrop, commentModalCell]);
+  }, [
+    isFullscreen,
+    immersiveFullscreen,
+    pendingDrop,
+    commentModalCell,
+    canUndo,
+    canRedo,
+    onUndo,
+    onRedo,
+  ]);
 
   const globalLockStatus = useMemo(
     () => checkScheduleEditLock(rules, userRole, actor.id),
@@ -644,13 +1027,219 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     slotOriginalIndexMap,
   ]);
 
+  const metaColWidths = useMemo(() => {
+    const clampW = (val: number | undefined, fallback: number, min = 26, max = 380) =>
+      typeof val === 'number' && !Number.isNaN(val) ? Math.max(min, Math.min(max, Math.round(val))) : fallback;
+    return {
+      major: clampW(liveLayout.metaColumns.major?.width, 114, 28, 360),
+      entry: clampW(liveLayout.metaColumns.entry?.width, 64, 26, 240),
+      totalStudents: clampW(liveLayout.metaColumns.totalStudents?.width, 56, 24, 180),
+      section: clampW(liveLayout.metaColumns.section?.width, 104, 28, 300),
+    };
+  }, [liveLayout.metaColumns]);
+
+  const stickyOffsets = useMemo(() => {
+    const firstWidth =
+      rowGrouping === 'by_major' ? metaColWidths.major : metaColWidths.entry;
+    const secondWidth =
+      rowGrouping === 'by_major' ? metaColWidths.entry : metaColWidths.major;
+    const thirdRight = firstWidth + secondWidth;
+    const fourthRight = thirdRight + metaColWidths.totalStudents;
+    return {
+      firstRight: 0,
+      secondRight: firstWidth,
+      thirdRight,
+      fourthRight,
+      totalMetaWidth: fourthRight + metaColWidths.section,
+    };
+  }, [rowGrouping, metaColWidths]);
+
+  const getSlotColumnStyle = (day: SchedDayKey, slotId: string) => {
+    const colKey = `${day}:${slotId}`;
+    const override = liveLayout.columnOverrides?.[colKey];
+    const slotBatchW = liveLayout.slotWidthsBySlotId?.[slotId];
+    const rawW = override?.width ?? slotBatchW ?? liveLayout.defaultSlotWidth ?? 168;
+    const width = Math.max(64, Math.min(440, Math.round(rawW)));
+    return {
+      width,
+      headerOrientation:
+        override?.headerOrientation ?? liveLayout.scheduleCells.headerOrientation ?? 'horizontal',
+      bodyOrientation:
+        override?.bodyOrientation ?? liveLayout.scheduleCells.bodyOrientation ?? 'horizontal',
+      textFit: override?.textFit ?? liveLayout.scheduleCells.textFit ?? 'wrap',
+      fontSizePx: override?.fontSizePx ?? liveLayout.scheduleCells.fontSizePx,
+    };
+  };
+
   const fitZoomPercent = useMemo(() => {
-    const naturalTableWidth = 338 + displayedDays.length * displayedSlots.length * 168;
+    let slotColumnsSum = 0;
+    for (const d of displayedDays) {
+      for (const s of displayedSlots) {
+        slotColumnsSum += getSlotColumnStyle(d, s.id).width;
+      }
+    }
+    const naturalTableWidth = stickyOffsets.totalMetaWidth + slotColumnsSum;
     if (!containerWidth || naturalTableWidth <= 0) return 100;
     return Math.max(28, Math.min(100, Math.floor(((containerWidth - 8) / naturalTableWidth) * 100)));
-  }, [containerWidth, displayedDays.length, displayedSlots.length]);
+  }, [containerWidth, stickyOffsets.totalMetaWidth, displayedDays, displayedSlots, liveLayout]);
 
   const effectiveZoom = fitToScreen ? fitZoomPercent : zoomPercent;
+  fitStateRef.current = { fitToScreen, fitZoomPercent };
+
+  // شروع و ادامه تغییر اندازه بصری ستون با ماوس
+  const startColumnResize = (
+    e: React.MouseEvent,
+    opts:
+      | { kind: 'meta'; metaKey: SchedMetaColumnKey; label: string; currentWidth: number }
+      | { kind: 'slot'; day: SchedDayKey; slotId: string; label: string; currentWidth: number }
+  ) => {
+    if (!isSystemAdmin) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const zoomScale = Math.max(0.25, effectiveZoom / 100);
+    const rotatedCss = mobileLandscape && isPortraitViewport;
+    resizeSessionRef.current = {
+      kind: opts.kind,
+      metaKey: opts.kind === 'meta' ? opts.metaKey : undefined,
+      day: opts.kind === 'slot' ? opts.day : undefined,
+      slotId: opts.kind === 'slot' ? opts.slotId : undefined,
+      label: opts.label,
+      startX: e.clientX,
+      startY: e.clientY,
+      startWidth: opts.currentWidth,
+      latestWidth: opts.currentWidth,
+      zoomScale,
+      rotatedCss,
+      shiftKey: e.shiftKey,
+    };
+    setResizeIndicator({
+      label: opts.label,
+      width: opts.currentWidth,
+      allSameSlot: opts.kind === 'slot' && e.shiftKey,
+    });
+  };
+
+  useEffect(() => {
+    if (!resizeIndicator) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const sess = resizeSessionRef.current;
+      if (!sess) return;
+      // در جدول راست‌به‌چپ با کشیدن لبه چپ به سمت چپ (کاهش X) عرض افزایش می‌یابد
+      const rawDelta = sess.rotatedCss ? sess.startY - e.clientY : sess.startX - e.clientX;
+      const adjustedDelta = rawDelta / sess.zoomScale;
+      const minW = sess.kind === 'meta' ? 26 : 64;
+      const maxW = sess.kind === 'meta' ? 380 : 440;
+      const nextW = Math.max(minW, Math.min(maxW, Math.round(sess.startWidth + adjustedDelta)));
+      sess.latestWidth = nextW;
+      const useShift = sess.shiftKey || e.shiftKey;
+      sess.shiftKey = useShift;
+
+      setResizeIndicator({
+        label: sess.label,
+        width: nextW,
+        allSameSlot: sess.kind === 'slot' && useShift,
+      });
+
+      setLiveLayout((prev) => {
+        if (sess.kind === 'meta' && sess.metaKey) {
+          return {
+            ...prev,
+            metaColumns: {
+              ...prev.metaColumns,
+              [sess.metaKey]: {
+                ...(prev.metaColumns[sess.metaKey] || {}),
+                width: nextW,
+              },
+            },
+          };
+        }
+        if (sess.kind === 'slot' && sess.day && sess.slotId) {
+          if (useShift) {
+            const nextOverrides = { ...(prev.columnOverrides || {}) };
+            // پاک کردن override عرض روزهای مختلف همین سانس تا عرض دسته‌ای سانس اعمال شود
+            Object.keys(nextOverrides).forEach((k) => {
+              if (k.endsWith(`:${sess.slotId}`) && nextOverrides[k]?.width !== undefined) {
+                const { width: _w, ...rest } = nextOverrides[k];
+                if (Object.keys(rest).length === 0) delete nextOverrides[k];
+                else nextOverrides[k] = rest;
+              }
+            });
+            return {
+              ...prev,
+              slotWidthsBySlotId: {
+                ...(prev.slotWidthsBySlotId || {}),
+                [sess.slotId]: nextW,
+              },
+              columnOverrides: nextOverrides,
+            };
+          }
+          const colKey = `${sess.day}:${sess.slotId}`;
+          return {
+            ...prev,
+            columnOverrides: {
+              ...(prev.columnOverrides || {}),
+              [colKey]: {
+                ...(prev.columnOverrides?.[colKey] || {}),
+                width: nextW,
+              },
+            },
+          };
+        }
+        return prev;
+      });
+    };
+
+    const handleMouseUp = () => {
+      const sess = resizeSessionRef.current;
+      resizeSessionRef.current = null;
+      setResizeIndicator(null);
+      if (sess) {
+        commitLayoutSettings(liveLayoutRef.current);
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [Boolean(resizeIndicator)]);
+
+  const resetSingleColumnWidth = (
+    opts: { kind: 'meta'; metaKey: SchedMetaColumnKey } | { kind: 'slot'; day: SchedDayKey; slotId: string }
+  ) => {
+    if (!isSystemAdmin) return;
+    if (opts.kind === 'meta') {
+      const defW = DEFAULT_MASTER_GRID_LAYOUT.metaColumns[opts.metaKey]?.width || 80;
+      const next: SchedMasterGridLayoutSettings = {
+        ...liveLayout,
+        metaColumns: {
+          ...liveLayout.metaColumns,
+          [opts.metaKey]: {
+            ...liveLayout.metaColumns[opts.metaKey],
+            width: defW,
+          },
+        },
+      };
+      commitLayoutSettings(next, `پهنای ستون «${META_COL_LABELS[opts.metaKey]}» به مقدار پیش‌فرض بازگشت.`);
+    } else {
+      const colKey = `${opts.day}:${opts.slotId}`;
+      const nextOverrides = { ...(liveLayout.columnOverrides || {}) };
+      if (nextOverrides[colKey]) {
+        const { width: _w, ...rest } = nextOverrides[colKey];
+        if (Object.keys(rest).length === 0) delete nextOverrides[colKey];
+        else nextOverrides[colKey] = rest;
+      }
+      commitLayoutSettings(
+        {
+          ...liveLayout,
+          columnOverrides: nextOverrides,
+        },
+        'عرض ستون به پیش‌فرض سانس بازنشانی شد.'
+      );
+    }
+  };
 
   // خلاصه اطلاعات فوکوس فعال
   const focusSummary = useMemo(() => {
@@ -720,7 +1309,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     if (focusMode !== 'classroom' || !focusRoomId) return new Set<string>();
     const set = new Set<string>();
     termOfferings
-      .filter((o) => o.classroomId === focusRoomId && o.dayOfWeek)
+      .filter((o) => !o.isDisabled && o.classroomId === focusRoomId && o.dayOfWeek)
       .forEach((o) => {
         o.slotIds.forEach((sid) => set.add(`${o.dayOfWeek}:${sid}`));
       });
@@ -858,6 +1447,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       professorName: prof?.fullName,
       classroomId: room?.id,
       classroomName: room?.name,
+      isDisabled: prof ? false : pendingDrop.originalOffering.isDisabled,
+      disabledReason: prof ? undefined : pendingDrop.originalOffering.disabledReason,
       updatedById: actor.id,
       updatedByName: actor.name,
       updatedAt: new Date().toISOString(),
@@ -973,59 +1564,103 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     onNotify('success', 'یادداشت روی سلول ثبت شد.');
   };
 
-  // چاپ ماتریس جامع A4 افقی
+  // چاپ ماتریس جامع A4 افقی با اعمال عرض ستون‌ها و جهت عمودی/افقی تنظیم‌شده
   const handlePrintMasterGrid = () => {
+    const mMajor = liveLayout.metaColumns.major;
+    const mEntry = liveLayout.metaColumns.entry;
+    const mTotal = liveLayout.metaColumns.totalStudents;
+    const mSec = liveLayout.metaColumns.section;
+
+    const wrapPrintSpan = (txt: string, ori?: SchedTextOrientation, fit?: SchedCellTextFit) => {
+      const oriCss = getOrientationPrintCss(ori);
+      const fitCss =
+        fit === 'shrink'
+          ? 'font-size:8.5px;line-height:1.15;'
+          : fit === 'clip'
+          ? 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;'
+          : 'white-space:normal;word-break:break-word;line-height:1.2;';
+      return `<div style="${oriCss}${fitCss}">${txt}</div>`;
+    };
+
     const dayThs = displayedDays
       .map((d) => `<th colspan="${displayedSlots.length}">${escapeHtml(SCHED_DAY_LABELS[d])}</th>`)
       .join('');
     const slotThs = displayedDays
-      .flatMap(() =>
+      .flatMap((day) =>
         displayedSlots.map((s) => {
           const origIdx = slotOriginalIndexMap.get(s.id) ?? 0;
-          return `<th style="font-size:9px;">${escapeHtml(getSchedSlotTitle(s, origIdx))}<div class="mono muted">${escapeHtml(s.startTime)}-${escapeHtml(s.endTime)}</div></th>`;
+          const cStyle = getSlotColumnStyle(day, s.id);
+          const content = `${escapeHtml(getSchedSlotTitle(s, origIdx))}<div class="mono muted">${escapeHtml(s.startTime)}-${escapeHtml(s.endTime)}</div>`;
+          return `<th style="width:${cStyle.width}px;font-size:9px;">${wrapPrintSpan(
+            content,
+            cStyle.headerOrientation,
+            'wrap'
+          )}</th>`;
         })
       )
       .join('');
 
     const bodyRows = displayRows
       .map((row) => {
+        const majorHtml = wrapPrintSpan(
+          escapeHtml(row.majorName),
+          mMajor.bodyOrientation,
+          mMajor.textFit
+        );
+        const entryHtml = wrapPrintSpan(
+          escapeHtml(row.entryTerm),
+          mEntry.bodyOrientation,
+          mEntry.textFit
+        );
+        const totalHtml = wrapPrintSpan(
+          row.totalCohortStudents.toLocaleString('fa-IR'),
+          mTotal.bodyOrientation,
+          mTotal.textFit
+        );
+        const sectionHtml = wrapPrintSpan(
+          `${escapeHtml(row.sectionName)}<div class="muted">${row.sectionStudentCount.toLocaleString('fa-IR')} نفر</div>`,
+          mSec.bodyOrientation,
+          mSec.textFit
+        );
+
         const prefixCells =
           rowGrouping === 'by_entry'
             ? [
                 row.isFirstEntryBlock
-                  ? `<td rowspan="${row.entryBlockSpan}" class="mono" style="font-weight:800;vertical-align:middle;text-align:center;">${escapeHtml(row.entryTerm)}</td>`
+                  ? `<td rowspan="${row.entryBlockSpan}" class="mono" style="width:${metaColWidths.entry}px;font-weight:800;vertical-align:middle;text-align:center;">${entryHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="font-weight:800;vertical-align:middle;text-align:center;">${escapeHtml(row.majorName)}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${metaColWidths.major}px;font-weight:800;vertical-align:middle;text-align:center;">${majorHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="vertical-align:middle;text-align:center;">${row.totalCohortStudents.toLocaleString('fa-IR')}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${metaColWidths.totalStudents}px;vertical-align:middle;text-align:center;">${totalHtml}</td>`
                   : '',
-                `<td style="text-align:center;font-weight:700;">${escapeHtml(row.sectionName)}<div class="muted">${row.sectionStudentCount.toLocaleString('fa-IR')} نفر</div></td>`,
+                `<td style="width:${metaColWidths.section}px;text-align:center;font-weight:700;">${sectionHtml}</td>`,
               ].join('')
             : [
                 row.isFirstMajorBlock
-                  ? `<td rowspan="${row.majorBlockSpan}" style="font-weight:800;vertical-align:middle;text-align:center;">${escapeHtml(row.majorName)}</td>`
+                  ? `<td rowspan="${row.majorBlockSpan}" style="width:${metaColWidths.major}px;font-weight:800;vertical-align:middle;text-align:center;">${majorHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" class="mono" style="font-weight:700;vertical-align:middle;text-align:center;">${escapeHtml(row.entryTerm)}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" class="mono" style="width:${metaColWidths.entry}px;font-weight:700;vertical-align:middle;text-align:center;">${entryHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="vertical-align:middle;text-align:center;">${row.totalCohortStudents.toLocaleString('fa-IR')}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${metaColWidths.totalStudents}px;vertical-align:middle;text-align:center;">${totalHtml}</td>`
                   : '',
-                `<td style="text-align:center;font-weight:700;">${escapeHtml(row.sectionName)}<div class="muted">${row.sectionStudentCount.toLocaleString('fa-IR')} نفر</div></td>`,
+                `<td style="width:${metaColWidths.section}px;text-align:center;font-weight:700;">${sectionHtml}</td>`,
               ].join('');
 
         const scheduleCells = displayedDays
           .flatMap((day) =>
             displayedSlots.map((slot) => {
+              const cStyle = getSlotColumnStyle(day, slot.id);
               const items = termOfferings.filter(
                 (o) =>
                   doesOfferingBelongToRow(o, row) &&
                   o.dayOfWeek === day &&
                   o.slotIds.includes(slot.id)
               );
-              if (items.length === 0) return '<td></td>';
+              if (items.length === 0) return `<td style="width:${cStyle.width}px;"></td>`;
               const htmlItems = items
                 .map((o) => {
                   const half = getOfferingSlotHalf(o, slot.id);
@@ -1049,10 +1684,11 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                     isCourseEligibleForExam(o) && o.examDayId && o.examSlotId
                       ? ` | آزمون: ${formatExamAssignmentShort(o, examSettings)}`
                       : '';
-                  return `<div class="cell-item"><strong>${escapeHtml(o.courseTitle)}${escapeHtml(internTag)}${escapeHtml(roleTag)}${escapeHtml(halfTag)}</strong><div class="muted">${escapeHtml(o.professorName || 'بدون استاد')}${o.classroomName ? ` · ${escapeHtml(o.classroomName)}` : ''}${escapeHtml(examTag)}</div></div>`;
+                  const inner = `<strong>${escapeHtml(o.courseTitle)}${escapeHtml(internTag)}${escapeHtml(roleTag)}${escapeHtml(halfTag)}</strong><div class="muted">${escapeHtml(o.professorName || 'بدون استاد')}${o.classroomName ? ` · ${escapeHtml(o.classroomName)}` : ''}${escapeHtml(examTag)}</div>`;
+                  return `<div class="cell-item">${wrapPrintSpan(inner, cStyle.bodyOrientation, cStyle.textFit)}</div>`;
                 })
                 .join('');
-              return `<td>${htmlItems}</td>`;
+              return `<td style="width:${cStyle.width}px;">${htmlItems}</td>`;
             })
           )
           .join('');
@@ -1062,16 +1698,16 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       .join('');
 
     const html = `
-      <table>
+      <table style="table-layout:fixed;">
         <thead>
           <tr>
             ${
               rowGrouping === 'by_entry'
-                ? '<th rowspan="2">ورودی</th><th rowspan="2">رشته</th>'
-                : '<th rowspan="2">رشته</th><th rowspan="2">ورودی</th>'
+                ? `<th rowspan="2" style="width:${metaColWidths.entry}px;">${wrapPrintSpan('ورودی', mEntry.headerOrientation, 'wrap')}</th><th rowspan="2" style="width:${metaColWidths.major}px;">${wrapPrintSpan('رشته', mMajor.headerOrientation, 'wrap')}</th>`
+                : `<th rowspan="2" style="width:${metaColWidths.major}px;">${wrapPrintSpan('رشته', mMajor.headerOrientation, 'wrap')}</th><th rowspan="2" style="width:${metaColWidths.entry}px;">${wrapPrintSpan('ورودی', mEntry.headerOrientation, 'wrap')}</th>`
             }
-            <th rowspan="2">تعداد</th>
-            <th rowspan="2">شعبه / گروه</th>
+            <th rowspan="2" style="width:${metaColWidths.totalStudents}px;">${wrapPrintSpan('تعداد', mTotal.headerOrientation, 'wrap')}</th>
+            <th rowspan="2" style="width:${metaColWidths.section}px;">${wrapPrintSpan('شعبه / گروه', mSec.headerOrientation, 'wrap')}</th>
             ${dayThs}
           </tr>
           <tr>${slotThs}</tr>
@@ -1146,23 +1782,202 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     );
   };
 
+  const isLandscapeRotatedCss = mobileLandscape && isPortraitViewport;
+  const anyFullscreen = isFullscreen || immersiveFullscreen;
+
   return (
     <div
+      ref={wrapperRef}
+      dir="rtl"
       className={
-        isFullscreen
+        isLandscapeRotatedCss
+          ? 'fixed top-0 left-0 w-[100dvh] h-[100dvw] origin-top-left [transform:translateX(100dvw)_rotate(90deg)] z-[98] bg-slate-50 dark:bg-slate-950 flex flex-col overflow-hidden'
+          : immersiveFullscreen
+          ? 'fixed inset-0 z-[95] bg-slate-50 dark:bg-slate-950 flex flex-col overflow-hidden'
+          : isFullscreen
           ? 'fixed inset-0 z-[55] bg-slate-50 dark:bg-slate-950 flex flex-col p-2.5 sm:p-3 overflow-hidden space-y-2.5'
           : 'space-y-4'
       }
     >
+      {/* حالت کاملاً تمام‌صفحه: نوار کنترل کشویی مخفی‌شونده خودکار (Auto-Hide) بدون اشغال فضای صفحه */}
+      {immersiveFullscreen && (
+        <>
+          {/* ناحیه حساس لبه بالایی برای آشکارسازی خودکار ابزارها با ماوس */}
+          <div
+            onMouseEnter={() => setImmersiveHudOpen(true)}
+            className="fixed top-0 inset-x-0 h-3 z-[62] cursor-pointer"
+          />
+
+          {/* دستگیره کوچک و کم‌مزاحمت گوشه بالا-چپ جهت باز کردن ابزارها در لمس/موبایل */}
+          {!immersiveHudOpen && (
+            <button
+              type="button"
+              onClick={() => setImmersiveHudOpen(true)}
+              onMouseEnter={() => setImmersiveHudOpen(true)}
+              className="fixed top-1.5 left-2 z-[63] px-2 py-1 rounded-lg bg-slate-900/75 hover:bg-slate-900 text-white text-[10px] font-bold backdrop-blur-sm shadow-md border border-white/15 inline-flex items-center gap-1 cursor-pointer transition opacity-70 hover:opacity-100"
+              title="نمایش نوار ابزار (یا ماوس را به بالای صفحه ببرید)"
+            >
+              <SlidersHorizontal className="w-3 h-3 text-teal-300" />
+              <span>ابزارها</span>
+              <ChevronDown className="w-3 h-3" />
+            </button>
+          )}
+
+          {/* پنل ابزار شناور اتوهاید */}
+          {immersiveHudOpen && (
+            <div
+              onMouseLeave={() => setImmersiveHudOpen(false)}
+              className="fixed top-0 inset-x-0 z-[65] bg-slate-900/95 text-white backdrop-blur-md border-b border-white/15 px-3 py-2 shadow-2xl flex flex-wrap items-center justify-between gap-2 text-xs"
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="px-2 py-1 rounded-lg bg-teal-600 text-white font-black text-[11px]">
+                  برنامه جامع تمام‌صفحه · ترم {activeTerm}
+                </span>
+                <button
+                  type="button"
+                  disabled={!canUndo}
+                  onClick={onUndo}
+                  className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-35 font-bold inline-flex items-center gap-1 cursor-pointer"
+                  title="بازگشت (Ctrl+Z)"
+                >
+                  <Undo2 className="w-3.5 h-3.5 text-amber-300" />
+                  <span>بازگشت</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!canRedo}
+                  onClick={onRedo}
+                  className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-35 font-bold inline-flex items-center gap-1 cursor-pointer"
+                  title="انجام مجدد (Ctrl+Y)"
+                >
+                  <Redo2 className="w-3.5 h-3.5 text-sky-300" />
+                  <span>مجدد</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOnlyPopulatedView((v) => !v)}
+                  className={`px-2 py-1 rounded-lg font-bold inline-flex items-center gap-1 cursor-pointer border ${
+                    onlyPopulatedView
+                      ? 'bg-violet-600 border-violet-500 text-white'
+                      : 'bg-white/10 border-white/15 text-slate-200'
+                  }`}
+                >
+                  <Filter className="w-3 h-3" />
+                  <span>فقط دروس ثبت‌شده</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFitToScreen((v) => !v)}
+                  className={`px-2 py-1 rounded-lg font-bold inline-flex items-center gap-1 cursor-pointer border ${
+                    fitToScreen
+                      ? 'bg-teal-600 border-teal-500 text-white'
+                      : 'bg-white/10 border-white/15 text-slate-200'
+                  }`}
+                >
+                  <Scan className="w-3 h-3" />
+                  <span>کل جدول در صفحه</span>
+                </button>
+                {isSystemAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setLayoutModalOpen(true)}
+                    className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-black inline-flex items-center gap-1 cursor-pointer"
+                    title="تنظیمات اکسل ستون‌ها، پهنا، عمودی/افقی و Wrap/Shrink"
+                  >
+                    <Columns3 className="w-3.5 h-3.5" />
+                    <span>تنظیمات ستون‌ها</span>
+                  </button>
+                )}
+                <div className="inline-flex items-center bg-white/10 rounded-lg p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFitToScreen(false);
+                      setZoomPercent((z) => Math.max(28, (fitToScreen ? fitZoomPercent : z) - 10));
+                    }}
+                    className="p-1 hover:bg-white/15 rounded cursor-pointer"
+                    title="کوچک‌نمایی"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFitToScreen(false);
+                      setZoomPercent(100);
+                    }}
+                    className="px-1.5 font-mono text-[11px] cursor-pointer"
+                  >
+                    {effectiveZoom}%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFitToScreen(false);
+                      setZoomPercent((z) => Math.min(150, (fitToScreen ? fitZoomPercent : z) + 10));
+                    }}
+                    className="p-1 hover:bg-white/15 rounded cursor-pointer"
+                    title="بزرگ‌نمایی"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={rowSearch}
+                  onChange={(e) => setRowSearch(e.target.value)}
+                  placeholder="جستجوی رشته یا ورودی..."
+                  className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/20 text-white placeholder-slate-400 text-[11px] w-36"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void toggleMobileLandscapeMode()}
+                  className={`px-2.5 py-1 rounded-lg font-bold inline-flex items-center gap-1 cursor-pointer border ${
+                    mobileLandscape
+                      ? 'bg-emerald-600 border-emerald-500 text-white'
+                      : 'bg-white/10 border-white/15 text-slate-200 hover:bg-white/20'
+                  }`}
+                  title="چرخش افقی برای نمایش بهتر در گوشی موبایل"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>{mobileLandscape ? 'حالت عمودی' : 'حالت افقی موبایل'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImmersiveHudOpen(false)}
+                  className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 inline-flex items-center gap-1 cursor-pointer"
+                  title="مخفی‌کردن نوار ابزار"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                  <span>مخفی</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void exitImmersiveFullscreen()}
+                  className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Minimize2 className="w-3.5 h-3.5" />
+                  <span>خروج از تمام‌صفحه (Esc)</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {/* نوار اعلان مسدودسازی تغییرات برنامه برای غیرمدیران */}
-      {globalLockStatus.locked && (
+      {!immersiveFullscreen && globalLockStatus.locked && (
         <div className="shrink-0 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 px-3.5 py-2 text-xs font-extrabold text-rose-900 dark:text-rose-200 flex items-center gap-2">
           <Lock className="w-4 h-4 text-rose-600 shrink-0" />
           <span>{globalLockStatus.reason}</span>
         </div>
       )}
 
-      {/* نوار کنترل و فوکوس برنامه جامع / فراگیر */}
+      {/* نوار کنترل و فوکوس برنامه جامع / فراگیر (در حالت کاملاً تمام‌صفحه مخفی است) */}
+      {!immersiveFullscreen && (
       <div
         className={`shrink-0 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs ${
           isFullscreen ? 'p-2.5 sm:p-3 space-y-2' : 'p-4 space-y-3.5'
@@ -1181,7 +1996,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 ماتریس کل رشته‌ها، ورودی‌ها و شعب به تفکیک روز و سانس
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                مشاهده همزمان کل برنامه، اسکرول افقی با <span className="font-mono font-bold">Alt / Shift / Ctrl + چرخ ماوس</span>، ثبت کامنت در هر سلول و جابجایی کشیدنی با پایش خودکار تداخل
+                زوم سریع: <span className="font-mono font-bold">Ctrl + چرخ ماوس</span> · اسکرول افقی: <span className="font-mono font-bold">Alt / Shift + چرخ ماوس</span> · بازگشت/مجدد: <span className="font-mono font-bold">Ctrl+Z / Ctrl+Y</span>
               </p>
             </div>
           ) : (
@@ -1190,7 +2005,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 برنامه جامع تمام‌صفحه · ترم {activeTerm}
               </span>
               <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
-                اسکرول افقی: Alt / Shift / Ctrl + ماوس · خروج: Esc
+                زوم: Ctrl+ماوس · اسکرول افقی: Alt/Shift+ماوس · Ctrl+Z/Y · خروج: Esc
               </span>
             </div>
           )}
@@ -1202,7 +2017,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 disabled={!canUndo}
                 onClick={onUndo}
                 className="px-2 py-1 rounded-lg text-[11px] font-extrabold inline-flex items-center gap-1 disabled:opacity-40 hover:bg-white dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 cursor-pointer disabled:cursor-not-allowed transition"
-                title={undoLabel ? `بازگشت تغییرات خودتان: ${undoLabel}` : 'بازگشت آخرین تغییر شما (Undo)'}
+                title={undoLabel ? `بازگشت تغییرات خودتان (Ctrl+Z): ${undoLabel}` : 'بازگشت آخرین تغییر شما (Ctrl+Z)'}
               >
                 <Undo2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 <span>بازگشت</span>
@@ -1212,12 +2027,24 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 disabled={!canRedo}
                 onClick={onRedo}
                 className="px-2 py-1 rounded-lg text-[11px] font-extrabold inline-flex items-center gap-1 disabled:opacity-40 hover:bg-white dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 cursor-pointer disabled:cursor-not-allowed transition"
-                title={redoLabel ? `انجام مجدد: ${redoLabel}` : 'انجام مجدد (Redo)'}
+                title={redoLabel ? `انجام مجدد (Ctrl+Y): ${redoLabel}` : 'انجام مجدد (Ctrl+Y)'}
               >
                 <Redo2 className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
                 <span>انجام مجدد</span>
               </button>
             </div>
+
+            {isSystemAdmin && (
+              <button
+                type="button"
+                onClick={() => setLayoutModalOpen(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer transition"
+                title="تنظیم پهنا (با ماوس یا عدد)، عمودی/افقی و Wrap/Shrink ستون‌ها و سلول‌ها (فقط مدیر سامانه)"
+              >
+                <Columns3 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>تنظیمات ستون‌ها و سلول‌ها</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -1273,10 +2100,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 type="button"
                 onClick={() => {
                   setFitToScreen(false);
-                  setZoomPercent((z) => Math.max(40, (fitToScreen ? fitZoomPercent : z) - 10));
+                  setZoomPercent((z) => Math.max(28, (fitToScreen ? fitZoomPercent : z) - 10));
                 }}
                 className="p-1 rounded-lg hover:bg-white dark:hover:bg-slate-700 cursor-pointer"
-                title="کوچک‌نمایی"
+                title="کوچک‌نمایی (یا Ctrl+چرخ ماوس)"
               >
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
@@ -1295,10 +2122,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 type="button"
                 onClick={() => {
                   setFitToScreen(false);
-                  setZoomPercent((z) => Math.min(130, (fitToScreen ? fitZoomPercent : z) + 10));
+                  setZoomPercent((z) => Math.min(150, (fitToScreen ? fitZoomPercent : z) + 10));
                 }}
                 className="p-1 rounded-lg hover:bg-white dark:hover:bg-slate-700 cursor-pointer"
-                title="بزرگ‌نمایی"
+                title="بزرگ‌نمایی (یا Ctrl+چرخ ماوس)"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
@@ -1312,7 +2139,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   ? 'bg-rose-600 hover:bg-rose-700 text-white'
                   : 'bg-indigo-600 hover:bg-indigo-700 text-white'
               }`}
-              title={isFullscreen ? 'بازگشت به نمای عادی (Esc)' : 'بزرگ‌نمایی تمام‌صفحه جدول'}
+              title={isFullscreen ? 'بازگشت به نمای عادی (Esc)' : 'بزرگ‌نمایی تمام‌صفحه جدول داخل صفحه'}
             >
               {isFullscreen ? (
                 <>
@@ -1322,9 +2149,29 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
               ) : (
                 <>
                   <Maximize2 className="w-3.5 h-3.5" />
-                  <span>نمای تمام‌صفحه جدول</span>
+                  <span>تمام‌صفحه جدول</span>
                 </>
               )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void enterImmersiveFullscreen(false)}
+              className="px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer transition shadow-xs"
+              title="نمایش بدون نوار مرورگر، بدون دکمه و اتوهاید روی کل مانیتور"
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              <span>کاملاً تمام‌صفحه</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void toggleMobileLandscapeMode()}
+              className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer transition"
+              title="حالت تمام‌صفحه افقی مخصوص موبایل"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">افقی موبایل</span>
             </button>
 
             <button
@@ -1422,7 +2269,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
             <span>تفکیک دو تک‌ساعت</span>
           </label>
 
-          {/* دکمه‌های سریع اسکرول افقی + راهنمای Alt/Shift/Ctrl + ماوس */}
+          {/* دکمه‌های سریع اسکرول افقی + راهنمای Alt/Shift + ماوس */}
           <div className="mr-auto inline-flex items-center gap-1">
             <button
               type="button"
@@ -1435,7 +2282,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
             <span className="text-[10px] text-slate-500 hidden xl:inline px-1">
-              Shift / Alt / Ctrl + اسکرول ماوس
+              Shift / Alt + ماوس: اسکرول افقی · Ctrl + ماوس: زوم
             </span>
             <button
               type="button"
@@ -1576,6 +2423,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           )}
         </div>
       </div>
+      )}
 
       {/* ماتریس فراگیر تمام‌عرض شبیه گوگل شیت */}
       {displayRows.length === 0 ? (
@@ -1591,66 +2439,147 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       ) : (
         <div
           ref={gridScrollRef}
-          className={`rounded-2xl border-2 border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-sm overflow-auto ${
-            isFullscreen ? 'flex-1 min-h-0' : 'max-h-[74vh]'
+          className={`bg-white dark:bg-slate-900 shadow-sm overflow-auto ${
+            immersiveFullscreen
+              ? 'flex-1 min-h-0 border-0 rounded-none'
+              : anyFullscreen
+              ? 'flex-1 min-h-0 rounded-2xl border-2 border-slate-400 dark:border-slate-600'
+              : 'max-h-[74vh] rounded-2xl border-2 border-slate-400 dark:border-slate-600'
           }`}
         >
           <table
-            ref={null}
             style={
               effectiveZoom !== 100
                 ? ({ zoom: effectiveZoom / 100 } as React.CSSProperties)
                 : undefined
             }
-            className="border-collapse text-[11px] w-max min-w-full"
+            className="border-collapse text-[11px] table-fixed w-max min-w-full"
           >
+            <colgroup>
+              {rowGrouping === 'by_major' ? (
+                <>
+                  <col style={{ width: `${metaColWidths.major}px` }} />
+                  <col style={{ width: `${metaColWidths.entry}px` }} />
+                </>
+              ) : (
+                <>
+                  <col style={{ width: `${metaColWidths.entry}px` }} />
+                  <col style={{ width: `${metaColWidths.major}px` }} />
+                </>
+              )}
+              <col style={{ width: `${metaColWidths.totalStudents}px` }} />
+              <col style={{ width: `${metaColWidths.section}px` }} />
+              {displayedDays.map((day) =>
+                displayedSlots.map((slot) => {
+                  const colW = getSlotColumnStyle(day, slot.id).width;
+                  return <col key={`col_${day}_${slot.id}`} style={{ width: `${colW}px` }} />;
+                })
+              )}
+            </colgroup>
+
             <thead className="sticky top-0 z-30 bg-slate-100 dark:bg-slate-800 shadow-xs">
               {/* ردیف اول هدر: ستون‌های مشخصات ثابت در راست + عنوان روزهای هفته */}
               <tr>
-                {rowGrouping === 'by_major' ? (
-                  <>
-                    <th
-                      rowSpan={2}
-                      className="sticky right-0 z-40 w-[114px] min-w-[114px] max-w-[114px] bg-slate-200 dark:bg-slate-800 border border-slate-400 dark:border-slate-600 p-2 text-center font-black"
-                    >
-                      رشته
-                    </th>
-                    <th
-                      rowSpan={2}
-                      className="sticky right-[114px] z-40 w-[64px] min-w-[64px] max-w-[64px] bg-slate-200 dark:bg-slate-800 border border-slate-400 dark:border-slate-600 p-2 text-center font-black"
-                    >
-                      ورودی
-                    </th>
-                  </>
-                ) : (
-                  <>
-                    <th
-                      rowSpan={2}
-                      className="sticky right-0 z-40 w-[64px] min-w-[64px] max-w-[64px] bg-slate-200 dark:bg-slate-800 border border-slate-400 dark:border-slate-600 p-2 text-center font-black"
-                    >
-                      ورودی
-                    </th>
-                    <th
-                      rowSpan={2}
-                      className="sticky right-[64px] z-40 w-[114px] min-w-[114px] max-w-[114px] bg-slate-200 dark:bg-slate-800 border border-slate-400 dark:border-slate-600 p-2 text-center font-black"
-                    >
-                      رشته
-                    </th>
-                  </>
-                )}
+                {(() => {
+                  const orderedFirstTwo: Array<{
+                    key: SchedMetaColumnKey;
+                    rightPx: number;
+                    widthPx: number;
+                  }> =
+                    rowGrouping === 'by_major'
+                      ? [
+                          { key: 'major', rightPx: stickyOffsets.firstRight, widthPx: metaColWidths.major },
+                          { key: 'entry', rightPx: stickyOffsets.secondRight, widthPx: metaColWidths.entry },
+                        ]
+                      : [
+                          { key: 'entry', rightPx: stickyOffsets.firstRight, widthPx: metaColWidths.entry },
+                          { key: 'major', rightPx: stickyOffsets.secondRight, widthPx: metaColWidths.major },
+                        ];
 
-                <th
-                  rowSpan={2}
-                  className="sticky right-[178px] z-40 w-[56px] min-w-[56px] max-w-[56px] bg-slate-200 dark:bg-slate-800 border border-slate-400 dark:border-slate-600 p-2 text-center font-black"
-                >
-                  تعداد کل
-                </th>
-                <th
-                  rowSpan={2}
-                  className="sticky right-[234px] z-40 w-[104px] min-w-[104px] max-w-[104px] bg-slate-200 dark:bg-slate-800 border-y border-r border-slate-400 dark:border-slate-600 border-l-[3px] border-l-slate-900 dark:border-l-slate-300 p-2 text-center font-black"
-                >
-                  شعبه / گروه
-                </th>
+                  const allMetaHeaders: Array<{
+                    key: SchedMetaColumnKey;
+                    rightPx: number;
+                    widthPx: number;
+                    isSectionEdge?: boolean;
+                  }> = [
+                    ...orderedFirstTwo,
+                    {
+                      key: 'totalStudents',
+                      rightPx: stickyOffsets.thirdRight,
+                      widthPx: metaColWidths.totalStudents,
+                    },
+                    {
+                      key: 'section',
+                      rightPx: stickyOffsets.fourthRight,
+                      widthPx: metaColWidths.section,
+                      isSectionEdge: true,
+                    },
+                  ];
+
+                  return allMetaHeaders.map((mh) => {
+                    const cfg = liveLayout.metaColumns[mh.key];
+                    const hOri = cfg?.headerOrientation || 'horizontal';
+                    const isVert = hOri !== 'horizontal';
+                    const label = META_COL_LABELS[mh.key];
+                    const shrinkFs =
+                      cfg?.textFit === 'shrink' && !isVert && mh.widthPx < 68
+                        ? computeAdaptiveShrinkFontPx(label.length, mh.widthPx, 11, 7.5, false)
+                        : cfg?.fontSizePx;
+                    return (
+                      <th
+                        key={`th_${mh.key}`}
+                        rowSpan={2}
+                        style={{
+                          right: `${mh.rightPx}px`,
+                          width: `${mh.widthPx}px`,
+                          minWidth: `${mh.widthPx}px`,
+                          maxWidth: `${mh.widthPx}px`,
+                        }}
+                        className={`sticky z-40 bg-slate-200 dark:bg-slate-800 border-y border-r border-slate-400 dark:border-slate-600 p-1 text-center font-black relative select-none ${
+                          mh.isSectionEdge
+                            ? 'border-l-[3px] border-l-slate-900 dark:border-l-slate-300'
+                            : 'border-l border-slate-400 dark:border-slate-600'
+                        }`}
+                      >
+                        <div
+                          style={{
+                            ...getOrientationStyleObj(hOri),
+                            ...(shrinkFs ? { fontSize: `${shrinkFs}px` } : {}),
+                          }}
+                          className={`mx-auto flex items-center justify-center ${
+                            isVert
+                              ? 'max-h-[82px] leading-tight whitespace-nowrap'
+                              : cfg?.textFit === 'clip'
+                              ? 'truncate'
+                              : 'whitespace-normal break-words leading-tight'
+                          }`}
+                        >
+                          {label}
+                        </div>
+                        {isSystemAdmin && (
+                          <div
+                            onMouseDown={(e) =>
+                              startColumnResize(e, {
+                                kind: 'meta',
+                                metaKey: mh.key,
+                                label,
+                                currentWidth: mh.widthPx,
+                              })
+                            }
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              resetSingleColumnWidth({ kind: 'meta', metaKey: mh.key });
+                            }}
+                            title={`بکشید برای تغییر عرض ستون «${label}» (${mh.widthPx}px) · دابل‌کلیک برای پیش‌فرض`}
+                            className="absolute top-0 bottom-0 left-0 w-2 -ml-1 cursor-col-resize z-50 group/resizer flex items-center justify-center"
+                          >
+                            <span className="w-[2px] h-2/3 rounded-full bg-transparent group-hover/resizer:bg-teal-500 transition-colors" />
+                          </div>
+                        )}
+                      </th>
+                    );
+                  });
+                })()}
 
                 {displayedDays.map((day, dIdx) => {
                   const isDayLocked =
@@ -1687,10 +2616,18 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       Boolean(rules.programLocks?.lockedSlotIds?.includes(slot.id));
                     const durHrs = getSlotDurationHours(slot);
                     const origIdx = slotOriginalIndexMap.get(slot.id) ?? sIdx;
+                    const cStyle = getSlotColumnStyle(day, slot.id);
+                    const isVertHeader = cStyle.headerOrientation !== 'horizontal';
+                    const slotTitle = getSchedSlotTitle(slot, origIdx);
                     return (
                       <th
                         key={`${day}_${slot.id}`}
-                        className={`min-w-[168px] w-[168px] border-t border-b-2 border-b-slate-700 dark:border-b-slate-400 border-x border-slate-300 dark:border-slate-700 py-1.5 px-1.5 text-center ${
+                        style={{
+                          width: `${cStyle.width}px`,
+                          minWidth: `${cStyle.width}px`,
+                          maxWidth: `${cStyle.width}px`,
+                        }}
+                        className={`relative select-none border-t border-b-2 border-b-slate-700 dark:border-b-slate-400 border-x border-slate-300 dark:border-slate-700 py-1.5 px-1 text-center ${
                           DAY_SLOT_SUBHEADER_PALETTES[dIdx % DAY_SLOT_SUBHEADER_PALETTES.length]
                         } ${
                           isFirstSlotOfDay
@@ -1702,23 +2639,50 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             : ''
                         }`}
                       >
-                        <div className="font-black text-[11px] leading-tight inline-flex items-center gap-1">
-                          <span>{getSchedSlotTitle(slot, origIdx)}</span>
-                          {durHrs <= 1 && (
-                            <span className="text-[9px] px-1 rounded bg-white/75 dark:bg-slate-800 text-indigo-700 dark:text-indigo-300">
-                              تک‌ساعت
-                            </span>
-                          )}
-                          {isSlotLocked && (
-                            <Lock className="w-3 h-3 text-rose-600 dark:text-rose-400" />
-                          )}
-                        </div>
                         <div
-                          className="text-[10px] font-mono tabular-nums opacity-90 mt-0.5"
-                          dir="ltr"
+                          style={getOrientationStyleObj(cStyle.headerOrientation)}
+                          className={`mx-auto ${isVertHeader ? 'max-h-[92px] flex flex-col items-center justify-center' : ''}`}
                         >
-                          {slot.startTime} - {slot.endTime}
+                          <div className="font-black text-[11px] leading-tight inline-flex items-center justify-center gap-1 flex-wrap">
+                            <span>{slotTitle}</span>
+                            {durHrs <= 1 && (
+                              <span className="text-[9px] px-1 rounded bg-white/75 dark:bg-slate-800 text-indigo-700 dark:text-indigo-300">
+                                تک‌ساعت
+                              </span>
+                            )}
+                            {isSlotLocked && (
+                              <Lock className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+                            )}
+                          </div>
+                          <div
+                            className="text-[10px] font-mono tabular-nums opacity-90 mt-0.5"
+                            dir="ltr"
+                          >
+                            {slot.startTime} - {slot.endTime}
+                          </div>
                         </div>
+
+                        {isSystemAdmin && (
+                          <div
+                            onMouseDown={(e) =>
+                              startColumnResize(e, {
+                                kind: 'slot',
+                                day,
+                                slotId: slot.id,
+                                label: `${SCHED_DAY_LABELS[day]} · ${slotTitle}`,
+                                currentWidth: cStyle.width,
+                              })
+                            }
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              resetSingleColumnWidth({ kind: 'slot', day, slotId: slot.id });
+                            }}
+                            title={`بکشید برای تغییر عرض (${cStyle.width}px) · با Shift برای همین سانس در همه روزها · دابل‌کلیک برای بازنشانی`}
+                            className="absolute top-0 bottom-0 left-0 w-2 -ml-1 cursor-col-resize z-50 group/resizer flex items-center justify-center"
+                          >
+                            <span className="w-[2px] h-2/3 rounded-full bg-transparent group-hover/resizer:bg-teal-500 transition-colors" />
+                          </div>
+                        )}
                       </th>
                     );
                   })
@@ -1737,6 +2701,80 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   Boolean(rules.programLocks?.lockedMajorCodes?.includes(row.majorCode));
                 const isDraggingThisRow = draggingState?.rowKey === row.rowKey;
 
+                const majorCfg = liveLayout.metaColumns.major;
+                const entryCfg = liveLayout.metaColumns.entry;
+                const totalCfg = liveLayout.metaColumns.totalStudents;
+                const secCfg = liveLayout.metaColumns.section;
+
+                const renderMetaInner = (
+                  text: string,
+                  subText: string | undefined,
+                  cfg: SchedMasterColumnStyle,
+                  colWidthPx: number,
+                  rowSpan: number,
+                  basePx: number,
+                  subClass = 'text-[9px] font-mono opacity-80',
+                  lockIcon?: boolean
+                ) => {
+                  const bodyOri = cfg?.bodyOrientation || 'horizontal';
+                  const isVert = bodyOri !== 'horizontal';
+                  const fit = cfg?.textFit || 'wrap';
+                  const fsPx =
+                    cfg?.fontSizePx ||
+                    (fit === 'shrink'
+                      ? computeAdaptiveShrinkFontPx(
+                          text.length,
+                          colWidthPx,
+                          basePx,
+                          7,
+                          isVert,
+                          rowSpan
+                        )
+                      : undefined);
+
+                  return (
+                    <div
+                      style={{
+                        ...getOrientationStyleObj(bodyOri),
+                        ...(fsPx ? { fontSize: `${fsPx}px`, lineHeight: 1.15 } : {}),
+                      }}
+                      className={`mx-auto flex flex-col items-center justify-center gap-0.5 ${
+                        isVert
+                          ? fit === 'clip'
+                            ? 'max-h-[110px] overflow-hidden whitespace-nowrap'
+                            : 'leading-tight'
+                          : fit === 'clip'
+                          ? 'w-full overflow-hidden'
+                          : 'w-full whitespace-normal break-words leading-snug'
+                      }`}
+                    >
+                      <span
+                        className={
+                          fit === 'clip' && !isVert
+                            ? 'w-full truncate block'
+                            : 'inline-flex items-center justify-center gap-1 flex-wrap'
+                        }
+                      >
+                        <span>{text}</span>
+                        {lockIcon && (
+                          <span title="تغییرات این رشته مسدود شده است" className="inline-flex">
+                            <Lock className="w-3 h-3 text-rose-600" />
+                          </span>
+                        )}
+                      </span>
+                      {subText && (
+                        <span
+                          className={`${subClass} ${
+                            fit === 'clip' && !isVert ? 'w-full truncate block' : ''
+                          }`}
+                        >
+                          {subText}
+                        </span>
+                      )}
+                    </div>
+                  );
+                };
+
                 return (
                   <tr
                     key={row.rowKey}
@@ -1748,19 +2786,24 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         {row.isFirstMajorBlock && (
                           <td
                             rowSpan={row.majorBlockSpan}
-                            className={`sticky right-0 z-20 w-[114px] min-w-[114px] max-w-[114px] border border-slate-300 dark:border-slate-700 p-2 text-center font-black align-middle ${majorPalette.cell}`}
+                            style={{
+                              right: `${stickyOffsets.firstRight}px`,
+                              width: `${metaColWidths.major}px`,
+                              minWidth: `${metaColWidths.major}px`,
+                              maxWidth: `${metaColWidths.major}px`,
+                            }}
+                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1.5 text-center font-black align-middle overflow-hidden ${majorPalette.cell}`}
                           >
-                            <div className="leading-snug flex flex-col items-center gap-0.5">
-                              <span>{row.majorName}</span>
-                              {isMajorLocked && (
-                                <span title="تغییرات این رشته مسدود شده است" className="inline-flex">
-                                  <Lock className="w-3 h-3 text-rose-600" />
-                                </span>
-                              )}
-                            </div>
-                            <div className={`text-[9px] font-mono mt-0.5 opacity-80 ${majorPalette.tag}`}>
-                              {row.majorCode}
-                            </div>
+                            {renderMetaInner(
+                              row.majorName,
+                              row.majorCode,
+                              majorCfg,
+                              metaColWidths.major,
+                              row.majorBlockSpan,
+                              11,
+                              `text-[9px] font-mono opacity-80 ${majorPalette.tag}`,
+                              isMajorLocked
+                            )}
                           </td>
                         )}
 
@@ -1768,9 +2811,22 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         {row.isFirstCohortBlock && (
                           <td
                             rowSpan={row.cohortBlockSpan}
-                            className="sticky right-[114px] z-20 w-[64px] min-w-[64px] max-w-[64px] border border-slate-300 dark:border-slate-700 p-1.5 text-center font-mono font-black align-middle bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100"
+                            style={{
+                              right: `${stickyOffsets.secondRight}px`,
+                              width: `${metaColWidths.entry}px`,
+                              minWidth: `${metaColWidths.entry}px`,
+                              maxWidth: `${metaColWidths.entry}px`,
+                            }}
+                            className="sticky z-20 border border-slate-300 dark:border-slate-700 p-1 text-center font-mono font-black align-middle bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 overflow-hidden"
                           >
-                            {row.entryTerm}
+                            {renderMetaInner(
+                              row.entryTerm,
+                              undefined,
+                              entryCfg,
+                              metaColWidths.entry,
+                              row.cohortBlockSpan,
+                              11
+                            )}
                           </td>
                         )}
                       </>
@@ -1780,29 +2836,47 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         {row.isFirstEntryBlock && (
                           <td
                             rowSpan={row.entryBlockSpan}
-                            className={`sticky right-0 z-20 w-[64px] min-w-[64px] max-w-[64px] border border-slate-300 dark:border-slate-700 p-1.5 text-center font-mono font-black align-middle ${entryPalette}`}
+                            style={{
+                              right: `${stickyOffsets.firstRight}px`,
+                              width: `${metaColWidths.entry}px`,
+                              minWidth: `${metaColWidths.entry}px`,
+                              maxWidth: `${metaColWidths.entry}px`,
+                            }}
+                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1 text-center font-mono font-black align-middle overflow-hidden ${entryPalette}`}
                           >
-                            <div>{row.entryTerm}</div>
-                            <div className="text-[8.5px] font-sans opacity-75 mt-0.5">ورودی</div>
+                            {renderMetaInner(
+                              row.entryTerm,
+                              'ورودی',
+                              entryCfg,
+                              metaColWidths.entry,
+                              row.entryBlockSpan,
+                              11,
+                              'text-[8.5px] font-sans opacity-75'
+                            )}
                           </td>
                         )}
 
                         {row.isFirstCohortBlock && (
                           <td
                             rowSpan={row.cohortBlockSpan}
-                            className={`sticky right-[64px] z-20 w-[114px] min-w-[114px] max-w-[114px] border border-slate-300 dark:border-slate-700 p-2 text-center font-black align-middle ${majorPalette.cell}`}
+                            style={{
+                              right: `${stickyOffsets.secondRight}px`,
+                              width: `${metaColWidths.major}px`,
+                              minWidth: `${metaColWidths.major}px`,
+                              maxWidth: `${metaColWidths.major}px`,
+                            }}
+                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1.5 text-center font-black align-middle overflow-hidden ${majorPalette.cell}`}
                           >
-                            <div className="leading-snug flex flex-col items-center gap-0.5">
-                              <span>{row.majorName}</span>
-                              {isMajorLocked && (
-                                <span title="تغییرات این رشته مسدود شده است" className="inline-flex">
-                                  <Lock className="w-3 h-3 text-rose-600" />
-                                </span>
-                              )}
-                            </div>
-                            <div className={`text-[9px] font-mono mt-0.5 opacity-80 ${majorPalette.tag}`}>
-                              {row.majorCode}
-                            </div>
+                            {renderMetaInner(
+                              row.majorName,
+                              row.majorCode,
+                              majorCfg,
+                              metaColWidths.major,
+                              row.cohortBlockSpan,
+                              11,
+                              `text-[9px] font-mono opacity-80 ${majorPalette.tag}`,
+                              isMajorLocked
+                            )}
                           </td>
                         )}
                       </>
@@ -1812,20 +2886,44 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                     {row.isFirstCohortBlock && (
                       <td
                         rowSpan={row.cohortBlockSpan}
-                        className="sticky right-[178px] z-20 w-[56px] min-w-[56px] max-w-[56px] border border-slate-300 dark:border-slate-700 p-1.5 text-center font-mono font-bold tabular-nums align-middle bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200"
+                        style={{
+                          right: `${stickyOffsets.thirdRight}px`,
+                          width: `${metaColWidths.totalStudents}px`,
+                          minWidth: `${metaColWidths.totalStudents}px`,
+                          maxWidth: `${metaColWidths.totalStudents}px`,
+                        }}
+                        className="sticky z-20 border border-slate-300 dark:border-slate-700 p-1 text-center font-mono font-bold tabular-nums align-middle bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 overflow-hidden"
                       >
-                        {row.totalCohortStudents.toLocaleString('fa-IR')}
+                        {renderMetaInner(
+                          row.totalCohortStudents.toLocaleString('fa-IR'),
+                          undefined,
+                          totalCfg,
+                          metaColWidths.totalStudents,
+                          row.cohortBlockSpan,
+                          11
+                        )}
                       </td>
                     )}
 
                     {/* ستون ۴: شعبه و تعداد نفرات شعبه */}
-                    <td className="sticky right-[234px] z-20 w-[104px] min-w-[104px] max-w-[104px] border-y border-r border-slate-300 dark:border-slate-700 border-l-[3px] border-l-slate-900 dark:border-l-slate-300 p-1.5 text-center align-middle bg-slate-50 dark:bg-slate-900">
-                      <div className="font-extrabold text-slate-900 dark:text-white truncate">
-                        {row.sectionName}
-                      </div>
-                      <div className="text-[9.5px] font-mono text-slate-500 tabular-nums">
-                        {row.sectionStudentCount.toLocaleString('fa-IR')} نفر
-                      </div>
+                    <td
+                      style={{
+                        right: `${stickyOffsets.fourthRight}px`,
+                        width: `${metaColWidths.section}px`,
+                        minWidth: `${metaColWidths.section}px`,
+                        maxWidth: `${metaColWidths.section}px`,
+                      }}
+                      className="sticky z-20 border-y border-r border-slate-300 dark:border-slate-700 border-l-[3px] border-l-slate-900 dark:border-l-slate-300 p-1 text-center align-middle bg-slate-50 dark:bg-slate-900 overflow-hidden"
+                    >
+                      {renderMetaInner(
+                        row.sectionName,
+                        `${row.sectionStudentCount.toLocaleString('fa-IR')} نفر`,
+                        secCfg,
+                        metaColWidths.section,
+                        1,
+                        11,
+                        'text-[9.5px] font-mono text-slate-500 tabular-nums'
+                      )}
                     </td>
 
                     {/* ستون‌های روز و سانس */}
@@ -1881,6 +2979,13 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             ? 'bg-slate-50/55 dark:bg-slate-900/55'
                             : 'bg-white dark:bg-slate-900';
 
+                        const colStyle = getSlotColumnStyle(day, slot.id);
+                        const slotColWidth = colStyle.width;
+                        const slotTextFit = colStyle.textFit;
+                        const slotBodyOri = colStyle.bodyOrientation;
+                        const isVertSlotBody = slotBodyOri !== 'horizontal';
+                        const isCompactCards = Boolean(liveLayout.scheduleCells.compactCards);
+
                         const renderOfferingChip = (o: SchedCourseOffering, compactHalf = false) => {
                           const conf = detectOfferingConflicts(
                             o,
@@ -1898,6 +3003,34 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                           const matchedFocus = doesOfferingMatchFocus(o);
                           const dimmed = isFocusActive && !matchedFocus;
                           const editable = canEditOffering(o);
+
+                          const effectiveWidth = compactHalf ? Math.max(44, Math.floor(slotColWidth / 2)) : slotColWidth;
+                          const customBasePx = colStyle.fontSizePx;
+                          const titlePx =
+                            customBasePx ||
+                            (slotTextFit === 'shrink'
+                              ? computeAdaptiveShrinkFontPx(
+                                  o.courseTitle.length,
+                                  effectiveWidth,
+                                  compactHalf ? 9.5 : 10.5,
+                                  7.2,
+                                  isVertSlotBody
+                                )
+                              : compactHalf
+                              ? 9.5
+                              : 10.5);
+                          const subPx =
+                            customBasePx
+                              ? Math.max(7, customBasePx - 1)
+                              : slotTextFit === 'shrink'
+                              ? Math.max(7, Number((titlePx - 1).toFixed(1)))
+                              : compactHalf
+                              ? 8.5
+                              : 9.5;
+                          const textFitClass =
+                            slotTextFit === 'clip' && !isVertSlotBody
+                              ? 'truncate'
+                              : 'whitespace-normal break-words leading-tight';
 
                           return (
                             <div
@@ -1928,10 +3061,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                   ? 'کلیک برای ویرایش یا انتخاب و کشیدن در همین ردیف برای جابجایی'
                                   : 'فقط مشاهده (تغییرات مسدود شده یا متعلق به گروه دیگر است)'
                               }
-                              className={`group/card relative rounded-lg border p-1.5 text-right transition select-none ${
+                              className={`group/card relative rounded-lg border ${
+                                isCompactCards ? 'p-1' : 'p-1.5'
+                              } text-right transition select-none overflow-hidden ${
                                 editable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
                               } ${
-                                conf.hasHardConflict
+                                o.isDisabled
+                                  ? 'bg-slate-100/90 dark:bg-slate-800/70 border-dashed border-amber-500 text-slate-600 dark:text-slate-300 opacity-85'
+                                  : conf.hasHardConflict
                                   ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-400 text-rose-950 dark:text-rose-100'
                                   : matchedFocus
                                   ? 'bg-amber-100 dark:bg-amber-900/60 border-amber-500 ring-2 ring-amber-400/70 text-slate-950 dark:text-white'
@@ -1942,107 +3079,125 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                   : 'bg-teal-50/70 dark:bg-teal-950/30 border-teal-200 dark:border-teal-800 hover:border-teal-500'
                               } ${dimmed ? 'opacity-25 grayscale' : ''}`}
                             >
-                              <div className="flex items-start justify-between gap-1">
-                                <span
-                                  className={`font-black leading-tight ${
-                                    compactHalf ? 'text-[9.5px]' : 'text-[10.5px]'
-                                  } text-slate-900 dark:text-white`}
-                                >
-                                  {o.courseTitle}
-                                  {o.practicalType === 'internship' && (
-                                    <span className="text-violet-700 dark:text-violet-300 font-bold">
-                                      {' '}
-                                      (ظرفیت {o.enrolledCount.toLocaleString('fa-IR')})
-                                    </span>
-                                  )}
-                                </span>
-                                {editable && (
-                                  <GripVertical className="w-3 h-3 text-slate-400 shrink-0 opacity-50 group-hover/card:opacity-100" />
-                                )}
-                              </div>
-
-                              {(o.internshipSubGroupLabel || o.internshipSessionRole) && (
-                                <div className="text-[8.5px] font-bold text-violet-700 dark:text-violet-300 flex flex-wrap items-center gap-1">
-                                  {o.internshipSubGroupLabel && (
-                                    <span>{o.internshipSubGroupLabel}</span>
-                                  )}
-                                  {o.internshipSessionRole === 'school_attendance' && (
-                                    <span className="px-1 rounded bg-violet-100 dark:bg-violet-900/60">
-                                      حضور مدرسه
-                                    </span>
-                                  )}
-                                  {o.internshipSessionRole === 'university_orientation' && (
-                                    <span className="px-1 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200">
-                                      توجیهی دانشگاه
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-
                               <div
-                                className={`${
-                                  compactHalf ? 'text-[9px]' : 'text-[9.5px]'
-                                } font-semibold text-slate-700 dark:text-slate-300 truncate mt-0.5`}
+                                style={getOrientationStyleObj(slotBodyOri)}
+                                className={isVertSlotBody ? 'mx-auto max-h-[120px]' : ''}
                               >
-                                {o.professorName || (
-                                  <span className="text-amber-700 dark:text-amber-400">
-                                    بدون استاد
+                                {o.isDisabled && (
+                                  <div className="mb-0.5 px-1 py-0.2 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 text-[8px] font-black inline-block">
+                                    غیرفعال · بدون استاد
+                                  </div>
+                                )}
+                                <div className="flex items-start justify-between gap-1">
+                                  <span
+                                    style={{ fontSize: `${titlePx}px` }}
+                                    className={`font-black text-slate-900 dark:text-white ${textFitClass}`}
+                                  >
+                                    {o.courseTitle}
+                                    {o.practicalType === 'internship' && (
+                                      <span className="text-violet-700 dark:text-violet-300 font-bold">
+                                        {' '}
+                                        (ظرفیت {o.enrolledCount.toLocaleString('fa-IR')})
+                                      </span>
+                                    )}
                                   </span>
+                                  {editable && !isCompactCards && (
+                                    <GripVertical className="w-3 h-3 text-slate-400 shrink-0 opacity-50 group-hover/card:opacity-100" />
+                                  )}
+                                </div>
+
+                                {(o.internshipSubGroupLabel || o.internshipSessionRole) && (
+                                  <div className="text-[8.5px] font-bold text-violet-700 dark:text-violet-300 flex flex-wrap items-center gap-1">
+                                    {o.internshipSubGroupLabel && (
+                                      <span>{o.internshipSubGroupLabel}</span>
+                                    )}
+                                    {o.internshipSessionRole === 'school_attendance' && (
+                                      <span className="px-1 rounded bg-violet-100 dark:bg-violet-900/60">
+                                        حضور مدرسه
+                                      </span>
+                                    )}
+                                    {o.internshipSessionRole === 'university_orientation' && (
+                                      <span className="px-1 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200">
+                                        توجیهی دانشگاه
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+
+                                <div
+                                  style={{ fontSize: `${subPx}px` }}
+                                  className={`font-semibold text-slate-700 dark:text-slate-300 mt-0.5 ${textFitClass}`}
+                                >
+                                  {o.professorName || (
+                                    <span className="text-amber-700 dark:text-amber-400">
+                                      بدون استاد
+                                    </span>
+                                  )}
+                                </div>
+
+                                {o.classroomName ? (
+                                  <div
+                                    style={{ fontSize: `${Math.max(7, subPx - 0.5)}px` }}
+                                    className={`text-slate-500 dark:text-slate-400 ${textFitClass}`}
+                                  >
+                                    کلاس: {o.classroomName}
+                                  </div>
+                                ) : o.internshipSessionRole === 'school_attendance' ? (
+                                  <div
+                                    style={{ fontSize: `${Math.max(7, subPx - 0.5)}px` }}
+                                    className={`text-violet-600 dark:text-violet-300 ${textFitClass}`}
+                                  >
+                                    محل: مدرسه
+                                  </div>
+                                ) : null}
+
+                                {o.sharedWithTargets && o.sharedWithTargets.length > 0 && (
+                                  <div
+                                    style={{ fontSize: `${Math.max(7, subPx - 1)}px` }}
+                                    className={`font-bold text-indigo-700 dark:text-indigo-300 mt-0.5 ${textFitClass}`}
+                                  >
+                                    {isSharedHost
+                                      ? `مشترک از ${o.ownerMajorName}`
+                                      : `مشترک با ${o.sharedWithTargets.length} گروه`}
+                                  </div>
+                                )}
+
+                                {(() => {
+                                  const bd = calculateOfferingBreakdown(o, rules);
+                                  if (bd.weeklyHours % 1 === 0) return null;
+                                  return (
+                                    <div className="text-[8.5px] font-bold text-sky-700 dark:text-sky-300 mt-0.5">
+                                      {bd.weeklyHours.toLocaleString('fa-IR')} س واقعی ({bd.rawUnits.toLocaleString('fa-IR')} واحد)
+                                    </div>
+                                  );
+                                })()}
+
+                                {examLabel && (
+                                  <div
+                                    style={{ fontSize: `${Math.max(7, subPx - 1)}px` }}
+                                    className={`font-bold mt-0.5 px-1 py-0.2 rounded ${textFitClass} ${
+                                      examWarns.length > 0
+                                        ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
+                                        : 'bg-indigo-100/70 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200'
+                                    }`}
+                                    title={
+                                      examWarns.length > 0
+                                        ? `اخطار تداخل امتحان: ${examWarns.join(' | ')}`
+                                        : `زمان امتحان: ${examLabel}`
+                                    }
+                                  >
+                                    {examWarns.length > 0 ? '⚠️ ' : '📝 '}
+                                    {examLabel}
+                                  </div>
+                                )}
+
+                                {conf.hasHardConflict && (
+                                  <div className="text-[8.5px] font-black text-rose-600 dark:text-rose-400 flex items-center gap-0.5 mt-0.5">
+                                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                                    <span>تداخل!</span>
+                                  </div>
                                 )}
                               </div>
-
-                              {o.classroomName ? (
-                                <div className="text-[9px] text-slate-500 dark:text-slate-400 truncate">
-                                  کلاس: {o.classroomName}
-                                </div>
-                              ) : o.internshipSessionRole === 'school_attendance' ? (
-                                <div className="text-[9px] text-violet-600 dark:text-violet-300 truncate">
-                                  محل: مدرسه
-                                </div>
-                              ) : null}
-
-                              {o.sharedWithTargets && o.sharedWithTargets.length > 0 && (
-                                <div className="text-[8.5px] font-bold text-indigo-700 dark:text-indigo-300 mt-0.5">
-                                  {isSharedHost
-                                    ? `مشترک از ${o.ownerMajorName}`
-                                    : `مشترک با ${o.sharedWithTargets.length} گروه`}
-                                </div>
-                              )}
-
-                              {(() => {
-                                const bd = calculateOfferingBreakdown(o, rules);
-                                if (bd.weeklyHours % 1 === 0) return null;
-                                return (
-                                  <div className="text-[8.5px] font-bold text-sky-700 dark:text-sky-300 mt-0.5">
-                                    {bd.weeklyHours.toLocaleString('fa-IR')} س واقعی ({bd.rawUnits.toLocaleString('fa-IR')} واحد)
-                                  </div>
-                                );
-                              })()}
-
-                              {examLabel && (
-                                <div
-                                  className={`text-[8.5px] font-bold mt-0.5 truncate px-1 py-0.2 rounded ${
-                                    examWarns.length > 0
-                                      ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
-                                      : 'bg-indigo-100/70 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200'
-                                  }`}
-                                  title={
-                                    examWarns.length > 0
-                                      ? `اخطار تداخل امتحان: ${examWarns.join(' | ')}`
-                                      : `زمان امتحان: ${examLabel}`
-                                  }
-                                >
-                                  {examWarns.length > 0 ? '⚠️ ' : '📝 '}
-                                  {examLabel}
-                                </div>
-                              )}
-
-                              {conf.hasHardConflict && (
-                                <div className="text-[8.5px] font-black text-rose-600 dark:text-rose-400 flex items-center gap-0.5 mt-0.5">
-                                  <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
-                                  <span>تداخل!</span>
-                                </div>
-                              )}
 
                               {/* دکمه‌های سریع روی کارت هنگام هاور */}
                               <div
@@ -2097,6 +3252,11 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         return (
                           <td
                             key={`${row.rowKey}_${day}_${slot.id}`}
+                            style={{
+                              width: `${slotColWidth}px`,
+                              minWidth: `${slotColWidth}px`,
+                              maxWidth: `${slotColWidth}px`,
+                            }}
                             onDragOver={(e) => {
                               if (!isDraggingThisRow || cellLock.locked) return;
                               e.preventDefault();
@@ -2113,7 +3273,9 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                 handleDropOnCell(e, row, day, slot.id, 'full');
                               }
                             }}
-                            className={`group/cell relative border border-slate-300 dark:border-slate-700 p-1 align-top min-w-[168px] w-[168px] transition ${
+                            className={`group/cell relative border border-slate-300 dark:border-slate-700 ${
+                              isCompactCards ? 'p-0.5' : 'p-1'
+                            } align-top overflow-hidden transition ${
                               isFirstSlotOfDay
                                 ? 'border-r-[3px] border-r-slate-800 dark:border-r-slate-300'
                                 : ''
@@ -2650,6 +3812,977 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 <CheckCircle2 className="w-4 h-4" />
                 <span>تأیید و ثبت جابجایی</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* نشانگر شناور زنده هنگام تغییر عرض ستون با ماوس */}
+      {resizeIndicator && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[110] px-4 py-2 rounded-2xl bg-slate-900/95 text-white border border-teal-400/60 shadow-2xl text-xs font-black flex items-center gap-2 pointer-events-none">
+          <MoveHorizontal className="w-4 h-4 text-teal-400" />
+          <span>{resizeIndicator.label}:</span>
+          <span className="font-mono text-teal-300 text-sm" dir="ltr">
+            {resizeIndicator.width} px
+          </span>
+          {resizeIndicator.allSameSlot && (
+            <span className="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[10px]">
+              اعمال روی همه روزهای این سانس
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* مودال تنظیمات اکسل‌مانند نمایش ستون‌ها و سلول‌های جدول (فقط مدیر سامانه) */}
+      {layoutModalOpen && isSystemAdmin && (
+        <div className="fixed inset-0 z-[98] flex items-center justify-center bg-black/65 backdrop-blur-sm p-3 sm:p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-4xl w-full p-5 border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-start gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500 text-slate-950 shrink-0">
+                  <Columns3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-slate-900 dark:text-white">
+                    تنظیمات اکسل‌مانند ستون‌ها و سلول‌های برنامه جامع
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    تغییر عرض عددی یا با کشیدن لبه ستون‌ها با ماوس، تنظیم Wrap / Shrink نوشته‌ها، و چرخش عمودی یا افقی هر ستون (با یا بدون سطر اول/سرتیتر)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLayoutModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer self-end sm:self-auto"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* الگوهای سریع یک‌کلیکی */}
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+              <div className="font-black text-slate-800 dark:text-slate-100 flex items-center justify-between flex-wrap gap-2">
+                <span>الگوهای سریع چیدمان (مانند شیت جامع):</span>
+                <span className="text-[10.5px] font-bold text-slate-500">
+                  مجموع عرض ۴ ستون اول فعلی: <strong className="font-mono text-teal-600">{stickyOffsets.totalMetaWidth}px</strong>
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    commitLayoutSettings(
+                      cloneDefaultLayout(),
+                      'چیدمان استاندارد (افقی) روی برنامه جامع اعمال شد.'
+                    )
+                  }
+                  className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:border-teal-500 font-extrabold cursor-pointer"
+                >
+                  ۱. پیش‌فرض استاندارد (افقی)
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    commitLayoutSettings(
+                      {
+                        metaColumns: {
+                          major: {
+                            width: 44,
+                            headerOrientation: 'horizontal',
+                            bodyOrientation: 'vertical_up',
+                            textFit: 'wrap',
+                          },
+                          entry: {
+                            width: 34,
+                            headerOrientation: 'horizontal',
+                            bodyOrientation: 'vertical_up',
+                            textFit: 'shrink',
+                          },
+                          totalStudents: {
+                            width: 34,
+                            headerOrientation: 'horizontal',
+                            bodyOrientation: 'vertical_up',
+                            textFit: 'shrink',
+                          },
+                          section: {
+                            width: 48,
+                            headerOrientation: 'horizontal',
+                            bodyOrientation: 'vertical_up',
+                            textFit: 'wrap',
+                          },
+                        },
+                        defaultSlotWidth: 136,
+                        slotWidthsBySlotId: {},
+                        scheduleCells: {
+                          headerOrientation: 'horizontal',
+                          bodyOrientation: 'horizontal',
+                          textFit: 'shrink',
+                          compactCards: true,
+                        },
+                        columnOverrides: {},
+                      },
+                      'حالت جمع‌وجور اکسل (۴ ستون اول عمودی با سرتیتر افقی) اعمال شد.'
+                    )
+                  }
+                  className="px-3 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold cursor-pointer"
+                >
+                  ۲. جمع‌وجور اکسل (۴ ستون اول عمودی · سرتیتر افقی)
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    commitLayoutSettings(
+                      {
+                        metaColumns: {
+                          major: {
+                            width: 38,
+                            headerOrientation: 'vertical_up',
+                            bodyOrientation: 'vertical_up',
+                            textFit: 'wrap',
+                          },
+                          entry: {
+                            width: 30,
+                            headerOrientation: 'vertical_up',
+                            bodyOrientation: 'vertical_up',
+                            textFit: 'shrink',
+                          },
+                          totalStudents: {
+                            width: 30,
+                            headerOrientation: 'vertical_up',
+                            bodyOrientation: 'vertical_up',
+                            textFit: 'shrink',
+                          },
+                          section: {
+                            width: 40,
+                            headerOrientation: 'vertical_up',
+                            bodyOrientation: 'vertical_up',
+                            textFit: 'wrap',
+                          },
+                        },
+                        defaultSlotWidth: 118,
+                        slotWidthsBySlotId: {},
+                        scheduleCells: {
+                          headerOrientation: 'horizontal',
+                          bodyOrientation: 'horizontal',
+                          textFit: 'shrink',
+                          compactCards: true,
+                        },
+                        columnOverrides: {},
+                      },
+                      'حالت فشرده حداکثری (۴ ستون اول همراه با سرتیتر عمودی) اعمال شد.'
+                    )
+                  }
+                  className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold cursor-pointer"
+                >
+                  ۳. فشرده حداکثری (۴ ستون اول + سرتیترها عمودی)
+                </button>
+              </div>
+            </div>
+
+            {/* تب‌های تنظیمات */}
+            <div className="flex flex-wrap gap-1.5 border-b border-slate-200 dark:border-slate-800 pb-2">
+              {[
+                {
+                  key: 'presets_meta' as const,
+                  label: 'چهار ستون اول (رشته، ورودی، تعداد کل، شعبه)',
+                  icon: Table2,
+                },
+                {
+                  key: 'slots_batch' as const,
+                  label: 'ستون‌های سانس و سلول‌های دروس (کلی و دسته‌ای)',
+                  icon: WrapText,
+                },
+                {
+                  key: 'individual_col' as const,
+                  label: 'تنظیم اختصاصی تک‌ستون (روز و سانس دلخواه)',
+                  icon: Settings2,
+                },
+              ].map((t) => {
+                const TIcon = t.icon;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setLayoutTab(t.key)}
+                    className={`px-3 py-1.5 rounded-xl font-extrabold inline-flex items-center gap-1.5 cursor-pointer transition ${
+                      layoutTab === t.key
+                        ? 'bg-slate-900 dark:bg-teal-600 text-white'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    <TIcon className="w-3.5 h-3.5" />
+                    <span>{t.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* تب ۱: ۴ ستون اول (فردی و دسته‌ای) */}
+            {layoutTab === 'presets_meta' && (
+              <div className="space-y-4">
+                {/* اعمال دسته‌ای روی ستون‌های انتخابی از ۴ ستون اول */}
+                <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-800 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-black text-amber-950 dark:text-amber-100">
+                      اعمال دسته‌ای روی ستون‌های انتخاب‌شده:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(['major', 'entry', 'totalStudents', 'section'] as SchedMetaColumnKey[]).map(
+                        (k) => {
+                          const checked = selectedBatchMetaKeys.includes(k);
+                          return (
+                            <button
+                              key={`bmeta_${k}`}
+                              type="button"
+                              onClick={() =>
+                                setSelectedBatchMetaKeys((prev) =>
+                                  prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]
+                                )
+                              }
+                              className={`px-2.5 py-1 rounded-lg border font-bold inline-flex items-center gap-1 cursor-pointer ${
+                                checked
+                                  ? 'bg-amber-500 text-slate-950 border-amber-600'
+                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                              }`}
+                            >
+                              {checked && <Check className="w-3 h-3" />}
+                              <span>{META_COL_LABELS[k]}</span>
+                            </button>
+                          );
+                        }
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end">
+                    <label className="space-y-1">
+                      <span className="font-bold block">پهنا (px):</span>
+                      <input
+                        type="number"
+                        min={24}
+                        max={380}
+                        value={batchMetaWidthInput}
+                        onChange={(e) => setBatchMetaWidthInput(e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">جهت نوشته ستون:</span>
+                      <select
+                        value={batchMetaBodyOri}
+                        onChange={(e) => setBatchMetaBodyOri(e.target.value as SchedTextOrientation)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(ORIENTATION_LABELS) as SchedTextOrientation[]).map((ok) => (
+                          <option key={ok} value={ok}>
+                            {ORIENTATION_LABELS[ok]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">نحوه جاگیری متن:</span>
+                      <select
+                        value={batchMetaTextFit}
+                        onChange={(e) => setBatchMetaTextFit(e.target.value as SchedCellTextFit)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(TEXT_FIT_LABELS) as SchedCellTextFit[]).map((fk) => (
+                          <option key={fk} value={fk}>
+                            {TEXT_FIT_LABELS[fk]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 font-bold cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={batchMetaApplyToHeader}
+                        onChange={(e) => setBatchMetaApplyToHeader(e.target.checked)}
+                        className="accent-teal-600 rounded"
+                      />
+                      <span>سطر اول (سرتیتر) هم هم‌جهت شود</span>
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={selectedBatchMetaKeys.length === 0}
+                      onClick={() => {
+                        const w = Math.max(
+                          24,
+                          Math.min(380, Number(batchMetaWidthInput) || 40)
+                        );
+                        const nextMeta = { ...liveLayout.metaColumns };
+                        selectedBatchMetaKeys.forEach((k) => {
+                          nextMeta[k] = {
+                            ...nextMeta[k],
+                            width: w,
+                            bodyOrientation: batchMetaBodyOri,
+                            headerOrientation: batchMetaApplyToHeader
+                              ? batchMetaBodyOri
+                              : 'horizontal',
+                            textFit: batchMetaTextFit,
+                          };
+                        });
+                        commitLayoutSettings(
+                          { ...liveLayout, metaColumns: nextMeta },
+                          'تغییرات دسته‌ای روی ستون‌های انتخابی اعمال شد.'
+                        );
+                      }}
+                      className="px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-45 text-white font-extrabold cursor-pointer"
+                    >
+                      اعمال دسته‌ای روی ستون‌های تیک‌خورده
+                    </button>
+                  </div>
+                </div>
+
+                {/* جدول تنظیم تک‌تک ۴ ستون اول */}
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-right">
+                        <th className="p-2.5">ستون</th>
+                        <th className="p-2.5">پهنا (px)</th>
+                        <th className="p-2.5">جهت متن ردیف‌ها (بدنه)</th>
+                        <th className="p-2.5">جهت سطر اول (سرتیتر)</th>
+                        <th className="p-2.5">Wrap / Shrink</th>
+                        <th className="p-2.5">فونت (px)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {(['major', 'entry', 'totalStudents', 'section'] as SchedMetaColumnKey[]).map(
+                        (k) => {
+                          const cfg = liveLayout.metaColumns[k] || {};
+                          const updateOne = (patch: Partial<SchedMasterColumnStyle>) => {
+                            commitLayoutSettings({
+                              ...liveLayout,
+                              metaColumns: {
+                                ...liveLayout.metaColumns,
+                                [k]: { ...cfg, ...patch },
+                              },
+                            });
+                          };
+                          return (
+                            <tr key={`rowcfg_${k}`}>
+                              <td className="p-2.5 font-black text-slate-900 dark:text-white">
+                                {META_COL_LABELS[k]}
+                              </td>
+                              <td className="p-2.5">
+                                <input
+                                  type="number"
+                                  min={24}
+                                  max={380}
+                                  value={cfg.width ?? metaColWidths[k]}
+                                  onChange={(e) =>
+                                    updateOne({
+                                      width: Math.max(
+                                        24,
+                                        Math.min(380, Number(e.target.value) || 30)
+                                      ),
+                                    })
+                                  }
+                                  className="w-20 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
+                                />
+                              </td>
+                              <td className="p-2.5">
+                                <select
+                                  value={cfg.bodyOrientation || 'horizontal'}
+                                  onChange={(e) =>
+                                    updateOne({
+                                      bodyOrientation: e.target.value as SchedTextOrientation,
+                                    })
+                                  }
+                                  className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                                >
+                                  {(Object.keys(ORIENTATION_LABELS) as SchedTextOrientation[]).map(
+                                    (ok) => (
+                                      <option key={ok} value={ok}>
+                                        {ORIENTATION_LABELS[ok]}
+                                      </option>
+                                    )
+                                  )}
+                                </select>
+                              </td>
+                              <td className="p-2.5">
+                                <select
+                                  value={cfg.headerOrientation || 'horizontal'}
+                                  onChange={(e) =>
+                                    updateOne({
+                                      headerOrientation: e.target.value as SchedTextOrientation,
+                                    })
+                                  }
+                                  className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                                >
+                                  {(Object.keys(ORIENTATION_LABELS) as SchedTextOrientation[]).map(
+                                    (ok) => (
+                                      <option key={ok} value={ok}>
+                                        {ORIENTATION_LABELS[ok]}
+                                      </option>
+                                    )
+                                  )}
+                                </select>
+                              </td>
+                              <td className="p-2.5">
+                                <select
+                                  value={cfg.textFit || 'wrap'}
+                                  onChange={(e) =>
+                                    updateOne({ textFit: e.target.value as SchedCellTextFit })
+                                  }
+                                  className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                                >
+                                  {(Object.keys(TEXT_FIT_LABELS) as SchedCellTextFit[]).map(
+                                    (fk) => (
+                                      <option key={fk} value={fk}>
+                                        {TEXT_FIT_LABELS[fk]}
+                                      </option>
+                                    )
+                                  )}
+                                </select>
+                              </td>
+                              <td className="p-2.5">
+                                <input
+                                  type="number"
+                                  min={7}
+                                  max={18}
+                                  placeholder="خودکار"
+                                  value={cfg.fontSizePx ?? ''}
+                                  onChange={(e) =>
+                                    updateOne({
+                                      fontSizePx: e.target.value
+                                        ? Math.max(7, Math.min(18, Number(e.target.value)))
+                                        : undefined,
+                                    })
+                                  }
+                                  className="w-16 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
+                                />
+                              </td>
+                            </tr>
+                          );
+                        }
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* تب ۲: تنظیمات عمومی و دسته‌ای ستون‌های سانس و سلول‌های دروس */}
+            {layoutTab === 'slots_batch' && (
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl bg-teal-50/60 dark:bg-teal-950/25 border border-teal-200 dark:border-teal-800 space-y-3">
+                  <div className="font-black text-teal-950 dark:text-teal-100">
+                    تنظیمات عمومی کل سلول‌ها و ستون‌های سانس هفته
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <label className="space-y-1">
+                      <span className="font-bold block">پهنای پیش‌فرض ستون سانس (px):</span>
+                      <input
+                        type="number"
+                        min={64}
+                        max={440}
+                        value={liveLayout.defaultSlotWidth}
+                        onChange={(e) =>
+                          commitLayoutSettings({
+                            ...liveLayout,
+                            defaultSlotWidth: Math.max(
+                              64,
+                              Math.min(440, Number(e.target.value) || 140)
+                            ),
+                          })
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">نحوه جاگیری متن سلول‌ها:</span>
+                      <select
+                        value={liveLayout.scheduleCells.textFit}
+                        onChange={(e) =>
+                          commitLayoutSettings({
+                            ...liveLayout,
+                            scheduleCells: {
+                              ...liveLayout.scheduleCells,
+                              textFit: e.target.value as SchedCellTextFit,
+                            },
+                          })
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(TEXT_FIT_LABELS) as SchedCellTextFit[]).map((fk) => (
+                          <option key={fk} value={fk}>
+                            {TEXT_FIT_LABELS[fk]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">جهت متن سلول‌های درس:</span>
+                      <select
+                        value={liveLayout.scheduleCells.bodyOrientation}
+                        onChange={(e) =>
+                          commitLayoutSettings({
+                            ...liveLayout,
+                            scheduleCells: {
+                              ...liveLayout.scheduleCells,
+                              bodyOrientation: e.target.value as SchedTextOrientation,
+                            },
+                          })
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(ORIENTATION_LABELS) as SchedTextOrientation[]).map((ok) => (
+                          <option key={ok} value={ok}>
+                            {ORIENTATION_LABELS[ok]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">جهت سرتیتر سانس‌ها:</span>
+                      <select
+                        value={liveLayout.scheduleCells.headerOrientation}
+                        onChange={(e) =>
+                          commitLayoutSettings({
+                            ...liveLayout,
+                            scheduleCells: {
+                              ...liveLayout.scheduleCells,
+                              headerOrientation: e.target.value as SchedTextOrientation,
+                            },
+                          })
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(ORIENTATION_LABELS) as SchedTextOrientation[]).map((ok) => (
+                          <option key={ok} value={ok}>
+                            {ORIENTATION_LABELS[ok]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="inline-flex items-center gap-1.5 font-bold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(liveLayout.scheduleCells.compactCards)}
+                          onChange={(e) =>
+                            commitLayoutSettings({
+                              ...liveLayout,
+                              scheduleCells: {
+                                ...liveLayout.scheduleCells,
+                                compactCards: e.target.checked,
+                              },
+                            })
+                          }
+                          className="accent-teal-600 rounded"
+                        />
+                        <span>کارت‌های فشرده (حداقل حاشیه و ارتفاع)</span>
+                      </label>
+                      <label className="inline-flex items-center gap-1.5 font-bold">
+                        <span>فونت ثابت کارت (اختیاری):</span>
+                        <input
+                          type="number"
+                          min={7}
+                          max={16}
+                          placeholder="خودکار"
+                          value={liveLayout.scheduleCells.fontSizePx ?? ''}
+                          onChange={(e) =>
+                            commitLayoutSettings({
+                              ...liveLayout,
+                              scheduleCells: {
+                                ...liveLayout.scheduleCells,
+                                fontSizePx: e.target.value
+                                  ? Math.max(7, Math.min(16, Number(e.target.value)))
+                                  : undefined,
+                              },
+                            })
+                          }
+                          className="w-16 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center"
+                        />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        commitLayoutSettings(
+                          {
+                            ...liveLayout,
+                            slotWidthsBySlotId: {},
+                            columnOverrides: {},
+                          },
+                          'عرض همه ستون‌های سانس به یک اندازه پیش‌فرض همسان شد.'
+                        )
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-200 font-bold cursor-pointer"
+                    >
+                      همسان‌سازی عرض همه ستون‌های روز و سانس
+                    </button>
+                  </div>
+                </div>
+
+                {/* پهنای دسته‌ای به تفکیک هر سانس در کل هفته */}
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                  <div className="font-black text-slate-900 dark:text-white">
+                    پهنای دسته‌ای هر سانس در تمام روزهای هفته (تغییر یک‌جای یک سانس):
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                    {sortedSlots.map((slot, idx) => {
+                      const val = liveLayout.slotWidthsBySlotId?.[slot.id] ?? '';
+                      return (
+                        <label
+                          key={`batch_slot_w_${slot.id}`}
+                          className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-1"
+                        >
+                          <span className="font-extrabold block truncate">
+                            {getSchedSlotTitle(slot, idx)}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono block" dir="ltr">
+                            {slot.startTime}-{slot.endTime}
+                          </span>
+                          <input
+                            type="number"
+                            min={64}
+                            max={440}
+                            placeholder={String(liveLayout.defaultSlotWidth)}
+                            value={val}
+                            onChange={(e) => {
+                              const nextSlotMap = { ...(liveLayout.slotWidthsBySlotId || {}) };
+                              if (!e.target.value) {
+                                delete nextSlotMap[slot.id];
+                              } else {
+                                nextSlotMap[slot.id] = Math.max(
+                                  64,
+                                  Math.min(440, Number(e.target.value) || 140)
+                                );
+                              }
+                              commitLayoutSettings({
+                                ...liveLayout,
+                                slotWidthsBySlotId: nextSlotMap,
+                              });
+                            }}
+                            className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* انتخاب گروهی دلخواه چند ستون روز+سانس برای تنظیم یکجا */}
+                <div className="p-3.5 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-black text-indigo-950 dark:text-indigo-100">
+                      انتخاب دسته‌ای چند ستون دلخواه از روزها و سانس‌ها ({selectedBatchSlotKeys.length.toLocaleString('fa-IR')} ستون انتخاب‌شده):
+                    </span>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedBatchSlotKeys(
+                            displayedDays.flatMap((d) => displayedSlots.map((s) => `${d}:${s.id}`))
+                          )
+                        }
+                        className="px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-300 text-indigo-700 font-bold cursor-pointer"
+                      >
+                        انتخاب همه
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBatchSlotKeys([])}
+                        className="px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 text-slate-600 font-bold cursor-pointer"
+                      >
+                        پاک کردن انتخاب
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-36 overflow-y-auto flex flex-wrap gap-1.5 p-2 rounded-lg bg-white/80 dark:bg-slate-900/60 border border-indigo-100 dark:border-indigo-900">
+                    {displayedDays.map((d) =>
+                      displayedSlots.map((s, sIdx) => {
+                        const k = `${d}:${s.id}`;
+                        const active = selectedBatchSlotKeys.includes(k);
+                        return (
+                          <button
+                            key={`sel_${k}`}
+                            type="button"
+                            onClick={() =>
+                              setSelectedBatchSlotKeys((prev) =>
+                                prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]
+                              )
+                            }
+                            className={`px-2 py-1 rounded-md border text-[10.5px] font-bold cursor-pointer ${
+                              active
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            {SCHED_DAY_LABELS[d]} · {getSchedSlotTitle(s, slotOriginalIndexMap.get(s.id) ?? sIdx)}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end">
+                    <label className="space-y-1">
+                      <span className="font-bold block">عرض (px):</span>
+                      <input
+                        type="number"
+                        min={64}
+                        max={440}
+                        value={batchSlotColWidthInput}
+                        onChange={(e) => setBatchSlotColWidthInput(e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">جهت سرتیتر:</span>
+                      <select
+                        value={batchSlotHeaderOri}
+                        onChange={(e) =>
+                          setBatchSlotHeaderOri(e.target.value as SchedTextOrientation)
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(ORIENTATION_LABELS) as SchedTextOrientation[]).map((ok) => (
+                          <option key={ok} value={ok}>
+                            {ORIENTATION_LABELS[ok]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">جهت سلول‌ها:</span>
+                      <select
+                        value={batchSlotBodyOri}
+                        onChange={(e) =>
+                          setBatchSlotBodyOri(e.target.value as SchedTextOrientation)
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(ORIENTATION_LABELS) as SchedTextOrientation[]).map((ok) => (
+                          <option key={ok} value={ok}>
+                            {ORIENTATION_LABELS[ok]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">Wrap / Shrink:</span>
+                      <select
+                        value={batchSlotTextFit}
+                        onChange={(e) => setBatchSlotTextFit(e.target.value as SchedCellTextFit)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(TEXT_FIT_LABELS) as SchedCellTextFit[]).map((fk) => (
+                          <option key={fk} value={fk}>
+                            {TEXT_FIT_LABELS[fk]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={selectedBatchSlotKeys.length === 0}
+                      onClick={() => {
+                        const w = Math.max(
+                          64,
+                          Math.min(440, Number(batchSlotColWidthInput) || 140)
+                        );
+                        const nextOverrides = { ...(liveLayout.columnOverrides || {}) };
+                        selectedBatchSlotKeys.forEach((colKey) => {
+                          nextOverrides[colKey] = {
+                            ...(nextOverrides[colKey] || {}),
+                            width: w,
+                            headerOrientation: batchSlotHeaderOri,
+                            bodyOrientation: batchSlotBodyOri,
+                            textFit: batchSlotTextFit,
+                          };
+                        });
+                        commitLayoutSettings(
+                          { ...liveLayout, columnOverrides: nextOverrides },
+                          `تنظیمات روی ${selectedBatchSlotKeys.length.toLocaleString('fa-IR')} ستون انتخاب‌شده اعمال شد.`
+                        );
+                      }}
+                      className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-45 text-white font-extrabold cursor-pointer"
+                    >
+                      اعمال روی ستون‌های انتخابی
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* تب ۳: تنظیم اختصاصی تک‌ستون روز/سانس */}
+            {layoutTab === 'individual_col' && (() => {
+              const targetSlotId = indSlotId || sortedSlots[0]?.id || '';
+              const colKey = `${indDay}:${targetSlotId}`;
+              const curStyle = getSlotColumnStyle(indDay, targetSlotId);
+              const override = liveLayout.columnOverrides?.[colKey];
+              const updateCol = (patch: Partial<SchedMasterColumnStyle>) => {
+                commitLayoutSettings({
+                  ...liveLayout,
+                  columnOverrides: {
+                    ...(liveLayout.columnOverrides || {}),
+                    [colKey]: {
+                      ...(override || {}),
+                      ...patch,
+                    },
+                  },
+                });
+              };
+              return (
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="space-y-1">
+                      <span className="font-bold block">انتخاب روز:</span>
+                      <select
+                        value={indDay}
+                        onChange={(e) => setIndDay(e.target.value as SchedDayKey)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {activeDays.map((d) => (
+                          <option key={d} value={d}>
+                            {SCHED_DAY_LABELS[d]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">انتخاب سانس:</span>
+                      <select
+                        value={targetSlotId}
+                        onChange={(e) => setIndSlotId(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {sortedSlots.map((s, idx) => (
+                          <option key={s.id} value={s.id}>
+                            {getSchedSlotTitle(s, idx)} ({s.startTime}-{s.endTime})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <label className="space-y-1">
+                      <span className="font-bold block">پهنای این ستون (px):</span>
+                      <input
+                        type="number"
+                        min={64}
+                        max={440}
+                        value={curStyle.width}
+                        onChange={(e) =>
+                          updateCol({
+                            width: Math.max(64, Math.min(440, Number(e.target.value) || 140)),
+                          })
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">جهت سرتیتر ستون:</span>
+                      <select
+                        value={curStyle.headerOrientation}
+                        onChange={(e) =>
+                          updateCol({ headerOrientation: e.target.value as SchedTextOrientation })
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(ORIENTATION_LABELS) as SchedTextOrientation[]).map((ok) => (
+                          <option key={ok} value={ok}>
+                            {ORIENTATION_LABELS[ok]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">جهت متن سلول‌ها:</span>
+                      <select
+                        value={curStyle.bodyOrientation}
+                        onChange={(e) =>
+                          updateCol({ bodyOrientation: e.target.value as SchedTextOrientation })
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(ORIENTATION_LABELS) as SchedTextOrientation[]).map((ok) => (
+                          <option key={ok} value={ok}>
+                            {ORIENTATION_LABELS[ok]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">نحوه جاگیری متن:</span>
+                      <select
+                        value={curStyle.textFit}
+                        onChange={(e) =>
+                          updateCol({ textFit: e.target.value as SchedCellTextFit })
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(TEXT_FIT_LABELS) as SchedCellTextFit[]).map((fk) => (
+                          <option key={fk} value={fk}>
+                            {TEXT_FIT_LABELS[fk]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  {override && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextOverrides = { ...(liveLayout.columnOverrides || {}) };
+                          delete nextOverrides[colKey];
+                          commitLayoutSettings(
+                            { ...liveLayout, columnOverrides: nextOverrides },
+                            'تنظیم اختصاصی این ستون حذف و به پیش‌فرض بازگشت.'
+                          );
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold cursor-pointer"
+                      >
+                        حذف تنظیم اختصاصی این ستون
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="text-[11px] text-slate-500">
+                نکته: روی هدر هر ستون در جدول، با کشیدن مرز سمت چپ ستون با ماوس می‌توانید عرض را بصری تغییر دهید (با نگه داشتن Shift روی همه روزهای آن سانس اعمال می‌شود).
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    commitLayoutSettings(
+                      cloneDefaultLayout(),
+                      'تمامی تنظیمات عرض و چرخش ستون‌ها به پیش‌فرض کارخانه بازنشانی شد.'
+                    )
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>بازنشانی کامل</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLayoutModalOpen(false)}
+                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black cursor-pointer"
+                >
+                  بستن و مشاهده جدول
+                </button>
+              </div>
             </div>
           </div>
         </div>

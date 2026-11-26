@@ -1890,6 +1890,8 @@ export interface SchedProfessor {
   photoUrl?: string;
   isActive: boolean;
   unavailableKeys?: string[]; // کلیدهای day:slotId عدم امکان حضور استاد
+  availabilitySubmitted?: boolean; // آیا استاد زمان‌بندی حضور خود را ثبت/تأیید کرده است (در غیر این صورت پیش‌فرض همه سانس‌ها آزادند)
+  availabilityUpdatedAt?: string;
   notes?: string;
 }
 
@@ -1955,6 +1957,32 @@ export interface SchedProgramLockSettings {
   blockedViewUserIds?: string[]; // مسدودسازی کامل مشاهده برنامه برای مدیران گروه، معاونان یا کارشناسان خاص
 }
 
+export type SchedMetaColumnKey = 'major' | 'entry' | 'totalStudents' | 'section';
+export type SchedTextOrientation = 'horizontal' | 'vertical_up' | 'vertical_down';
+export type SchedCellTextFit = 'wrap' | 'shrink' | 'clip';
+
+export interface SchedMasterColumnStyle {
+  width?: number;
+  headerOrientation?: SchedTextOrientation;
+  bodyOrientation?: SchedTextOrientation;
+  textFit?: SchedCellTextFit;
+  fontSizePx?: number;
+}
+
+export interface SchedMasterGridLayoutSettings {
+  metaColumns: Record<SchedMetaColumnKey, SchedMasterColumnStyle>;
+  defaultSlotWidth: number;
+  slotWidthsBySlotId?: Record<string, number>;
+  scheduleCells: {
+    headerOrientation: SchedTextOrientation;
+    bodyOrientation: SchedTextOrientation;
+    textFit: SchedCellTextFit;
+    fontSizePx?: number;
+    compactCards?: boolean;
+  };
+  columnOverrides?: Record<string, SchedMasterColumnStyle>;
+}
+
 export interface SchedRulesSettings {
   activeTerm: string; // مثلاً 1405-1
   availableTerms: string[];
@@ -1979,6 +2007,15 @@ export interface SchedRulesSettings {
   studentAccessScope?: StudentScheduleAccessScope; // محدوده مجاز مشاهده: فقط رشته و ورودی خودشان | کل ورودی‌های رشته خودشان | کل رشته‌ها
   studentPublishedTerms?: string[]; // نیمسال‌های منتشرشده برای دانشجویان
   programLocks?: SchedProgramLockSettings; // مسدودسازی کل یا بخشی از تغییرات برنامه توسط مدیر سامانه
+  professorAvailabilityWindow?: {
+    enabled: boolean;
+    startDate?: string;
+    startTime?: string;
+    endDate?: string;
+    endTime?: string;
+    note?: string;
+  };
+  masterGridLayout?: SchedMasterGridLayoutSettings;
 }
 
 export interface SchedSharedTarget {
@@ -2036,6 +2073,8 @@ export interface SchedCourseOffering {
   splitPart?: 'full' | 'theory' | 'practical';
   examDayId?: string; // روز امتحان پایان ترم (صرفاً برای دروس نظری)
   examSlotId?: string; // سانس امتحان پایان ترم (صرفاً برای دروس نظری)
+  isDisabled?: boolean; // غیرفعال‌شدن درس در صورت حذف استاد از لیست اساتید تا زمان تعیین استاد جدید
+  disabledReason?: string;
   notes?: string;
   createdById: string;
   createdByName: string;

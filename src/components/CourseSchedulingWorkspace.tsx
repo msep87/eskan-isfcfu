@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   SchedCellComment,
   SchedClassroom,
@@ -25,6 +25,7 @@ import {
   StudentScheduleAccessScope,
 } from '../types';
 import { Storage, normalizeAssignedFieldsList, normalizePersianSearch } from '../utils/storage';
+import { addDaysToJalaliDate, formatJalaliDate, getTodayJalali } from '../utils/jalaliCalendar';
 import {
   SCHED_COURSE_TYPE_LABELS,
   SCHED_DAY_LABELS,
@@ -34,6 +35,7 @@ import {
   SCHED_ROOM_TYPE_LABELS,
   applyOfferingHistoryStep,
   buildDefaultExamSlots,
+  buildDefaultProfessorAvailabilityWindowDates,
   buildDefaultTimeSlots,
   buildExamDaysSequence,
   buildSevenToEightSlot,
@@ -43,6 +45,7 @@ import {
   checkScheduleViewLock,
   computeInternshipSplitPlan,
   computeOfferingDeltas,
+  deactivateOfferingsForRemovedProfessors,
   detectOfferingConflicts,
   downloadSchedExcelTemplate,
   exportJsonRowsToExcel,
@@ -50,6 +53,7 @@ import {
   formatProfessorDegreeFull,
   getExamSettingsForTerm,
   getOfferingSlotHalf,
+  getProfessorAvailabilityWindowStatus,
   getSchedSlotOrdinalLabel,
   getSchedSlotTitle,
   getSlotDurationHours,
@@ -78,6 +82,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock,
+  Database,
   Download,
   Edit3,
   Eye,
@@ -92,6 +97,7 @@ import {
   Plus,
   Printer,
   Redo2,
+  RotateCcw,
   School,
   Search,
   Settings2,
@@ -180,6 +186,41 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [showNewTermBox, setShowNewTermBox] = useState(false);
   const [commonExamModalOpen, setCommonExamModalOpen] = useState(false);
 
+  const [nowTick, setNowTick] = useState<Date>(() => new Date());
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = window.setInterval(() => setNowTick(new Date()), 30000);
+    return () => window.clearInterval(timer);
+  }, [isOpen]);
+
+  const availWindowStatus = useMemo(
+    () => getProfessorAvailabilityWindowStatus(rules, nowTick),
+    [rules, nowTick]
+  );
+
+  const profAvailStats = useMemo(() => {
+    const active = professors.filter((p) => p.isActive);
+    const submitted = active.filter((p) => p.availabilitySubmitted).length;
+    return {
+      totalActive: active.length,
+      submitted,
+      defaultOpen: Math.max(0, active.length - submitted),
+    };
+  }, [professors]);
+
+  const [profToDelete, setProfToDelete] = useState<SchedProfessor | null>(null);
+  type SchedDangerAction =
+    | 'clear_term_schedule'
+    | 'clear_all_schedules'
+    | 'clear_classrooms'
+    | 'clear_professors'
+    | 'clear_courses'
+    | 'clear_programs'
+    | 'clear_comments_history'
+    | 'clear_everything';
+  const [dangerActionModal, setDangerActionModal] = useState<SchedDangerAction | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement | null>(null);
+
   const [historyState, setHistoryState] = useState<SchedUserHistoryState>(() =>
     Storage.getSchedUserHistory(actor.id)
   );
@@ -233,6 +274,195 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setCellComments(next);
     Storage.setSchedCellComments(next);
     onDataUpdated?.();
+  };
+
+  const deptHeadAccessOpen = useMemo(() => {
+    const locks = rules.programLocks;
+    if (!locks) return true;
+    return !locks.lockAllChanges && (!locks.lockedDeptHeadIds || locks.lockedDeptHeadIds.length === 0);
+  }, [rules.programLocks]);
+
+  const handleToggleDeptHeadAccess = () => {
+    const currentLocks = rules.programLocks || {
+      lockAllChanges: false,
+      lockMessage: '',
+      lockedMajorCodes: [],
+      lockedDays: [],
+      lockedSlotIds: [],
+      lockedDeptHeadIds: [],
+      lockedAcademicDeputyIds: [],
+      lockedExpertIds: [],
+      blockedViewUserIds: [],
+    };
+    const nextOpen = !deptHeadAccessOpen;
+    const nextRules: SchedRulesSettings = {
+      ...rules,
+      programLocks: {
+        ...currentLocks,
+        lockAllChanges: !nextOpen,
+        lockedDeptHeadIds: nextOpen ? [] : currentLocks.lockedDeptHeadIds || [],
+      },
+    };
+    setDraftRules(nextRules);
+    persistRules(nextRules);
+    notify(
+      'success',
+      nextOpen
+        ? 'دسترسی مدیران گروه برای ثبت و ویرایش دروس در برنامه با یک کلیک باز شد.'
+        : 'دسترسی ویرایش مدیران گروه مسدود شد (صرفاً مدیر سامانه مجاز به تغییر است).'
+    );
+  };
+
+  const handleConfirmDeleteProfessor = () => {
+    if (!profToDelete) return;
+    const map = new Map<string, string>([[profToDelete.id, profToDelete.fullName]]);
+    const { nextOfferings, affectedCount } = deactivateOfferingsForRemovedProfessors(
+      offerings,
+      [profToDelete.id],
+      actor,
+      map
+    );
+    persistProfessors(professors.filter((x) => x.id !== profToDelete.id));
+    if (affectedCount > 0) {
+      commitOfferingsWithHistory(
+        nextOfferings,
+        `حذف استاد «${profToDelete.fullName}» و غیرفعال‌سازی ${affectedCount} درس`
+      );
+      notify(
+        'success',
+        `استاد «${profToDelete.fullName}» حذف شد و ${affectedCount.toLocaleString('fa-IR')} درس تخصیص‌یافته غیرفعال و بدون استاد گردید.`
+      );
+    } else {
+      notify('success', `استاد «${profToDelete.fullName}» از لیست اساتید حذف شد.`);
+    }
+    setProfToDelete(null);
+  };
+
+  const handleDownloadSchedBackup = () => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      activeTerm,
+      classrooms,
+      programs,
+      professors,
+      courses,
+      offerings,
+      cellComments,
+      rules,
+    };
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sched_backup_${activeTerm}_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    notify('success', 'فایل پشتیبان کامل برنامه درسی (JSON) ذخیره و دانلود شد.');
+  };
+
+  const handleRestoreSchedBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.offerings)) {
+        notify('error', 'ساختار فایل پشتیبان معتبر نیست.');
+        return;
+      }
+      if (Array.isArray(parsed.classrooms)) persistClassrooms(parsed.classrooms);
+      if (Array.isArray(parsed.programs)) persistPrograms(parsed.programs);
+      if (Array.isArray(parsed.professors)) persistProfessors(parsed.professors);
+      if (Array.isArray(parsed.courses)) persistCourses(parsed.courses);
+      if (Array.isArray(parsed.offerings)) persistOfferings(parsed.offerings);
+      if (Array.isArray(parsed.cellComments)) persistCellComments(parsed.cellComments);
+      if (parsed.rules && typeof parsed.rules === 'object') {
+        const mergedRules: SchedRulesSettings = {
+          ...rules,
+          ...parsed.rules,
+        };
+        setDraftRules(mergedRules);
+        persistRules(mergedRules);
+        if (mergedRules.activeTerm) setActiveTerm(mergedRules.activeTerm);
+      } else if (typeof parsed.activeTerm === 'string' && parsed.activeTerm) {
+        setActiveTerm(parsed.activeTerm);
+      }
+      notify('success', 'بازیابی اطلاعات برنامه‌ریزی از فایل پشتیبان با موفقیت انجام شد.');
+    } catch {
+      notify('error', 'خطا در خواندن یا تجزیه فایل پشتیبان JSON.');
+    }
+  };
+
+  const executeDangerAction = () => {
+    if (!dangerActionModal) return;
+    if (dangerActionModal === 'clear_term_schedule') {
+      const removedCount = offerings.filter((o) => o.termKey === activeTerm).length;
+      commitOfferingsWithHistory(
+        offerings.filter((o) => o.termKey !== activeTerm),
+        `خالی کردن جدول برنامه ترم ${activeTerm}`
+      );
+      notify(
+        'success',
+        `تمامی ${removedCount.toLocaleString('fa-IR')} درس جدول برنامه ترم ${activeTerm} خالی شد؛ اطلاعات پایه حفظ گردید.`
+      );
+    } else if (dangerActionModal === 'clear_all_schedules') {
+      const removedCount = offerings.length;
+      commitOfferingsWithHistory([], 'خالی کردن برنامه تمام ترم‌ها');
+      notify(
+        'success',
+        `تمامی ${removedCount.toLocaleString('fa-IR')} درس برنامه‌ریزی‌شده همه ترم‌ها حذف شد؛ اطلاعات پایه حفظ گردید.`
+      );
+    } else if (dangerActionModal === 'clear_classrooms') {
+      persistClassrooms([]);
+      const updatedOffs = offerings.map((o) =>
+        o.classroomId ? { ...o, classroomId: undefined, classroomName: undefined } : o
+      );
+      persistOfferings(updatedOffs);
+      notify('success', 'لیست کلاس‌های فیزیکی پاک‌سازی و تخصیص کلاس در دروس آزاد شد.');
+    } else if (dangerActionModal === 'clear_professors') {
+      const profNameMap = new Map(professors.map((p) => [p.id, p.fullName]));
+      const { nextOfferings, affectedCount } = deactivateOfferingsForRemovedProfessors(
+        offerings,
+        professors.map((p) => p.id),
+        actor,
+        profNameMap
+      );
+      persistProfessors([]);
+      persistOfferings(nextOfferings);
+      notify(
+        'success',
+        `لیست اساتید پاک‌سازی شد و ${affectedCount.toLocaleString('fa-IR')} درس مرتبط غیرفعال و بدون استاد شدند.`
+      );
+    } else if (dangerActionModal === 'clear_courses') {
+      persistCourses([]);
+      notify('success', 'لیست سرفصل دروس (کد ۷ رقمی) پاک‌سازی شد.');
+    } else if (dangerActionModal === 'clear_programs') {
+      persistPrograms([]);
+      notify('success', 'فهرست رشته‌ها، سال‌های ورود و شعب پاک‌سازی شد.');
+    } else if (dangerActionModal === 'clear_comments_history') {
+      persistCellComments([]);
+      const emptyHist: SchedUserHistoryState = { undoStack: [], redoStack: [] };
+      setHistoryState(emptyHist);
+      Storage.setSchedUserHistory(actor.id, emptyHist);
+      notify('success', 'یادداشت‌های سلول‌ها و تاریخچه بازگشت تغییرات پاک‌سازی شد.');
+    } else if (dangerActionModal === 'clear_everything') {
+      persistOfferings([]);
+      persistClassrooms([]);
+      persistPrograms([]);
+      persistProfessors([]);
+      persistCourses([]);
+      persistCellComments([]);
+      const emptyHist: SchedUserHistoryState = { undoStack: [], redoStack: [] };
+      setHistoryState(emptyHist);
+      Storage.setSchedUserHistory(actor.id, emptyHist);
+      notify('success', 'تمامی داده‌های برنامه‌ریزی درسی به صورت کامل پاک‌سازی شدند.');
+    }
+    setDangerActionModal(null);
   };
 
   const commitOfferingsWithHistory = (
@@ -386,9 +616,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const overviewStats = useMemo(() => {
     let totalHours = 0;
     let hardConflicts = 0;
-    for (const o of termOfferings) {
+    const activeTermOfferings = termOfferings.filter((o) => !o.isDisabled);
+    const disabledOfferingsCount = termOfferings.length - activeTermOfferings.length;
+    for (const o of activeTermOfferings) {
       totalHours += calculateOfferingBreakdown(o, rules).weeklyHours;
-      if (detectOfferingConflicts(o, termOfferings, classrooms, professors).hasHardConflict) {
+      if (detectOfferingConflicts(o, activeTermOfferings, classrooms, professors).hasHardConflict) {
         hardConflicts++;
       }
     }
@@ -398,10 +630,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       totalSections: programs.reduce((s, p) => s + Math.max(1, p.sections.length), 0),
       activeProfessors: professors.filter((p) => p.isActive).length,
       totalCourses: courses.length,
-      termOfferingsCount: termOfferings.length,
+      termOfferingsCount: activeTermOfferings.length,
+      disabledOfferingsCount,
       totalWeeklyHours: round2(totalHours),
       hardConflicts,
-      sharedCount: termOfferings.filter(
+      sharedCount: activeTermOfferings.filter(
         (o) => o.sharedWithTargets && o.sharedWithTargets.length > 0
       ).length,
     };
@@ -1003,6 +1236,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [offNotes, setOffNotes] = useState('');
   const [offExamDayId, setOffExamDayId] = useState('');
   const [offExamSlotId, setOffExamSlotId] = useState('');
+  const [offIsDisabled, setOffIsDisabled] = useState(false);
+  const [offDisabledReason, setOffDisabledReason] = useState('');
   const [sharePickerCohortId, setSharePickerCohortId] = useState('');
   const [sharePickerSectionId, setSharePickerSectionId] = useState('');
 
@@ -1121,6 +1356,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setOffNotes('');
     setOffExamDayId('');
     setOffExamSlotId('');
+    setOffIsDisabled(false);
+    setOffDisabledReason('');
     setSharePickerCohortId('');
     setSharePickerSectionId('');
     setOffModalOpen(true);
@@ -1150,6 +1387,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setOffNotes(o.notes || '');
     setOffExamDayId(o.examDayId || '');
     setOffExamSlotId(o.examSlotId || '');
+    setOffIsDisabled(Boolean(o.isDisabled));
+    setOffDisabledReason(o.disabledReason || '');
     setSharePickerCohortId('');
     setSharePickerSectionId('');
     setOffModalOpen(true);
@@ -1214,6 +1453,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           ? offExamSlotId
           : undefined,
       notes: offNotes.trim() || undefined,
+      isDisabled: !prof?.id && offIsDisabled ? true : undefined,
+      disabledReason:
+        !prof?.id && offIsDisabled ? offDisabledReason.trim() || undefined : undefined,
       createdById: actor.id,
       createdByName: actor.name,
       createdByRole: userRole,
@@ -1244,6 +1486,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     offNotes,
     offExamDayId,
     offExamSlotId,
+    offIsDisabled,
+    offDisabledReason,
     actor,
     userRole,
   ]);
@@ -1640,32 +1884,54 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           )}
 
           {isSystemAdmin && (
-            <button
-              type="button"
-              onClick={() => setSection('rules')}
-              className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold border inline-flex items-center gap-1.5 cursor-pointer transition ${
-                rules.studentAccessEnabled
-                  ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25'
-                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
-              }`}
-              title="مدیریت انتشار برنامه ترم برای دانشجویان"
-            >
-              {rules.studentAccessEnabled ? (
-                <Unlock className="w-3.5 h-3.5 text-emerald-300" />
-              ) : (
-                <Lock className="w-3.5 h-3.5 text-amber-300" />
-              )}
-              <span>
-                برنامه دانشجویان:{' '}
-                {rules.studentAccessEnabled
-                  ? rules.studentAccessScope === 'all_programs'
-                    ? 'فعال (کل رشته‌ها)'
-                    : rules.studentAccessScope === 'own_major'
-                    ? 'فعال (رشته خودشان)'
-                    : 'فعال (رشته و ورودی خودشان)'
-                  : 'بسته'}
-              </span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleToggleDeptHeadAccess}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold border inline-flex items-center gap-1.5 cursor-pointer transition ${
+                  deptHeadAccessOpen
+                    ? 'bg-teal-500/20 border-teal-400/50 text-teal-200 hover:bg-teal-500/30'
+                    : 'bg-amber-500/20 border-amber-400/50 text-amber-200 hover:bg-amber-500/30'
+                }`}
+                title="باز کردن یا بستن دسترسی مدیران گروه برای ثبت و ویرایش دروس با یک کلیک"
+              >
+                {deptHeadAccessOpen ? (
+                  <Unlock className="w-3.5 h-3.5 text-teal-300" />
+                ) : (
+                  <Lock className="w-3.5 h-3.5 text-amber-300" />
+                )}
+                <span>
+                  مدیران گروه: {deptHeadAccessOpen ? 'باز (در حال ثبت)' : 'بسته (یک کلیک برای باز کردن)'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSection('rules')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold border inline-flex items-center gap-1.5 cursor-pointer transition ${
+                  rules.studentAccessEnabled
+                    ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25'
+                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                }`}
+                title="مدیریت انتشار برنامه ترم برای دانشجویان"
+              >
+                {rules.studentAccessEnabled ? (
+                  <Unlock className="w-3.5 h-3.5 text-emerald-300" />
+                ) : (
+                  <Lock className="w-3.5 h-3.5 text-amber-300" />
+                )}
+                <span>
+                  برنامه دانشجویان:{' '}
+                  {rules.studentAccessEnabled
+                    ? rules.studentAccessScope === 'all_programs'
+                      ? 'فعال (کل رشته‌ها)'
+                      : rules.studentAccessScope === 'own_major'
+                      ? 'فعال (رشته خودشان)'
+                      : 'فعال (رشته و ورودی خودشان)'
+                    : 'بسته'}
+                </span>
+              </button>
+            </>
           )}
 
           <button
@@ -1881,6 +2147,148 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 </div>
               </div>
 
+              {/* گردش‌کار مرحله‌بندی‌شده آماده‌سازی برنامه ترم */}
+              {isSystemAdmin && (
+                <div className="rounded-2xl bg-gradient-to-l from-slate-50 via-teal-50/40 to-indigo-50/40 dark:from-slate-900 dark:via-teal-950/20 dark:to-indigo-950/20 border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-teal-600" />
+                        <span>گردش‌کار ۴ مرحله‌ای آماده‌سازی جدول، اعلام حضور اساتید و باز کردن دسترسی مدیران گروه</span>
+                      </h3>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        پس از ورود اطلاعات اولیه و آماده بودن ساختار سانس‌ها، ابتدا بازه اعلام حضور اساتید را باز کنید و پس از اتمام مهلت با یک کلیک دسترسی مدیران گروه را فعال نمایید.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-[11px]">
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
+                      <div className="font-black text-slate-800 dark:text-slate-100">
+                        ۱. اطلاعات اولیه سامانه
+                      </div>
+                      <div className="text-slate-500">
+                        {overviewStats.activeClassrooms} کلاس · {overviewStats.activeProfessors} استاد · {overviewStats.totalCohorts} ورودی
+                      </div>
+                      <div
+                        className={`font-extrabold ${
+                          overviewStats.activeClassrooms > 0 &&
+                          overviewStats.activeProfessors > 0 &&
+                          overviewStats.totalCohorts > 0
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-amber-600'
+                        }`}
+                      >
+                        {overviewStats.activeClassrooms > 0 &&
+                        overviewStats.activeProfessors > 0 &&
+                        overviewStats.totalCohorts > 0
+                          ? 'تکمیل و آماده'
+                          : 'نیازمند تکمیل'}
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
+                      <div className="font-black text-slate-800 dark:text-slate-100">
+                        ۲. جدول سانس‌ها و ردیف‌ها
+                      </div>
+                      <div className="text-slate-500">
+                        {activeDays.length} روز فعال × {sortedSlots.length} سانس زمانی
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSection('master_grid')}
+                        className="font-extrabold text-teal-600 hover:underline cursor-pointer"
+                      >
+                        مشاهده برنامه جامع
+                      </button>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
+                      <div className="font-black text-slate-800 dark:text-slate-100 flex items-center justify-between gap-1">
+                        <span>۳. بازه اعلام حضور اساتید</span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                            availWindowStatus.isOpen
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              : availWindowStatus.status === 'expired'
+                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                              : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {availWindowStatus.isOpen
+                            ? 'باز'
+                            : availWindowStatus.status === 'expired'
+                            ? 'منقضی'
+                            : availWindowStatus.status === 'not_started'
+                            ? 'در انتظار'
+                            : 'بسته'}
+                        </span>
+                      </div>
+                      <div className="text-slate-500">
+                        ثبت‌کرده: {profAvailStats.submitted.toLocaleString('fa-IR')} نفر · پیش‌فرض آزاد:{' '}
+                        {profAvailStats.defaultOpen.toLocaleString('fa-IR')} نفر
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSection('rules')}
+                        className="font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                      >
+                        تنظیم بازه زمانی اساتید
+                      </button>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1.5">
+                      <div className="font-black text-slate-800 dark:text-slate-100">
+                        ۴. دسترسی مدیران گروه
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleToggleDeptHeadAccess}
+                        className={`w-full px-2.5 py-1.5 rounded-lg text-[11px] font-black inline-flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                          deptHeadAccessOpen
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            : 'bg-amber-600 hover:bg-amber-700 text-white'
+                        }`}
+                      >
+                        {deptHeadAccessOpen ? (
+                          <>
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>باز است (کلیک برای بستن)</span>
+                          </>
+                        ) : (
+                          <>
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>باز کردن با یک کلیک</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {overviewStats.disabledOfferingsCount > 0 && (
+                <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-start gap-2.5">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-black text-amber-900 dark:text-amber-100">
+                        {overviewStats.disabledOfferingsCount.toLocaleString('fa-IR')} درس در ترم {activeTerm} به علت حذف استاد قبلی غیرفعال و بدون استاد هستند
+                      </div>
+                      <div className="text-[11px] text-amber-800/90 dark:text-amber-200/80 mt-0.5">
+                        این دروس در تداخل‌ها، ساعات تدریس اساتید و برنامه دانشجویان محاسبه نمی‌شوند و با تخصیص استاد جدید مجدداً فعال خواهند شد.
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSection('schedule')}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold shrink-0 cursor-pointer"
+                  >
+                    مشاهده و تخصیص استاد
+                  </button>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 tabular-nums">
                 <button
                   type="button"
@@ -1938,7 +2346,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   </div>
                 </button>
                 <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-                  <div className="text-xs text-slate-500">دروس ارائه‌شده ترم {activeTerm}</div>
+                  <div className="text-xs text-slate-500">دروس فعال ترم {activeTerm}</div>
                   <div className="text-2xl font-black text-teal-700 dark:text-teal-400 mt-1">
                     {overviewStats.termOfferingsCount}
                   </div>
@@ -2427,38 +2835,50 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                               {summary.equivalentUnits} معادل ({summary.weeklyHours} ساعت)
                             </td>
                             <td className="p-3 text-center">
-                              <div className="inline-flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setUnavailProfModal(p);
-                                    setUnavailDraft([...(p.unavailableKeys || [])]);
-                                  }}
-                                  className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-[11px] font-bold cursor-pointer"
-                                  title="ثبت زمان‌های عدم امکان حضور استاد"
+                              <div className="inline-flex flex-col items-center gap-1">
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setUnavailProfModal(p);
+                                      setUnavailDraft([...(p.unavailableKeys || [])]);
+                                    }}
+                                    className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-[11px] font-bold cursor-pointer"
+                                    title="ثبت زمان‌های عدم امکان حضور استاد"
+                                  >
+                                    عدم حضور ({p.unavailableKeys?.length || 0})
+                                  </button>
+                                  {canManageMasterData && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => openProfModal(p)}
+                                        className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 cursor-pointer"
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setProfToDelete(p)}
+                                        className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-600 border border-rose-200 dark:border-rose-800 cursor-pointer"
+                                        title="حذف استاد و غیرفعال‌سازی خودکار دروس مرتبط"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                                <span
+                                  className={`text-[10px] font-bold ${
+                                    p.availabilitySubmitted
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : 'text-slate-400 dark:text-slate-500'
+                                  }`}
                                 >
-                                  عدم حضور ({p.unavailableKeys?.length || 0})
-                                </button>
-                                {canManageMasterData && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => openProfModal(p)}
-                                      className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 cursor-pointer"
-                                    >
-                                      <Edit3 className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        persistProfessors(professors.filter((x) => x.id !== p.id))
-                                      }
-                                      className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-600 border border-rose-200 dark:border-rose-800 cursor-pointer"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </>
-                                )}
+                                  {p.availabilitySubmitted
+                                    ? 'ثبت زمان توسط استاد'
+                                    : 'پیش‌فرض: کل هفته آزاد'}
+                                </span>
                               </div>
                             </td>
                           </tr>
@@ -3137,6 +3557,234 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   </div>
                 </div>
 
+                {/* تنظیمات بازه زمانی اعلام حضور و عدم امکان حضور اساتید */}
+                {(() => {
+                  const defaultWin = buildDefaultProfessorAvailabilityWindowDates();
+                  const winCfg = draftRules.professorAvailabilityWindow || {
+                    enabled: false,
+                    startDate: defaultWin.startDate,
+                    startTime: defaultWin.startTime,
+                    endDate: defaultWin.endDate,
+                    endTime: defaultWin.endTime,
+                    note: '',
+                  };
+                  const draftWinStatus = getProfessorAvailabilityWindowStatus(
+                    { ...draftRules, professorAvailabilityWindow: winCfg },
+                    nowTick
+                  );
+                  const updateWinCfg = (
+                    patch: Partial<NonNullable<SchedRulesSettings['professorAvailabilityWindow']>>
+                  ) => {
+                    setDraftRules((prev) => ({
+                      ...prev,
+                      professorAvailabilityWindow: {
+                        ...(prev.professorAvailabilityWindow || winCfg),
+                        ...patch,
+                      },
+                    }));
+                  };
+                  const applyWinPreset = (daysCount: number) => {
+                    const today = getTodayJalali();
+                    const sDate = formatJalaliDate(today.jy, today.jm, today.jd, 'en');
+                    const eDate =
+                      daysCount <= 0 ? sDate : addDaysToJalaliDate(sDate, daysCount, 'en') || sDate;
+                    const nextWin = {
+                      ...winCfg,
+                      enabled: true,
+                      startDate: sDate,
+                      startTime: '00:00',
+                      endDate: eDate,
+                      endTime: '23:59',
+                    };
+                    const nextRules: SchedRulesSettings = {
+                      ...draftRules,
+                      professorAvailabilityWindow: nextWin,
+                    };
+                    setDraftRules(nextRules);
+                    persistRules(nextRules);
+                    notify(
+                      'success',
+                      `بازه زمانی اعلام حضور اساتید از ${sDate} تا ${eDate} (ساعت ۲۳:۵۹) فعال و ذخیره شد.`
+                    );
+                  };
+
+                  return (
+                    <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-l from-teal-50/80 via-emerald-50/40 to-sky-50/60 dark:from-teal-950/30 dark:via-emerald-950/15 dark:to-sky-950/20 border border-teal-200 dark:border-teal-800 space-y-4 text-xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-teal-200/70 dark:border-teal-800/60">
+                        <div className="flex items-start gap-2.5">
+                          <div className="p-2 rounded-xl bg-teal-600 text-white shrink-0">
+                            <Clock className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-sm text-teal-950 dark:text-teal-100">
+                              بازه زمانی اعلام روزها و سانس‌های حضور اساتید
+                            </h3>
+                            <p className="text-[11px] text-teal-800/85 dark:text-teal-300 mt-0.5 leading-relaxed">
+                              پس از آماده شدن جدول سانس‌ها، در این بازه زمانی اساتید با ورود به پنل خود روزها و سانس‌های حضور و عدم حضورشان را ثبت می‌کنند. پس از اتمام مهلت، دسترسی به صورت خودکار بسته می‌شود و اساتیدی که ثبت نکرده باشند پیش‌فرض کل هفته آزاد هستند.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span
+                            className={`px-2.5 py-1 rounded-lg font-black text-[11px] ${
+                              draftWinStatus.isOpen
+                                ? 'bg-emerald-600 text-white'
+                                : draftWinStatus.status === 'expired'
+                                ? 'bg-rose-600 text-white'
+                                : draftWinStatus.status === 'not_started'
+                                ? 'bg-amber-600 text-white'
+                                : 'bg-slate-600 text-white'
+                            }`}
+                          >
+                            {draftWinStatus.isOpen
+                              ? `باز (${draftWinStatus.remainingText || 'فعال'})`
+                              : draftWinStatus.status === 'expired'
+                              ? 'پایان مهلت (خودکار بسته)'
+                              : draftWinStatus.status === 'not_started'
+                              ? 'در انتظار شروع'
+                              : 'غیرفعال'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="inline-flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-teal-200 dark:border-teal-800 cursor-pointer font-extrabold">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(winCfg.enabled)}
+                            onChange={(e) => {
+                              const nextWin = { ...winCfg, enabled: e.target.checked };
+                              const nextRules = {
+                                ...draftRules,
+                                professorAvailabilityWindow: nextWin,
+                              };
+                              setDraftRules(nextRules);
+                              persistRules(nextRules);
+                            }}
+                            className="w-4 h-4 accent-teal-600 rounded cursor-pointer"
+                          />
+                          <span>فعال‌سازی دسترسی اساتید برای ثبت ساعات حضور و عدم حضور</span>
+                        </label>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => applyWinPreset(0)}
+                            className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-200 font-bold hover:bg-teal-50 cursor-pointer"
+                          >
+                            فقط امروز تا ۲۳:۵۹
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyWinPreset(3)}
+                            className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-200 font-bold hover:bg-teal-50 cursor-pointer"
+                          >
+                            شروع فوری تا ۳ روز
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyWinPreset(7)}
+                            className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-200 font-bold hover:bg-teal-50 cursor-pointer"
+                          >
+                            شروع فوری تا ۷ روز
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <label className="space-y-1">
+                          <span className="font-bold text-slate-700 dark:text-slate-200 block">
+                            تاریخ شروع (شمسی):
+                          </span>
+                          <input
+                            type="text"
+                            dir="ltr"
+                            placeholder="1404/11/10"
+                            value={winCfg.startDate}
+                            onChange={(e) => updateWinCfg({ startDate: e.target.value })}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="font-bold text-slate-700 dark:text-slate-200 block">
+                            ساعت شروع:
+                          </span>
+                          <input
+                            type="text"
+                            dir="ltr"
+                            placeholder="08:00"
+                            value={winCfg.startTime || ''}
+                            onChange={(e) => updateWinCfg({ startTime: e.target.value })}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="font-bold text-slate-700 dark:text-slate-200 block">
+                            تاریخ پایان مهلت (شمسی):
+                          </span>
+                          <input
+                            type="text"
+                            dir="ltr"
+                            placeholder="1404/11/15"
+                            value={winCfg.endDate}
+                            onChange={(e) => updateWinCfg({ endDate: e.target.value })}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="font-bold text-slate-700 dark:text-slate-200 block">
+                            ساعت پایان مهلت:
+                          </span>
+                          <input
+                            type="text"
+                            dir="ltr"
+                            placeholder="23:59"
+                            value={winCfg.endTime || ''}
+                            onChange={(e) => updateWinCfg({ endTime: e.target.value })}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                        <label className="sm:col-span-2 space-y-1">
+                          <span className="font-bold text-slate-700 dark:text-slate-200 block">
+                            پیام یا راهنمای مدیر سامانه برای اساتید (اختیاری):
+                          </span>
+                          <input
+                            type="text"
+                            value={winCfg.note || ''}
+                            onChange={(e) => updateWinCfg({ note: e.target.value })}
+                            placeholder="مثال: اساتید محترم لطفاً تا پایان مهلت تعیین‌شده روزها و سانس‌های حضور خود را نهایی نمایید."
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            persistRules(draftRules);
+                            notify('success', 'تنظیمات بازه زمانی حضور اساتید ذخیره و اعمال شد.');
+                          }}
+                          className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold cursor-pointer"
+                        >
+                          ذخیره فوری بازه اساتید
+                        </button>
+                      </div>
+
+                      <div className="p-2.5 rounded-xl bg-white/80 dark:bg-slate-900/70 border border-teal-200/70 dark:border-teal-800/60 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <span className="font-bold text-slate-700 dark:text-slate-200">
+                          {draftWinStatus.message}
+                        </span>
+                        <span className="font-extrabold text-teal-700 dark:text-teal-300 tabular-nums">
+                          ثبت‌کرده: {profAvailStats.submitted.toLocaleString('fa-IR')} از{' '}
+                          {profAvailStats.totalActive.toLocaleString('fa-IR')} استاد فعال (
+                          {profAvailStats.defaultOpen.toLocaleString('fa-IR')} نفر پیش‌فرض تمام هفته آزاد)
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* تنظیمات بازه امتحانات پایان ترم و سانس‌های امتحانی (ترم فعال) */}
                 {(() => {
                   const draftExam = getExamSettingsForTerm(draftRules, activeTerm);
@@ -3759,6 +4407,126 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   </div>
                 </div>
               </div>
+
+              {/* پشتیبان‌گیری، تخلیه جدول برنامه و پاک‌سازی موردی یا کامل داده‌های برنامه‌ریزی */}
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 p-5 space-y-4 text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-2 rounded-xl bg-slate-900 dark:bg-slate-800 text-white shrink-0">
+                      <Database className="w-4 h-4 text-teal-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                        پشتیبان‌گیری (بکاپ JSON)، تخلیه برنامه و پاک‌سازی اطلاعات سامانه
+                      </h3>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        پیش از شروع ترم جدید، اصلاح اطلاعات پایه یا پاک‌سازی، می‌توانید نسخه پشتیبان کامل دانلود کنید و در صورت نیاز مجدداً بازیابی نمایید.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleDownloadSchedBackup}
+                      className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>دانلود پشتیبان کامل (JSON)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => restoreInputRef.current?.click()}
+                      className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>بازیابی از فایل پشتیبان</span>
+                    </button>
+                    <input
+                      ref={restoreInputRef}
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleRestoreSchedBackup}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+
+                {/* تخلیه جدول برنامه درسی (با حفظ اطلاعات پایه) */}
+                <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 space-y-2.5">
+                  <div className="font-black text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
+                    <RotateCcw className="w-4 h-4 text-amber-600" />
+                    <span>تخلیه جدول برنامه درسی (با حفظ کلاس‌ها، اساتید، رشته‌ها و سرفصل دروس)</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDangerActionModal('clear_term_schedule')}
+                      className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 hover:bg-amber-100 font-extrabold cursor-pointer"
+                    >
+                      خالی کردن جدول برنامه ترم {activeTerm} ({termOfferings.length.toLocaleString('fa-IR')} درس)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDangerActionModal('clear_all_schedules')}
+                      className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold cursor-pointer"
+                    >
+                      حذف برنامه‌های درسی همه ترم‌ها ({offerings.length.toLocaleString('fa-IR')} درس)
+                    </button>
+                  </div>
+                </div>
+
+                {/* پاک‌سازی موردی و پاک‌سازی کامل */}
+                <div className="p-4 rounded-xl bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900 space-y-3">
+                  <div className="font-black text-rose-950 dark:text-rose-100 flex items-center gap-1.5">
+                    <Trash2 className="w-4 h-4 text-rose-600" />
+                    <span>پاک‌سازی موردی اطلاعات پایه یا پاک‌سازی کامل کل سامانه</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDangerActionModal('clear_classrooms')}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 font-bold cursor-pointer"
+                    >
+                      پاک کردن کلاس‌های فیزیکی ({classrooms.length.toLocaleString('fa-IR')})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDangerActionModal('clear_professors')}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 font-bold cursor-pointer"
+                    >
+                      پاک کردن لیست اساتید ({professors.length.toLocaleString('fa-IR')})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDangerActionModal('clear_courses')}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 font-bold cursor-pointer"
+                    >
+                      پاک کردن سرفصل دروس ({courses.length.toLocaleString('fa-IR')})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDangerActionModal('clear_programs')}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 font-bold cursor-pointer"
+                    >
+                      پاک کردن رشته‌ها و شعب ({programs.length.toLocaleString('fa-IR')})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDangerActionModal('clear_comments_history')}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 font-bold cursor-pointer"
+                    >
+                      پاک کردن یادداشت‌ها و تاریخچه ({cellComments.length.toLocaleString('fa-IR')})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDangerActionModal('clear_everything')}
+                      className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black cursor-pointer mr-auto"
+                    >
+                      پاک‌سازی کامل کل اطلاعات سامانه
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -3823,6 +4591,48 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     >
                       باز کردن همه قفل‌ها
                     </button>
+                  </div>
+
+                  {/* نوار اقدام سریع گردش‌کار اعلام حضور اساتید و باز کردن دسترسی مدیران گروه */}
+                  <div className="p-3.5 rounded-xl bg-teal-50/70 dark:bg-teal-950/25 border border-teal-200 dark:border-teal-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="font-black text-teal-950 dark:text-teal-100">
+                        آماده‌سازی دسترسی مرحله‌ای (اساتید ← مدیران گروه)
+                      </div>
+                      <div className="text-[11px] text-teal-800 dark:text-teal-300 mt-0.5">
+                        وضعیت بازه اساتید: <strong>{availWindowStatus.message}</strong>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setSection('rules')}
+                        className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-200 font-bold cursor-pointer"
+                      >
+                        تنظیم بازه اساتید
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleToggleDeptHeadAccess}
+                        className={`px-3.5 py-1.5 rounded-xl font-extrabold text-white cursor-pointer inline-flex items-center gap-1.5 ${
+                          deptHeadAccessOpen
+                            ? 'bg-emerald-600 hover:bg-emerald-700'
+                            : 'bg-amber-600 hover:bg-amber-700'
+                        }`}
+                      >
+                        {deptHeadAccessOpen ? (
+                          <>
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>بستن دسترسی مدیران گروه</span>
+                          </>
+                        ) : (
+                          <>
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>باز کردن یک‌کلیکی دسترسی مدیران گروه</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   {/* قفل سراسری کل برنامه */}
@@ -4271,6 +5081,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               onOpenCommonExamModal={() => setCommonExamModalOpen(true)}
               onOpenNewOffering={(opts) => openNewOfferingModal(opts)}
               onOpenEditOffering={(o) => openEditOfferingModal(o)}
+              onPersistRules={persistRules}
               onNotify={notify}
             />
           )}
@@ -4524,54 +5335,61 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                       w.includes('تداخل امتحان')
                                     );
                                     const bd = calculateOfferingBreakdown(o, rules);
-                                    return (
-                                      <div
-                                        key={o.id}
-                                        onClick={() => openEditOfferingModal(o)}
-                                        className={`p-2 rounded-xl border text-right cursor-pointer transition ${
-                                          conf.hasHardConflict
-                                            ? 'border-rose-400 bg-rose-50/80 dark:bg-rose-950/30'
-                                            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 hover:border-teal-500'
-                                        }`}
-                                      >
-                                        <div className="font-bold text-slate-900 dark:text-white leading-snug">
-                                          {o.courseTitle}
-                                        </div>
-                                        <div className="text-[10px] font-mono text-slate-500 mt-0.5">
-                                          {o.courseCode} · {bd.rawUnits} واحد ({bd.weeklyHours} س)
-                                        </div>
-                                        <div className="text-[10px] text-slate-600 dark:text-slate-300 mt-0.5">
-                                          {o.ownerMajorName} ({o.entryTerm}
-                                          {o.sectionName ? ` - ${o.sectionName}` : ''})
-                                        </div>
-                                        <div className="text-[10px] text-teal-700 dark:text-teal-400 font-semibold">
-                                          {o.professorName || 'بدون استاد'} ·{' '}
-                                          {o.classroomName || 'بدون کلاس'}
-                                        </div>
-                                        {o.sharedWithTargets && o.sharedWithTargets.length > 0 && (
-                                          <div className="text-[10px] text-indigo-700 dark:text-indigo-300 font-bold mt-0.5">
-                                            مشترک با {o.sharedWithTargets.length} گروه دیگر
+                                      return (
+                                        <div
+                                          key={o.id}
+                                          onClick={() => openEditOfferingModal(o)}
+                                          className={`p-2 rounded-xl border text-right cursor-pointer transition ${
+                                            o.isDisabled
+                                              ? 'border-dashed border-amber-400 bg-amber-50/80 dark:bg-amber-950/25 opacity-85'
+                                              : conf.hasHardConflict
+                                              ? 'border-rose-400 bg-rose-50/80 dark:bg-rose-950/30'
+                                              : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 hover:border-teal-500'
+                                          }`}
+                                        >
+                                          {o.isDisabled && (
+                                            <div className="text-[9.5px] font-black text-amber-800 dark:text-amber-300 mb-0.5">
+                                              ⚠ غیرفعال · بدون استاد
+                                            </div>
+                                          )}
+                                          <div className="font-bold text-slate-900 dark:text-white leading-snug">
+                                            {o.courseTitle}
                                           </div>
-                                        )}
-                                        {examLabel && (
-                                          <div
-                                            className={`text-[10px] font-bold mt-0.5 ${
-                                              hasExamWarn
-                                                ? 'text-amber-700 dark:text-amber-300'
-                                                : 'text-violet-700 dark:text-violet-300'
-                                            }`}
-                                          >
-                                            {hasExamWarn ? '⚠ ' : ''}امتحان: {examLabel}
+                                          <div className="text-[10px] font-mono text-slate-500 mt-0.5">
+                                            {o.courseCode} · {bd.rawUnits} واحد ({bd.weeklyHours} س)
                                           </div>
-                                        )}
-                                        {conf.hasHardConflict && (
-                                          <div className="text-[10px] text-rose-600 font-extrabold mt-0.5">
-                                            تداخل زمانی!
+                                          <div className="text-[10px] text-slate-600 dark:text-slate-300 mt-0.5">
+                                            {o.ownerMajorName} ({o.entryTerm}
+                                            {o.sectionName ? ` - ${o.sectionName}` : ''})
                                           </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
+                                          <div className="text-[10px] text-teal-700 dark:text-teal-400 font-semibold">
+                                            {o.professorName || 'بدون استاد'} ·{' '}
+                                            {o.classroomName || 'بدون کلاس'}
+                                          </div>
+                                          {o.sharedWithTargets && o.sharedWithTargets.length > 0 && (
+                                            <div className="text-[10px] text-indigo-700 dark:text-indigo-300 font-bold mt-0.5">
+                                              مشترک با {o.sharedWithTargets.length} گروه دیگر
+                                            </div>
+                                          )}
+                                          {examLabel && (
+                                            <div
+                                              className={`text-[10px] font-bold mt-0.5 ${
+                                                hasExamWarn
+                                                  ? 'text-amber-700 dark:text-amber-300'
+                                                  : 'text-violet-700 dark:text-violet-300'
+                                              }`}
+                                            >
+                                              {hasExamWarn ? '⚠ ' : ''}امتحان: {examLabel}
+                                            </div>
+                                          )}
+                                          {!o.isDisabled && conf.hasHardConflict && (
+                                            <div className="text-[10px] text-rose-600 font-extrabold mt-0.5">
+                                              تداخل زمانی!
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
                                   <button
                                     type="button"
                                     onClick={() => openNewOfferingModal(day, slot.id)}
@@ -4617,13 +5435,23 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                           : '';
                         const examWarns = conf.warnings.filter((w) => w.includes('تداخل امتحان'));
                         return (
-                          <tr key={o.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <tr
+                            key={o.id}
+                            className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 ${
+                              o.isDisabled ? 'bg-amber-50/50 dark:bg-amber-950/20' : ''
+                            }`}
+                          >
                             <td className="p-3 font-mono font-bold text-indigo-700 dark:text-indigo-400">
                               {o.courseCode}
                             </td>
                             <td className="p-3 font-bold text-slate-900 dark:text-white">
                               {o.courseTitle}
-                              {conf.hasHardConflict && (
+                              {o.isDisabled && (
+                                <div className="text-[10px] text-amber-700 dark:text-amber-300 font-black mt-0.5">
+                                  ⚠ غیرفعال · بدون استاد ({o.disabledReason || 'حذف استاد قبلی'})
+                                </div>
+                              )}
+                              {!o.isDisabled && conf.hasHardConflict && (
                                 <div className="text-[10px] text-rose-600 font-extrabold">
                                   دارای تداخل زمانی
                                 </div>
@@ -5573,6 +6401,15 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               </div>
             )}
 
+            {offIsDisabled && !offProfessorId && (
+              <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs font-extrabold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  این درس هم‌اکنون غیرفعال و بدون استاد است ({offDisabledReason || 'استاد پیشین حذف شده'}). با انتخاب استاد جدید و ذخیره تغییرات، درس مجدداً فعال می‌شود.
+                </span>
+              </div>
+            )}
+
             <form onSubmit={handleSaveOffering} className="space-y-3.5 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -6071,7 +6908,14 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   <span className="font-bold">تخصیص استاد (کد استاد یکتا)</span>
                   <select
                     value={offProfessorId}
-                    onChange={(e) => setOffProfessorId(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setOffProfessorId(val);
+                      if (val) {
+                        setOffIsDisabled(false);
+                        setOffDisabledReason('');
+                      }
+                    }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                   >
                     <option value="">-- بدون استاد / تعیین در آینده --</option>
@@ -6441,6 +7285,157 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         }
         onNotify={notify}
       />
+
+      {/* مودال تایید حذف استاد با نمایش پیامد غیرفعال‌سازی دروس مرتبط */}
+      {profToDelete && (() => {
+        const linkedCount = offerings.filter((o) => o.professorId === profToDelete.id).length;
+        return (
+          <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/65 backdrop-blur-sm p-4">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-5 border border-rose-200 dark:border-rose-800 shadow-2xl space-y-4 text-xs">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    تایید حذف استاد «{profToDelete.fullName}»
+                  </h3>
+                  <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {linkedCount > 0
+                      ? `با حذف این استاد، تمامی ${linkedCount.toLocaleString('fa-IR')} درس تخصیص‌یافته به ایشان در برنامه درسی به‌صورت خودکار «غیرفعال و بدون استاد» می‌شوند تا تداخلی ایجاد نشود.`
+                      : 'این استاد در حال حاضر درس فعالی در جدول ندارد و از لیست اساتید حذف خواهد شد.'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setProfToDelete(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 font-bold cursor-pointer"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteProfessor}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black cursor-pointer"
+                >
+                  حذف استاد و اعمال تغییرات
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* مودال تایید پاک‌سازی اطلاعات و تخلیه جدول برنامه */}
+      {dangerActionModal && (() => {
+        const meta: Record<
+          typeof dangerActionModal,
+          { title: string; desc: string; confirmLabel: string; tone: 'amber' | 'rose' }
+        > = {
+          clear_term_schedule: {
+            title: `تخلیه جدول برنامه ترم ${activeTerm}`,
+            desc: `تمامی ${termOfferings.length.toLocaleString('fa-IR')} درس ارائه‌شده در ترم ${activeTerm} حذف می‌شوند؛ کلاس‌ها، اساتید، رشته‌ها و سرفصل دروس دست‌نخورده باقی می‌مانند.`,
+            confirmLabel: 'تخلیه جدول ترم فعال',
+            tone: 'amber',
+          },
+          clear_all_schedules: {
+            title: 'حذف برنامه‌های درسی همه ترم‌ها',
+            desc: `تمامی ${offerings.length.toLocaleString('fa-IR')} درس ثبت‌شده در جدول تمام ترم‌ها حذف می‌شوند؛ اطلاعات پایه حفظ خواهند شد.`,
+            confirmLabel: 'حذف کل برنامه‌های درسی',
+            tone: 'amber',
+          },
+          clear_classrooms: {
+            title: 'پاک کردن لیست کلاس‌های فیزیکی',
+            desc: `تمامی ${classrooms.length.toLocaleString('fa-IR')} کلاس فیزیکی حذف شده و تخصیص کلاس در دروس موجود آزاد می‌شود.`,
+            confirmLabel: 'پاک کردن کلاس‌ها',
+            tone: 'rose',
+          },
+          clear_professors: {
+            title: 'پاک کردن کامل لیست اساتید',
+            desc: `تمامی ${professors.length.toLocaleString('fa-IR')} استاد حذف و کلیه دروس دارای استاد به‌صورت خودکار غیرفعال و بدون استاد می‌شوند.`,
+            confirmLabel: 'پاک کردن اساتید',
+            tone: 'rose',
+          },
+          clear_courses: {
+            title: 'پاک کردن سرفصل دروس (کد ۷ رقمی)',
+            desc: `تمامی ${courses.length.toLocaleString('fa-IR')} عنوان درس چارت آموزشی حذف می‌شوند.`,
+            confirmLabel: 'پاک کردن سرفصل دروس',
+            tone: 'rose',
+          },
+          clear_programs: {
+            title: 'پاک کردن رشته‌ها، ورودی‌ها و شعب',
+            desc: `تمامی ${programs.length.toLocaleString('fa-IR')} ورودی و شعبه از اطلاعات پایه حذف می‌شوند.`,
+            confirmLabel: 'پاک کردن رشته‌ها و شعب',
+            tone: 'rose',
+          },
+          clear_comments_history: {
+            title: 'پاک کردن یادداشت‌ها و تاریخچه بازگشت',
+            desc: `تمامی ${cellComments.length.toLocaleString('fa-IR')} یادداشت سلول‌های جدول و تاریخچه Undo/Redo شما پاک می‌شود.`,
+            confirmLabel: 'پاک کردن یادداشت‌ها و تاریخچه',
+            tone: 'rose',
+          },
+          clear_everything: {
+            title: 'پاک‌سازی کامل کل داده‌های سامانه برنامه‌ریزی',
+            desc: 'کلیه برنامه‌های درسی، کلاس‌ها، اساتید، رشته‌ها، دروس و یادداشت‌ها حذف می‌شوند (ضرایب و تنظیمات کلی حفظ می‌گردد). پیشنهاد می‌شود پیش از تایید فایل پشتیبان دانلود نمایید.',
+            confirmLabel: 'تایید پاک‌سازی کامل',
+            tone: 'rose',
+          },
+        };
+        const info = meta[dangerActionModal];
+        return (
+          <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/65 backdrop-blur-sm p-4">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-5 border border-rose-200 dark:border-rose-800 shadow-2xl space-y-4 text-xs">
+              <div className="flex items-start gap-3">
+                <div
+                  className={`p-2.5 rounded-xl shrink-0 ${
+                    info.tone === 'amber'
+                      ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-600'
+                      : 'bg-rose-100 dark:bg-rose-950/60 text-rose-600'
+                  }`}
+                >
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">{info.title}</h3>
+                  <p className="text-slate-600 dark:text-slate-300 leading-relaxed">{info.desc}</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={handleDownloadSchedBackup}
+                  className="px-3 py-2 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 font-bold inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>ابتدا دانلود بکاپ</span>
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDangerActionModal(null)}
+                    className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 font-bold cursor-pointer"
+                  >
+                    انصراف
+                  </button>
+                  <button
+                    type="button"
+                    onClick={executeDangerAction}
+                    className={`px-4 py-2 rounded-xl text-white font-black cursor-pointer ${
+                      info.tone === 'amber'
+                        ? 'bg-amber-600 hover:bg-amber-700'
+                        : 'bg-rose-600 hover:bg-rose-700'
+                    }`}
+                  >
+                    {info.confirmLabel}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

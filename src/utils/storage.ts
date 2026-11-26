@@ -2988,7 +2988,25 @@ export const Storage = {
   setBeds: (beds: Bed[]) => set(STORAGE_KEYS.BEDS, beds),
 
   getStudents: (): Student[] => get(STORAGE_KEYS.STUDENTS, INITIAL_STUDENTS),
-  setStudents: (students: Student[]) => set(STORAGE_KEYS.STUDENTS, students),
+  setStudents: (students: Student[]) => {
+    const saved = set(STORAGE_KEYS.STUDENTS, students);
+    const activeIds = new Set(
+      students.map((s) => normalizeAsciiDigits(s.studentId || '').trim()).filter(Boolean)
+    );
+    const beds = Storage.getBeds();
+    let bedsChanged = false;
+    const nextBeds = beds.map((b) => {
+      if (b.studentId && !activeIds.has(normalizeAsciiDigits(b.studentId).trim())) {
+        bedsChanged = true;
+        return { ...b, studentId: null, assignmentStatus: undefined };
+      }
+      return b;
+    });
+    if (bedsChanged) {
+      Storage.setBeds(nextBeds);
+    }
+    return saved;
+  },
 
   getSupervisors: (): Supervisor[] => get(STORAGE_KEYS.SUPERVISORS, INITIAL_SUPERVISORS),
   setSupervisors: (supervisors: Supervisor[]) => set(STORAGE_KEYS.SUPERVISORS, supervisors),
@@ -3962,15 +3980,23 @@ export const Storage = {
   releaseBed: (studentId: string): { success: boolean; message: string } => {
     const beds = Storage.getBeds();
     const students = Storage.getStudents();
+    const normTargetId = normalizeAsciiDigits(studentId || '').trim();
+    const student = students.find(
+      (s) => s.studentId === studentId || normalizeAsciiDigits(s.studentId || '').trim() === normTargetId
+    );
+    const targetBedId = student?.assignedBedId;
 
     beds.forEach((b) => {
-      if (b.studentId === studentId) {
+      const normBedStudentId = b.studentId ? normalizeAsciiDigits(b.studentId).trim() : '';
+      if (
+        (normBedStudentId && normBedStudentId === normTargetId) ||
+        (targetBedId && b.id === targetBedId)
+      ) {
         b.studentId = null;
         b.assignmentStatus = undefined;
       }
     });
 
-    const student = students.find((s) => s.studentId === studentId);
     if (student) {
       student.assignedDormId = undefined;
       student.assignedDormName = undefined;
@@ -4526,19 +4552,70 @@ export const Storage = {
 
   // حذف دانشجو توسط مدیر (آزادسازی خودکار تخت و حذف فوری از Supabase)
   deleteStudent: (studentId: string): { success: boolean; message: string } => {
-    const target = Storage.getStudents().find((s) => s.studentId === studentId);
-    Storage.releaseBed(studentId);
-    const students = Storage.getStudents().filter((s) => s.studentId !== studentId);
+    const normTargetId = normalizeAsciiDigits(studentId || '').trim();
+    const allStudents = Storage.getStudents();
+    const target = allStudents.find(
+      (s) => s.studentId === studentId || normalizeAsciiDigits(s.studentId || '').trim() === normTargetId
+    );
+    const canonicalId = target?.studentId || studentId;
+    const targetBedId = target?.assignedBedId;
+
+    // ۱. آزادسازی قطعی تخت(های) منتسب به دانشجو (چه با شماره دانشجویی و چه با شناسه تخت)
+    const beds = Storage.getBeds();
+    let bedsChanged = false;
+    const nextBeds = beds.map((b) => {
+      const normBedSt = b.studentId ? normalizeAsciiDigits(b.studentId).trim() : '';
+      if ((normBedSt && normBedSt === normTargetId) || (targetBedId && b.id === targetBedId)) {
+        bedsChanged = true;
+        return { ...b, studentId: null, assignmentStatus: undefined };
+      }
+      return b;
+    });
+    if (bedsChanged) {
+      Storage.setBeds(nextBeds);
+    }
+
+    // ۲. پاک‌سازی نمایندگی اتاق در صورت انتساب به دانشجوی حذف‌شده
+    const rooms = Storage.getRooms();
+    let roomsChanged = false;
+    const nextRooms = rooms.map((r) => {
+      if (
+        r.representativeStudentId &&
+        normalizeAsciiDigits(r.representativeStudentId).trim() === normTargetId
+      ) {
+        roomsChanged = true;
+        return { ...r, representativeStudentId: undefined };
+      }
+      return r;
+    });
+    if (roomsChanged) {
+      Storage.setRooms(nextRooms);
+    }
+
+    // ۳. حذف از لیست دانشجویان و همگام‌سازی حذف ابری بدون تداخل upsert
+    const students = allStudents.filter(
+      (s) => s.studentId !== canonicalId && normalizeAsciiDigits(s.studentId || '').trim() !== normTargetId
+    );
     saveStudentsLocalOnly(students);
-    void deleteStudentFromSupabase(studentId);
+    void deleteStudentFromSupabase(canonicalId);
+
+    const currentUser = Storage.getCurrentUser();
+    if (
+      currentUser &&
+      currentUser.role === 'student' &&
+      normalizeAsciiDigits(currentUser.student.studentId || '').trim() === normTargetId
+    ) {
+      Storage.setCurrentUser(null);
+    }
+
     Storage.addActivityLog({
       category: 'student',
-      action: 'حذف پرونده دانشجو',
-      details: `پرونده دانشجو ${target?.fullName || ''} (${studentId}) از سامانه حذف شد.`,
-      targetName: `${target?.fullName || studentId}`,
+      action: 'حذف پرونده دانشجو و آزادسازی تخت',
+      details: `پرونده دانشجو ${target?.fullName || ''} (${canonicalId}) حذف و تخت مربوطه در صورت اسکان آزاد شد.`,
+      targetName: `${target?.fullName || canonicalId}`,
       severity: 'warning',
     });
-    return { success: true, message: 'دانشجو و سوابق اسکان وی با موفقیت از سیستم حذف شد.' };
+    return { success: true, message: 'دانشجو حذف و تخت وی با موفقیت خالی و آزاد شد.' };
   },
 
   // ویرایش اطلاعات دانشجو توسط مدیر (پشتیبانی از تغییر کلیه فیلدها از جمله شماره دانشجویی)
@@ -13848,6 +13925,45 @@ export const Storage = {
           ? stored.programLocks!.blockedViewUserIds
           : [],
       },
+      professorAvailabilityWindow: stored.professorAvailabilityWindow
+        ? {
+            enabled: Boolean(stored.professorAvailabilityWindow.enabled),
+            startDate: stored.professorAvailabilityWindow.startDate || '',
+            startTime: stored.professorAvailabilityWindow.startTime || '00:00',
+            endDate: stored.professorAvailabilityWindow.endDate || '',
+            endTime: stored.professorAvailabilityWindow.endTime || '23:59',
+            note: stored.professorAvailabilityWindow.note || '',
+          }
+        : DEFAULT_SCHED_RULES.professorAvailabilityWindow,
+      masterGridLayout: (() => {
+        const def = DEFAULT_SCHED_RULES.masterGridLayout!;
+        const s = stored.masterGridLayout;
+        if (!s || typeof s !== 'object') return def;
+        return {
+          metaColumns: {
+            major: { ...def.metaColumns.major, ...(s.metaColumns?.major || {}) },
+            entry: { ...def.metaColumns.entry, ...(s.metaColumns?.entry || {}) },
+            totalStudents: { ...def.metaColumns.totalStudents, ...(s.metaColumns?.totalStudents || {}) },
+            section: { ...def.metaColumns.section, ...(s.metaColumns?.section || {}) },
+          },
+          defaultSlotWidth:
+            typeof s.defaultSlotWidth === 'number' && s.defaultSlotWidth >= 60
+              ? s.defaultSlotWidth
+              : def.defaultSlotWidth,
+          slotWidthsBySlotId:
+            s.slotWidthsBySlotId && typeof s.slotWidthsBySlotId === 'object'
+              ? s.slotWidthsBySlotId
+              : {},
+          scheduleCells: {
+            ...def.scheduleCells,
+            ...(s.scheduleCells || {}),
+          },
+          columnOverrides:
+            s.columnOverrides && typeof s.columnOverrides === 'object'
+              ? s.columnOverrides
+              : {},
+        };
+      })(),
     };
   },
   setSchedRules: (rules: SchedRulesSettings): boolean =>

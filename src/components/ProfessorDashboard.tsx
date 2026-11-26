@@ -9,21 +9,25 @@ import {
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
   exportJsonRowsToExcel,
+  getProfessorAvailabilityWindowStatus,
   getSchedSlotTitle,
   printSchedHtml,
 } from '../utils/schedulingUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
 import {
+  AlertTriangle,
   BookOpen,
   CalendarDays,
   CheckCircle2,
   Clock,
   Download,
   KeyRound,
+  Lock,
   Mail,
   Printer,
   Save,
-  UserCheck,
+  Sparkles,
+  Unlock,
 } from 'lucide-react';
 
 interface ProfessorDashboardProps {
@@ -47,11 +51,22 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
   const allOfferings = useMemo(() => Storage.getSchedOfferings(), [cloudSyncTick]);
   const [selectedTerm, setSelectedTerm] = useState<string>(rules.activeTerm || '4041');
   const [unavailDraft, setUnavailDraft] = useState<string[]>(professor.unavailableKeys || []);
-  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [savedMsg, setSavedMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [nowTick, setNowTick] = useState<Date>(() => new Date());
+
+  React.useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(new Date()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   React.useEffect(() => {
     setUnavailDraft(professor.unavailableKeys || []);
   }, [professor.unavailableKeys]);
+
+  const availWindowStatus = useMemo(
+    () => getProfessorAvailabilityWindowStatus(rules, nowTick),
+    [rules, nowTick]
+  );
 
   const activeDays = useMemo(
     () =>
@@ -70,6 +85,7 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
     () =>
       allOfferings.filter(
         (o) =>
+          !o.isDisabled &&
           o.professorId === professor.id &&
           (selectedTerm === 'all' || o.termKey === selectedTerm)
       ),
@@ -94,15 +110,71 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
     [messages, professor.id]
   );
 
+  const totalGridSlotCount = activeDays.length * sortedSlots.length;
+  const blockedSlotCount = activeDays.reduce(
+    (sum, d) =>
+      sum + sortedSlots.filter((s) => unavailDraft.includes(`${d}:${s.id}`)).length,
+    0
+  );
+  const availableSlotCount = Math.max(0, totalGridSlotCount - blockedSlotCount);
+
   const handleSaveUnavailable = () => {
+    const freshRules = Storage.getSchedRules();
+    const liveStatus = getProfessorAvailabilityWindowStatus(freshRules, new Date());
+    if (!liveStatus.isOpen) {
+      setNowTick(new Date());
+      setSavedMsg({ type: 'error', text: liveStatus.message });
+      window.setTimeout(() => setSavedMsg(null), 6000);
+      return;
+    }
+
     const allProfs = Storage.getSchedProfessors();
+    const nowIso = new Date().toISOString();
     const updated = allProfs.map((p) =>
-      p.id === professor.id ? { ...p, unavailableKeys: unavailDraft } : p
+      p.id === professor.id
+        ? {
+            ...p,
+            unavailableKeys: unavailDraft,
+            availabilitySubmitted: true,
+            availabilityUpdatedAt: nowIso,
+          }
+        : p
     );
     Storage.setSchedProfessors(updated);
     onRefreshData();
-    setSavedMsg('زمان‌های عدم امکان حضور شما با موفقیت ثبت شد و برای مدیران گروه قابل مشاهده است.');
-    window.setTimeout(() => setSavedMsg(null), 4000);
+    setSavedMsg({
+      type: 'success',
+      text: 'ساعات حضور و عدم امکان حضور شما با موفقیت ثبت شد و برای مدیران گروه در برنامه‌ریزی ترم قابل مشاهده است.',
+    });
+    window.setTimeout(() => setSavedMsg(null), 5000);
+  };
+
+  const toggleDayAvailability = (day: SchedDayKey) => {
+    if (!availWindowStatus.isOpen) return;
+    const dayKeys = sortedSlots.map((s) => `${day}:${s.id}`);
+    const allBlocked = dayKeys.every((k) => unavailDraft.includes(k));
+    setUnavailDraft((prev) => {
+      const next = new Set(prev);
+      dayKeys.forEach((k) => {
+        if (allBlocked) next.delete(k);
+        else next.add(k);
+      });
+      return Array.from(next);
+    });
+  };
+
+  const toggleSlotAvailabilityAcrossWeek = (slotId: string) => {
+    if (!availWindowStatus.isOpen) return;
+    const slotKeys = activeDays.map((d) => `${d}:${slotId}`);
+    const allBlocked = slotKeys.every((k) => unavailDraft.includes(k));
+    setUnavailDraft((prev) => {
+      const next = new Set(prev);
+      slotKeys.forEach((k) => {
+        if (allBlocked) next.delete(k);
+        else next.add(k);
+      });
+      return Array.from(next);
+    });
   };
 
   const handlePrintSchedule = () => {
@@ -470,32 +542,133 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
         </div>
       </div>
 
-      {/* ثبت و ویرایش زمان‌های عدم امکان حضور استاد */}
-      <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+      {/* ثبت و ویرایش زمان‌های حضور و عدم امکان حضور استاد در بازه تعیین‌شده توسط مدیر سامانه */}
+      <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+            <h3 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
               <Clock className="w-4 h-4 text-amber-600" />
-              <span>اعلام زمان‌های عدم امکان حضور (جهت راهنمایی مدیران گروه در برنامه‌ریزی)</span>
+              <span>اعلام روزها، ساعت‌ها و سانس‌های حضور و عدم امکان حضور</span>
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              سانس‌هایی که امکان تدریس ندارید را علامت زده و دکمه ذخیره را بزنید.
+            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+              در بازه زمانی اعلام‌شده توسط مدیر سامانه می‌توانید سانس‌های آزاد (امکان حضور) و عدم امکان تدریس خود را ثبت کنید. برای اساتیدی که ثبت انجام ندهند، به‌صورت پیش‌فرض <strong>تمام سانس‌ها آزاد</strong> در نظر گرفته می‌شود.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleSaveUnavailable}
-            className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
-          >
-            <Save className="w-3.5 h-3.5" />
-            <span>ثبت محدودیت‌های زمانی</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <span
+              className={`px-2.5 py-1 rounded-xl text-[11px] font-black border inline-flex items-center gap-1 ${
+                professor.availabilitySubmitted
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800'
+                  : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+              }`}
+            >
+              {professor.availabilitySubmitted ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>وضعیت: ثبت‌شده توسط شما</span>
+                </>
+              ) : (
+                <span>پیش‌فرض: همه سانس‌ها آزاد</span>
+              )}
+            </span>
+            <button
+              type="button"
+              disabled={!availWindowStatus.isOpen}
+              onClick={handleSaveUnavailable}
+              className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed transition"
+            >
+              {availWindowStatus.isOpen ? <Save className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+              <span>{availWindowStatus.isOpen ? 'ثبت و ذخیره ساعات حضور' : 'بازه ثبت بسته است'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* وضعیت زنده بازه زمانی */}
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+            availWindowStatus.isOpen
+              ? 'bg-emerald-50/85 dark:bg-emerald-950/35 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+              : availWindowStatus.status === 'not_started'
+              ? 'bg-amber-50/85 dark:bg-amber-950/35 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200'
+              : 'bg-rose-50/85 dark:bg-rose-950/35 border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            {availWindowStatus.isOpen ? (
+              <Unlock className="w-4 h-4 shrink-0 text-emerald-600 mt-0.5" />
+            ) : (
+              <Lock className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+            )}
+            <div className="space-y-1">
+              <div className="font-black">{availWindowStatus.message}</div>
+              {(availWindowStatus.startsAtLabel || availWindowStatus.endsAtLabel) && (
+                <div className="text-[11px] opacity-85">
+                  {availWindowStatus.startsAtLabel ? `شروع: ${availWindowStatus.startsAtLabel}` : ''}
+                  {availWindowStatus.startsAtLabel && availWindowStatus.endsAtLabel ? ' · ' : ''}
+                  {availWindowStatus.endsAtLabel ? `پایان: ${availWindowStatus.endsAtLabel}` : ''}
+                </div>
+              )}
+              {rules.professorAvailabilityWindow?.note && (
+                <div className="text-[11px] font-bold">
+                  یادداشت مدیر سامانه: {rules.professorAvailabilityWindow.note}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-extrabold shrink-0 tabular-nums">
+            <span className="px-2.5 py-1 rounded-lg bg-white/80 dark:bg-slate-900/70 border border-current/20">
+              آزاد: {availableSlotCount.toLocaleString('fa-IR')} سانس
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-white/80 dark:bg-slate-900/70 border border-current/20">
+              عدم امکان: {blockedSlotCount.toLocaleString('fa-IR')} سانس
+            </span>
+          </div>
         </div>
 
         {savedMsg && (
-          <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span>{savedMsg}</span>
+          <div
+            className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2 ${
+              savedMsg.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+            }`}
+          >
+            {savedMsg.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+            )}
+            <span>{savedMsg.text}</span>
+          </div>
+        )}
+
+        {availWindowStatus.isOpen && (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <div className="text-slate-500">
+              روی هر سلول کلیک کنید تا بین «آزاد (امکان حضور)» و «عدم امکان» جابجا شود. با کلیک روی نام روز یا عنوان سانس، کل آن سطر/ستون تغییر می‌کند.
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setUnavailDraft([])}
+                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 font-bold inline-flex items-center gap-1 cursor-pointer"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>کل هفته آزاد (پیش‌فرض کامل)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setUnavailDraft(
+                    activeDays.flatMap((d) => sortedSlots.map((s) => `${d}:${s.id}`))
+                  )
+                }
+                className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 border border-rose-200 dark:border-rose-800 font-bold cursor-pointer"
+              >
+                انتخاب کل هفته به عنوان عدم امکان
+              </button>
+            </div>
           </div>
         )}
 
@@ -506,12 +679,31 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
                 <th className="p-2 text-right border border-slate-200 dark:border-slate-700">
                   روز هفته
                 </th>
-                {sortedSlots.map((s) => (
-                  <th key={s.id} className="p-2 text-center border border-slate-200 dark:border-slate-700">
-                    <div>{s.label}</div>
-                    <div className="font-mono text-[10px] text-slate-500" dir="ltr">
-                      {s.startTime}-{s.endTime}
-                    </div>
+                {sortedSlots.map((s, idx) => (
+                  <th
+                    key={s.id}
+                    className="p-2 text-center border border-slate-200 dark:border-slate-700"
+                  >
+                    <button
+                      type="button"
+                      disabled={!availWindowStatus.isOpen}
+                      onClick={() => toggleSlotAvailabilityAcrossWeek(s.id)}
+                      title={
+                        availWindowStatus.isOpen
+                          ? 'تغییر یکجای این سانس در کل هفته'
+                          : 'بازه ثبت بسته است'
+                      }
+                      className={`w-full ${
+                        availWindowStatus.isOpen
+                          ? 'cursor-pointer hover:text-teal-700 dark:hover:text-teal-300'
+                          : 'cursor-default'
+                      }`}
+                    >
+                      <div className="font-bold">{getSchedSlotTitle(s, idx)}</div>
+                      <div className="font-mono text-[10px] text-slate-500" dir="ltr">
+                        {s.startTime}-{s.endTime}
+                      </div>
+                    </button>
                   </th>
                 ))}
               </tr>
@@ -520,7 +712,23 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
               {activeDays.map((day) => (
                 <tr key={day}>
                   <td className="p-2 font-bold border border-slate-200 dark:border-slate-700">
-                    {SCHED_DAY_LABELS[day]}
+                    <button
+                      type="button"
+                      disabled={!availWindowStatus.isOpen}
+                      onClick={() => toggleDayAvailability(day)}
+                      title={
+                        availWindowStatus.isOpen
+                          ? 'تغییر یکجای کل سانس‌های این روز'
+                          : 'بازه ثبت بسته است'
+                      }
+                      className={`w-full text-right ${
+                        availWindowStatus.isOpen
+                          ? 'cursor-pointer hover:text-teal-700 dark:hover:text-teal-300'
+                          : 'cursor-default'
+                      }`}
+                    >
+                      {SCHED_DAY_LABELS[day]}
+                    </button>
                   </td>
                   {sortedSlots.map((slot) => {
                     const key = `${day}:${slot.id}`;
@@ -532,18 +740,24 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
                       >
                         <button
                           type="button"
-                          onClick={() =>
+                          disabled={!availWindowStatus.isOpen}
+                          onClick={() => {
+                            if (!availWindowStatus.isOpen) return;
                             setUnavailDraft((prev) =>
                               blocked ? prev.filter((k) => k !== key) : [...prev, key]
-                            )
-                          }
-                          className={`w-full py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition ${
+                            );
+                          }}
+                          className={`w-full py-1.5 rounded-lg text-[11px] font-bold transition ${
+                            availWindowStatus.isOpen
+                              ? 'cursor-pointer'
+                              : 'cursor-not-allowed opacity-75'
+                          } ${
                             blocked
                               ? 'bg-rose-600 text-white'
                               : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300'
                           }`}
                         >
-                          {blocked ? 'عدم امکان' : 'آزاد'}
+                          {blocked ? 'عدم امکان' : 'آزاد (حضور)'}
                         </button>
                       </td>
                     );

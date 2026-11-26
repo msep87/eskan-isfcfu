@@ -161,12 +161,22 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
     [rules.timeSlots]
   );
 
-  const termOfferings = useMemo(
+  const rawTermOfferings = useMemo(
     () =>
       selectedTerm === 'all'
         ? offerings
         : offerings.filter((o) => o.termKey === selectedTerm),
     [offerings, selectedTerm]
+  );
+
+  const disabledOfferings = useMemo(
+    () => rawTermOfferings.filter((o) => Boolean(o.isDisabled)),
+    [rawTermOfferings]
+  );
+
+  const termOfferings = useMemo(
+    () => rawTermOfferings.filter((o) => !o.isDisabled),
+    [rawTermOfferings]
   );
 
   const uniqueMajors = useMemo(() => {
@@ -393,8 +403,8 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
       }
     }
 
-    return { sharedOfferings, missingProf, missingRoom, unscheduled, conflicts };
-  }, [termOfferings, classrooms, professors]);
+    return { sharedOfferings, missingProf, missingRoom, unscheduled, disabledOfferings, conflicts };
+  }, [termOfferings, disabledOfferings, classrooms, professors]);
 
   const termLabel = selectedTerm === 'all' ? 'کل ترم‌ها' : `ترم ${selectedTerm}`;
 
@@ -1550,6 +1560,43 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
               </div>
             )}
           </div>
+
+          {auditData.disabledOfferings.length > 0 && (
+            <div className="rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/25 p-4 space-y-2.5">
+              <h3 className="text-xs font-extrabold text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <span>
+                  دروس غیرفعال‌شده و بدون استاد (نیازمند تخصیص استاد جدید:{' '}
+                  {auditData.disabledOfferings.length.toLocaleString('fa-IR')} مورد)
+                </span>
+              </h3>
+              <div className="space-y-1.5">
+                {auditData.disabledOfferings.map((o) => (
+                  <div
+                    key={o.id}
+                    className="p-2.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 text-xs flex flex-wrap items-center justify-between gap-2"
+                  >
+                    <div>
+                      <span className="font-extrabold text-slate-900 dark:text-white">
+                        {o.courseTitle}
+                      </span>{' '}
+                      (<span className="font-mono">{o.courseCode}</span>) — {o.ownerMajorName} (
+                      {o.entryTerm}
+                      {o.sectionName ? ` - ${o.sectionName}` : ''})
+                      {o.disabledReason && (
+                        <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                          {o.disabledReason}
+                        </div>
+                      )}
+                    </div>
+                    <span className="px-2 py-0.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 font-bold text-[11px]">
+                      غیرفعال · بدون استاد
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -56,6 +56,7 @@ import {
   SchedProfessor,
   SchedCurriculumCourse,
   SchedCourseOffering,
+  SchedMasterGridLayoutSettings,
   SchedRulesSettings,
   SchedCellComment,
 } from '../types';
@@ -290,6 +291,32 @@ export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
     lockedExpertIds: [],
     blockedViewUserIds: [],
   },
+  professorAvailabilityWindow: {
+    enabled: false,
+    startTime: '00:00',
+    endTime: '23:59',
+    note: '',
+  },
+  masterGridLayout: {
+    metaColumns: {
+      major: { width: 114, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'wrap' },
+      entry: { width: 64, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'wrap' },
+      totalStudents: { width: 56, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'wrap' },
+      section: { width: 104, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'clip' },
+    },
+    defaultSlotWidth: 168,
+    slotWidthsBySlotId: {},
+    scheduleCells: {
+      headerOrientation: 'horizontal',
+      bodyOrientation: 'horizontal',
+      textFit: 'wrap',
+      compactCards: false,
+    },
+    columnOverrides: {},
+  },
 };
+
+export const DEFAULT_MASTER_GRID_LAYOUT: SchedMasterGridLayoutSettings =
+  DEFAULT_SCHED_RULES.masterGridLayout!;
 
 
