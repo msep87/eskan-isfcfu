@@ -1983,6 +1983,53 @@ export interface SchedMasterGridLayoutSettings {
   columnOverrides?: Record<string, SchedMasterColumnStyle>;
 }
 
+export type SchedPaperSize = 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal' | 'B4' | 'B5';
+export type SchedPrintOrientation = 'landscape' | 'portrait';
+export type SchedPrintScalingMode =
+  | 'fit_1_page_wide'
+  | 'fit_1_page'
+  | 'fit_n_pages_wide'
+  | 'custom_percent';
+export type SchedPrintColorMode = 'color' | 'grayscale';
+
+export interface SchedMasterPrintSettings {
+  paperSize: SchedPaperSize;
+  orientation: SchedPrintOrientation;
+  scalingMode: SchedPrintScalingMode;
+  scalePercent: number;
+  fitPagesWide: number;
+  marginsMm: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
+  showGridlines: boolean;
+  boldDayBorders: boolean;
+  colorMode: SchedPrintColorMode;
+  includeColors: boolean;
+  repeatHeaderRows: boolean;
+  avoidRowBreak: boolean;
+  centerHorizontally: boolean;
+  centerVertically: boolean;
+  fontSizePx: number;
+  cellPaddingPx: number;
+  useLayoutWidthsAndOrientations: boolean;
+  includeProfessor: boolean;
+  includeClassroom: boolean;
+  includeExamInfo: boolean;
+  includeSharedTag: boolean;
+  includeComments: boolean;
+  showHeaderBanner: boolean;
+  customTitle: string;
+  customSubtitle: string;
+  showPrintDate: boolean;
+  showActorName: boolean;
+  footerNote: string;
+  showSignatureBlock: boolean;
+  printScope: 'current_view' | 'populated_only' | 'all_rows_and_days';
+}
+
 export interface SchedRulesSettings {
   activeTerm: string; // مثلاً 1405-1
   availableTerms: string[];
@@ -2016,6 +2063,7 @@ export interface SchedRulesSettings {
     note?: string;
   };
   masterGridLayout?: SchedMasterGridLayoutSettings;
+  masterPrintSettings?: SchedMasterPrintSettings;
 }
 
 export interface SchedSharedTarget {
@@ -2073,7 +2121,8 @@ export interface SchedCourseOffering {
   splitPart?: 'full' | 'theory' | 'practical';
   examDayId?: string; // روز امتحان پایان ترم (صرفاً برای دروس نظری)
   examSlotId?: string; // سانس امتحان پایان ترم (صرفاً برای دروس نظری)
-  isDisabled?: boolean; // غیرفعال‌شدن درس در صورت حذف استاد از لیست اساتید تا زمان تعیین استاد جدید
+  isDisabled?: boolean; // غیرفعال‌شدن درس در صورت حذف استاد یا ثبت موقت/ناقص تا زمان تکمیل اطلاعات
+  isProvisional?: boolean; // ثبت موقت (ناقص از نظر ساعت مصوب، استاد یا کلاس فیزیکی)
   disabledReason?: string;
   notes?: string;
   createdById: string;

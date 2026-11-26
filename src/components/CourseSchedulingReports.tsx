@@ -19,8 +19,10 @@ import {
   detectOfferingConflicts,
   exportJsonRowsToExcel,
   getSchedSlotTitle,
+  isOfferingEffectivelyActive,
   printSchedHtml,
   round2,
+  summarizeSectionOfferings,
 } from '../utils/schedulingUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
 import {
@@ -170,13 +172,13 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
   );
 
   const disabledOfferings = useMemo(
-    () => rawTermOfferings.filter((o) => Boolean(o.isDisabled)),
-    [rawTermOfferings]
+    () => rawTermOfferings.filter((o) => !isOfferingEffectivelyActive(o, rules)),
+    [rawTermOfferings, rules]
   );
 
   const termOfferings = useMemo(
-    () => rawTermOfferings.filter((o) => !o.isDisabled),
-    [rawTermOfferings]
+    () => rawTermOfferings.filter((o) => isOfferingEffectivelyActive(o, rules)),
+    [rawTermOfferings, rules]
   );
 
   const uniqueMajors = useMemo(() => {
@@ -242,7 +244,7 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
     }
   }, [professors, selectedProfId]);
 
-  // محاسبه ردیف‌های گزارش ۴ (تعداد روز برنامه هر ورودی و شعبه)
+  // محاسبه ردیف‌های گزارش ۴ (تعداد روز برنامه هر ورودی و شعبه با احتساب شعبه‌های کارورزی به عنوان ۱ درس و ۱ واحد واقعی برای دانشجو)
   const programDaysRows = useMemo(() => {
     const rows: Array<{
       cohortId: string;
@@ -258,6 +260,7 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
       totalUnits: number;
       totalHours: number;
       maxHoursInADay: number;
+      internshipDeduplicated: boolean;
     }> = [];
 
     for (const p of programs) {
@@ -272,18 +275,15 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
           doesOfferingIncludeCohort(o, p.id, sec.id || undefined)
         );
         const dayHourMap = new Map<SchedDayKey, number>();
-        let totalUnits = 0;
-        let totalHours = 0;
 
         for (const o of secOffs) {
           const bd = calculateOfferingBreakdown(o, rules);
-          totalUnits += bd.rawUnits;
-          totalHours += bd.weeklyHours;
           if (o.dayOfWeek) {
             dayHourMap.set(o.dayOfWeek, round2((dayHourMap.get(o.dayOfWeek) || 0) + bd.weeklyHours));
           }
         }
 
+        const secSummary = summarizeSectionOfferings(secOffs, rules);
         const activeDayList = SCHED_DAYS_ORDER.filter((d) => dayHourMap.has(d));
         const maxDayHours = Math.max(0, ...Array.from(dayHourMap.values()));
 
@@ -298,10 +298,12 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
             studentCount: sec.studentCount,
             activeDays: activeDayList,
             daysCount: activeDayList.length,
-            offeringsCount: secOffs.length,
-            totalUnits: round2(totalUnits),
-            totalHours: round2(totalHours),
+            offeringsCount: secSummary.courseCount,
+            totalUnits: secSummary.totalUnits,
+            totalHours: secSummary.totalWeeklyHours,
             maxHoursInADay: round2(maxDayHours),
+            internshipDeduplicated:
+              secSummary.internshipRecordsCount > secSummary.internshipCourseCount,
           });
         }
       }
@@ -810,15 +812,15 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
 
               {(() => {
                 const daysSet = new Set(cohortOfferings.map((o) => o.dayOfWeek).filter(Boolean));
-                const totalH = round2(
-                  cohortOfferings.reduce(
-                    (s, o) => s + calculateOfferingBreakdown(o, rules).weeklyHours,
-                    0
-                  )
-                );
+                const cohortSummary = summarizeSectionOfferings(cohortOfferings, rules, {
+                  groupByCohortSection: selectedSectionId === 'all',
+                });
                 return (
                   <div className="text-xs text-slate-600 dark:text-slate-400 tabular-nums">
-                    روزهای حضور در هفته: <strong className="text-teal-700 dark:text-teal-400">{daysSet.size} روز</strong> · مجموع ساعت هفتگی: <strong>{totalH}</strong>
+                    تعداد درس: <strong>{cohortSummary.courseCount}</strong> · جمع واحد:{' '}
+                    <strong>{cohortSummary.totalUnits}</strong> · روزهای حضور در هفته:{' '}
+                    <strong className="text-teal-700 dark:text-teal-400">{daysSet.size} روز</strong> · مجموع ساعت هفتگی:{' '}
+                    <strong>{cohortSummary.totalWeeklyHours}</strong>
                   </div>
                 );
               })()}
@@ -1001,7 +1003,14 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                           ? r.activeDays.map((d) => SCHED_DAY_LABELS[d]).join('، ')
                           : 'بدون برنامه زمان‌بندی'}
                       </td>
-                      <td className="p-3 text-center">{r.offeringsCount}</td>
+                      <td className="p-3 text-center">
+                        {r.offeringsCount}
+                        {r.internshipDeduplicated && (
+                          <div className="text-[9.5px] text-violet-600 dark:text-violet-400 font-semibold">
+                            (کارورزی = ۱ درس)
+                          </div>
+                        )}
+                      </td>
                       <td className="p-3 text-center font-bold">{r.totalUnits}</td>
                       <td className="p-3 text-center">
                         {r.totalHours} ساعت · سقف {r.maxHoursInADay} س/روز

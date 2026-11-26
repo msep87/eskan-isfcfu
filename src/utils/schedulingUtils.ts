@@ -11,7 +11,9 @@ import {
   SchedExamSlot,
   SchedOfferingHistoryDelta,
   SchedOfferingHistoryEntry,
+  SchedPaperSize,
   SchedPracticalUnitType,
+  SchedPrintColorMode,
   SchedProfessor,
   SchedProgramCohort,
   SchedRulesSettings,
@@ -324,6 +326,335 @@ export function calculateOfferingBreakdown(
   };
 }
 
+export function getOfferingScheduledHours(
+  offering: Pick<SchedCourseOffering, 'dayOfWeek' | 'slotIds' | 'slotParts'>,
+  rules: SchedRulesSettings
+): number {
+  if (!offering.dayOfWeek || !offering.slotIds || offering.slotIds.length === 0) {
+    return 0;
+  }
+  let total = 0;
+  for (const sid of offering.slotIds) {
+    const slot = rules.timeSlots.find((s) => s.id === sid);
+    const dur = slot ? getSlotDurationHours(slot) : 2;
+    const half = getOfferingSlotHalf(offering, sid);
+    if (half === 'first_hour' || half === 'second_hour') {
+      total += Math.min(dur, 1);
+    } else {
+      total += dur;
+    }
+  }
+  return round2(total);
+}
+
+export function getOfferingRequiredTableHours(
+  offering: Pick<
+    SchedCourseOffering,
+    | 'theoreticalUnits'
+    | 'practicalUnits'
+    | 'practicalType'
+    | 'splitPart'
+    | 'enrolledCount'
+    | 'internshipSessionRole'
+  >,
+  rules: SchedRulesSettings
+): {
+  actualWeeklyHours: number;
+  requiredTableHours: number;
+  isFractionalRounded: boolean;
+} {
+  const bd = calculateOfferingBreakdown(offering, rules);
+  let targetActual = bd.weeklyHours;
+
+  if (offering.practicalType === 'internship' && (offering.splitPart || 'full') !== 'theory') {
+    if (offering.internshipSessionRole === 'school_attendance') {
+      targetActual = round2(Math.min(bd.weeklyHours, 6));
+    } else if (offering.internshipSessionRole === 'university_orientation') {
+      targetActual = round2(Math.min(bd.weeklyHours, 2));
+    }
+  }
+
+  const requiredTableHours =
+    targetActual > 0
+      ? Math.abs(targetActual % 1) > 0.001
+        ? Math.ceil(targetActual)
+        : round2(targetActual)
+      : 0;
+
+  return {
+    actualWeeklyHours: targetActual,
+    requiredTableHours,
+    isFractionalRounded: Math.abs(requiredTableHours - targetActual) > 0.001,
+  };
+}
+
+export interface OfferingCompletenessReport {
+  isComplete: boolean;
+  isEffectivelyInactive: boolean;
+  scheduledHours: number;
+  actualWeeklyHours: number;
+  requiredTableHours: number;
+  hourDiff: number;
+  missingItems: string[];
+  checklist: {
+    hasDayAndSlots: boolean;
+    hoursExact: boolean;
+    hasProfessor: boolean;
+    hasClassroom: boolean;
+    classroomRequired: boolean;
+  };
+}
+
+export function evaluateOfferingCompleteness(
+  offering: Pick<
+    SchedCourseOffering,
+    | 'theoreticalUnits'
+    | 'practicalUnits'
+    | 'practicalType'
+    | 'splitPart'
+    | 'enrolledCount'
+    | 'internshipSessionRole'
+    | 'dayOfWeek'
+    | 'slotIds'
+    | 'slotParts'
+    | 'professorId'
+    | 'classroomId'
+    | 'isDisabled'
+    | 'isProvisional'
+    | 'disabledReason'
+  >,
+  rules: SchedRulesSettings
+): OfferingCompletenessReport {
+  const hasDayAndSlots = Boolean(
+    offering.dayOfWeek && offering.slotIds && offering.slotIds.length > 0
+  );
+  const scheduledHours = getOfferingScheduledHours(offering, rules);
+  const { actualWeeklyHours, requiredTableHours, isFractionalRounded } =
+    getOfferingRequiredTableHours(offering, rules);
+  const hourDiff = round2(scheduledHours - requiredTableHours);
+  const hoursExact = hasDayAndSlots && Math.abs(hourDiff) < 0.01;
+  const hasProfessor = Boolean(offering.professorId && offering.professorId.trim());
+  const classroomRequired = !(
+    offering.practicalType === 'internship' &&
+    offering.internshipSessionRole === 'school_attendance'
+  );
+  const hasClassroom = Boolean(offering.classroomId && offering.classroomId.trim());
+
+  const missingItems: string[] = [];
+
+  if (!hasDayAndSlots) {
+    missingItems.push(
+      `زمان برگزاری (روز و سانس) برای ${requiredTableHours.toLocaleString('fa-IR')} ساعت درس انتخاب نشده است.`
+    );
+  } else if (!hoursExact) {
+    if (hourDiff < 0) {
+      missingItems.push(
+        `ساعت ثبت‌شده (${scheduledHours.toLocaleString('fa-IR')} ساعت) کمتر از ساعت مصوب درس (${requiredTableHours.toLocaleString('fa-IR')} ساعت${
+          isFractionalRounded ? ` معادل ${actualWeeklyHours.toLocaleString('fa-IR')} س واقعی` : ''
+        }) است (${round2(Math.abs(hourDiff)).toLocaleString('fa-IR')} ساعت کمبود).`
+      );
+    } else {
+      missingItems.push(
+        `ساعت ثبت‌شده (${scheduledHours.toLocaleString('fa-IR')} ساعت) بیشتر از ساعت مصوب درس (${requiredTableHours.toLocaleString('fa-IR')} ساعت) است (${round2(hourDiff).toLocaleString('fa-IR')} ساعت مازاد).`
+      );
+    }
+  }
+
+  if (!hasProfessor) {
+    missingItems.push('استاد درس هنوز تعیین نشده است.');
+  }
+  if (classroomRequired && !hasClassroom) {
+    missingItems.push('کلاس فیزیکی درس هنوز تعیین نشده است.');
+  }
+  if (
+    offering.isDisabled &&
+    offering.disabledReason &&
+    !missingItems.some((m) => m.includes(offering.disabledReason!))
+  ) {
+    missingItems.push(offering.disabledReason);
+  }
+
+  const isComplete =
+    hasDayAndSlots &&
+    hoursExact &&
+    hasProfessor &&
+    (!classroomRequired || hasClassroom);
+  const isEffectivelyInactive = Boolean(
+    offering.isDisabled || offering.isProvisional || !isComplete
+  );
+
+  return {
+    isComplete,
+    isEffectivelyInactive,
+    scheduledHours,
+    actualWeeklyHours,
+    requiredTableHours,
+    hourDiff,
+    missingItems,
+    checklist: {
+      hasDayAndSlots,
+      hoursExact,
+      hasProfessor,
+      hasClassroom,
+      classroomRequired,
+    },
+  };
+}
+
+export function isOfferingEffectivelyActive(
+  offering: SchedCourseOffering,
+  rules: SchedRulesSettings
+): boolean {
+  return !evaluateOfferingCompleteness(offering, rules).isEffectivelyInactive;
+}
+
+export function buildRecommendedSlotsForHours(
+  requiredTableHours: number,
+  sortedSlots: SchedTimeSlot[],
+  anchorSlotId?: string
+): { slotIds: string[]; slotParts: Record<string, SchedSlotHalf> } {
+  const ordered = [...sortedSlots].sort((a, b) => a.order - b.order);
+  if (ordered.length === 0 || requiredTableHours <= 0) {
+    return { slotIds: [], slotParts: {} };
+  }
+  let remaining = round2(requiredTableHours);
+  const anchorIdx = anchorSlotId
+    ? Math.max(
+        0,
+        ordered.findIndex((s) => s.id === anchorSlotId)
+      )
+    : 0;
+
+  const chosen = new Map<string, SchedSlotHalf>();
+
+  const tryPick = (slot: SchedTimeSlot) => {
+    if (remaining <= 0.01 || chosen.has(slot.id)) return;
+    const dur = getSlotDurationHours(slot);
+    if (remaining >= dur - 0.01) {
+      chosen.set(slot.id, 'full');
+      remaining = round2(remaining - dur);
+    } else if (dur > 1 && remaining >= 0.99) {
+      chosen.set(slot.id, 'first_hour');
+      remaining = round2(remaining - Math.min(dur, 1));
+    } else {
+      chosen.set(slot.id, 'full');
+      remaining = round2(remaining - dur);
+    }
+  };
+
+  for (let i = anchorIdx; i < ordered.length && remaining > 0.01; i++) {
+    tryPick(ordered[i]);
+  }
+  for (let i = anchorIdx - 1; i >= 0 && remaining > 0.01; i--) {
+    tryPick(ordered[i]);
+  }
+
+  const slotIds = ordered.filter((s) => chosen.has(s.id)).map((s) => s.id);
+  const slotParts: Record<string, SchedSlotHalf> = {};
+  slotIds.forEach((sid) => {
+    slotParts[sid] = chosen.get(sid)!;
+  });
+  return { slotIds, slotParts };
+}
+
+export interface SectionOfferingsSummary {
+  courseCount: number;
+  offeringRecordsCount: number;
+  totalUnits: number;
+  totalWeeklyHours: number;
+  internshipCourseCount: number;
+  internshipRecordsCount: number;
+}
+
+/**
+ * محاسبه تعداد درس، جمع واحد و جمع ساعت برای یک ورودی/شعبه
+ * نکته مهم: در صورتی که برای یک رشته-ورودی-شعبه چندین شعبه کارورزی (مثلاً شعبه ۱ و ۲ کارورزی)
+ * یا تفکیک حضور مدرسه + توجیهی دانشگاه برای همان کارورزی ارائه شود، از آنجا که دانشجو تنها
+ * یکی از آن‌ها را انتخاب می‌کند، کل شعبه‌های آن کارورزی «یک درس» و با واحد واقعی آن محاسبه می‌شوند.
+ */
+export function summarizeSectionOfferings(
+  offerings: SchedCourseOffering[],
+  rules: SchedRulesSettings,
+  options?: { groupByCohortSection?: boolean }
+): SectionOfferingsSummary {
+  const groupByCohortSection = Boolean(options?.groupByCohortSection);
+
+  const nonInternshipCourseKeys = new Set<string>();
+  const nonInternshipSeenPartKeys = new Set<string>();
+  let totalUnits = 0;
+  let totalWeeklyHours = 0;
+
+  const internshipGroups = new Map<
+    string,
+    {
+      maxUnits: number;
+      courseWeeklyHours: number;
+      recordsCount: number;
+      branchHours: Map<string, number>;
+    }
+  >();
+
+  for (const o of offerings) {
+    const normCode = normalizeSchedCode(o.courseCode) || o.courseId || o.courseTitle;
+    const prefix = groupByCohortSection
+      ? `${o.cohortId}::${o.sectionId || 'ALL'}::`
+      : '';
+    const bd = calculateOfferingBreakdown(o, rules);
+
+    if (o.practicalType === 'internship') {
+      const iKey = `${prefix}${normCode}`;
+      let grp = internshipGroups.get(iKey);
+      if (!grp) {
+        grp = {
+          maxUnits: 0,
+          courseWeeklyHours: 0,
+          recordsCount: 0,
+          branchHours: new Map(),
+        };
+        internshipGroups.set(iKey, grp);
+      }
+      grp.recordsCount += 1;
+      grp.maxUnits = Math.max(grp.maxUnits, bd.rawUnits);
+      grp.courseWeeklyHours = Math.max(grp.courseWeeklyHours, bd.weeklyHours);
+      const branchKey = (o.internshipSubGroupLabel || '__default__').trim();
+      const { actualWeeklyHours } = getOfferingRequiredTableHours(o, rules);
+      grp.branchHours.set(
+        branchKey,
+        round2((grp.branchHours.get(branchKey) || 0) + actualWeeklyHours)
+      );
+    } else {
+      const cKey = `${prefix}${normCode}`;
+      nonInternshipCourseKeys.add(cKey);
+      const partKey = `${cKey}::${o.splitPart || 'full'}`;
+      if (!nonInternshipSeenPartKeys.has(partKey)) {
+        nonInternshipSeenPartKeys.add(partKey);
+        totalUnits += bd.rawUnits;
+      }
+      totalWeeklyHours += bd.weeklyHours;
+    }
+  }
+
+  let internshipRecordsCount = 0;
+  for (const grp of internshipGroups.values()) {
+    internshipRecordsCount += grp.recordsCount;
+    totalUnits += grp.maxUnits;
+    const maxBranchHours = Math.max(0, ...Array.from(grp.branchHours.values()));
+    totalWeeklyHours +=
+      maxBranchHours > 0
+        ? Math.min(grp.courseWeeklyHours || maxBranchHours, maxBranchHours)
+        : grp.courseWeeklyHours;
+  }
+
+  return {
+    courseCount: nonInternshipCourseKeys.size + internshipGroups.size,
+    offeringRecordsCount: offerings.length,
+    totalUnits: round2(totalUnits),
+    totalWeeklyHours: round2(totalWeeklyHours),
+    internshipCourseCount: internshipGroups.size,
+    internshipRecordsCount,
+  };
+}
+
 export interface ProfessorLoadSummary {
   professorId: string;
   offeringCount: number;
@@ -340,7 +671,9 @@ export function calculateProfessorLoadSummary(
   offerings: SchedCourseOffering[],
   rules: SchedRulesSettings
 ): ProfessorLoadSummary {
-  const mine = offerings.filter((o) => o.professorId === professorId);
+  const mine = offerings.filter(
+    (o) => o.professorId === professorId && isOfferingEffectivelyActive(o, rules)
+  );
   let rawUnits = 0;
   let theoreticalUnits = 0;
   let practicalUnits = 0;
@@ -418,10 +751,10 @@ export function detectOfferingConflicts(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  if (candidate.isDisabled) {
+  if (candidate.isDisabled || candidate.isProvisional) {
     warnings.push(
       candidate.disabledReason ||
-        'این درس به دلیل حذف استاد غیرفعال و بدون استاد است؛ با تخصیص استاد جدید مجدداً فعال خواهد شد.'
+        'این درس به صورت موقت یا غیرفعال ثبت شده و تا تکمیل اطلاعات در برنامه نهایی و محاسبات لحاظ نمی‌شود.'
     );
   }
 
@@ -433,12 +766,13 @@ export function detectOfferingConflicts(
     }
   }
 
-  // بررسی تداخل زمانی فقط در صورتی که روز و حداقل یک سانس انتخاب شده باشد (دروس غیرفعال تداخل ایجاد نمی‌کنند)
-  if (!candidate.isDisabled && candidate.dayOfWeek && candidate.slotIds.length > 0) {
+  // بررسی تداخل زمانی فقط در صورتی که روز و حداقل یک سانس انتخاب شده باشد (دروس غیرفعال/موقت تداخل ایجاد نمی‌کنند)
+  if (!candidate.isDisabled && !candidate.isProvisional && candidate.dayOfWeek && candidate.slotIds.length > 0) {
     const sameTermOthers = allOfferings.filter(
       (o) =>
         o.id !== candidate.id &&
         !o.isDisabled &&
+        !o.isProvisional &&
         o.termKey === candidate.termKey &&
         o.dayOfWeek === candidate.dayOfWeek &&
         o.slotIds.some(
@@ -614,12 +948,10 @@ export function runSmartAutoScheduler(
       { ...item.course, enrolledCount: item.enrolledCount },
       rules
     );
-    // تخمین تعداد سانس مورد نیاز (هر سانس حدود ۲ ساعت در نظر گرفته می‌شود؛ اگر ۱ یا ۲ ساعت -> ۱ سانس، ۳ یا ۴ ساعت -> ۲ سانس، ۵+ -> ۳ سانس)
-    const slotsNeeded = Math.max(
-      1,
-      Math.min(orderedSlots.length, Math.ceil(bd.weeklyHours / 2))
+    const { requiredTableHours } = getOfferingRequiredTableHours(
+      { ...item.course, enrolledCount: item.enrolledCount, splitPart: 'full' },
+      rules
     );
-
     const prof = item.preferredProfessorId
       ? professors.find((p) => p.id === item.preferredProfessorId)
       : undefined;
@@ -682,18 +1014,26 @@ export function runSmartAutoScheduler(
         continue;
       }
 
-      // انتخاب بلوک متوالی سانس به طول slotsNeeded
-      for (let idx = 0; idx <= sortedSlots.length - slotsNeeded; idx++) {
-        // ترتیب بر اساس timePreference
-        const slotBlock =
-          config.timePreference === 'afternoon'
-            ? sortedSlots.slice(
-                sortedSlots.length - slotsNeeded - idx,
-                sortedSlots.length - idx
-              )
-            : sortedSlots.slice(idx, idx + slotsNeeded);
-        if (slotBlock.length < slotsNeeded) continue;
-        const slotIds = slotBlock.map((s) => s.id);
+      const startIndices =
+        config.timePreference === 'afternoon'
+          ? Array.from({ length: sortedSlots.length }, (_, k) => sortedSlots.length - 1 - k)
+          : Array.from({ length: sortedSlots.length }, (_, k) => k);
+
+      for (const sIdx of startIndices) {
+        const anchorSlot = sortedSlots[sIdx];
+        const { slotIds, slotParts } = buildRecommendedSlotsForHours(
+          requiredTableHours,
+          sortedSlots,
+          anchorSlot.id
+        );
+        if (slotIds.length === 0) continue;
+
+        // اطمینان از تطابق دقیق ساعت‌های انتخابی با ساعت مصوب
+        const allocatedHours = getOfferingScheduledHours(
+          { dayOfWeek: day, slotIds, slotParts },
+          rules
+        );
+        if (Math.abs(allocatedHours - requiredTableHours) >= 0.01) continue;
 
         // بررسی عدم امکان استاد در این روز/سانس
         if (prof) {
@@ -706,14 +1046,13 @@ export function runSmartAutoScheduler(
           }
         }
 
-        // اگر کارورزی بدون نیاز به کلاس فیزیکی است یا اتاق پیدا نشد
         const roomsToTry: Array<SchedClassroom | null> =
           item.course.practicalType === 'internship' && roomCandidates.length === 0
             ? [null]
             : roomCandidates;
 
         for (const room of roomsToTry) {
-          const candidate: SchedCourseOffering = {
+          const candidateDraft: SchedCourseOffering = {
             id: `off_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             termKey: config.termKey,
             courseId: item.course.id,
@@ -738,15 +1077,25 @@ export function runSmartAutoScheduler(
             classroomName: room?.name,
             dayOfWeek: day,
             slotIds,
+            slotParts,
             splitPart: 'full',
             createdById: actor.id,
             createdByName: actor.name,
             createdByRole: actor.role,
             updatedAt: new Date().toISOString(),
           };
+          const comp = evaluateOfferingCompleteness(candidateDraft, rules);
+          const candidate: SchedCourseOffering = comp.isComplete
+            ? candidateDraft
+            : {
+                ...candidateDraft,
+                isProvisional: true,
+                isDisabled: true,
+                disabledReason: comp.missingItems.join(' | '),
+              };
 
           const conflict = detectOfferingConflicts(
-            candidate,
+            candidateDraft,
             workingOfferings,
             classrooms,
             professors
@@ -936,6 +1285,20 @@ export function formatProfessorDegreeFull(
   if (main) return main;
   if (s) return `گرایش ${s}`;
   return '';
+}
+
+export function formatProfessorDepartmentAndField(
+  prof?: Pick<SchedProfessor, 'departmentName' | 'degreeField' | 'degreeSpecialization'> | null
+): string {
+  if (!prof) return '';
+  const parts: string[] = [];
+  const dept = (prof.departmentName || '').trim();
+  const field = (prof.degreeField || '').trim();
+  const spec = (prof.degreeSpecialization || '').trim();
+  if (dept) parts.push(`گروه ${dept}`);
+  if (field) parts.push(`رشته ${field}`);
+  else if (spec) parts.push(`گرایش ${spec}`);
+  return parts.join(' / ');
 }
 
 function normalizeHeaderKey(raw: string): string {
@@ -1429,10 +1792,52 @@ export async function exportJsonRowsToExcel(
   XLSX.writeFile(wb, fileName);
 }
 
+export const SCHED_PAPER_SIZES_MM: Record<
+  SchedPaperSize,
+  { label: string; widthMm: number; heightMm: number }
+> = {
+  A4: { label: 'A4 (210 × 297 mm)', widthMm: 210, heightMm: 297 },
+  A3: { label: 'A3 (297 × 420 mm)', widthMm: 297, heightMm: 420 },
+  A5: { label: 'A5 (148 × 210 mm)', widthMm: 148, heightMm: 210 },
+  Letter: { label: 'Letter (216 × 279 mm)', widthMm: 215.9, heightMm: 279.4 },
+  Legal: { label: 'Legal (216 × 356 mm)', widthMm: 215.9, heightMm: 355.6 },
+  B4: { label: 'B4 (250 × 353 mm)', widthMm: 250, heightMm: 353 },
+  B5: { label: 'B5 (176 × 250 mm)', widthMm: 176, heightMm: 250 },
+};
+
+export interface SchedPrintPageOptions {
+  paperSize?: SchedPaperSize;
+  marginsMm?: {
+    top?: number;
+    right?: number;
+    bottom?: number;
+    left?: number;
+  };
+  scaleZoom?: number;
+  fitSinglePage?: boolean;
+  colorMode?: SchedPrintColorMode;
+  showGridlines?: boolean;
+  repeatHeaderRows?: boolean;
+  avoidRowBreak?: boolean;
+  centerHorizontally?: boolean;
+  centerVertically?: boolean;
+  fontSizePx?: number;
+  cellPaddingPx?: number;
+  hideDefaultHeader?: boolean;
+  customHeaderHtml?: string;
+  customFooterHtml?: string;
+}
+
 /**
  * چاپ امن گزارش‌ها در محیط iFrame بدون استفاده از window.open یا window.alert
+ * همراه با پشتیبانی کامل از تنظیمات برگه مشابه اکسل (اندازه کاغذ، جهت، حاشیه، مقیاس، رنگ، خطوط شبکه)
  */
-export function printSchedHtml(title: string, bodyHtml: string, landscape = true): void {
+export function printSchedHtml(
+  title: string,
+  bodyHtml: string,
+  landscape = true,
+  options?: SchedPrintPageOptions
+): void {
   if (typeof document === 'undefined') return;
   const safeTitle = String(title || 'گزارش برنامه درسی').replace(/[<>]/g, '');
   const iframe = document.createElement('iframe');
@@ -1452,44 +1857,100 @@ export function printSchedHtml(title: string, bodyHtml: string, landscape = true
     return;
   }
 
+  const paperSize: SchedPaperSize = options?.paperSize || 'A4';
+  const mTop = Math.max(0, Math.min(40, options?.marginsMm?.top ?? 10));
+  const mRight = Math.max(0, Math.min(40, options?.marginsMm?.right ?? 10));
+  const mBottom = Math.max(0, Math.min(40, options?.marginsMm?.bottom ?? 10));
+  const mLeft = Math.max(0, Math.min(40, options?.marginsMm?.left ?? 10));
+  const scaleZoom =
+    typeof options?.scaleZoom === 'number' && Number.isFinite(options.scaleZoom)
+      ? Math.max(0.2, Math.min(2, options.scaleZoom))
+      : 1;
+  const showGridlines = options?.showGridlines ?? true;
+  const repeatHeaderRows = options?.repeatHeaderRows ?? true;
+  const avoidRowBreak = options?.avoidRowBreak ?? true;
+  const isGrayscale = options?.colorMode === 'grayscale';
+  const baseFontPx = options?.fontSizePx ?? 11;
+  const cellPadPx = options?.cellPaddingPx ?? 5;
+  const paperSpec = SCHED_PAPER_SIZES_MM[paperSize] || SCHED_PAPER_SIZES_MM.A4;
+  const pageHeightMm = landscape ? paperSpec.widthMm : paperSpec.heightMm;
+  const printableHeightPx = Math.max(200, (pageHeightMm - mTop - mBottom) * 3.7795);
+
+  const headerMarkup = options?.hideDefaultHeader
+    ? options.customHeaderHtml || ''
+    : options?.customHeaderHtml ||
+      `<div class="print-header">
+        <div>
+          <h1>${safeTitle}</h1>
+          <div class="muted">دانشگاه فرهنگیان استان اصفهان • سامانه جامع برنامه‌ریزی درسی</div>
+        </div>
+        <div class="print-meta">
+          تاریخ چاپ: ${new Date().toLocaleDateString('fa-IR')}
+        </div>
+      </div>`;
+
+  const footerMarkup = options?.customFooterHtml || '';
+
   const fullHtml = `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8" />
 <title>${safeTitle}</title>
 <style>
-  @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 10mm; }
-  * { box-sizing: border-box; }
-  body {
-    font-family: Vazirmatn, Tahoma, 'Segoe UI', sans-serif;
-    direction: rtl;
-    color: #0f172a;
-    background: #fff;
+  @page {
+    size: ${paperSize} ${landscape ? 'landscape' : 'portrait'};
+    margin: ${mTop}mm ${mRight}mm ${mBottom}mm ${mLeft}mm;
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  html, body {
     margin: 0;
     padding: 0;
-    font-size: 11px;
-    line-height: 1.5;
+    background: #fff;
+    color: #0f172a;
+    direction: rtl;
+    font-family: Vazirmatn, Tahoma, 'Segoe UI', sans-serif;
+    font-size: ${baseFontPx}px;
+    line-height: 1.45;
+  }
+  .print-root {
+    width: 100%;
+    ${scaleZoom !== 1 ? `zoom: ${scaleZoom};` : ''}
+    ${isGrayscale ? 'filter: grayscale(100%);' : ''}
+    ${options?.centerHorizontally ? 'display: flex; flex-direction: column; align-items: center;' : ''}
+    ${options?.centerVertically ? 'min-height: 98vh; justify-content: center;' : ''}
+  }
+  .print-sheet-inner {
+    width: 100%;
+    ${options?.centerHorizontally ? 'margin-left: auto; margin-right: auto;' : ''}
   }
   .print-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     border-bottom: 2px solid #0f172a;
-    padding-bottom: 8px;
-    margin-bottom: 12px;
+    padding-bottom: 7px;
+    margin-bottom: 10px;
   }
-  .print-header h1 { margin: 0; font-size: 15px; font-weight: 800; }
-  .print-meta { font-size: 10px; color: #475569; text-align: left; }
+  .print-header h1 { margin: 0; font-size: ${Math.max(12, baseFontPx + 4)}px; font-weight: 800; }
+  .print-subtitle { margin-top: 2px; font-size: ${Math.max(9, baseFontPx - 1)}px; color: #334155; }
+  .print-meta { font-size: ${Math.max(8.5, baseFontPx - 1.5)}px; color: #475569; text-align: left; }
   table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 14px;
+    margin-bottom: 10px;
     page-break-inside: auto;
   }
-  tr { page-break-inside: avoid; }
+  thead {
+    display: ${repeatHeaderRows ? 'table-header-group' : 'table-row-group'};
+  }
+  ${avoidRowBreak ? 'tr { page-break-inside: avoid; break-inside: avoid; }' : ''}
   th, td {
-    border: 1px solid #cbd5e1;
-    padding: 5px 6px;
+    border: ${showGridlines ? '1px solid #cbd5e1' : '0'};
+    padding: ${cellPadPx}px ${Math.max(2, cellPadPx)}px;
     vertical-align: top;
     text-align: right;
   }
@@ -1502,27 +1963,44 @@ export function printSchedHtml(title: string, bodyHtml: string, landscape = true
     background: #f8fafc;
     border: 1px solid #cbd5e1;
     border-radius: 4px;
-    padding: 3px 5px;
-    margin-bottom: 4px;
-    font-size: 10px;
+    padding: ${Math.max(1.5, Math.round(cellPadPx * 0.6))}px ${Math.max(2.5, cellPadPx)}px;
+    margin-bottom: 3px;
+    font-size: ${Math.max(7.5, baseFontPx - 1)}px;
   }
   .cell-item:last-child { margin-bottom: 0; }
-  .muted { color: #64748b; font-size: 9.5px; }
+  .muted { color: #64748b; font-size: ${Math.max(7, baseFontPx - 1.5)}px; }
   .mono { font-family: ui-monospace, monospace; direction: ltr; display: inline-block; }
+  .print-footer {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid #cbd5e1;
+    font-size: ${Math.max(8, baseFontPx - 1.5)}px;
+    color: #334155;
+  }
+  .sig-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 14px;
+    text-align: center;
+  }
+  .sig-box {
+    border-top: 1px dashed #94a3b8;
+    padding-top: 6px;
+    font-weight: 700;
+    color: #1e293b;
+  }
   .page-break { page-break-after: always; }
 </style>
 </head>
 <body>
-  <div class="print-header">
-    <div>
-      <h1>${safeTitle}</h1>
-      <div class="muted">دانشگاه فرهنگیان استان اصفهان • سامانه جامع برنامه‌ریزی درسی</div>
-    </div>
-    <div class="print-meta">
-      تاریخ چاپ: ${new Date().toLocaleDateString('fa-IR')}
+  <div class="print-root" id="print-root">
+    <div class="print-sheet-inner" id="print-sheet-inner">
+      ${headerMarkup}
+      ${bodyHtml}
+      ${footerMarkup}
     </div>
   </div>
-  ${bodyHtml}
 </body>
 </html>`;
 
@@ -1540,12 +2018,27 @@ export function printSchedHtml(title: string, bodyHtml: string, landscape = true
 
   window.setTimeout(() => {
     try {
+      if (options?.fitSinglePage) {
+        const rootEl = doc.getElementById('print-root');
+        const innerEl = doc.getElementById('print-sheet-inner');
+        if (rootEl && innerEl) {
+          const curZoom = scaleZoom || 1;
+          const naturalHeight = innerEl.scrollHeight * curZoom;
+          if (naturalHeight > printableHeightPx && naturalHeight > 0) {
+            const heightZoom = Math.max(
+              0.2,
+              curZoom * ((printableHeightPx - 8) / naturalHeight)
+            );
+            rootEl.style.zoom = String(Number(heightZoom.toFixed(3)));
+          }
+        }
+      }
       iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
     } finally {
       cleanup();
     }
-  }, 250);
+  }, 280);
 }
 
 // =========================================================================

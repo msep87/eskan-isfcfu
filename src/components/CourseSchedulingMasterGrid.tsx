@@ -8,6 +8,7 @@ import {
   SchedDayKey,
   SchedMasterColumnStyle,
   SchedMasterGridLayoutSettings,
+  SchedMasterPrintSettings,
   SchedMetaColumnKey,
   SchedProfessor,
   SchedProgramCohort,
@@ -17,28 +18,40 @@ import {
   SchedTimeSlot,
   SchedWorkspaceRole,
 } from '../types';
-import { DEFAULT_MASTER_GRID_LAYOUT } from '../utils/sampleData';
+import {
+  DEFAULT_MASTER_GRID_LAYOUT,
+  DEFAULT_MASTER_PRINT_SETTINGS,
+} from '../utils/sampleData';
 import {
   SCHED_DAY_LABELS,
+  SCHED_PAPER_SIZES_MM,
   SCHED_ROOM_TYPE_LABELS,
   buildTermExamConflictMap,
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
   checkScheduleEditLock,
   detectOfferingConflicts,
+  evaluateOfferingCompleteness,
   exportJsonRowsToExcel,
   formatExamAssignmentShort,
+  formatProfessorDepartmentAndField,
   getExamSettingsForTerm,
   getOfferingSlotHalf,
   getSchedSlotTitle,
   getSlotDurationHours,
   getSlotHalfLabel,
   isCourseEligibleForExam,
+  isOfferingEffectivelyActive,
   normalizePersianText,
   printSchedHtml,
   round2,
+  summarizeSectionOfferings,
 } from '../utils/schedulingUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
+import {
+  CourseSchedulingPrintModal,
+  PrintPreviewSummary,
+} from './CourseSchedulingPrintModal';
 import {
   AlertCircle,
   AlertTriangle,
@@ -64,6 +77,7 @@ import {
   Monitor,
   MoveHorizontal,
   Printer,
+  Plus,
   Redo2,
   RotateCcw,
   Scan,
@@ -108,14 +122,17 @@ interface CourseSchedulingMasterGridProps {
   onRedo: () => void;
   onOpenCommonExamModal: () => void;
   onOpenNewOffering: (opts: {
-    cohortId: string;
+    cohortId?: string;
     sectionId?: string;
-    dayOfWeek: SchedDayKey;
-    slotId: string;
+    dayOfWeek?: SchedDayKey;
+    slotId?: string;
     slotHalf?: SchedSlotHalf;
   }) => void;
   onOpenEditOffering: (offering: SchedCourseOffering) => void;
   onPersistRules?: (next: SchedRulesSettings) => void;
+  onFullscreenContainerChange?: (el: HTMLElement | null) => void;
+  hasExternalModalOpen?: boolean;
+  onCloseExternalModals?: () => void;
   onNotify: (type: 'success' | 'error', text: string) => void;
 }
 
@@ -367,6 +384,9 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   onOpenNewOffering,
   onOpenEditOffering,
   onPersistRules,
+  onFullscreenContainerChange,
+  hasExternalModalOpen = false,
+  onCloseExternalModals,
   onNotify,
 }) => {
   const isSystemAdmin = userRole === 'admin';
@@ -450,6 +470,26 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   };
 
   const [layoutModalOpen, setLayoutModalOpen] = useState(false);
+  const [printModalOpen, setPrintModalOpen] = useState(false);
+  const [printSettings, setPrintSettings] = useState<SchedMasterPrintSettings>(() => ({
+    ...DEFAULT_MASTER_PRINT_SETTINGS,
+    ...(rules.masterPrintSettings || {}),
+    marginsMm: {
+      ...DEFAULT_MASTER_PRINT_SETTINGS.marginsMm,
+      ...(rules.masterPrintSettings?.marginsMm || {}),
+    },
+  }));
+  useEffect(() => {
+    setPrintSettings({
+      ...DEFAULT_MASTER_PRINT_SETTINGS,
+      ...(rules.masterPrintSettings || {}),
+      marginsMm: {
+        ...DEFAULT_MASTER_PRINT_SETTINGS.marginsMm,
+        ...(rules.masterPrintSettings?.marginsMm || {}),
+      },
+    });
+  }, [rules.masterPrintSettings]);
+
   const [layoutTab, setLayoutTab] = useState<'presets_meta' | 'slots_batch' | 'individual_col'>(
     'presets_meta'
   );
@@ -514,6 +554,18 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     window.addEventListener('resize', checkViewport);
     return () => window.removeEventListener('resize', checkViewport);
   }, []);
+
+  // همگام‌سازی کانتینر تمام‌صفحه برای پورتال شدن فرم‌های شناور و اعلان‌ها داخل لایه بومی تمام‌صفحه
+  useEffect(() => {
+    const active = isFullscreen || immersiveFullscreen;
+    onFullscreenContainerChange?.(active ? wrapperRef.current : null);
+  }, [isFullscreen, immersiveFullscreen, onFullscreenContainerChange]);
+
+  useEffect(() => {
+    return () => {
+      onFullscreenContainerChange?.(null);
+    };
+  }, [onFullscreenContainerChange]);
 
   const enterImmersiveFullscreen = async (withLandscape = false) => {
     setImmersiveFullscreen(true);
@@ -661,6 +713,18 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         Boolean(target?.isContentEditable);
 
       if (e.key === 'Escape') {
+        if (hasExternalModalOpen) {
+          onCloseExternalModals?.();
+          return;
+        }
+        if (printModalOpen) {
+          setPrintModalOpen(false);
+          return;
+        }
+        if (layoutModalOpen) {
+          setLayoutModalOpen(false);
+          return;
+        }
         if (commentModalCell) {
           setCommentModalCell(null);
           return;
@@ -679,7 +743,15 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         }
       }
 
-      if (isEditingText || pendingDrop || commentModalCell) return;
+      if (
+        isEditingText ||
+        hasExternalModalOpen ||
+        printModalOpen ||
+        layoutModalOpen ||
+        pendingDrop ||
+        commentModalCell
+      )
+        return;
 
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         const keyLower = e.key.toLowerCase();
@@ -703,6 +775,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   }, [
     isFullscreen,
     immersiveFullscreen,
+    hasExternalModalOpen,
+    onCloseExternalModals,
+    printModalOpen,
+    layoutModalOpen,
     pendingDrop,
     commentModalCell,
     canUndo,
@@ -912,44 +988,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       }
     }
 
-    const result: MasterRowDisplay[] = filtered.map((r) => ({
-      ...r,
-      isFirstMajorBlock: false,
-      majorBlockSpan: 1,
-      isFirstEntryBlock: false,
-      entryBlockSpan: 1,
-      isFirstCohortBlock: false,
-      cohortBlockSpan: 1,
-    }));
-
-    // ادغام ستون رشته برای ردیف‌های مجاور هم‌رشته
-    for (let i = 0; i < result.length; ) {
-      let j = i + 1;
-      while (j < result.length && result[j].majorCode === result[i].majorCode) j++;
-      result[i].isFirstMajorBlock = true;
-      result[i].majorBlockSpan = j - i;
-      i = j;
-    }
-
-    // ادغام ستون ورودی برای ردیف‌های مجاور هم‌ورودی
-    for (let i = 0; i < result.length; ) {
-      let j = i + 1;
-      while (j < result.length && result[j].entryTerm === result[i].entryTerm) j++;
-      result[i].isFirstEntryBlock = true;
-      result[i].entryBlockSpan = j - i;
-      i = j;
-    }
-
-    // ادغام ستون کد/ورودی+رشته (Cohort) برای تعداد کل
-    for (let i = 0; i < result.length; ) {
-      let j = i + 1;
-      while (j < result.length && result[j].cohortId === result[i].cohortId) j++;
-      result[i].isFirstCohortBlock = true;
-      result[i].cohortBlockSpan = j - i;
-      i = j;
-    }
-
-    return result;
+    return buildMasterDisplayRows(filtered);
   }, [
     allRawRows,
     majorFilter,
@@ -964,6 +1003,44 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     focusProfId,
     focusRoomId,
   ]);
+
+  function buildMasterDisplayRows(filtered: MasterRowRaw[]): MasterRowDisplay[] {
+    const result: MasterRowDisplay[] = filtered.map((r) => ({
+      ...r,
+      isFirstMajorBlock: false,
+      majorBlockSpan: 1,
+      isFirstEntryBlock: false,
+      entryBlockSpan: 1,
+      isFirstCohortBlock: false,
+      cohortBlockSpan: 1,
+    }));
+
+    for (let i = 0; i < result.length; ) {
+      let j = i + 1;
+      while (j < result.length && result[j].majorCode === result[i].majorCode) j++;
+      result[i].isFirstMajorBlock = true;
+      result[i].majorBlockSpan = j - i;
+      i = j;
+    }
+
+    for (let i = 0; i < result.length; ) {
+      let j = i + 1;
+      while (j < result.length && result[j].entryTerm === result[i].entryTerm) j++;
+      result[i].isFirstEntryBlock = true;
+      result[i].entryBlockSpan = j - i;
+      i = j;
+    }
+
+    for (let i = 0; i < result.length; ) {
+      let j = i + 1;
+      while (j < result.length && result[j].cohortId === result[i].cohortId) j++;
+      result[i].isFirstCohortBlock = true;
+      result[i].cohortBlockSpan = j - i;
+      i = j;
+    }
+
+    return result;
+  }
 
   // محاسبه روزها و سانس‌های نمایشی (در حالت «نمای کل محدودشده دروس»، روزهای بدون درس مثل پنجشنبه/جمعه و سانس‌های خالی کناری حذف می‌شوند)
   const slotOriginalIndexMap = useMemo(() => {
@@ -1392,17 +1469,29 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       );
     if (sameSlots) return;
 
-    const candidate: SchedCourseOffering = {
+    const candidateBase: SchedCourseOffering = {
       ...dragged,
       dayOfWeek: targetDay,
       slotIds: newSlotIds,
       slotParts: newSlotParts,
+      isDisabled: false,
+      isProvisional: false,
+      disabledReason: undefined,
       updatedById: actor.id,
       updatedByName: actor.name,
       updatedAt: new Date().toISOString(),
     };
+    const movedComp = evaluateOfferingCompleteness(candidateBase, rules);
+    const candidate: SchedCourseOffering = movedComp.isComplete
+      ? candidateBase
+      : {
+          ...candidateBase,
+          isProvisional: true,
+          isDisabled: true,
+          disabledReason: movedComp.missingItems.join(' | ') || dragged.disabledReason,
+        };
 
-    const report = detectOfferingConflicts(candidate, termOfferings, classrooms, professors, rules);
+    const report = detectOfferingConflicts(candidateBase, termOfferings, classrooms, professors, rules);
     const hasProfUnavail = report.warnings.some((w) => w.includes('عدم امکان حضور'));
 
     if (!report.hasHardConflict && !hasProfUnavail) {
@@ -1412,12 +1501,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       );
       onNotify(
         'success',
-        `درس «${dragged.courseTitle}» بدون تداخل به ${SCHED_DAY_LABELS[targetDay]} (${newSlotIds
+        `درس «${dragged.courseTitle}» به ${SCHED_DAY_LABELS[targetDay]} (${newSlotIds
           .map((id) => {
             const idx = sortedSlots.findIndex((s) => s.id === id);
             return idx >= 0 ? getSchedSlotTitle(sortedSlots[idx], idx) : id;
           })
-          .join(' + ')}) منتقل شد.`
+          .join(' + ')}) منتقل شد${movedComp.isComplete ? '.' : ' (وضعیت: موقت / نیازمند تکمیل).'}`
       );
       return;
     }
@@ -1437,7 +1526,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     const prof = professors.find((p) => p.id === pendingDrop.pickedProfessorId);
     const room = classrooms.find((r) => r.id === pendingDrop.pickedClassroomId);
 
-    const candidate: SchedCourseOffering = {
+    const candidateDraft: SchedCourseOffering = {
       ...pendingDrop.originalOffering,
       dayOfWeek: pendingDrop.targetDay,
       slotIds: pendingDrop.targetSlotIds,
@@ -1447,14 +1536,24 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       professorName: prof?.fullName,
       classroomId: room?.id,
       classroomName: room?.name,
-      isDisabled: prof ? false : pendingDrop.originalOffering.isDisabled,
-      disabledReason: prof ? undefined : pendingDrop.originalOffering.disabledReason,
+      isDisabled: false,
+      isProvisional: false,
+      disabledReason: undefined,
       updatedById: actor.id,
       updatedByName: actor.name,
       updatedAt: new Date().toISOString(),
     };
+    const compAfterFix = evaluateOfferingCompleteness(candidateDraft, rules);
+    const candidate: SchedCourseOffering = compAfterFix.isComplete
+      ? candidateDraft
+      : {
+          ...candidateDraft,
+          isProvisional: true,
+          isDisabled: true,
+          disabledReason: compAfterFix.missingItems.join(' | '),
+        };
 
-    const report = detectOfferingConflicts(candidate, termOfferings, classrooms, professors, rules);
+    const report = detectOfferingConflicts(candidateDraft, termOfferings, classrooms, professors, rules);
 
     const professorOptions = professors
       .filter((p) => p.isActive)
@@ -1564,43 +1663,224 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     onNotify('success', 'یادداشت روی سلول ثبت شد.');
   };
 
-  // چاپ ماتریس جامع A4 افقی با اعمال عرض ستون‌ها و جهت عمودی/افقی تنظیم‌شده
-  const handlePrintMasterGrid = () => {
+  // محاسبه محدوده ردیف‌ها و روزها و ضریب مقیاس برای چاپ و پیش‌نمایش اکسل‌مانند
+  const resolvePrintScopeAndScale = (cfg: SchedMasterPrintSettings) => {
+    let targetDays: SchedDayKey[];
+    let targetRows: MasterRowDisplay[];
+
+    if (cfg.printScope === 'all_rows_and_days') {
+      targetDays = activeDays;
+      targetRows = buildMasterDisplayRows(allRawRows);
+    } else if (cfg.printScope === 'populated_only') {
+      const popDays = activeDays.filter((d) =>
+        termOfferings.some((o) => o.dayOfWeek === d && o.slotIds.length > 0)
+      );
+      targetDays = popDays.length > 0 ? popDays : activeDays;
+      const popRaw = allRawRows.filter((r) =>
+        termOfferings.some(
+          (o) => o.dayOfWeek && o.slotIds.length > 0 && doesOfferingBelongToRow(o, r)
+        )
+      );
+      targetRows = buildMasterDisplayRows(popRaw.length > 0 ? popRaw : allRawRows);
+    } else {
+      targetDays = displayedDays;
+      targetRows = displayRows;
+    }
+
+    const useLayout = cfg.useLayoutWidthsAndOrientations;
+    const wMajor = useLayout ? metaColWidths.major : 110;
+    const wEntry = useLayout ? metaColWidths.entry : 56;
+    const wTotal = useLayout ? metaColWidths.totalStudents : 48;
+    const wSec = useLayout ? metaColWidths.section : 88;
+    const metaTotalW = wMajor + wEntry + wTotal + wSec;
+
+    let slotsSumW = 0;
+    targetDays.forEach((d) => {
+      displayedSlots.forEach((s) => {
+        slotsSumW += useLayout ? getSlotColumnStyle(d, s.id).width : 145;
+      });
+    });
+    const totalTableWidthPx = Math.max(300, metaTotalW + slotsSumW);
+
+    const spec = SCHED_PAPER_SIZES_MM[cfg.paperSize] || SCHED_PAPER_SIZES_MM.A4;
+    const isLand = cfg.orientation === 'landscape';
+    const pageWmm = isLand ? spec.heightMm : spec.widthMm;
+    const pageHmm = isLand ? spec.widthMm : spec.heightMm;
+    const printableWpx = Math.max(
+      180,
+      (pageWmm - cfg.marginsMm.left - cfg.marginsMm.right) * 3.7795
+    );
+    const printableHpx = Math.max(
+      180,
+      (pageHmm - cfg.marginsMm.top - cfg.marginsMm.bottom) * 3.7795
+    );
+
+    let scaleZoom = 1;
+    if (cfg.scalingMode === 'custom_percent') {
+      scaleZoom = Math.max(0.25, Math.min(1.8, (cfg.scalePercent || 100) / 100));
+    } else if (cfg.scalingMode === 'fit_n_pages_wide') {
+      const pagesW = Math.max(1, cfg.fitPagesWide || 1);
+      scaleZoom = Math.min(1, Math.max(0.2, (printableWpx * pagesW - 8) / totalTableWidthPx));
+    } else {
+      scaleZoom = Math.min(1, Math.max(0.2, (printableWpx - 8) / totalTableWidthPx));
+    }
+
+    const estTableHpx = (targetRows.length * 52 + 95) * scaleZoom;
+    if (cfg.scalingMode === 'fit_1_page' && estTableHpx > printableHpx) {
+      scaleZoom = Math.max(0.2, scaleZoom * ((printableHpx - 12) / estTableHpx));
+    }
+
+    const pagesW =
+      cfg.scalingMode === 'fit_n_pages_wide'
+        ? Math.max(1, cfg.fitPagesWide || 1)
+        : Math.max(1, Math.ceil((totalTableWidthPx * scaleZoom) / printableWpx));
+    const pagesH =
+      cfg.scalingMode === 'fit_1_page'
+        ? 1
+        : Math.max(1, Math.ceil(estTableHpx / printableHpx));
+
+    return {
+      targetDays,
+      targetRows,
+      wMajor,
+      wEntry,
+      wTotal,
+      wSec,
+      totalTableWidthPx,
+      scaleZoom,
+      computedScalePercent: Math.round(scaleZoom * 100),
+      estimatedPages: Math.max(1, pagesW * pagesH),
+    };
+  };
+
+  const printPreviewSummary = useMemo<PrintPreviewSummary>(() => {
+    const resolved = resolvePrintScopeAndScale(printSettings);
+    const sampleRows = resolved.targetRows.slice(0, 5).map((r) => {
+      const cells: string[] = [];
+      resolved.targetDays.slice(0, 3).forEach((d) => {
+        displayedSlots.slice(0, 2).forEach((s) => {
+          const item = termOfferings.find(
+            (o) =>
+              doesOfferingBelongToRow(o, r) &&
+              o.dayOfWeek === d &&
+              o.slotIds.includes(s.id)
+          );
+          cells.push(item ? item.courseTitle : '');
+        });
+      });
+      return {
+        major: r.majorName,
+        entry: r.entryTerm,
+        total: r.totalCohortStudents.toLocaleString('fa-IR'),
+        section: r.sectionName,
+        cells,
+      };
+    });
+    return {
+      rowsCount: resolved.targetRows.length,
+      daysCount: resolved.targetDays.length,
+      slotsCount: displayedSlots.length,
+      totalTableWidthPx: resolved.totalTableWidthPx,
+      computedScalePercent: resolved.computedScalePercent,
+      estimatedPages: resolved.estimatedPages,
+      dayLabels: resolved.targetDays.map((d) => SCHED_DAY_LABELS[d]),
+      slotHeaders: displayedSlots.map((s, idx) =>
+        getSchedSlotTitle(s, slotOriginalIndexMap.get(s.id) ?? idx)
+      ),
+      sampleRows,
+    };
+  }, [
+    printSettings,
+    displayedDays,
+    displayedSlots,
+    displayRows,
+    allRawRows,
+    activeDays,
+    termOfferings,
+    liveLayout,
+    metaColWidths,
+    slotOriginalIndexMap,
+  ]);
+
+  // چاپ ماتریس جامع با اعمال کامل تنظیمات اکسل‌مانند صفحه، حاشیه، مقیاس، رنگ، سرصفحه و محتوا
+  const executeMasterGridPrint = (cfg: SchedMasterPrintSettings) => {
+    const resolved = resolvePrintScopeAndScale(cfg);
+    const useLayout = cfg.useLayoutWidthsAndOrientations;
     const mMajor = liveLayout.metaColumns.major;
     const mEntry = liveLayout.metaColumns.entry;
     const mTotal = liveLayout.metaColumns.totalStudents;
     const mSec = liveLayout.metaColumns.section;
 
+    const DAY_PRINT_BG = [
+      '#e0f2fe',
+      '#d1fae5',
+      '#e0e7ff',
+      '#fef3c7',
+      '#ede9fe',
+      '#ffe4e6',
+      '#ccfbf1',
+    ];
+    const MAJOR_PRINT_BG = [
+      '#fae8ff',
+      '#e0f2fe',
+      '#d1fae5',
+      '#fef3c7',
+      '#e0e7ff',
+      '#ffe4e6',
+      '#ccfbf1',
+      '#ede9fe',
+    ];
+
     const wrapPrintSpan = (txt: string, ori?: SchedTextOrientation, fit?: SchedCellTextFit) => {
-      const oriCss = getOrientationPrintCss(ori);
+      const oriCss = useLayout ? getOrientationPrintCss(ori) : '';
       const fitCss =
         fit === 'shrink'
-          ? 'font-size:8.5px;line-height:1.15;'
+          ? `font-size:${Math.max(7, cfg.fontSizePx - 1.5)}px;line-height:1.15;`
           : fit === 'clip'
           ? 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;'
-          : 'white-space:normal;word-break:break-word;line-height:1.2;';
+          : 'white-space:normal;word-break:break-word;line-height:1.22;';
       return `<div style="${oriCss}${fitCss}">${txt}</div>`;
     };
 
-    const dayThs = displayedDays
-      .map((d) => `<th colspan="${displayedSlots.length}">${escapeHtml(SCHED_DAY_LABELS[d])}</th>`)
+    const dayThs = resolved.targetDays
+      .map((d, dIdx) => {
+        const bg = cfg.includeColors
+          ? `background:${DAY_PRINT_BG[dIdx % DAY_PRINT_BG.length]};`
+          : '';
+        const borderCss = cfg.boldDayBorders ? 'border-right:2.5px solid #0f172a;' : '';
+        return `<th colspan="${displayedSlots.length}" style="${bg}${borderCss}font-size:${cfg.fontSizePx + 1}px;">${escapeHtml(
+          SCHED_DAY_LABELS[d]
+        )}</th>`;
+      })
       .join('');
-    const slotThs = displayedDays
-      .flatMap((day) =>
-        displayedSlots.map((s) => {
+
+    const slotThs = resolved.targetDays
+      .flatMap((day, dIdx) =>
+        displayedSlots.map((s, sIdx) => {
           const origIdx = slotOriginalIndexMap.get(s.id) ?? 0;
           const cStyle = getSlotColumnStyle(day, s.id);
-          const content = `${escapeHtml(getSchedSlotTitle(s, origIdx))}<div class="mono muted">${escapeHtml(s.startTime)}-${escapeHtml(s.endTime)}</div>`;
-          return `<th style="width:${cStyle.width}px;font-size:9px;">${wrapPrintSpan(
+          const colW = useLayout ? cStyle.width : 145;
+          const bg = cfg.includeColors
+            ? `background:${DAY_PRINT_BG[dIdx % DAY_PRINT_BG.length]}66;`
+            : '';
+          const firstBorder =
+            cfg.boldDayBorders && sIdx === 0 ? 'border-right:2.5px solid #0f172a;' : '';
+          const content = `${escapeHtml(getSchedSlotTitle(s, origIdx))}<div class="mono muted">${escapeHtml(
+            s.startTime
+          )}-${escapeHtml(s.endTime)}</div>`;
+          return `<th style="width:${colW}px;${bg}${firstBorder}font-size:${Math.max(
+            7.5,
+            cfg.fontSizePx - 1
+          )}px;">${wrapPrintSpan(
             content,
-            cStyle.headerOrientation,
+            useLayout ? cStyle.headerOrientation : 'horizontal',
             'wrap'
           )}</th>`;
         })
       )
       .join('');
 
-    const bodyRows = displayRows
+    const bodyRows = resolved.targetRows
       .map((row) => {
         const majorHtml = wrapPrintSpan(
           escapeHtml(row.majorName),
@@ -1622,45 +1902,56 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           mSec.bodyOrientation,
           mSec.textFit
         );
+        const majorBg = cfg.includeColors
+          ? `background:${MAJOR_PRINT_BG[row.majorColorIdx % MAJOR_PRINT_BG.length]};`
+          : '';
 
         const prefixCells =
           rowGrouping === 'by_entry'
             ? [
                 row.isFirstEntryBlock
-                  ? `<td rowspan="${row.entryBlockSpan}" class="mono" style="width:${metaColWidths.entry}px;font-weight:800;vertical-align:middle;text-align:center;">${entryHtml}</td>`
+                  ? `<td rowspan="${row.entryBlockSpan}" class="mono" style="width:${resolved.wEntry}px;font-weight:800;vertical-align:middle;text-align:center;">${entryHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${metaColWidths.major}px;font-weight:800;vertical-align:middle;text-align:center;">${majorHtml}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wMajor}px;${majorBg}font-weight:800;vertical-align:middle;text-align:center;">${majorHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${metaColWidths.totalStudents}px;vertical-align:middle;text-align:center;">${totalHtml}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wTotal}px;vertical-align:middle;text-align:center;">${totalHtml}</td>`
                   : '',
-                `<td style="width:${metaColWidths.section}px;text-align:center;font-weight:700;">${sectionHtml}</td>`,
+                `<td style="width:${resolved.wSec}px;text-align:center;font-weight:700;">${sectionHtml}</td>`,
               ].join('')
             : [
                 row.isFirstMajorBlock
-                  ? `<td rowspan="${row.majorBlockSpan}" style="width:${metaColWidths.major}px;font-weight:800;vertical-align:middle;text-align:center;">${majorHtml}</td>`
+                  ? `<td rowspan="${row.majorBlockSpan}" style="width:${resolved.wMajor}px;${majorBg}font-weight:800;vertical-align:middle;text-align:center;">${majorHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" class="mono" style="width:${metaColWidths.entry}px;font-weight:700;vertical-align:middle;text-align:center;">${entryHtml}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" class="mono" style="width:${resolved.wEntry}px;font-weight:700;vertical-align:middle;text-align:center;">${entryHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${metaColWidths.totalStudents}px;vertical-align:middle;text-align:center;">${totalHtml}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wTotal}px;vertical-align:middle;text-align:center;">${totalHtml}</td>`
                   : '',
-                `<td style="width:${metaColWidths.section}px;text-align:center;font-weight:700;">${sectionHtml}</td>`,
+                `<td style="width:${resolved.wSec}px;text-align:center;font-weight:700;">${sectionHtml}</td>`,
               ].join('');
 
-        const scheduleCells = displayedDays
-          .flatMap((day) =>
-            displayedSlots.map((slot) => {
+        const scheduleCells = resolved.targetDays
+          .flatMap((day, dIdx) =>
+            displayedSlots.map((slot, sIdx) => {
               const cStyle = getSlotColumnStyle(day, slot.id);
+              const colW = useLayout ? cStyle.width : 145;
+              const firstBorder =
+                cfg.boldDayBorders && sIdx === 0 ? 'border-right:2.5px solid #0f172a;' : '';
+              const zebraBg =
+                cfg.includeColors && dIdx % 2 === 1 ? 'background:#f8fafc;' : '';
               const items = termOfferings.filter(
                 (o) =>
                   doesOfferingBelongToRow(o, row) &&
                   o.dayOfWeek === day &&
                   o.slotIds.includes(slot.id)
               );
-              if (items.length === 0) return `<td style="width:${cStyle.width}px;"></td>`;
+              const commentsHere = cfg.includeComments
+                ? commentsByCellKey.get(`${row.rowKey}|${day}|${slot.id}`) || []
+                : [];
+
               const htmlItems = items
                 .map((o) => {
                   const half = getOfferingSlotHalf(o, slot.id);
@@ -1680,15 +1971,60 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       : o.internshipSessionRole === 'university_orientation'
                       ? ' [توجیهی دانشگاه]'
                       : '';
-                  const examTag =
-                    isCourseEligibleForExam(o) && o.examDayId && o.examSlotId
-                      ? ` | آزمون: ${formatExamAssignmentShort(o, examSettings)}`
+                  const subParts: string[] = [];
+                  if (cfg.includeProfessor) {
+                    subParts.push(escapeHtml(o.professorName || 'بدون استاد'));
+                  }
+                  if (cfg.includeClassroom && o.classroomName) {
+                    subParts.push(escapeHtml(o.classroomName));
+                  }
+                  if (
+                    cfg.includeExamInfo &&
+                    isCourseEligibleForExam(o) &&
+                    o.examDayId &&
+                    o.examSlotId
+                  ) {
+                    subParts.push(`آزمون: ${escapeHtml(formatExamAssignmentShort(o, examSettings))}`);
+                  }
+                  if (cfg.includeSharedTag && o.sharedWithTargets && o.sharedWithTargets.length > 0) {
+                    subParts.push(
+                      o.cohortId !== row.cohortId
+                        ? `مشترک از ${escapeHtml(o.ownerMajorName)}`
+                        : `مشترک (${o.sharedWithTargets.length})`
+                    );
+                  }
+                  const subLine =
+                    subParts.length > 0
+                      ? `<div class="muted">${subParts.join(' · ')}</div>`
                       : '';
-                  const inner = `<strong>${escapeHtml(o.courseTitle)}${escapeHtml(internTag)}${escapeHtml(roleTag)}${escapeHtml(halfTag)}</strong><div class="muted">${escapeHtml(o.professorName || 'بدون استاد')}${o.classroomName ? ` · ${escapeHtml(o.classroomName)}` : ''}${escapeHtml(examTag)}</div>`;
-                  return `<div class="cell-item">${wrapPrintSpan(inner, cStyle.bodyOrientation, cStyle.textFit)}</div>`;
+                  const compPrint = evaluateOfferingCompleteness(o, rules);
+                  const provTag = compPrint.isEffectivelyInactive ? ' [موقت/ناقص]' : '';
+                  const inner = `<strong>${escapeHtml(o.courseTitle)}${escapeHtml(internTag)}${escapeHtml(roleTag)}${escapeHtml(halfTag)}${escapeHtml(provTag)}</strong>${subLine}`;
+                  const itemBg = cfg.includeColors
+                    ? compPrint.isEffectivelyInactive
+                      ? 'background:#fef3c7;border-color:#f59e0b;border-style:dashed;opacity:0.85;'
+                      : o.practicalType === 'internship'
+                      ? 'background:#f5f3ff;border-color:#ddd6fe;'
+                      : o.cohortId !== row.cohortId
+                      ? 'background:#eef2ff;border-color:#c7d2fe;'
+                      : 'background:#f0fdfa;border-color:#99f6e4;'
+                    : 'background:#ffffff;border-color:#cbd5e1;';
+                  return `<div class="cell-item" style="${itemBg}">${wrapPrintSpan(
+                    inner,
+                    useLayout ? cStyle.bodyOrientation : 'horizontal',
+                    cStyle.textFit
+                  )}</div>`;
                 })
                 .join('');
-              return `<td style="width:${cStyle.width}px;">${htmlItems}</td>`;
+
+              const cmtHtml =
+                commentsHere.length > 0
+                  ? `<div class="muted" style="margin-top:2px;border-top:1px dashed #cbd5e1;padding-top:1px;">💬 ${commentsHere
+                      .map((c) => escapeHtml(c.text))
+                      .join(' | ')}</div>`
+                  : '';
+
+              return `<td style="width:${colW}px;${firstBorder}${zebraBg}">${htmlItems}${cmtHtml}</td>`;
             })
           )
           .join('');
@@ -1698,16 +2034,16 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       .join('');
 
     const html = `
-      <table style="table-layout:fixed;">
+      <table style="table-layout:fixed;width:${resolved.totalTableWidthPx}px;">
         <thead>
           <tr>
             ${
               rowGrouping === 'by_entry'
-                ? `<th rowspan="2" style="width:${metaColWidths.entry}px;">${wrapPrintSpan('ورودی', mEntry.headerOrientation, 'wrap')}</th><th rowspan="2" style="width:${metaColWidths.major}px;">${wrapPrintSpan('رشته', mMajor.headerOrientation, 'wrap')}</th>`
-                : `<th rowspan="2" style="width:${metaColWidths.major}px;">${wrapPrintSpan('رشته', mMajor.headerOrientation, 'wrap')}</th><th rowspan="2" style="width:${metaColWidths.entry}px;">${wrapPrintSpan('ورودی', mEntry.headerOrientation, 'wrap')}</th>`
+                ? `<th rowspan="2" style="width:${resolved.wEntry}px;">${wrapPrintSpan('ورودی', mEntry.headerOrientation, 'wrap')}</th><th rowspan="2" style="width:${resolved.wMajor}px;">${wrapPrintSpan('رشته', mMajor.headerOrientation, 'wrap')}</th>`
+                : `<th rowspan="2" style="width:${resolved.wMajor}px;">${wrapPrintSpan('رشته', mMajor.headerOrientation, 'wrap')}</th><th rowspan="2" style="width:${resolved.wEntry}px;">${wrapPrintSpan('ورودی', mEntry.headerOrientation, 'wrap')}</th>`
             }
-            <th rowspan="2" style="width:${metaColWidths.totalStudents}px;">${wrapPrintSpan('تعداد', mTotal.headerOrientation, 'wrap')}</th>
-            <th rowspan="2" style="width:${metaColWidths.section}px;">${wrapPrintSpan('شعبه / گروه', mSec.headerOrientation, 'wrap')}</th>
+            <th rowspan="2" style="width:${resolved.wTotal}px;">${wrapPrintSpan('تعداد', mTotal.headerOrientation, 'wrap')}</th>
+            <th rowspan="2" style="width:${resolved.wSec}px;">${wrapPrintSpan('شعبه / گروه', mSec.headerOrientation, 'wrap')}</th>
             ${dayThs}
           </tr>
           <tr>${slotThs}</tr>
@@ -1715,7 +2051,58 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         <tbody>${bodyRows}</tbody>
       </table>
     `;
-    printSchedHtml(`برنامه جامع و فراگیر ترم ${activeTerm}`, html, true);
+
+    const printTitle = cfg.customTitle.trim() || `برنامه جامع و فراگیر ترم ${activeTerm}`;
+    const customHeaderHtml = cfg.showHeaderBanner
+      ? `<div class="print-header">
+          <div>
+            <h1>${escapeHtml(printTitle)}</h1>
+            ${
+              cfg.customSubtitle.trim()
+                ? `<div class="print-subtitle">${escapeHtml(cfg.customSubtitle.trim())}</div>`
+                : `<div class="muted">دانشگاه فرهنگیان استان اصفهان • سامانه جامع برنامه‌ریزی درسی</div>`
+            }
+          </div>
+          <div class="print-meta">
+            ${cfg.showPrintDate ? `<div>تاریخ چاپ: ${new Date().toLocaleDateString('fa-IR')}</div>` : ''}
+            ${cfg.showActorName ? `<div>تنظیم/چاپ: ${escapeHtml(actor.name)}</div>` : ''}
+          </div>
+        </div>`
+      : '';
+
+    const customFooterHtml =
+      cfg.footerNote.trim() || cfg.showSignatureBlock
+        ? `<div class="print-footer">
+            ${cfg.footerNote.trim() ? `<div>${escapeHtml(cfg.footerNote.trim())}</div>` : ''}
+            ${
+              cfg.showSignatureBlock
+                ? `<div class="sig-grid">
+                    <div class="sig-box">تأیید مدیر گروه آموزشی</div>
+                    <div class="sig-box">تأیید معاونت آموزشی</div>
+                    <div class="sig-box">تأیید ریاست پردیس</div>
+                  </div>`
+                : ''
+            }
+          </div>`
+        : '';
+
+    printSchedHtml(printTitle, html, cfg.orientation === 'landscape', {
+      paperSize: cfg.paperSize,
+      marginsMm: cfg.marginsMm,
+      scaleZoom: resolved.scaleZoom,
+      fitSinglePage: cfg.scalingMode === 'fit_1_page',
+      colorMode: cfg.colorMode,
+      showGridlines: cfg.showGridlines,
+      repeatHeaderRows: cfg.repeatHeaderRows,
+      avoidRowBreak: cfg.avoidRowBreak,
+      centerHorizontally: cfg.centerHorizontally,
+      centerVertically: cfg.centerVertically,
+      fontSizePx: cfg.fontSizePx,
+      cellPaddingPx: cfg.cellPaddingPx,
+      hideDefaultHeader: !cfg.showHeaderBanner,
+      customHeaderHtml,
+      customFooterHtml,
+    });
   };
 
   // خروجی اکسل ماتریس جامع
@@ -1835,6 +2222,30 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 </span>
                 <button
                   type="button"
+                  onClick={() => {
+                    setImmersiveHudOpen(false);
+                    onOpenNewOffering({});
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black inline-flex items-center gap-1 cursor-pointer"
+                  title="ثبت درس جدید در برنامه (یا مستقیماً روی هر سلول خالی کلیک کنید)"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>ثبت درس جدید</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImmersiveHudOpen(false);
+                    onOpenCommonExamModal();
+                  }}
+                  className="px-2 py-1 rounded-lg bg-indigo-500/80 hover:bg-indigo-500 text-white font-bold inline-flex items-center gap-1 cursor-pointer"
+                  title="مدیریت امتحانات مشترک و عمومی"
+                >
+                  <CalendarClock className="w-3.5 h-3.5" />
+                  <span>امتحانات</span>
+                </button>
+                <button
+                  type="button"
                   disabled={!canUndo}
                   onClick={onUndo}
                   className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-35 font-bold inline-flex items-center gap-1 cursor-pointer"
@@ -1880,7 +2291,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 {isSystemAdmin && (
                   <button
                     type="button"
-                    onClick={() => setLayoutModalOpen(true)}
+                    onClick={() => {
+                      setImmersiveHudOpen(false);
+                      setLayoutModalOpen(true);
+                    }}
                     className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-black inline-flex items-center gap-1 cursor-pointer"
                     title="تنظیمات اکسل ستون‌ها، پهنا، عمودی/افقی و Wrap/Shrink"
                   >
@@ -1888,6 +2302,18 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                     <span>تنظیمات ستون‌ها</span>
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImmersiveHudOpen(false);
+                    setPrintModalOpen(true);
+                  }}
+                  className="px-2 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white font-bold inline-flex items-center gap-1 cursor-pointer"
+                  title="تنظیمات کامل چاپ (اندازه کاغذ، حاشیه، افقی/عمودی، مقیاس)"
+                >
+                  <Printer className="w-3.5 h-3.5 text-teal-300" />
+                  <span>چاپ</span>
+                </button>
                 <div className="inline-flex items-center bg-white/10 rounded-lg p-0.5">
                   <button
                     type="button"
@@ -2176,11 +2602,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
             <button
               type="button"
-              onClick={handlePrintMasterGrid}
+              onClick={() => setPrintModalOpen(true)}
               className="px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              title="تنظیمات پیشرفته چاپ اکسل‌مانند (اندازه کاغذ، افقی/عمودی، حاشیه، مقیاس و پیش‌نمایش)"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>چاپ</span>
+              <span>چاپ و تنظیمات صفحه</span>
             </button>
             <button
               type="button"
@@ -2352,11 +2779,15 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 className="min-w-[220px] px-2.5 py-1 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 font-bold"
               >
                 <option value="">-- انتخاب استاد برای مشاهده کل برنامه --</option>
-                {professors.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.fullName} (کد {p.professorCode})
-                  </option>
-                ))}
+                {professors.map((p) => {
+                  const df = formatProfessorDepartmentAndField(p);
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {p.fullName} (کد {p.professorCode}
+                      {df ? ` · ${df}` : ''})
+                    </option>
+                  );
+                })}
               </select>
             )}
 
@@ -2700,6 +3131,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   userRole !== 'admin' &&
                   Boolean(rules.programLocks?.lockedMajorCodes?.includes(row.majorCode));
                 const isDraggingThisRow = draggingState?.rowKey === row.rowKey;
+                const rowActiveOfferings = termOfferings.filter(
+                  (o) => doesOfferingBelongToRow(o, row) && isOfferingEffectivelyActive(o, rules)
+                );
+                const rowSummary = summarizeSectionOfferings(rowActiveOfferings, rules);
 
                 const majorCfg = liveLayout.metaColumns.major;
                 const entryCfg = liveLayout.metaColumns.entry;
@@ -2905,7 +3340,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       </td>
                     )}
 
-                    {/* ستون ۴: شعبه و تعداد نفرات شعبه */}
+                    {/* ستون ۴: شعبه و تعداد نفرات شعبه (+ خلاصه دروس/واحد با احتساب شعب کارورزی به عنوان ۱ درس) */}
                     <td
                       style={{
                         right: `${stickyOffsets.fourthRight}px`,
@@ -2913,16 +3348,27 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         minWidth: `${metaColWidths.section}px`,
                         maxWidth: `${metaColWidths.section}px`,
                       }}
+                      title={`${row.sectionName} · ${row.sectionStudentCount.toLocaleString('fa-IR')} نفر${
+                        rowSummary.courseCount > 0
+                          ? ` · ${rowSummary.courseCount.toLocaleString('fa-IR')} درس (${rowSummary.totalUnits.toLocaleString('fa-IR')} واحد / ${rowSummary.totalWeeklyHours.toLocaleString('fa-IR')} ساعت)`
+                          : ''
+                      }${
+                        rowSummary.internshipRecordsCount > rowSummary.internshipCourseCount
+                          ? ' — شعبه‌های کارورزی این ردیف معادل ۱ درس برای دانشجو محاسبه شده است.'
+                          : ''
+                      }`}
                       className="sticky z-20 border-y border-r border-slate-300 dark:border-slate-700 border-l-[3px] border-l-slate-900 dark:border-l-slate-300 p-1 text-center align-middle bg-slate-50 dark:bg-slate-900 overflow-hidden"
                     >
                       {renderMetaInner(
                         row.sectionName,
-                        `${row.sectionStudentCount.toLocaleString('fa-IR')} نفر`,
+                        metaColWidths.section >= 86 && rowSummary.courseCount > 0
+                          ? `${row.sectionStudentCount.toLocaleString('fa-IR')} نفر · ${rowSummary.courseCount.toLocaleString('fa-IR')} درس (${rowSummary.totalUnits.toLocaleString('fa-IR')} و)`
+                          : `${row.sectionStudentCount.toLocaleString('fa-IR')} نفر`,
                         secCfg,
                         metaColWidths.section,
                         1,
                         11,
-                        'text-[9.5px] font-mono text-slate-500 tabular-nums'
+                        'text-[9px] font-mono text-slate-500 tabular-nums'
                       )}
                     </td>
 
@@ -2994,6 +3440,9 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             professors,
                             rules
                           );
+                          const comp = evaluateOfferingCompleteness(o, rules);
+                          const isProvisionalOrDisabled = comp.isEffectivelyInactive;
+                          const hoverIssues = [...comp.missingItems, ...conf.errors];
                           const examWarns = examConflictMap.get(o.id) || [];
                           const examLabel =
                             isCourseEligibleForExam(o) && o.examDayId && o.examSlotId
@@ -3032,6 +3481,13 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                               ? 'truncate'
                               : 'whitespace-normal break-words leading-tight';
 
+                          const cardTooltip =
+                            hoverIssues.length > 0
+                              ? `وضعیت موقت / نواقص درس:\n• ${hoverIssues.join('\n• ')}\n(کلیک کنید تا تکمیل و نهایی شود)`
+                              : editable
+                              ? 'کلیک برای ویرایش یا انتخاب و کشیدن در همین ردیف برای جابجایی'
+                              : 'فقط مشاهده (تغییرات مسدود شده یا متعلق به گروه دیگر است)';
+
                           return (
                             <div
                               key={`${o.id}_${slot.id}`}
@@ -3056,18 +3512,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                 e.stopPropagation();
                                 onOpenEditOffering(o);
                               }}
-                              title={
-                                editable
-                                  ? 'کلیک برای ویرایش یا انتخاب و کشیدن در همین ردیف برای جابجایی'
-                                  : 'فقط مشاهده (تغییرات مسدود شده یا متعلق به گروه دیگر است)'
-                              }
+                              title={cardTooltip}
                               className={`group/card relative rounded-lg border ${
                                 isCompactCards ? 'p-1' : 'p-1.5'
-                              } text-right transition select-none overflow-hidden ${
+                              } text-right transition select-none ${
                                 editable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
                               } ${
-                                o.isDisabled
-                                  ? 'bg-slate-100/90 dark:bg-slate-800/70 border-dashed border-amber-500 text-slate-600 dark:text-slate-300 opacity-85'
+                                isProvisionalOrDisabled
+                                  ? 'bg-amber-50/90 dark:bg-amber-950/40 border-dashed border-2 border-amber-400 dark:border-amber-500 text-amber-950 dark:text-amber-100 opacity-75'
                                   : conf.hasHardConflict
                                   ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-400 text-rose-950 dark:text-rose-100'
                                   : matchedFocus
@@ -3081,11 +3533,15 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             >
                               <div
                                 style={getOrientationStyleObj(slotBodyOri)}
-                                className={isVertSlotBody ? 'mx-auto max-h-[120px]' : ''}
+                                className={`overflow-hidden ${isVertSlotBody ? 'mx-auto max-h-[120px]' : ''}`}
                               >
-                                {o.isDisabled && (
-                                  <div className="mb-0.5 px-1 py-0.2 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 text-[8px] font-black inline-block">
-                                    غیرفعال · بدون استاد
+                                {isProvisionalOrDisabled && (
+                                  <div className="mb-0.5 px-1 py-0.5 rounded bg-amber-200/80 dark:bg-amber-900/60 text-amber-950 dark:text-amber-100 text-[8px] font-black inline-flex items-center gap-0.5">
+                                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                                    <span>
+                                      موقت / غیرفعال ({comp.scheduledHours.toLocaleString('fa-IR')}/
+                                      {comp.requiredTableHours.toLocaleString('fa-IR')} س)
+                                    </span>
                                   </div>
                                 )}
                                 <div className="flex items-start justify-between gap-1">
@@ -3149,7 +3605,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                   >
                                     محل: مدرسه
                                   </div>
-                                ) : null}
+                                ) : (
+                                  <div
+                                    style={{ fontSize: `${Math.max(7, subPx - 0.5)}px` }}
+                                    className={`text-amber-700 dark:text-amber-400 font-bold ${textFitClass}`}
+                                  >
+                                    بدون کلاس
+                                  </div>
+                                )}
 
                                 {o.sharedWithTargets && o.sharedWithTargets.length > 0 && (
                                   <div
@@ -3191,13 +3654,31 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                   </div>
                                 )}
 
-                                {conf.hasHardConflict && (
+                                {!isProvisionalOrDisabled && conf.hasHardConflict && (
                                   <div className="text-[8.5px] font-black text-rose-600 dark:text-rose-400 flex items-center gap-0.5 mt-0.5">
                                     <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
                                     <span>تداخل!</span>
                                   </div>
                                 )}
                               </div>
+
+                              {/* تولتیپ شناور نمایش خطاها و نواقص هنگام قرار گرفتن نشانگر ماوس روی کارت */}
+                              {hoverIssues.length > 0 && (
+                                <div className="hidden group-hover/card:block absolute z-[95] right-0 top-full mt-1 w-64 p-2.5 rounded-xl bg-slate-900 text-white text-[10px] shadow-2xl border border-amber-400/80 pointer-events-none space-y-1">
+                                  <div className="font-black text-amber-300 flex items-center gap-1">
+                                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                    <span>وضعیت موقت / نواقص درس:</span>
+                                  </div>
+                                  <ul className="list-disc pr-4 space-y-0.5 text-slate-100 leading-relaxed">
+                                    {hoverIssues.map((msg, idx) => (
+                                      <li key={idx}>{msg}</li>
+                                    ))}
+                                  </ul>
+                                  <div className="text-[9px] text-amber-200/90 pt-0.5 border-t border-slate-700">
+                                    برای تکمیل ساعت، استاد و کلاس کلیک کنید.
+                                  </div>
+                                </div>
+                              )}
 
                               {/* دکمه‌های سریع روی کارت هنگام هاور */}
                               <div
@@ -3249,6 +3730,9 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                           );
                         };
 
+                        const isEmptyDirectClickable =
+                          !showSplitView && fullItems.length === 0 && !cellLock.locked;
+
                         return (
                           <td
                             key={`${row.rowKey}_${day}_${slot.id}`}
@@ -3256,6 +3740,11 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                               width: `${slotColWidth}px`,
                               minWidth: `${slotColWidth}px`,
                               maxWidth: `${slotColWidth}px`,
+                            }}
+                            onClick={() => {
+                              if (isEmptyDirectClickable) {
+                                handleOpenCellFromGrid(row, day, slot.id, 'full');
+                              }
                             }}
                             onDragOver={(e) => {
                               if (!isDraggingThisRow || cellLock.locked) return;
@@ -3276,6 +3765,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             className={`group/cell relative border border-slate-300 dark:border-slate-700 ${
                               isCompactCards ? 'p-0.5' : 'p-1'
                             } align-top overflow-hidden transition ${
+                              isEmptyDirectClickable ? 'cursor-pointer' : ''
+                            } ${
                               isFirstSlotOfDay
                                 ? 'border-r-[3px] border-r-slate-800 dark:border-r-slate-300'
                                 : ''
@@ -3364,6 +3855,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                 <div className="grid grid-cols-2 gap-1 min-h-[62px]">
                                   {/* نیمه سمت راست = ساعت اول */}
                                   <div
+                                    onClick={(e) => {
+                                      if (!cellLock.locked && firstHourItems.length === 0) {
+                                        e.stopPropagation();
+                                        handleOpenCellFromGrid(row, day, slot.id, 'first_hour');
+                                      }
+                                    }}
                                     onDragOver={(e) => {
                                       if (!isDraggingThisRow || cellLock.locked) return;
                                       e.preventDefault();
@@ -3378,6 +3875,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                       handleDropOnCell(e, row, day, slot.id, 'first_hour')
                                     }
                                     className={`rounded-lg border p-0.5 flex flex-col gap-1 transition ${
+                                      !cellLock.locked && firstHourItems.length === 0
+                                        ? 'cursor-pointer hover:border-teal-400'
+                                        : ''
+                                    } ${
                                       dragOverTargetKey === rightDropKey
                                         ? 'border-teal-500 bg-teal-100/80 dark:bg-teal-900/50'
                                         : 'border-dashed border-slate-200 dark:border-slate-700'
@@ -3390,9 +3891,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                     {!cellLock.locked && (
                                       <button
                                         type="button"
-                                        onClick={() =>
-                                          handleOpenCellFromGrid(row, day, slot.id, 'first_hour')
-                                        }
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenCellFromGrid(row, day, slot.id, 'first_hour');
+                                        }}
                                         className="mt-auto w-full py-0.5 rounded text-[9px] font-bold text-slate-400 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
                                       >
                                         + ۱س راست
@@ -3402,6 +3904,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
                                   {/* نیمه سمت چپ = ساعت دوم */}
                                   <div
+                                    onClick={(e) => {
+                                      if (!cellLock.locked && secondHourItems.length === 0) {
+                                        e.stopPropagation();
+                                        handleOpenCellFromGrid(row, day, slot.id, 'second_hour');
+                                      }
+                                    }}
                                     onDragOver={(e) => {
                                       if (!isDraggingThisRow || cellLock.locked) return;
                                       e.preventDefault();
@@ -3416,6 +3924,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                       handleDropOnCell(e, row, day, slot.id, 'second_hour')
                                     }
                                     className={`rounded-lg border p-0.5 flex flex-col gap-1 transition ${
+                                      !cellLock.locked && secondHourItems.length === 0
+                                        ? 'cursor-pointer hover:border-teal-400'
+                                        : ''
+                                    } ${
                                       dragOverTargetKey === leftDropKey
                                         ? 'border-teal-500 bg-teal-100/80 dark:bg-teal-900/50'
                                         : 'border-dashed border-slate-200 dark:border-slate-700'
@@ -3428,9 +3940,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                     {!cellLock.locked && (
                                       <button
                                         type="button"
-                                        onClick={() =>
-                                          handleOpenCellFromGrid(row, day, slot.id, 'second_hour')
-                                        }
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenCellFromGrid(row, day, slot.id, 'second_hour');
+                                        }}
                                         className="mt-auto w-full py-0.5 rounded text-[9px] font-bold text-slate-400 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
                                       >
                                         + ۱س چپ
@@ -3446,10 +3959,11 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                 {!cellLock.locked && (
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      handleOpenCellFromGrid(row, day, slot.id, 'full')
-                                    }
-                                    className="w-full py-0.5 rounded border border-dashed border-transparent hover:border-slate-300 dark:hover:border-slate-600 text-[9px] text-slate-400 opacity-0 group-hover/row:opacity-100 hover:text-teal-600 transition cursor-pointer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenCellFromGrid(row, day, slot.id, 'full');
+                                    }}
+                                    className="w-full py-0.5 rounded border border-dashed border-transparent hover:border-slate-300 dark:hover:border-slate-600 text-[9px] text-slate-400 opacity-55 sm:opacity-0 sm:group-hover/cell:opacity-100 hover:text-teal-600 transition cursor-pointer"
                                     title="افزودن مورد جدید (یا شعبه کارورزی) به این سانس"
                                   >
                                     + افزودن مورد دیگر
@@ -3458,25 +3972,29 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                               </div>
                             ) : cellLock.locked ? (
                               /* حالت ۳ الف: سلول قفل‌شده */
-                              <div className="min-h-[58px] flex items-center justify-center text-slate-300 dark:text-slate-600">
+                              <div className="min-h-[58px] h-full flex items-center justify-center text-slate-300 dark:text-slate-600">
                                 <Lock className="w-3.5 h-3.5 opacity-40" />
                               </div>
                             ) : (
-                              /* حالت ۳ ب: سلول خالی — کلیک برای ثبت کل سانس یا تفکیک ساعت اول/دوم */
-                              <div className="group/empty min-h-[60px] flex flex-col justify-between rounded-lg p-0.5">
+                              /* حالت ۳ ب: سلول خالی — کلیک در هر نقطه سلول برای ثبت کل سانس یا تفکیک ساعت اول/دوم */
+                              <div className="group/empty min-h-[60px] h-full flex flex-col justify-between rounded-lg p-0.5">
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    handleOpenCellFromGrid(row, day, slot.id, 'full')
-                                  }
-                                  className="flex-1 w-full rounded-lg border border-dashed border-transparent group-hover/empty:border-teal-300 dark:group-hover/empty:border-teal-700 flex items-center justify-center text-[10px] font-bold text-slate-300 dark:text-slate-700 group-hover/empty:text-teal-600 transition cursor-pointer"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenCellFromGrid(row, day, slot.id, 'full');
+                                  }}
+                                  className="flex-1 w-full min-h-[36px] rounded-lg border border-dashed border-transparent group-hover/cell:border-teal-300 dark:group-hover/cell:border-teal-700 flex items-center justify-center text-[10px] font-bold text-slate-300 dark:text-slate-700 group-hover/cell:text-teal-600 transition cursor-pointer"
                                 >
-                                  <span className="opacity-0 group-hover/empty:opacity-100">
+                                  <span className="opacity-0 group-hover/cell:opacity-100">
                                     + ثبت درس ({slotDuration <= 1 ? 'تک‌ساعت' : 'کل سانس'})
                                   </span>
                                 </button>
                                 {slotDuration > 1 && (
-                                  <div className="hidden group-hover/empty:grid grid-cols-2 gap-1 pt-0.5">
+                                  <div
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="hidden group-hover/cell:grid grid-cols-2 gap-1 pt-0.5"
+                                  >
                                     <button
                                       type="button"
                                       onClick={() =>
@@ -3513,7 +4031,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
       {/* مودال ثبت و مشاهده کامنت‌های هر سلول */}
       {commentModalCell && (
-        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-5 border border-amber-300 dark:border-amber-800 shadow-2xl space-y-4 max-h-[88vh] overflow-y-auto text-xs">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
@@ -3616,7 +4134,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
       {/* مودال بررسی و رفع تداخل هنگام جابجایی درس با Drag & Drop */}
       {pendingDrop && pendingResolutionEval && (
-        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/65 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/65 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full p-5 border border-rose-300 dark:border-rose-800 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto text-xs">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
@@ -3707,13 +4225,17 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
               >
                 <option value="">-- بدون استاد --</option>
-                {pendingResolutionEval.professorOptions.map((opt) => (
-                  <option key={opt.prof.id} value={opt.prof.id}>
-                    {opt.isFree ? '✅ آزاد' : '⚠️ تداخل/محدودیت'} — {opt.prof.fullName} (کد{' '}
-                    {opt.prof.professorCode} · بار: {opt.load.equivalentUnits} معادل)
-                    {opt.issue ? ` [${opt.issue}]` : ''}
-                  </option>
-                ))}
+                {pendingResolutionEval.professorOptions.map((opt) => {
+                  const df = formatProfessorDepartmentAndField(opt.prof);
+                  return (
+                    <option key={opt.prof.id} value={opt.prof.id}>
+                      {opt.isFree ? '✅ آزاد' : '⚠️ تداخل/محدودیت'} — {opt.prof.fullName} (کد{' '}
+                      {opt.prof.professorCode}
+                      {df ? ` · ${df}` : ''} · بار: {opt.load.equivalentUnits} معادل)
+                      {opt.issue ? ` [${opt.issue}]` : ''}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -3819,7 +4341,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
       {/* نشانگر شناور زنده هنگام تغییر عرض ستون با ماوس */}
       {resizeIndicator && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[110] px-4 py-2 rounded-2xl bg-slate-900/95 text-white border border-teal-400/60 shadow-2xl text-xs font-black flex items-center gap-2 pointer-events-none">
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[130] px-4 py-2 rounded-2xl bg-slate-900/95 text-white border border-teal-400/60 shadow-2xl text-xs font-black flex items-center gap-2 pointer-events-none">
           <MoveHorizontal className="w-4 h-4 text-teal-400" />
           <span>{resizeIndicator.label}:</span>
           <span className="font-mono text-teal-300 text-sm" dir="ltr">
@@ -3835,7 +4357,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
       {/* مودال تنظیمات اکسل‌مانند نمایش ستون‌ها و سلول‌های جدول (فقط مدیر سامانه) */}
       {layoutModalOpen && isSystemAdmin && (
-        <div className="fixed inset-0 z-[98] flex items-center justify-center bg-black/65 backdrop-blur-sm p-3 sm:p-4">
+        <div className="fixed inset-0 z-[118] flex items-center justify-center bg-black/65 backdrop-blur-sm p-3 sm:p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-4xl w-full p-5 border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto text-xs">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-start gap-2.5">
@@ -4787,6 +5309,35 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           </div>
         </div>
       )}
+
+      {/* مودال تنظیمات کامل چاپ مشابه اکسل + پیش‌نمایش زنده */}
+      <CourseSchedulingPrintModal
+        isOpen={printModalOpen}
+        onClose={() => setPrintModalOpen(false)}
+        settings={printSettings}
+        onChangeSettings={setPrintSettings}
+        onResetSettings={() => {
+          setPrintSettings({ ...DEFAULT_MASTER_PRINT_SETTINGS });
+          onNotify('success', 'تنظیمات چاپ به حالت پیش‌فرض بازنشانی شد.');
+        }}
+        canSaveDefault={isSystemAdmin && Boolean(onPersistRules)}
+        onSaveAsDefault={(nextCfg) => {
+          if (onPersistRules) {
+            onPersistRules({
+              ...rules,
+              masterPrintSettings: nextCfg,
+            });
+            onNotify('success', 'تنظیمات چاپ به‌عنوان پیش‌فرض سامانه ذخیره شد.');
+          }
+        }}
+        onPrintNow={(effective) => {
+          setPrintSettings(effective);
+          executeMasterGridPrint(effective);
+        }}
+        activeTerm={activeTerm}
+        actorName={actor.name}
+        previewMeta={printPreviewSummary}
+      />
     </div>
   );
 };

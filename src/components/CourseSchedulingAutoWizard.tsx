@@ -13,6 +13,7 @@ import {
   SCHED_PRACTICAL_TYPE_LABELS,
   SmartSchedulerResult,
   calculateOfferingBreakdown,
+  formatProfessorDepartmentAndField,
   getSchedSlotTitle,
   normalizeSchedCode,
   round2,
@@ -423,11 +424,15 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
                                     <option value="">بدون تعیین قبلی</option>
                                     {professors
                                       .filter((p) => p.isActive !== false)
-                                      .map((p) => (
-                                        <option key={p.id} value={p.id}>
-                                          {p.fullName} ({p.professorCode})
-                                        </option>
-                                      ))}
+                                      .map((p) => {
+                                        const deptField = formatProfessorDepartmentAndField(p);
+                                        return (
+                                          <option key={p.id} value={p.id}>
+                                            {p.fullName} ({p.professorCode})
+                                            {deptField ? ` · ${deptField}` : ''}
+                                          </option>
+                                        );
+                                      })}
                                   </select>
                                 </td>
                                 <td className="p-2.5">
@@ -507,11 +512,15 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
                 onChange={(e) => setFocusProfessorId(e.target.value)}
                 className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold min-w-[220px]"
               >
-                {professors.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.fullName} (کد {p.professorCode})
-                  </option>
-                ))}
+                {professors.map((p) => {
+                  const deptField = formatProfessorDepartmentAndField(p);
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {p.fullName} (کد {p.professorCode})
+                      {deptField ? ` · ${deptField}` : ''}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -785,14 +794,36 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
                         .map((sid) => {
                           const idx = sortedSlots.findIndex((s) => s.id === sid);
                           const sl = idx >= 0 ? sortedSlots[idx] : undefined;
-                          return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : sid;
+                          const half = o.slotParts?.[sid];
+                          const halfSuffix =
+                            half === 'first_hour'
+                              ? ' [۱س اول]'
+                              : half === 'second_hour'
+                              ? ' [۱س دوم]'
+                              : '';
+                          return sl
+                            ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})${halfSuffix}`
+                            : sid;
                         })
                         .join(' + ');
                       return (
-                        <tr key={o.id}>
+                        <tr
+                          key={o.id}
+                          title={o.disabledReason || undefined}
+                          className={
+                            o.isProvisional || o.isDisabled
+                              ? 'bg-amber-50/75 dark:bg-amber-950/25'
+                              : ''
+                          }
+                        >
                           <td className="p-2.5">
                             <div className="font-bold text-slate-900 dark:text-white">{o.courseTitle}</div>
                             <div className="text-[11px] text-slate-500 font-mono">{o.courseCode}</div>
+                            {(o.isProvisional || o.isDisabled) && (
+                              <div className="text-[10px] font-black text-amber-800 dark:text-amber-300 mt-0.5">
+                                ⚠ موقت / نیازمند تکمیل ({o.disabledReason || 'استاد یا کلاس'})
+                              </div>
+                            )}
                           </td>
                           <td className="p-2.5 text-[11px] font-semibold">
                             {o.ownerMajorName} ({o.entryTerm}){o.sectionName ? ` · ${o.sectionName}` : ''}

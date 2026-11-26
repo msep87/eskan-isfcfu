@@ -11,6 +11,7 @@ import {
   exportJsonRowsToExcel,
   getProfessorAvailabilityWindowStatus,
   getSchedSlotTitle,
+  isOfferingEffectivelyActive,
   printSchedHtml,
 } from '../utils/schedulingUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
@@ -85,11 +86,11 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
     () =>
       allOfferings.filter(
         (o) =>
-          !o.isDisabled &&
+          isOfferingEffectivelyActive(o, rules) &&
           o.professorId === professor.id &&
           (selectedTerm === 'all' || o.termKey === selectedTerm)
       ),
-    [allOfferings, professor.id, selectedTerm]
+    [allOfferings, rules, professor.id, selectedTerm]
   );
 
   const loadSummary = useMemo(

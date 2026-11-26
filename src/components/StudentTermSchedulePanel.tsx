@@ -20,9 +20,11 @@ import {
   getOfferingSlotHalf,
   getSchedSlotTitle,
   getSlotHalfLabel,
+  isOfferingEffectivelyActive,
   normalizePersianText,
   printSchedHtml,
   round2,
+  summarizeSectionOfferings,
 } from '../utils/schedulingUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
 import {
@@ -148,11 +150,11 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
     () =>
       allOfferings.filter(
         (o) =>
-          !o.isDisabled &&
+          isOfferingEffectivelyActive(o, rules) &&
           o.termKey === selectedTerm &&
           doesOfferingMatchStudentScope(o, student.fieldOfStudy, student.entryTerm, scope)
       ),
-    [allOfferings, selectedTerm, student.fieldOfStudy, student.entryTerm, scope]
+    [allOfferings, rules, selectedTerm, student.fieldOfStudy, student.entryTerm, scope]
   );
 
   const availableMajors = useMemo(() => {
@@ -243,23 +245,17 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
   }, [scopeOfferings, majorFilter, entryFilter, sectionFilter, searchQuery]);
 
   const summaryStats = useMemo(() => {
-    const uniqueCourseCodes = new Set<string>();
-    let totalHours = 0;
-    let totalUnits = 0;
     const daysUsed = new Set<SchedDayKey>();
     for (const o of filteredOfferings) {
-      const bd = calculateOfferingBreakdown(o, rules);
-      totalHours += bd.weeklyHours;
-      if (!uniqueCourseCodes.has(`${o.courseCode}_${o.splitPart}`)) {
-        totalUnits += bd.rawUnits;
-      }
-      uniqueCourseCodes.add(`${o.courseCode}_${o.splitPart}`);
       if (o.dayOfWeek) daysUsed.add(o.dayOfWeek);
     }
+    const secSummary = summarizeSectionOfferings(filteredOfferings, rules, {
+      groupByCohortSection: true,
+    });
     return {
-      offeringsCount: filteredOfferings.length,
-      totalUnits: round2(totalUnits),
-      totalHours: round2(totalHours),
+      offeringsCount: secSummary.courseCount,
+      totalUnits: secSummary.totalUnits,
+      totalHours: secSummary.totalWeeklyHours,
       activeDaysCount: daysUsed.size,
     };
   }, [filteredOfferings, rules]);

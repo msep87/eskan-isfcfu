@@ -13964,6 +13964,19 @@ export const Storage = {
               : {},
         };
       })(),
+      masterPrintSettings: (() => {
+        const def = DEFAULT_SCHED_RULES.masterPrintSettings!;
+        const s = stored.masterPrintSettings;
+        if (!s || typeof s !== 'object') return def;
+        return {
+          ...def,
+          ...s,
+          marginsMm: {
+            ...def.marginsMm,
+            ...(s.marginsMm || {}),
+          },
+        };
+      })(),
     };
   },
   setSchedRules: (rules: SchedRulesSettings): boolean =>

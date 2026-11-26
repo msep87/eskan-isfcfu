@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   SchedCellComment,
   SchedClassroom,
@@ -38,6 +39,7 @@ import {
   buildDefaultProfessorAvailabilityWindowDates,
   buildDefaultTimeSlots,
   buildExamDaysSequence,
+  buildRecommendedSlotsForHours,
   buildSevenToEightSlot,
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
@@ -48,9 +50,11 @@ import {
   deactivateOfferingsForRemovedProfessors,
   detectOfferingConflicts,
   downloadSchedExcelTemplate,
+  evaluateOfferingCompleteness,
   exportJsonRowsToExcel,
   formatExamAssignmentShort,
   formatProfessorDegreeFull,
+  formatProfessorDepartmentAndField,
   getExamSettingsForTerm,
   getOfferingSlotHalf,
   getProfessorAvailabilityWindowStatus,
@@ -59,6 +63,7 @@ import {
   getSlotDurationHours,
   getSlotHalfLabel,
   isCourseEligibleForExam,
+  isOfferingEffectivelyActive,
   normalizeSchedCode,
   parseDecimalUnits,
   parseSchedExcelFile,
@@ -185,6 +190,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [newTermInput, setNewTermInput] = useState('');
   const [showNewTermBox, setShowNewTermBox] = useState(false);
   const [commonExamModalOpen, setCommonExamModalOpen] = useState(false);
+  const [masterFullscreenPortalEl, setMasterFullscreenPortalEl] = useState<HTMLElement | null>(
+    null
+  );
 
   const [nowTick, setNowTick] = useState<Date>(() => new Date());
   useEffect(() => {
@@ -616,11 +624,16 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const overviewStats = useMemo(() => {
     let totalHours = 0;
     let hardConflicts = 0;
-    const activeTermOfferings = termOfferings.filter((o) => !o.isDisabled);
+    const activeTermOfferings = termOfferings.filter((o) =>
+      isOfferingEffectivelyActive(o, rules)
+    );
     const disabledOfferingsCount = termOfferings.length - activeTermOfferings.length;
     for (const o of activeTermOfferings) {
       totalHours += calculateOfferingBreakdown(o, rules).weeklyHours;
-      if (detectOfferingConflicts(o, activeTermOfferings, classrooms, professors).hasHardConflict) {
+      if (
+        detectOfferingConflicts(o, activeTermOfferings, classrooms, professors, rules)
+          .hasHardConflict
+      ) {
         hardConflicts++;
       }
     }
@@ -1513,13 +1526,64 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
   const candidateConflictReport = useMemo(() => {
     if (!candidateOffering) return { hasHardConflict: false, errors: [], warnings: [] };
-    return detectOfferingConflicts(candidateOffering, termOfferings, classrooms, professors, rules);
+    // در پیش‌نمایش فرم، حتی اگر درس قبلاً موقت بوده باشد، تداخل‌های فعال را بررسی کن تا کاربر قبل از ثبت نهایی آگاه شود
+    const probe: SchedCourseOffering = {
+      ...candidateOffering,
+      isDisabled: false,
+      isProvisional: false,
+    };
+    return detectOfferingConflicts(probe, termOfferings, classrooms, professors, rules);
   }, [candidateOffering, termOfferings, classrooms, professors, rules]);
 
   const candidateBreakdown = useMemo(() => {
     if (!candidateOffering) return null;
     return calculateOfferingBreakdown(candidateOffering, rules);
   }, [candidateOffering, rules]);
+
+  const candidateCompleteness = useMemo(() => {
+    if (!candidateOffering) return null;
+    return evaluateOfferingCompleteness(
+      {
+        ...candidateOffering,
+        isDisabled: false,
+        isProvisional: false,
+      },
+      rules
+    );
+  }, [candidateOffering, rules]);
+
+  const isMultiInternshipMode = Boolean(
+    !editingOffId &&
+      selectedOffCourse?.practicalType === 'internship' &&
+      offInternshipGroups.length > 0
+  );
+
+  const multiInternshipMissingProfessors = useMemo(() => {
+    if (!isMultiInternshipMode) return false;
+    return offInternshipGroups.some((g) => !(g.professorId || offProfessorId));
+  }, [isMultiInternshipMode, offInternshipGroups, offProfessorId]);
+
+  const canFinalizeModal = useMemo(() => {
+    if (!candidateOffering || !candidateCompleteness) return false;
+    if (modalLockStatus.locked) return false;
+    if (isMultiInternshipMode) {
+      return (
+        candidateCompleteness.checklist.hasDayAndSlots &&
+        candidateCompleteness.checklist.hoursExact &&
+        (!candidateCompleteness.checklist.classroomRequired ||
+          candidateCompleteness.checklist.hasClassroom) &&
+        !multiInternshipMissingProfessors
+      );
+    }
+    return candidateCompleteness.isComplete && !candidateConflictReport.hasHardConflict;
+  }, [
+    candidateOffering,
+    candidateCompleteness,
+    modalLockStatus.locked,
+    isMultiInternshipMode,
+    multiInternshipMissingProfessors,
+    candidateConflictReport.hasHardConflict,
+  ]);
 
   const handleAddSharedTarget = () => {
     if (!selectedOffCourse || !sharePickerCohortId) return;
@@ -1564,21 +1628,16 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setSharePickerSectionId('');
   };
 
-  const handleSaveOffering = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!candidateOffering) return;
+  const commitOfferingModalSave = (mode: 'final' | 'provisional') => {
+    if (!candidateOffering || !candidateCompleteness) return;
 
     if (modalLockStatus.locked) {
       notify('error', modalLockStatus.reason || 'امکان ذخیره تغییر در این برنامه مسدود شده است.');
       return;
     }
 
-    // حالت ثبت چند شعبه کارورزی (مثلاً تقسیم ۲۴ نفر به دو شعبه ۱۲ نفره یا ۲۳ نفر به ۱۲+۱۱)
-    if (
-      !editingOffId &&
-      selectedOffCourse?.practicalType === 'internship' &&
-      offInternshipGroups.length > 0
-    ) {
+    // حالت ثبت چند شعبه کارورزی (مثلاً تقسیم ۲۴ نفر به دو شعبه ۱۲ نفره)
+    if (isMultiInternshipMode && selectedOffCourse) {
       const created: SchedCourseOffering[] = [];
       let workingTerm = [...termOfferings];
       for (let i = 0; i < offInternshipGroups.length; i++) {
@@ -1595,7 +1654,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           },
           rules
         );
-        const item: SchedCourseOffering = {
+        const draftItem: SchedCourseOffering = {
           ...candidateOffering,
           id: `off_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
           enrolledCount: Math.max(1, grp.studentCount || 1),
@@ -1604,55 +1663,112 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           professorId: grpProf?.id,
           professorCode: grpProf?.professorCode,
           professorName: grpProf?.fullName,
+          isDisabled: false,
+          isProvisional: false,
+          disabledReason: undefined,
           updatedById: actor.id,
           updatedByName: actor.name,
           updatedAt: new Date().toISOString(),
         };
-        const rep = detectOfferingConflicts(item, workingTerm, classrooms, professors, rules);
-        if (rep.hasHardConflict) {
-          notify('error', `تداخل در ${item.internshipSubGroupLabel}: ${rep.errors[0]}`);
+        const grpComp = evaluateOfferingCompleteness(draftItem, rules);
+        if (mode === 'final' && !grpComp.isComplete) {
+          notify(
+            'error',
+            `برای ثبت نهایی «${draftItem.internshipSubGroupLabel}» نواقص زیر را برطرف کنید یا از «ثبت موقت» استفاده نمایید: ${grpComp.missingItems[0]}`
+          );
           return;
         }
-        created.push(item);
-        workingTerm.push(item);
+        if (mode === 'final') {
+          const rep = detectOfferingConflicts(draftItem, workingTerm, classrooms, professors, rules);
+          if (rep.hasHardConflict) {
+            notify('error', `تداخل در ${draftItem.internshipSubGroupLabel}: ${rep.errors[0]}`);
+            return;
+          }
+        }
+        const finalItem: SchedCourseOffering =
+          mode === 'provisional' || !grpComp.isComplete
+            ? {
+                ...draftItem,
+                isProvisional: true,
+                isDisabled: true,
+                disabledReason: grpComp.missingItems.join(' | ') || 'ثبت موقت (ناقص)',
+              }
+            : draftItem;
+
+        created.push(finalItem);
+        workingTerm.push(finalItem);
       }
       commitOfferingsWithHistory(
         [...offerings, ...created],
-        `ثبت ${created.length} شعبه کارورزی «${selectedOffCourse.title}»`
+        `${mode === 'provisional' ? 'ثبت موقت' : 'ثبت نهایی'} ${created.length} شعبه کارورزی «${selectedOffCourse.title}»`
       );
       notify(
         'success',
-        `${created.length} شعبه کارورزی برای درس «${selectedOffCourse.title}» با موفقیت ثبت شد.`
+        mode === 'provisional'
+          ? `${created.length} شعبه کارورزی برای درس «${selectedOffCourse.title}» به صورت موقت و غیرفعال ذخیره شد.`
+          : `${created.length} شعبه کارورزی برای درس «${selectedOffCourse.title}» با موفقیت ثبت نهایی شد.`
       );
       setOffModalOpen(false);
       return;
     }
 
-    if (candidateConflictReport.hasHardConflict) {
-      notify('error', 'به دلیل وجود تداخل زمانی قطعی امکان ذخیره وجود ندارد. تداخل را برطرف نمایید.');
-      return;
+    if (mode === 'final') {
+      if (!candidateCompleteness.isComplete) {
+        notify(
+          'error',
+          `برای ثبت نهایی درس باید ساعت ارائه، استاد و کلاس تکمیل باشد: ${candidateCompleteness.missingItems.join(' • ')}`
+        );
+        return;
+      }
+      if (candidateConflictReport.hasHardConflict) {
+        notify('error', 'به دلیل وجود تداخل زمانی قطعی امکان ثبت نهایی وجود ندارد. تداخل را برطرف نمایید.');
+        return;
+      }
     }
+
+    const isProvSave = mode === 'provisional' || !candidateCompleteness.isComplete;
     const saved: SchedCourseOffering = {
       ...candidateOffering,
       id: editingOffId || `off_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      isProvisional: isProvSave ? true : undefined,
+      isDisabled: isProvSave ? true : undefined,
+      disabledReason: isProvSave
+        ? candidateCompleteness.missingItems.join(' | ') || 'ثبت موقت در انتظار تکمیل'
+        : undefined,
       updatedById: actor.id,
       updatedByName: actor.name,
       updatedAt: new Date().toISOString(),
     };
+
     if (editingOffId) {
       commitOfferingsWithHistory(
         offerings.map((o) => (o.id === editingOffId ? saved : o)),
-        `ویرایش درس «${saved.courseTitle}»`
+        `${isProvSave ? 'ذخیره موقت' : 'ثبت نهایی و ویرایش'} درس «${saved.courseTitle}»`
       );
-      notify('success', `برنامه درس «${saved.courseTitle}» بروزرسانی شد.`);
+      notify(
+        'success',
+        isProvSave
+          ? `درس «${saved.courseTitle}» به صورت موقت (غیرفعال تا تکمیل نواقص) ذخیره شد.`
+          : `برنامه درس «${saved.courseTitle}» با موفقیت ثبت نهایی شد.`
+      );
     } else {
       commitOfferingsWithHistory(
         [...offerings, saved],
-        `ثبت درس «${saved.courseTitle}»`
+        `${isProvSave ? 'ثبت موقت' : 'ثبت نهایی'} درس «${saved.courseTitle}»`
       );
-      notify('success', `درس «${saved.courseTitle}» با موفقیت در برنامه ترم ${activeTerm} ثبت شد.`);
+      notify(
+        'success',
+        isProvSave
+          ? `درس «${saved.courseTitle}» به صورت موقت در جدول ثبت شد؛ با تکمیل ساعت، استاد و کلاس نهایی خواهد شد.`
+          : `درس «${saved.courseTitle}» با موفقیت در برنامه ترم ${activeTerm} ثبت نهایی شد.`
+      );
     }
     setOffModalOpen(false);
+  };
+
+  const handleSaveOffering = (e: React.FormEvent) => {
+    e.preventDefault();
+    commitOfferingModalSave('final');
   };
 
   // =====================================================
@@ -2272,10 +2388,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                     <div>
                       <div className="font-black text-amber-900 dark:text-amber-100">
-                        {overviewStats.disabledOfferingsCount.toLocaleString('fa-IR')} درس در ترم {activeTerm} به علت حذف استاد قبلی غیرفعال و بدون استاد هستند
+                        {overviewStats.disabledOfferingsCount.toLocaleString('fa-IR')} درس در ترم {activeTerm} به صورت موقت، ناقص یا غیرفعال (نیازمند تکمیل ساعت، استاد یا کلاس) هستند
                       </div>
                       <div className="text-[11px] text-amber-800/90 dark:text-amber-200/80 mt-0.5">
-                        این دروس در تداخل‌ها، ساعات تدریس اساتید و برنامه دانشجویان محاسبه نمی‌شوند و با تخصیص استاد جدید مجدداً فعال خواهند شد.
+                        این دروس با هایلایت زرد در جدول نمایش داده می‌شوند و تا زمان تکمیل و ثبت نهایی، در تداخل‌ها، ساعات اساتید و برنامه رسمی دانشجویان لحاظ نمی‌شوند.
                       </div>
                     </div>
                   </div>
@@ -2284,7 +2400,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     onClick={() => setSection('schedule')}
                     className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold shrink-0 cursor-pointer"
                   >
-                    مشاهده و تخصیص استاد
+                    مشاهده و تکمیل دروس
                   </button>
                 </div>
               )}
@@ -5082,6 +5198,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               onOpenNewOffering={(opts) => openNewOfferingModal(opts)}
               onOpenEditOffering={(o) => openEditOfferingModal(o)}
               onPersistRules={persistRules}
+              onFullscreenContainerChange={setMasterFullscreenPortalEl}
+              hasExternalModalOpen={offModalOpen || commonExamModalOpen}
+              onCloseExternalModals={() => {
+                setOffModalOpen(false);
+                setCommonExamModalOpen(false);
+              }}
               onNotify={notify}
             />
           )}
@@ -5234,11 +5356,14 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                   >
                     <option value="all">همه اساتید</option>
-                    {professors.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.fullName} (کد {p.professorCode})
-                      </option>
-                    ))}
+                    {professors.map((p) => {
+                      const deptField = formatProfessorDepartmentAndField(p);
+                      return (
+                        <option key={p.id} value={p.id}>
+                          {p.fullName} (کد {p.professorCode}){deptField ? ` · ${deptField}` : ''}
+                        </option>
+                      );
+                    })}
                   </select>
 
                   {!canManageMasterData && (
@@ -5335,21 +5460,36 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                       w.includes('تداخل امتحان')
                                     );
                                     const bd = calculateOfferingBreakdown(o, rules);
+                                    const comp = evaluateOfferingCompleteness(o, rules);
+                                    const isProvisionalOrDisabled = comp.isEffectivelyInactive;
+                                    const hoverIssues = [
+                                      ...comp.missingItems,
+                                      ...conf.errors,
+                                    ];
                                       return (
                                         <div
                                           key={o.id}
                                           onClick={() => openEditOfferingModal(o)}
-                                          className={`p-2 rounded-xl border text-right cursor-pointer transition ${
-                                            o.isDisabled
-                                              ? 'border-dashed border-amber-400 bg-amber-50/80 dark:bg-amber-950/25 opacity-85'
+                                          title={
+                                            hoverIssues.length > 0
+                                              ? `نواقص و خطاها:\n• ${hoverIssues.join('\n• ')}`
+                                              : 'کلیک برای ویرایش درس'
+                                          }
+                                          className={`group/card relative p-2 rounded-xl border text-right cursor-pointer transition ${
+                                            isProvisionalOrDisabled
+                                              ? 'border-dashed border-2 border-amber-400 dark:border-amber-500 bg-amber-50/90 dark:bg-amber-950/35 opacity-80'
                                               : conf.hasHardConflict
                                               ? 'border-rose-400 bg-rose-50/80 dark:bg-rose-950/30'
                                               : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 hover:border-teal-500'
                                           }`}
                                         >
-                                          {o.isDisabled && (
-                                            <div className="text-[9.5px] font-black text-amber-800 dark:text-amber-300 mb-0.5">
-                                              ⚠ غیرفعال · بدون استاد
+                                          {isProvisionalOrDisabled && (
+                                            <div className="text-[9.5px] font-black text-amber-900 dark:text-amber-200 bg-amber-200/70 dark:bg-amber-900/50 px-1.5 py-0.5 rounded inline-flex items-center gap-1 mb-1">
+                                              <AlertTriangle className="w-3 h-3 shrink-0" />
+                                              <span>
+                                                موقت / غیرفعال ({comp.scheduledHours.toLocaleString('fa-IR')}/
+                                                {comp.requiredTableHours.toLocaleString('fa-IR')} س)
+                                              </span>
                                             </div>
                                           )}
                                           <div className="font-bold text-slate-900 dark:text-white leading-snug">
@@ -5364,7 +5504,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                           </div>
                                           <div className="text-[10px] text-teal-700 dark:text-teal-400 font-semibold">
                                             {o.professorName || 'بدون استاد'} ·{' '}
-                                            {o.classroomName || 'بدون کلاس'}
+                                            {o.classroomName ||
+                                              (o.internshipSessionRole === 'school_attendance'
+                                                ? 'محل: مدرسه'
+                                                : 'بدون کلاس')}
                                           </div>
                                           {o.sharedWithTargets && o.sharedWithTargets.length > 0 && (
                                             <div className="text-[10px] text-indigo-700 dark:text-indigo-300 font-bold mt-0.5">
@@ -5382,9 +5525,22 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                               {hasExamWarn ? '⚠ ' : ''}امتحان: {examLabel}
                                             </div>
                                           )}
-                                          {!o.isDisabled && conf.hasHardConflict && (
+                                          {!isProvisionalOrDisabled && conf.hasHardConflict && (
                                             <div className="text-[10px] text-rose-600 font-extrabold mt-0.5">
                                               تداخل زمانی!
+                                            </div>
+                                          )}
+                                          {hoverIssues.length > 0 && (
+                                            <div className="hidden group-hover/card:block absolute z-40 right-0 top-full mt-1 w-64 p-2.5 rounded-xl bg-slate-900 text-white text-[10px] shadow-xl border border-amber-400/70 pointer-events-none space-y-1">
+                                              <div className="font-black text-amber-300 flex items-center gap-1">
+                                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                                <span>نواقص و خطاهای درس:</span>
+                                              </div>
+                                              <ul className="list-disc pr-4 space-y-0.5 text-slate-100 leading-relaxed">
+                                                {hoverIssues.map((msg, idx) => (
+                                                  <li key={idx}>{msg}</li>
+                                                ))}
+                                              </ul>
                                             </div>
                                           )}
                                         </div>
@@ -5434,11 +5590,19 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                           ? formatExamAssignmentShort(o, activeTermExamSettings)
                           : '';
                         const examWarns = conf.warnings.filter((w) => w.includes('تداخل امتحان'));
+                        const comp = evaluateOfferingCompleteness(o, rules);
+                        const isProvisionalOrDisabled = comp.isEffectivelyInactive;
+                        const hoverIssues = [...comp.missingItems, ...conf.errors];
                         return (
                           <tr
                             key={o.id}
+                            title={
+                              hoverIssues.length > 0
+                                ? `نواقص و خطاها:\n• ${hoverIssues.join('\n• ')}`
+                                : undefined
+                            }
                             className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 ${
-                              o.isDisabled ? 'bg-amber-50/50 dark:bg-amber-950/20' : ''
+                              isProvisionalOrDisabled ? 'bg-amber-50/75 dark:bg-amber-950/25 opacity-85' : ''
                             }`}
                           >
                             <td className="p-3 font-mono font-bold text-indigo-700 dark:text-indigo-400">
@@ -5446,12 +5610,18 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             </td>
                             <td className="p-3 font-bold text-slate-900 dark:text-white">
                               {o.courseTitle}
-                              {o.isDisabled && (
-                                <div className="text-[10px] text-amber-700 dark:text-amber-300 font-black mt-0.5">
-                                  ⚠ غیرفعال · بدون استاد ({o.disabledReason || 'حذف استاد قبلی'})
+                              {isProvisionalOrDisabled && (
+                                <div className="text-[10px] text-amber-800 dark:text-amber-200 font-black mt-0.5 space-y-0.5">
+                                  <div>
+                                    ⚠ موقت / غیرفعال ({comp.scheduledHours.toLocaleString('fa-IR')}/
+                                    {comp.requiredTableHours.toLocaleString('fa-IR')} ساعت)
+                                  </div>
+                                  <div className="font-semibold text-[9.5px] text-amber-700 dark:text-amber-300">
+                                    {comp.missingItems.join(' • ')}
+                                  </div>
                                 </div>
                               )}
-                              {!o.isDisabled && conf.hasHardConflict && (
+                              {!isProvisionalOrDisabled && conf.hasHardConflict && (
                                 <div className="text-[10px] text-rose-600 font-extrabold">
                                   دارای تداخل زمانی
                                 </div>
@@ -6375,24 +6545,33 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         </div>
       )}
 
-      {/* مودال ثبت و ویرایش درس در برنامه (توسط مدیر سامانه، معاونت و مدیر گروه) */}
-      {offModalOpen && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full p-5 border border-slate-200 dark:border-slate-800 space-y-4 max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <h3 className="font-extrabold text-sm">
-                {editingOffId
-                  ? `ویرایش برنامه درس: ${selectedOffCourse?.title || ''}`
-                  : `ثبت درس جدید در برنامه هفتگی ترم ${activeTerm}`}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setOffModalOpen(false)}
-                className="p-1 text-slate-400 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* مودال شناور ثبت و ویرایش درس در برنامه (پورتال‌شونده داخل تمام‌صفحه واقعی) */}
+      {(() => {
+        if (!offModalOpen) return null;
+        const offeringModalEl = (
+          <div
+            onClick={() => setOffModalOpen(false)}
+            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 sm:p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full p-5 border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4 max-h-[92%] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <h3 className="font-extrabold text-sm">
+                  {editingOffId
+                    ? `ویرایش برنامه درس: ${selectedOffCourse?.title || ''}`
+                    : `ثبت درس جدید در برنامه هفتگی ترم ${activeTerm}`}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setOffModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  title="بستن فرم (Esc)"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
             {modalLockStatus.locked && (
               <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs font-extrabold flex items-center gap-2">
@@ -6789,11 +6968,15 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             <option value="">(استاد عمومی فرم)</option>
                             {professors
                               .filter((p) => p.isActive)
-                              .map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.fullName}
-                                </option>
-                              ))}
+                              .map((p) => {
+                                const deptField = formatProfessorDepartmentAndField(p);
+                                return (
+                                  <option key={p.id} value={p.id}>
+                                    {p.fullName}
+                                    {deptField ? ` · ${deptField}` : ''}
+                                  </option>
+                                );
+                              })}
                           </select>
                           <div className="col-span-1 text-center">
                             {offInternshipGroups.length > 1 && (
@@ -6923,13 +7106,43 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       .filter((p) => p.isActive)
                       .map((p) => {
                         const ld = calculateProfessorLoadSummary(p.id, termOfferings, rules);
+                        const deptField = formatProfessorDepartmentAndField(p);
                         return (
                           <option key={p.id} value={p.id}>
-                            {p.fullName} (کد {p.professorCode}) — بار فعلی: {ld.equivalentUnits} معادل
+                            {p.fullName} (کد {p.professorCode}){deptField ? ` · ${deptField}` : ''} — بار فعلی:{' '}
+                            {ld.equivalentUnits} معادل
                           </option>
                         );
                       })}
                   </select>
+                  {(() => {
+                    const selectedProf = professors.find((p) => p.id === offProfessorId);
+                    if (!selectedProf) return null;
+                    const degreeLabel = formatProfessorDegreeFull(
+                      selectedProf.degreeLevel,
+                      selectedProf.degreeField,
+                      selectedProf.degreeSpecialization
+                    );
+                    return (
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-600 dark:text-slate-300">
+                        {selectedProf.departmentName && (
+                          <span className="px-2 py-0.5 rounded bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800 font-bold text-teal-700 dark:text-teal-300">
+                            گروه آموزشی: {selectedProf.departmentName}
+                          </span>
+                        )}
+                        {(degreeLabel || selectedProf.degreeField) && (
+                          <span className="px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 font-bold text-indigo-700 dark:text-indigo-300">
+                            رشته / مدرک: {degreeLabel || selectedProf.degreeField}
+                          </span>
+                        )}
+                        {selectedProf.academicRank && (
+                          <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold">
+                            مرتبه: {selectedProf.academicRank}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </label>
 
                 <label className="space-y-1">
@@ -7185,6 +7398,123 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       واحد معادل استاد: {candidateBreakdown.equivalentUnits}
                     </span>
                   </div>
+
+                  {candidateCompleteness && (
+                    <div
+                      className={`p-3 rounded-xl border space-y-2 ${
+                        canFinalizeModal
+                          ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800'
+                          : 'bg-amber-50/90 dark:bg-amber-950/35 border-amber-300 dark:border-amber-700'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="font-black text-[11px] flex items-center gap-1.5">
+                          {canFinalizeModal ? (
+                            <>
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <span className="text-emerald-900 dark:text-emerald-200">
+                                اطلاعات درس کامل و آماده ثبت نهایی است ({candidateCompleteness.scheduledHours.toLocaleString('fa-IR')} از{' '}
+                                {candidateCompleteness.requiredTableHours.toLocaleString('fa-IR')} ساعت)
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                              <span className="text-amber-900 dark:text-amber-200">
+                                وضعیت فعلی: نیازمند تکمیل برای ثبت نهایی (در صورت ذخیره، به صورت «موقت و غیرفعال» ثبت می‌شود)
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        {!candidateCompleteness.checklist.hoursExact &&
+                          candidateCompleteness.requiredTableHours > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const rec = buildRecommendedSlotsForHours(
+                                  candidateCompleteness.requiredTableHours,
+                                  sortedSlots,
+                                  offSlotIds[0]
+                                );
+                                if (rec.slotIds.length > 0) {
+                                  if (!offDay) setOffDay(activeDays[0] || 'saturday');
+                                  setOffSlotIds(rec.slotIds);
+                                  setOffSlotParts(rec.slotParts);
+                                }
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10.5px] font-extrabold cursor-pointer"
+                            >
+                              تنظیم خودکار سانس ({candidateCompleteness.requiredTableHours.toLocaleString('fa-IR')} ساعت)
+                            </button>
+                          )}
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10.5px] font-bold">
+                        <div
+                          className={`px-2 py-1 rounded-lg border ${
+                            candidateCompleteness.checklist.hasDayAndSlots
+                              ? 'bg-white/80 dark:bg-slate-900/70 border-emerald-300 text-emerald-700 dark:text-emerald-300'
+                              : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 text-rose-700 dark:text-rose-300'
+                          }`}
+                        >
+                          {candidateCompleteness.checklist.hasDayAndSlots ? '✓' : '✕'} روز و سانس
+                        </div>
+                        <div
+                          className={`px-2 py-1 rounded-lg border ${
+                            candidateCompleteness.checklist.hoursExact
+                              ? 'bg-white/80 dark:bg-slate-900/70 border-emerald-300 text-emerald-700 dark:text-emerald-300'
+                              : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 text-rose-700 dark:text-rose-300'
+                          }`}
+                        >
+                          {candidateCompleteness.checklist.hoursExact ? '✓' : '✕'} ساعت:{' '}
+                          {candidateCompleteness.scheduledHours.toLocaleString('fa-IR')}/
+                          {candidateCompleteness.requiredTableHours.toLocaleString('fa-IR')}
+                        </div>
+                        <div
+                          className={`px-2 py-1 rounded-lg border ${
+                            (isMultiInternshipMode
+                              ? !multiInternshipMissingProfessors
+                              : candidateCompleteness.checklist.hasProfessor)
+                              ? 'bg-white/80 dark:bg-slate-900/70 border-emerald-300 text-emerald-700 dark:text-emerald-300'
+                              : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 text-rose-700 dark:text-rose-300'
+                          }`}
+                        >
+                          {(isMultiInternshipMode
+                            ? !multiInternshipMissingProfessors
+                            : candidateCompleteness.checklist.hasProfessor)
+                            ? '✓'
+                            : '✕'}{' '}
+                          استاد درس
+                        </div>
+                        <div
+                          className={`px-2 py-1 rounded-lg border ${
+                            !candidateCompleteness.checklist.classroomRequired ||
+                            candidateCompleteness.checklist.hasClassroom
+                              ? 'bg-white/80 dark:bg-slate-900/70 border-emerald-300 text-emerald-700 dark:text-emerald-300'
+                              : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 text-rose-700 dark:text-rose-300'
+                          }`}
+                        >
+                          {!candidateCompleteness.checklist.classroomRequired
+                            ? '✓ محل: مدرسه'
+                            : candidateCompleteness.checklist.hasClassroom
+                            ? '✓ کلاس فیزیکی'
+                            : '✕ کلاس فیزیکی'}
+                        </div>
+                      </div>
+
+                      {!canFinalizeModal && candidateCompleteness.missingItems.length > 0 && (
+                        <ul className="list-disc pr-4 text-[10.5px] text-amber-900 dark:text-amber-200 space-y-0.5">
+                          {candidateCompleteness.missingItems.map((m, idx) => (
+                            <li key={idx}>{m}</li>
+                          ))}
+                          {isMultiInternshipMode && multiInternshipMissingProfessors && (
+                            <li>برای یکی از شعبه‌های کارورزی استاد تعیین نشده است.</li>
+                          )}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -7212,7 +7542,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 </div>
               )}
 
-              <div className="flex items-center justify-between gap-2 pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
                 {editingOffId ? (
                   <button
                     type="button"
@@ -7236,55 +7566,109 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 ) : (
                   <div />
                 )}
-                <button
-                  type="submit"
-                  disabled={
-                    modalLockStatus.locked ||
-                    (!editingOffId &&
-                    selectedOffCourse?.practicalType === 'internship' &&
-                    offInternshipGroups.length > 0
-                      ? false
-                      : candidateConflictReport.hasHardConflict)
-                  }
-                  className="px-6 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-extrabold cursor-pointer"
-                >
-                  {editingOffId
-                    ? 'ذخیره تغییرات درس'
-                    : selectedOffCourse?.practicalType === 'internship' &&
-                      offInternshipGroups.length > 1
-                    ? `ثبت قطعی ${offInternshipGroups.length.toLocaleString('fa-IR')} شعبه کارورزی`
-                    : 'ثبت قطعی در برنامه هفتگی'}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {!canFinalizeModal && (
+                    <button
+                      type="button"
+                      disabled={modalLockStatus.locked || !candidateOffering}
+                      onClick={() => commitOfferingModalSave('provisional')}
+                      className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-extrabold cursor-pointer inline-flex items-center gap-1.5"
+                      title="ثبت در جدول با رنگ زرد و وضعیت غیرفعال تا تکمیل ساعت، استاد و کلاس"
+                    >
+                      <AlertTriangle className="w-4 h-4" />
+                      <span>ثبت موقت (غیرفعال تا تکمیل)</span>
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={!canFinalizeModal}
+                    title={
+                      !canFinalizeModal
+                        ? 'برای ثبت نهایی باید زمان، تعداد ساعت دقیق، استاد و کلاس درس تکمیل و بدون تداخل باشد.'
+                        : undefined
+                    }
+                    className="px-6 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-45 disabled:cursor-not-allowed text-white font-extrabold cursor-pointer"
+                  >
+                    {editingOffId
+                      ? 'تکمیل و ثبت نهایی تغییرات'
+                      : isMultiInternshipMode && offInternshipGroups.length > 1
+                      ? `ثبت نهایی ${offInternshipGroups.length.toLocaleString('fa-IR')} شعبه کارورزی`
+                      : 'ثبت نهایی در برنامه هفتگی'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </div>
-      )}
+        );
+        return masterFullscreenPortalEl
+          ? createPortal(offeringModalEl, masterFullscreenPortalEl)
+          : offeringModalEl;
+      })()}
 
       {/* مودال برنامه‌ریزی امتحانات دروس مشترک و عمومی */}
-      <CourseSchedulingCommonExamModal
-        isOpen={commonExamModalOpen}
-        onClose={() => setCommonExamModalOpen(false)}
-        activeTerm={activeTerm}
-        offerings={offerings}
-        termOfferings={termOfferings}
-        rules={rules}
-        userRole={userRole}
-        actor={actor}
-        canManageMasterData={canManageMasterData}
-        isOwnMajorName={isOwnMajorName}
-        onCommitOfferings={commitOfferingsWithHistory}
-        onOpenEditOffering={(o) => openEditOfferingModal(o)}
-        onOpenExamSettings={
-          isSystemAdmin
-            ? () => {
-                setCommonExamModalOpen(false);
-                setSection('rules');
-              }
-            : undefined
-        }
-        onNotify={notify}
-      />
+      {(() => {
+        const examModalNode = (
+          <CourseSchedulingCommonExamModal
+            isOpen={commonExamModalOpen}
+            onClose={() => setCommonExamModalOpen(false)}
+            activeTerm={activeTerm}
+            offerings={offerings}
+            termOfferings={termOfferings}
+            rules={rules}
+            userRole={userRole}
+            actor={actor}
+            canManageMasterData={canManageMasterData}
+            isOwnMajorName={isOwnMajorName}
+            onCommitOfferings={commitOfferingsWithHistory}
+            onOpenEditOffering={(o) => openEditOfferingModal(o)}
+            onOpenExamSettings={
+              isSystemAdmin
+                ? () => {
+                    setCommonExamModalOpen(false);
+                    if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+                      void document.exitFullscreen().catch(() => {});
+                    }
+                    setMasterFullscreenPortalEl(null);
+                    setSection('rules');
+                  }
+                : undefined
+            }
+            onNotify={notify}
+          />
+        );
+        return masterFullscreenPortalEl && commonExamModalOpen
+          ? createPortal(examModalNode, masterFullscreenPortalEl)
+          : examModalNode;
+      })()}
+
+      {/* نوار اعلان شناور درون حالت تمام‌صفحه */}
+      {masterFullscreenPortalEl &&
+        feedback &&
+        createPortal(
+          <div
+            className={`fixed top-3 left-1/2 -translate-x-1/2 z-[130] max-w-[92%] px-4 py-2.5 rounded-2xl border shadow-2xl text-xs font-extrabold flex items-center gap-2.5 backdrop-blur-md ${
+              feedback.type === 'success'
+                ? 'bg-emerald-950/95 text-emerald-100 border-emerald-500/60'
+                : 'bg-rose-950/95 text-rose-100 border-rose-500/60'
+            }`}
+          >
+            {feedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            )}
+            <span>{feedback.text}</span>
+            <button
+              type="button"
+              onClick={() => setFeedback(null)}
+              className="p-0.5 hover:opacity-75 cursor-pointer shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>,
+          masterFullscreenPortalEl
+        )}
 
       {/* مودال تایید حذف استاد با نمایش پیامد غیرفعال‌سازی دروس مرتبط */}
       {profToDelete && (() => {

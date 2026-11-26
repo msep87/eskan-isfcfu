@@ -57,6 +57,7 @@ import {
   SchedCurriculumCourse,
   SchedCourseOffering,
   SchedMasterGridLayoutSettings,
+  SchedMasterPrintSettings,
   SchedRulesSettings,
   SchedCellComment,
 } from '../types';
@@ -314,9 +315,49 @@ export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
     },
     columnOverrides: {},
   },
+  masterPrintSettings: {
+    paperSize: 'A4',
+    orientation: 'landscape',
+    scalingMode: 'fit_1_page_wide',
+    scalePercent: 100,
+    fitPagesWide: 1,
+    marginsMm: {
+      top: 8,
+      right: 8,
+      bottom: 8,
+      left: 8,
+    },
+    showGridlines: true,
+    boldDayBorders: true,
+    colorMode: 'color',
+    includeColors: true,
+    repeatHeaderRows: true,
+    avoidRowBreak: true,
+    centerHorizontally: true,
+    centerVertically: false,
+    fontSizePx: 10,
+    cellPaddingPx: 4,
+    useLayoutWidthsAndOrientations: true,
+    includeProfessor: true,
+    includeClassroom: true,
+    includeExamInfo: true,
+    includeSharedTag: true,
+    includeComments: false,
+    showHeaderBanner: true,
+    customTitle: '',
+    customSubtitle: '',
+    showPrintDate: true,
+    showActorName: true,
+    footerNote: '',
+    showSignatureBlock: false,
+    printScope: 'current_view',
+  },
 };
 
 export const DEFAULT_MASTER_GRID_LAYOUT: SchedMasterGridLayoutSettings =
   DEFAULT_SCHED_RULES.masterGridLayout!;
+
+export const DEFAULT_MASTER_PRINT_SETTINGS: SchedMasterPrintSettings =
+  DEFAULT_SCHED_RULES.masterPrintSettings!;
 
 

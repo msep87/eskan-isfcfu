@@ -395,7 +395,7 @@ export const CourseSchedulingCommonExamModal: React.FC<
   };
 
   return (
-    <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/65 backdrop-blur-sm p-2 sm:p-4">
+    <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/65 backdrop-blur-sm p-2 sm:p-4">
       <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-[1440px] h-[92vh] border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col overflow-hidden text-xs">
         {/* هدر مودال امتحانات مشترک و عمومی */}
         <div className="shrink-0 px-4 sm:px-6 py-3.5 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3 border-b border-slate-800">
