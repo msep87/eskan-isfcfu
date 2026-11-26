@@ -79,6 +79,8 @@ import { CourseSchedulingAutoWizard } from './CourseSchedulingAutoWizard';
 import { CourseSchedulingReports } from './CourseSchedulingReports';
 import { CourseSchedulingMasterGrid } from './CourseSchedulingMasterGrid';
 import { CourseSchedulingCommonExamModal } from './CourseSchedulingCommonExamModal';
+import { PersianDatePicker } from './PersianDatePicker';
+import { PersianTimePicker } from './PersianTimePicker';
 import {
   AlertCircle,
   AlertTriangle,
@@ -4040,58 +4042,56 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                        <label className="space-y-1">
+                        <div className="space-y-1">
                           <span className="font-bold text-slate-700 dark:text-slate-200 block">
                             تاریخ شروع (شمسی):
                           </span>
-                          <input
-                            type="text"
+                          <PersianDatePicker
+                            digits="en"
                             dir="ltr"
                             placeholder="1404/11/10"
-                            value={winCfg.startDate}
-                            onChange={(e) => updateWinCfg({ startDate: e.target.value })}
-                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                            value={winCfg.startDate || ''}
+                            onChange={(val) => updateWinCfg({ startDate: val })}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
                           />
-                        </label>
-                        <label className="space-y-1">
+                        </div>
+                        <div className="space-y-1">
                           <span className="font-bold text-slate-700 dark:text-slate-200 block">
                             ساعت شروع:
                           </span>
-                          <input
-                            type="text"
-                            dir="ltr"
+                          <PersianTimePicker
+                            digits="en"
                             placeholder="08:00"
                             value={winCfg.startTime || ''}
-                            onChange={(e) => updateWinCfg({ startTime: e.target.value })}
-                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                            onChange={(val) => updateWinCfg({ startTime: val })}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
                           />
-                        </label>
-                        <label className="space-y-1">
+                        </div>
+                        <div className="space-y-1">
                           <span className="font-bold text-slate-700 dark:text-slate-200 block">
                             تاریخ پایان مهلت (شمسی):
                           </span>
-                          <input
-                            type="text"
+                          <PersianDatePicker
+                            digits="en"
                             dir="ltr"
                             placeholder="1404/11/15"
-                            value={winCfg.endDate}
-                            onChange={(e) => updateWinCfg({ endDate: e.target.value })}
-                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                            value={winCfg.endDate || ''}
+                            onChange={(val) => updateWinCfg({ endDate: val })}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
                           />
-                        </label>
-                        <label className="space-y-1">
+                        </div>
+                        <div className="space-y-1">
                           <span className="font-bold text-slate-700 dark:text-slate-200 block">
                             ساعت پایان مهلت:
                           </span>
-                          <input
-                            type="text"
-                            dir="ltr"
+                          <PersianTimePicker
+                            digits="en"
                             placeholder="23:59"
                             value={winCfg.endTime || ''}
-                            onChange={(e) => updateWinCfg({ endTime: e.target.value })}
-                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                            onChange={(val) => updateWinCfg({ endTime: val })}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
                           />
-                        </label>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
@@ -4186,22 +4186,22 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-                        <label className="space-y-1">
+                        <div className="space-y-1">
                           <span className="font-bold text-slate-700 dark:text-slate-200 block">
                             تاریخ شروع بازه امتحانات (شمسی):
                           </span>
-                          <input
-                            type="text"
+                          <PersianDatePicker
+                            digits="en"
                             dir="ltr"
                             placeholder="1404/10/20"
                             disabled={!isSystemAdmin}
                             value={draftExam.startDate}
-                            onChange={(e) =>
-                              updateDraftExam({ ...draftExam, startDate: e.target.value })
+                            onChange={(val) =>
+                              updateDraftExam({ ...draftExam, startDate: val })
                             }
-                            className="w-full px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-slate-900 font-mono text-center"
+                            className="w-full px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-slate-900 font-mono text-center text-xs"
                           />
-                        </label>
+                        </div>
                         <label className="space-y-1">
                           <span className="font-bold text-slate-700 dark:text-slate-200 block">
                             روز شروع پیش‌فرض (در صورت نبود تاریخ):
@@ -4343,22 +4343,23 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                 </button>
                               </div>
                               <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-slate-500">تاریخ:</span>
-                                <input
-                                  type="text"
+                                <span className="text-[10px] text-slate-500 shrink-0">تاریخ:</span>
+                                <PersianDatePicker
+                                  digits="en"
                                   dir="ltr"
                                   disabled={!isSystemAdmin}
                                   value={day.date}
-                                  onChange={(e) =>
+                                  onChange={(val) =>
                                     updateDraftExam({
                                       ...draftExam,
                                       examDays: draftExam.examDays.map((x, i) =>
-                                        i === dIdx ? { ...x, date: e.target.value } : x
+                                        i === dIdx ? { ...x, date: val } : x
                                       ),
                                     })
                                   }
                                   placeholder="1404/10/20"
-                                  className="flex-1 font-mono text-[11px] px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-center"
+                                  wrapperClassName="flex-1"
+                                  className="w-full font-mono text-[11px] px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-center"
                                 />
                               </div>
                             </div>

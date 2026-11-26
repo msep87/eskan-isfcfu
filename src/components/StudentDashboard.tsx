@@ -39,6 +39,7 @@ import { AcademicWorkflowPanel } from './AcademicWorkflowPanel';
 import { CommunityChatHub } from './CommunityChatHub';
 import { ImportantAnnouncementsWidget } from './ImportantAnnouncementsWidget';
 import { StudentTermSchedulePanel } from './StudentTermSchedulePanel';
+import type { MessagingComposePreset } from './MessagingPanel';
 import {
   User,
   Bed as BedIcon,
@@ -77,6 +78,8 @@ import {
   MessagesSquare,
   Cpu,
   Landmark,
+  LayoutGrid,
+  Inbox,
 } from 'lucide-react';
 import {
   PORTAL_COLOR_STYLES,
@@ -96,9 +99,31 @@ interface StudentDashboardProps {
   settings: AppSettings;
   cloudSyncTick?: number;
   onRefreshData: () => void;
-  onOpenMessages: () => void;
+  onOpenMessages: (preset?: MessagingComposePreset) => void;
   onOpenUserGuide?: () => void;
 }
+
+type StudentTabKey =
+  | 'overview'
+  | 'picker'
+  | 'guest'
+  | 'surveys'
+  | 'cultural'
+  | 'sports'
+  | 'elections'
+  | 'library'
+  | 'term_schedule'
+  | 'academic_requests'
+  | 'clearance'
+  | 'community_chat'
+  | 'portals';
+
+type StudentMenuGroupKey =
+  | 'housing'
+  | 'education'
+  | 'activities'
+  | 'communications'
+  | 'services';
 
 export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   student,
@@ -114,8 +139,36 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  // تب‌های داشبورد
-  const [activeTab, setActiveTab] = useState<'overview' | 'picker' | 'guest' | 'surveys' | 'cultural' | 'sports' | 'elections' | 'library' | 'term_schedule' | 'academic_requests' | 'clearance' | 'community_chat' | 'portals'>('overview');
+  // تب‌های داشبورد و دسته‌بندی منوی کاربردی
+  const [activeTab, setActiveTabState] = useState<StudentTabKey>('overview');
+  const [activeMenuGroup, setActiveMenuGroup] = useState<StudentMenuGroupKey>('housing');
+  const [showAllMenuGroups, setShowAllMenuGroups] = useState(false);
+
+  const setActiveTab = (tab: StudentTabKey) => {
+    setActiveTabState(tab);
+    if (tab === 'overview' || tab === 'picker' || tab === 'guest') {
+      setActiveMenuGroup('housing');
+    } else if (
+      tab === 'term_schedule' ||
+      tab === 'academic_requests' ||
+      tab === 'library' ||
+      tab === 'clearance'
+    ) {
+      setActiveMenuGroup('education');
+    } else if (
+      tab === 'cultural' ||
+      tab === 'sports' ||
+      tab === 'elections' ||
+      tab === 'surveys'
+    ) {
+      setActiveMenuGroup('activities');
+    } else if (tab === 'community_chat') {
+      setActiveMenuGroup('communications');
+    } else if (tab === 'portals') {
+      setActiveMenuGroup('services');
+    }
+  };
+
   const schedRules = useMemo(
     () => Storage.getSchedRules(),
     [cloudSyncTick, activeTab]
@@ -538,331 +591,497 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
       )}
 
-      {/* دکمه‌های ناوبری اصلی داشبورد دانشجو */}
-      <div className="flex flex-wrap gap-2.5">
-        <button
-          onClick={() => setActiveTab('overview')}
-          className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'overview'
-              ? 'bg-teal-600 text-white shadow-teal-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>{isStudentDormResident ? 'پیشخوان، اتاق و هم‌اتاقی‌ها' : 'پیشخوان وضعیت دانشجو'}</span>
-        </button>
+      {/* منوی کاربردی دسته‌بندی‌شده خدمات دانشجویی */}
+      {(() => {
+        interface MenuActionItem {
+          id: string;
+          label: string;
+          subtitle?: string;
+          icon: React.ReactNode;
+          isActive?: boolean;
+          disabled?: boolean;
+          toneClass?: string;
+          badge?: string;
+          badgeClass?: string;
+          title?: string;
+          onClick: () => void;
+        }
 
-        {isStudentDormResident && (
-          <>
-            <button
-              onClick={() => {
-                if (!student.isProfileCompleted) {
-                  setIsProfileModalOpen(true);
-                  return;
-                }
-                setActiveTab('picker');
-              }}
-              className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-                activeTab === 'picker'
-                  ? 'bg-teal-600 text-white shadow-teal-600/20'
-                  : !student.isProfileCompleted
-                  ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 border-2 border-dashed border-amber-400'
-                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-              }`}
-            >
-              {!student.isProfileCompleted || !settings.selectionActive ? (
-                <Lock className="w-4 h-4 text-amber-600 shrink-0" />
-              ) : (
-                <Sparkles className="w-4 h-4 text-amber-500" />
-              )}
-              <span>انتخاب یا جابجایی اتاق و تخت بصری</span>
-              {!student.isProfileCompleted ? (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-extrabold mr-1 shrink-0">
-                  قفل (نیازمند تکمیل پرونده)
-                </span>
-              ) : !settings.selectionActive ? (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-extrabold mr-1 shrink-0">
-                  بسته توسط مدیر
-                </span>
-              ) : null}
-            </button>
+        const menuGroups: Array<{
+          key: StudentMenuGroupKey;
+          label: string;
+          icon: React.ReactNode;
+          badgeCount?: number;
+          items: MenuActionItem[];
+        }> = [
+          {
+            key: 'housing',
+            label: 'اسکان و امور سرا',
+            icon: <Building className="w-4 h-4" />,
+            badgeCount: pendingGuestCount + approvedAwaitingDocsGuests.length,
+            items: [
+              {
+                id: 'overview',
+                label: isStudentDormResident ? 'پیشخوان، اتاق و هم‌اتاقی‌ها' : 'پیشخوان وضعیت دانشجو',
+                subtitle: 'ارزیابی، مالی و وضعیت سکونت',
+                icon: <Users className="w-4 h-4" />,
+                isActive: activeTab === 'overview',
+                onClick: () => setActiveTab('overview'),
+              },
+              ...(isStudentDormResident
+                ? [
+                    {
+                      id: 'picker',
+                      label: 'انتخاب یا جابجایی اتاق و تخت',
+                      subtitle: !student.isProfileCompleted
+                        ? 'نیازمند تکمیل پرونده'
+                        : settings.selectionActive
+                        ? 'نقشه بصری اتاق‌ها'
+                        : 'بسته توسط مدیر',
+                      icon:
+                        !student.isProfileCompleted || !settings.selectionActive ? (
+                          <Lock className="w-4 h-4 text-amber-600" />
+                        ) : (
+                          <Sparkles className="w-4 h-4 text-amber-500" />
+                        ),
+                      isActive: activeTab === 'picker',
+                      badge: !student.isProfileCompleted
+                        ? 'قفل'
+                        : !settings.selectionActive
+                        ? 'بسته'
+                        : undefined,
+                      badgeClass: !student.isProfileCompleted
+                        ? 'bg-amber-200 text-amber-900'
+                        : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300',
+                      onClick: () => {
+                        if (!student.isProfileCompleted) {
+                          setIsProfileModalOpen(true);
+                          return;
+                        }
+                        setActiveTab('picker');
+                      },
+                    },
+                    {
+                      id: 'guest',
+                      label: 'درخواست موافقت با مهمان',
+                      subtitle: 'ثبت و پیگیری مجوز مهمان',
+                      icon: <UserPlus className="w-4 h-4 text-indigo-500" />,
+                      isActive: activeTab === 'guest',
+                      toneClass: 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-600/20',
+                      badge:
+                        approvedAwaitingDocsGuests.length > 0
+                          ? 'موافقت شد'
+                          : pendingGuestCount > 0
+                          ? `${pendingGuestCount.toLocaleString('fa-IR')} در انتظار`
+                          : undefined,
+                      badgeClass:
+                        approvedAwaitingDocsGuests.length > 0
+                          ? 'bg-emerald-500 text-white'
+                          : 'bg-amber-400 text-slate-950',
+                      onClick: () => setActiveTab('guest'),
+                    },
+                  ]
+                : []),
+            ],
+          },
+          {
+            key: 'education',
+            label: 'آموزش و کتابخانه',
+            icon: <GraduationCap className="w-4 h-4" />,
+            badgeCount: myActiveAcademicRequestsCount + myActiveLibraryLoansCount,
+            items: [
+              {
+                id: 'term_schedule',
+                label: 'برنامه هفتگی ترم',
+                subtitle: isTermSchedulePublished
+                  ? `مشاهده و چاپ برنامه ترم ${schedRules.activeTerm}`
+                  : 'در انتظار انتشار مدیر',
+                icon: !isTermSchedulePublished ? (
+                  <Lock className="w-4 h-4 text-slate-400" />
+                ) : (
+                  <Calendar className="w-4 h-4 text-teal-600" />
+                ),
+                isActive: activeTab === 'term_schedule',
+                disabled: !isTermSchedulePublished,
+                badge: isTermSchedulePublished ? `ترم ${schedRules.activeTerm}` : 'غیرفعال',
+                badgeClass: isTermSchedulePublished
+                  ? 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300'
+                  : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+                title: isTermSchedulePublished
+                  ? 'مشاهده و چاپ برنامه هفتگی و کلاسی ترم'
+                  : 'دکمه برنامه ترم پس از فعال‌سازی تیک انتشار توسط مدیر سامانه فعال می‌شود',
+                onClick: () => {
+                  if (!isTermSchedulePublished) return;
+                  setActiveTab('term_schedule');
+                },
+              },
+              {
+                id: 'academic_requests',
+                label: 'درخواست‌های آموزشی',
+                subtitle: 'گردش کار با مدیر گروه و آموزش',
+                icon: <ClipboardList className="w-4 h-4 text-indigo-600" />,
+                isActive: activeTab === 'academic_requests',
+                toneClass: 'bg-indigo-700 text-white border-indigo-700 shadow-indigo-700/20',
+                badge:
+                  myActiveAcademicRequestsCount > 0
+                    ? `${myActiveAcademicRequestsCount.toLocaleString('fa-IR')} در جریان`
+                    : undefined,
+                badgeClass: 'bg-indigo-100 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-200',
+                onClick: () => setActiveTab('academic_requests'),
+              },
+              {
+                id: 'library',
+                label: 'کتابخانه و پژوهش',
+                subtitle: 'جستجوی کتاب و درخواست امانت',
+                icon: <BookOpen className="w-4 h-4 text-amber-600" />,
+                isActive: activeTab === 'library',
+                toneClass: 'bg-amber-600 text-white border-amber-600 shadow-amber-600/20',
+                badge:
+                  myActiveLibraryLoansCount > 0
+                    ? `${myActiveLibraryLoansCount.toLocaleString('fa-IR')} فعال`
+                    : undefined,
+                badgeClass: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300',
+                onClick: () => setActiveTab('library'),
+              },
+              {
+                id: 'clearance',
+                label: 'تسویه حساب فراغت از تحصیل',
+                subtitle: 'پیگیری الکترونیک ۱۲ واحد',
+                icon: <GraduationCap className="w-4 h-4 text-sky-600" />,
+                isActive: activeTab === 'clearance',
+                toneClass: 'bg-sky-700 text-white border-sky-700 shadow-sky-700/20',
+                badge: myClearance
+                  ? myClearance.status === 'completed'
+                    ? 'تکمیل'
+                    : myClearance.status === 'rejected_education' || myClearance.status === 'rejected_dept_head'
+                    ? 'نیازمند اصلاح'
+                    : 'در جریان'
+                  : undefined,
+                badgeClass: myClearance
+                  ? myClearance.status === 'completed'
+                    ? 'bg-emerald-500 text-white'
+                    : myClearance.status === 'rejected_education' || myClearance.status === 'rejected_dept_head'
+                    ? 'bg-rose-500 text-white'
+                    : 'bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300'
+                  : undefined,
+                onClick: () => setActiveTab('clearance'),
+              },
+            ],
+          },
+          {
+            key: 'activities',
+            label: 'فرهنگی، ورزشی و صنفی',
+            icon: <Award className="w-4 h-4" />,
+            badgeCount: pendingSurveysCount + activeGuildElectionsCount,
+            items: [
+              {
+                id: 'cultural',
+                label: 'برنامه فرهنگی و تشکل‌ها',
+                subtitle: 'رویدادها و عضویت تشکل‌ها',
+                icon: <Sparkles className="w-4 h-4 text-fuchsia-600" />,
+                isActive: activeTab === 'cultural',
+                toneClass: 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-fuchsia-600/20',
+                badge:
+                  approvedCulturalPrograms.length > 0
+                    ? `${approvedCulturalPrograms.length.toLocaleString('fa-IR')} برنامه`
+                    : undefined,
+                badgeClass: 'bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-950 dark:text-fuchsia-300',
+                onClick: () => setActiveTab('cultural'),
+              },
+              {
+                id: 'sports',
+                label: 'برنامه‌های ورزشی و تربیت بدنی',
+                subtitle: 'مسابقات و کلاس‌های ورزشی',
+                icon: <Dumbbell className="w-4 h-4 text-emerald-600" />,
+                isActive: activeTab === 'sports',
+                toneClass: 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-600/20',
+                badge:
+                  openSportsCount > 0
+                    ? `${openSportsCount.toLocaleString('fa-IR')} فعال`
+                    : undefined,
+                badgeClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+                onClick: () => setActiveTab('sports'),
+              },
+              {
+                id: 'elections',
+                label: 'انتخابات شورای صنفی',
+                subtitle: 'صندوق رأی‌گیری الکترونیک',
+                icon: <Vote className="w-4 h-4 text-indigo-600" />,
+                isActive: activeTab === 'elections',
+                toneClass: 'bg-indigo-700 text-white border-indigo-700 shadow-indigo-700/20',
+                badge:
+                  activeGuildElectionsCount > 0
+                    ? `${activeGuildElectionsCount.toLocaleString('fa-IR')} فعال`
+                    : undefined,
+                badgeClass: 'bg-emerald-400 text-slate-950',
+                onClick: () => setActiveTab('elections'),
+              },
+              {
+                id: 'surveys',
+                label: 'نظرسنجی‌های دوره‌ای',
+                subtitle: 'ارزیابی خدمات و امکانات سرا',
+                icon: <ClipboardList className="w-4 h-4 text-violet-600" />,
+                isActive: activeTab === 'surveys',
+                toneClass: 'bg-violet-600 text-white border-violet-600 shadow-violet-600/20',
+                badge:
+                  pendingSurveysCount > 0
+                    ? `${pendingSurveysCount.toLocaleString('fa-IR')} جدید`
+                    : undefined,
+                badgeClass: 'bg-amber-400 text-slate-950',
+                onClick: () => setActiveTab('surveys'),
+              },
+            ],
+          },
+          {
+            key: 'communications',
+            label: 'مشاوره، ارتباطات و تیکت‌ها',
+            icon: <MessageSquare className="w-4 h-4" />,
+            items: [
+              {
+                id: 'msg_counselor',
+                label: 'درخواست مشاوره',
+                subtitle: 'اتصال مستقیم به مشاور مرکز',
+                icon: <HeartHandshake className="w-4 h-4 text-emerald-600" />,
+                title: 'ارتباط مستقیم و محرمانه با مشاوران و روانشناسان سراهای دانشجویی',
+                onClick: () =>
+                  onOpenMessages({
+                    openCompose: true,
+                    receiverType: 'counselor',
+                    category: 'counseling',
+                    lockReceiver: true,
+                    bannerTitle: 'مشاور و روانشناس مرکز مشاوره',
+                    bannerSubtitle:
+                      'ارتباط مستقیم و محرمانه با مشاوران مرکز — پیام‌های قبلی شما در ستون سمت راست قابل مشاهده است',
+                  }),
+              },
+              {
+                id: 'msg_education',
+                label: 'سوالات و مشکلات آموزشی',
+                subtitle: 'اتصال مستقیم به کارشناس آموزش رشته',
+                icon: <GraduationCap className="w-4 h-4 text-sky-600" />,
+                title: 'طرح سوالات، مشکلات و درخواست‌های آموزشی مستقیماً با کارشناس آموزش رشته شما',
+                onClick: () =>
+                  onOpenMessages({
+                    openCompose: true,
+                    receiverType: 'education',
+                    category: 'education',
+                    lockReceiver: true,
+                    bannerTitle: 'کارشناس آموزش و مدیر گروه رشته',
+                    bannerSubtitle:
+                      'ارجاع هوشمند و مستقیم به مسئول آموزش رشته تحصیلی شما — پیام‌های قبلی در ستون سمت راست نمایش داده می‌شود',
+                  }),
+              },
+              {
+                id: 'msg_supervisor',
+                label: 'پیام به سرپرست سرا و مدیر',
+                subtitle: 'اتصال مستقیم به سرپرست سرا',
+                icon: <MessageSquare className="w-4 h-4 text-teal-600" />,
+                title: 'ارسال پیام مستقیم به سرپرست سرا و مدیریت خوابگاه',
+                onClick: () =>
+                  onOpenMessages({
+                    openCompose: true,
+                    receiverType: 'supervisor',
+                    category: 'accommodation',
+                    lockReceiver: true,
+                    bannerTitle: 'سرپرست سرا و مدیریت خوابگاه',
+                    bannerSubtitle:
+                      'ارسال مستقیم پیام در خصوص اسکان، مرخصی، تأسیسات و امور سرا — سوابق در ستون سمت راست قابل مشاهده است',
+                  }),
+              },
+              {
+                id: 'msg_unified',
+                label: 'همه پیام‌ها و تیکت‌ها',
+                subtitle: 'مشاهده سابقه و ارسال تیکت جدید',
+                icon: <Inbox className="w-4 h-4 text-indigo-600" />,
+                onClick: () => onOpenMessages({ openCompose: false }),
+              },
+              {
+                id: 'community_chat',
+                label: 'تالار گفتگوی دانشجویی',
+                subtitle: 'گروه‌های تخصصی و پیام‌رسان',
+                icon: <MessagesSquare className="w-4 h-4 text-teal-600" />,
+                isActive: activeTab === 'community_chat',
+                onClick: () => setActiveTab('community_chat'),
+              },
+            ],
+          },
+          {
+            key: 'services',
+            label: 'مدارک و سامانه‌ها',
+            icon: <Globe className="w-4 h-4" />,
+            items: [
+              {
+                id: 'id_card',
+                label: 'کارت شناسایی و مجوز اسکان',
+                subtitle: 'مشاهده مجازی و چاپ کارت',
+                icon: <QrCode className="w-4 h-4 text-teal-600" />,
+                onClick: () => setIsIdCardModalOpen(true),
+              },
+              {
+                id: 'transcript',
+                label: 'کارنامه فعالیت‌ها (چاپ)',
+                subtitle: 'فرهنگی، اجتماعی، ورزشی و انضباطی',
+                icon: <Award className="w-4 h-4 text-amber-600" />,
+                onClick: () => setIsTranscriptModalOpen(true),
+              },
+              {
+                id: 'portals',
+                label: 'سامانه‌ها و درگاه‌های دانشگاه',
+                subtitle: 'پیوندهای رسمی دانشجویی',
+                icon: <Globe className="w-4 h-4 text-cyan-600" />,
+                isActive: activeTab === 'portals',
+                toneClass: 'bg-cyan-700 text-white border-cyan-700 shadow-cyan-700/20',
+                badge: `${activeStudentPortals.length.toLocaleString('fa-IR')} لینک`,
+                badgeClass: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300',
+                onClick: () => setActiveTab('portals'),
+              },
+            ],
+          },
+        ];
 
-            <button
-              onClick={() => setActiveTab('guest')}
-              className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-                activeTab === 'guest'
-                  ? 'bg-indigo-600 text-white shadow-indigo-600/20'
-                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-              }`}
-            >
-              <UserPlus className="w-4 h-4 text-indigo-500" />
-              <span>درخواست موافقت با مهمان</span>
-              {pendingGuestCount > 0 && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black">
-                  {pendingGuestCount} در انتظار
-                </span>
-              )}
-              {approvedAwaitingDocsGuests.length > 0 && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-black">
-                  موافقت شده
-                </span>
-              )}
-            </button>
-          </>
-        )}
+        const visibleGroups = showAllMenuGroups
+          ? menuGroups
+          : menuGroups.filter((g) => g.key === activeMenuGroup);
 
-        <button
-          onClick={() => setActiveTab('surveys')}
-          className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'surveys'
-              ? 'bg-violet-600 text-white shadow-violet-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <ClipboardList className={`w-4 h-4 ${activeTab === 'surveys' ? 'text-white' : 'text-violet-600'}`} />
-          <span>نظرسنجی‌های دوره‌ای</span>
-          {pendingSurveysCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black animate-pulse">
-              {pendingSurveysCount} جدید
-            </span>
-          )}
-        </button>
+        return (
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2 text-xs sm:text-sm font-extrabold text-slate-800 dark:text-slate-100">
+                <LayoutGrid className="w-4 h-4 text-teal-600 shrink-0" />
+                <span>منوی کاربردی خدمات دانشجویی</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenMessages({ openCompose: true })}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-extrabold shadow-xs transition cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>ارسال پیام و تیکت</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAllMenuGroups((prev) => !prev)}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold transition cursor-pointer"
+                >
+                  <span>{showAllMenuGroups ? 'نمای دسته‌بندی‌شده' : 'نمایش همه منو'}</span>
+                </button>
+              </div>
+            </div>
 
-        <button
-          onClick={() => setActiveTab('cultural')}
-          className={`flex-1 min-w-[190px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'cultural'
-              ? 'bg-fuchsia-600 text-white shadow-fuchsia-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <Sparkles className={`w-4 h-4 ${activeTab === 'cultural' ? 'text-white' : 'text-fuchsia-600'}`} />
-          <span>برنامه فرهنگی و تشکل‌ها</span>
-          {approvedCulturalPrograms.length > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-950 dark:text-fuchsia-300 font-black">
-              {approvedCulturalPrograms.length} برنامه
-            </span>
-          )}
-        </button>
+            {!showAllMenuGroups && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                {menuGroups.map((grp) => {
+                  const isGrpActive = activeMenuGroup === grp.key;
+                  return (
+                    <button
+                      key={grp.key}
+                      type="button"
+                      onClick={() => setActiveMenuGroup(grp.key)}
+                      className={`px-3 py-2.5 rounded-2xl border text-xs font-extrabold transition flex items-center justify-between gap-2 cursor-pointer ${
+                        isGrpActive
+                          ? 'bg-slate-900 dark:bg-teal-600 text-white border-slate-900 dark:border-teal-600 shadow-sm'
+                          : 'bg-slate-50 dark:bg-slate-800/70 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="shrink-0">{grp.icon}</span>
+                        <span className="truncate">{grp.label}</span>
+                      </span>
+                      {grp.badgeCount !== undefined && grp.badgeCount > 0 && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded-full text-[10px] font-black tabular-nums shrink-0 ${
+                            isGrpActive
+                              ? 'bg-amber-400 text-slate-950'
+                              : 'bg-rose-500 text-white'
+                          }`}
+                        >
+                          {grp.badgeCount.toLocaleString('fa-IR')}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-        <button
-          onClick={() => setActiveTab('sports')}
-          className={`flex-1 min-w-[190px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'sports'
-              ? 'bg-emerald-600 text-white shadow-emerald-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <Dumbbell className={`w-4 h-4 ${activeTab === 'sports' ? 'text-white' : 'text-emerald-600'}`} />
-          <span>برنامه‌های ورزشی و تربیت بدنی</span>
-          {openSportsCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-black">
-              {openSportsCount} برنامه فعال
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('elections')}
-          className={`flex-1 min-w-[190px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'elections'
-              ? 'bg-indigo-700 text-white shadow-indigo-700/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <Vote className={`w-4 h-4 ${activeTab === 'elections' ? 'text-white' : 'text-indigo-600'}`} />
-          <span>انتخابات شورای صنفی</span>
-          {activeGuildElectionsCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-black animate-pulse">
-              {activeGuildElectionsCount} رأی‌گیری فعال
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('library')}
-          className={`flex-1 min-w-[190px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'library'
-              ? 'bg-amber-600 text-white shadow-amber-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <BookOpen className={`w-4 h-4 ${activeTab === 'library' ? 'text-white' : 'text-amber-600'}`} />
-          <span>کتابخانه و پژوهش</span>
-          {myActiveLibraryLoansCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300 font-black">
-              {myActiveLibraryLoansCount} فعال
-            </span>
-          )}
-        </button>
-
-        <button
-          type="button"
-          disabled={!isTermSchedulePublished}
-          onClick={() => {
-            if (!isTermSchedulePublished) return;
-            setActiveTab('term_schedule');
-          }}
-          title={
-            isTermSchedulePublished
-              ? 'مشاهده و چاپ برنامه هفتگی و کلاسی ترم'
-              : 'دکمه برنامه ترم پس از فعال‌سازی تیک انتشار توسط مدیر سامانه فعال می‌شود'
-          }
-          className={`flex-1 min-w-[195px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 shadow-xs ${
-            !isTermSchedulePublished
-              ? 'bg-slate-100 dark:bg-slate-900/60 text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 cursor-not-allowed opacity-80'
-              : activeTab === 'term_schedule'
-              ? 'bg-teal-700 text-white shadow-teal-700/20 cursor-pointer'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 cursor-pointer'
-          }`}
-        >
-          {!isTermSchedulePublished ? (
-            <Lock className="w-4 h-4 text-slate-400 shrink-0" />
-          ) : (
-            <Calendar
-              className={`w-4 h-4 ${
-                activeTab === 'term_schedule' ? 'text-white' : 'text-teal-600'
-              }`}
-            />
-          )}
-          <span>برنامه ترم</span>
-          {!isTermSchedulePublished ? (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400 font-extrabold shrink-0">
-              غیرفعال (در انتظار انتشار مدیر)
-            </span>
-          ) : (
-            <span
-              className={`text-[10px] px-2 py-0.5 rounded-full font-black shrink-0 ${
-                activeTab === 'term_schedule'
-                  ? 'bg-white/20 text-white'
-                  : 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300'
-              }`}
-            >
-              ترم {schedRules.activeTerm}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('academic_requests')}
-          className={`flex-1 min-w-[210px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'academic_requests'
-              ? 'bg-indigo-700 text-white shadow-indigo-700/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <ClipboardList className={`w-4 h-4 ${activeTab === 'academic_requests' ? 'text-white' : 'text-indigo-600'}`} />
-          <span>درخواست‌های آموزشی (مدیر گروه / آموزش)</span>
-          {myActiveAcademicRequestsCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-200 font-black">
-              {myActiveAcademicRequestsCount.toLocaleString('fa-IR')} در جریان
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('clearance')}
-          className={`flex-1 min-w-[200px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'clearance'
-              ? 'bg-sky-700 text-white shadow-sky-700/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <GraduationCap className={`w-4 h-4 ${activeTab === 'clearance' ? 'text-white' : 'text-sky-600'}`} />
-          <span>تسویه حساب فراغت از تحصیل</span>
-          {myClearance && (
-            <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-              myClearance.status === 'completed'
-                ? 'bg-emerald-500 text-white'
-                : myClearance.status === 'rejected_education' || myClearance.status === 'rejected_dept_head'
-                ? 'bg-rose-500 text-white'
-                : 'bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300'
-            }`}>
-              {myClearance.status === 'completed'
-                ? 'تکمیل (آماده چاپ)'
-                : myClearance.status === 'rejected_education' || myClearance.status === 'rejected_dept_head'
-                ? 'نیازمند اصلاح'
-                : 'در جریان'}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('community_chat')}
-          className={`flex-1 min-w-[200px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'community_chat'
-              ? 'bg-gradient-to-l from-teal-600 to-emerald-600 text-white shadow-teal-600/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <MessagesSquare className={`w-4 h-4 ${activeTab === 'community_chat' ? 'text-white' : 'text-teal-600'}`} />
-          <span>تالار گفتگو و پیام‌رسان دانشجویی</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('portals')}
-          className={`flex-1 min-w-[180px] py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
-            activeTab === 'portals'
-              ? 'bg-cyan-700 text-white shadow-cyan-700/20'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-          }`}
-        >
-          <Globe className={`w-4 h-4 ${activeTab === 'portals' ? 'text-white' : 'text-cyan-600'}`} />
-          <span>سامانه‌ها</span>
-          <span
-            className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-              activeTab === 'portals'
-                ? 'bg-white/20 text-white'
-                : 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300'
-            }`}
-          >
-            {activeStudentPortals.length.toLocaleString('fa-IR')} لینک
-          </span>
-        </button>
-
-        <button
-          onClick={() => setIsIdCardModalOpen(true)}
-          className="py-3.5 px-5 rounded-2xl bg-gradient-to-r from-teal-700 to-cyan-700 hover:from-teal-800 hover:to-cyan-800 text-white font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-teal-700/20 hover:scale-105"
-        >
-          <QrCode className="w-4 h-4 text-amber-300" />
-          <span>کارت شناسایی و مجوز اسکان سرا (چاپ / مجازی)</span>
-        </button>
-
-        <button
-          onClick={() => setIsTranscriptModalOpen(true)}
-          className="py-3.5 px-5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-black text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-amber-600/25 hover:scale-105"
-          title="مشاهده و چاپ کارنامه جامع فعالیت‌های فرهنگی، اجتماعی، ورزشی و انضباطی شما"
-        >
-          <Award className="w-4 h-4 text-yellow-100" />
-          <span>کارنامه فعالیت‌های فرهنگی، اجتماعی و ورزشی (چاپ)</span>
-        </button>
-
-        <button
-          onClick={onOpenMessages}
-          className="py-3.5 px-5 rounded-2xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-        >
-          <MessageSquare className="w-4 h-4 text-teal-600" />
-          <span>ارسال پیام به سرپرست سرا و مدیر</span>
-        </button>
-
-        <button
-          onClick={onOpenMessages}
-          className="py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-emerald-700/20"
-          title="ارتباط مستقیم و محرمانه با مشاوران و روانشناسان سراهای دانشجویی"
-        >
-          <HeartHandshake className="w-4 h-4 text-emerald-200" />
-          <span>درخواست مشاوره و پیام به مشاور مرکز</span>
-        </button>
-
-        <button
-          onClick={onOpenMessages}
-          className="py-3.5 px-5 rounded-2xl bg-gradient-to-r from-sky-600 to-blue-700 hover:from-sky-700 hover:to-blue-800 text-white font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-sky-700/20"
-          title="طرح سوالات، مشکلات و درخواست‌های آموزشی با کارشناس آموزش"
-        >
-          <GraduationCap className="w-4 h-4 text-sky-200" />
-          <span>سوالات و مشکلات آموزشی (کارشناس آموزش)</span>
-        </button>
-      </div>
+            <div className="space-y-4">
+              {visibleGroups.map((grp) => (
+                <div key={grp.key} className="space-y-2">
+                  {showAllMenuGroups && (
+                    <div className="flex items-center gap-2 px-1">
+                      <span className="w-1.5 h-4 rounded-full bg-teal-500" />
+                      <h4 className="text-xs font-extrabold text-slate-600 dark:text-slate-300">
+                        {grp.label}
+                      </h4>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    {grp.items.map((item) => {
+                      const activeCls =
+                        item.toneClass ||
+                        'bg-teal-600 text-white border-teal-600 shadow-md shadow-teal-600/20';
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          disabled={item.disabled}
+                          title={item.title}
+                          onClick={item.onClick}
+                          className={`w-full text-right px-3.5 py-2.5 rounded-2xl border transition flex items-center justify-between gap-2.5 ${
+                            item.disabled
+                              ? 'bg-slate-100 dark:bg-slate-900/60 text-slate-400 dark:text-slate-500 border-dashed border-slate-300 dark:border-slate-700 cursor-not-allowed opacity-80'
+                              : item.isActive
+                              ? `${activeCls} cursor-pointer`
+                              : 'bg-slate-50/80 dark:bg-slate-800/60 border-slate-200/90 dark:border-slate-700/80 text-slate-800 dark:text-slate-100 hover:bg-white dark:hover:bg-slate-800 hover:border-teal-400 dark:hover:border-teal-600 hover:shadow-xs cursor-pointer'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                                item.isActive
+                                  ? 'bg-white/20 text-white'
+                                  : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700'
+                              }`}
+                            >
+                              {item.icon}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-extrabold truncate">{item.label}</div>
+                              {item.subtitle && (
+                                <div
+                                  className={`text-[10px] truncate mt-0.5 ${
+                                    item.isActive
+                                      ? 'text-white/85'
+                                      : 'text-slate-500 dark:text-slate-400'
+                                  }`}
+                                >
+                                  {item.subtitle}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          {item.badge && (
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-black shrink-0 ${
+                                item.isActive
+                                  ? 'bg-white/25 text-white'
+                                  : item.badgeClass || 'bg-teal-100 text-teal-800'
+                              }`}
+                            >
+                              {item.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* اطلاعیه‌های مهم دانشگاه و سرا بصورت دکمه بازشونده و پاپ‌آپ (جلوگیری از شلوغی صفحه) */}
       <ImportantAnnouncementsWidget announcements={announcements} />
@@ -1352,7 +1571,16 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={onOpenMessages}
+                  onClick={() =>
+                    onOpenMessages({
+                      openCompose: true,
+                      receiverType: 'cultural',
+                      category: 'cultural',
+                      lockReceiver: true,
+                      bannerTitle: 'ارسال پیام مستقیم به واحد امور فرهنگی',
+                      bannerSubtitle: 'پیشنهادات و سوالات خود درباره برنامه‌های فرهنگی را ثبت کنید.',
+                    })
+                  }
                   className="px-3.5 py-2 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                 >
                   <MessageSquare className="w-4 h-4" />

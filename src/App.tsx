@@ -70,6 +70,7 @@ import {
   LiveNotificationToasts,
 } from './components/NotificationPromptBanner';
 import type { ExcelImportTab } from './components/ExcelImportModal';
+import type { MessagingComposePreset } from './components/MessagingPanel';
 import { RichTextDisplay } from './components/RichTextEditor';
 import { AnnouncementImageBox, ImageLightboxModal } from './components/ImageLightboxModal';
 import { ImportantAnnouncementsWidget } from './components/ImportantAnnouncementsWidget';
@@ -738,8 +739,16 @@ export default function App() {
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [excelModalInitialTab, setExcelModalInitialTab] = useState<ExcelImportTab>('students');
   const [isMessagesModalOpen, setIsMessagesModalOpen] = useState(false);
+  const [messagingPreset, setMessagingPreset] = useState<MessagingComposePreset | null>(null);
   const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
   const [openedMessagesFromNotif, setOpenedMessagesFromNotif] = useState(false);
+
+  const handleOpenMessages = useCallback((preset?: MessagingComposePreset) => {
+    setFocusedMessageId(null);
+    setOpenedMessagesFromNotif(false);
+    setMessagingPreset(preset ?? null);
+    setIsMessagesModalOpen(true);
+  }, []);
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [focusAboutEditorTick, setFocusAboutEditorTick] = useState(0);
@@ -1243,7 +1252,7 @@ export default function App() {
             setIsReportsModalOpen(true);
           }
         }}
-        onOpenMessages={() => setIsMessagesModalOpen(true)}
+        onOpenMessages={() => handleOpenMessages()}
         onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
         onLogout={handleLogout}
         onNavigateHome={() => {}}
@@ -1653,7 +1662,7 @@ export default function App() {
             settings={settings}
             cloudSyncTick={cloudSyncTick}
             onRefreshData={refreshAllData}
-            onOpenMessages={() => setIsMessagesModalOpen(true)}
+            onOpenMessages={(preset) => handleOpenMessages(preset)}
             onOpenUserGuide={() => handleOpenUserGuide('student')}
           />
         )}
@@ -2094,6 +2103,7 @@ export default function App() {
             isOpen={isMessagesModalOpen}
             onClose={() => {
               setIsMessagesModalOpen(false);
+              setMessagingPreset(null);
               setFocusedMessageId(null);
               setOpenedMessagesFromNotif(false);
             }}
@@ -2101,6 +2111,7 @@ export default function App() {
             messages={messages}
             onMessagesUpdated={refreshAllData}
             initialMessageId={focusedMessageId}
+            initialPreset={messagingPreset}
             returnLabel={openedMessagesFromNotif ? 'بستن و بازگشت' : 'بازگشت'}
           />
         )}

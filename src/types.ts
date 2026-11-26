@@ -102,6 +102,18 @@ export interface Bed {
   assignmentStatus?: 'none' | 'temporary' | 'confirmed'; // وضعیت تخصیص: موقت یا قطعی
 }
 
+export type RoomAssetStatus = 'healthy' | 'damaged' | 'missing' | 'unavailable';
+
+export interface RoomAssetItem {
+  id: string;
+  name: string;
+  quantity?: number;
+  status: RoomAssetStatus; // healthy = سالم و موجود | damaged = خراب / شکسته | missing = مفقودشده | unavailable = غیرفعال / این اتاق ندارد
+  note?: string; // توضیحات وضعیت وسیله (مثلاً توسط دانشجویان شکسته شده)
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
 export interface Room {
   id: string;
   dormId: string;
@@ -112,6 +124,7 @@ export interface Room {
   allowedFields?: string[]; // رشته‌های مجاز (خالی = همه رشته‌ها)
   allowedEntryTerms?: string[]; // ترم‌های ورود مجاز (خالی = همه ورودی‌ها)
   facilities: string[]; // امکانات اتاق (یخچال، بالکن، شوفاژ، کولر، کمد دیواری، میز مطالعه)
+  assets?: RoomAssetItem[]; // فهرست تفصیلی اموال و تجهیزات اتاق همراه با وضعیت سلامت، خرابی، مفقودی یا عدم وجود
   notes?: string;
   status?: 'active' | 'maintenance' | 'inactive';
   disciplineScore?: number; // نمره انضباط و رعایت مقررات سکونت و رفت و آمد (۰ تا ۱۰۰)

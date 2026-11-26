@@ -2,6 +2,8 @@ import {
   Student,
   Dormitory,
   Room,
+  RoomAssetItem,
+  RoomAssetStatus,
   Bed,
   RoomWarning,
   Announcement,
@@ -101,6 +103,39 @@ import {
   SchedUserHistoryState,
 } from '../types';
 import { getSchedSlotTitle } from './schedulingUtils';
+
+export const DEFAULT_COMMON_ROOM_ASSETS: string[] = [
+  'یخچال',
+  'شوفاژ',
+  'کمد دیواری',
+  'چوب لباسی',
+  'میز مطالعه',
+  'صندلی',
+  'پرده',
+  'موکت / فرش',
+  'کولر',
+  'آینه',
+  'چراغ مطالعه',
+  'جاکفشی',
+  'سطل زباله',
+  'قفل کمد',
+];
+
+export function getEffectiveRoomAssets(room: Room): RoomAssetItem[] {
+  if (Array.isArray(room.assets)) {
+    return room.assets;
+  }
+  const baseFacilities = Array.isArray(room.facilities) ? room.facilities : [];
+  return baseFacilities
+    .map((f) => String(f || '').trim())
+    .filter(Boolean)
+    .map((name, idx) => ({
+      id: `asset_${room.id}_${idx}`,
+      name,
+      quantity: 1,
+      status: 'healthy' as RoomAssetStatus,
+    }));
+}
 import {
   DEFAULT_COMMUNITY_CHAT_SETTINGS,
   INITIAL_PUBLIC_FORUM,
@@ -3119,7 +3154,7 @@ export const Storage = {
       roomNumber,
       floor,
       capacity,
-      facilities: ['یخچال', 'شوفاژ', 'کمد دیواری'],
+      facilities: ['یخچال', 'شوفاژ', 'کمد دیواری', 'چوب لباسی'],
       status: 'active',
     };
 
@@ -3610,6 +3645,137 @@ export const Storage = {
         cleanRoomNumber !== oldRoom.roomNumber
           ? `نام/شماره اتاق با موفقیت از «${oldRoom.roomNumber}» به «${cleanRoomNumber}» تغییر یافت.`
           : 'اطلاعات و امکانات اتاق با موفقیت بروزرسانی شد.',
+    };
+  },
+
+  updateRoomAssets: (
+    roomId: string,
+    nextAssets: RoomAssetItem[],
+    actorName = 'سرپرست / مدیر سرا',
+    actorRole: 'admin' | 'supervisor' = 'supervisor',
+    options?: {
+      notifyOccupants?: boolean;
+      actorId?: string;
+      changeSummary?: string;
+    }
+  ): { success: boolean; message: string; assets?: RoomAssetItem[] } => {
+    const rooms = Storage.getRooms();
+    const idx = rooms.findIndex((r) => r.id === roomId);
+    if (idx === -1) {
+      return { success: false, message: 'اتاق مورد نظر یافت نشد.' };
+    }
+
+    const nowStr = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const validStatuses: RoomAssetStatus[] = ['healthy', 'damaged', 'missing', 'unavailable'];
+    const cleanedAssets: RoomAssetItem[] = nextAssets
+      .map((item, i) => {
+        const cleanName = String(item.name || '').trim();
+        if (!cleanName) return null;
+        const status: RoomAssetStatus = validStatuses.includes(item.status) ? item.status : 'healthy';
+        const qty =
+          typeof item.quantity === 'number' && !Number.isNaN(item.quantity) && item.quantity >= 1
+            ? Math.round(item.quantity)
+            : 1;
+        return {
+          id: item.id || `asset_${roomId}_${Date.now()}_${i}`,
+          name: cleanName,
+          quantity: qty,
+          status,
+          note: item.note?.trim() || undefined,
+          updatedBy: item.updatedBy || actorName,
+          updatedAt: item.updatedAt || nowStr,
+        } as RoomAssetItem;
+      })
+      .filter((x): x is RoomAssetItem => Boolean(x));
+
+    const room = rooms[idx];
+    const syncedFacilities = cleanedAssets
+      .filter((a) => a.status === 'healthy' || a.status === 'damaged')
+      .map((a) => a.name);
+
+    rooms[idx] = {
+      ...room,
+      assets: cleanedAssets,
+      facilities: syncedFacilities,
+    };
+    Storage.setRooms(rooms);
+
+    const dorm = Storage.getDormitories().find((d) => d.id === room.dormId);
+    const damagedCount = cleanedAssets.filter((a) => a.status === 'damaged').length;
+    const missingCount = cleanedAssets.filter((a) => a.status === 'missing').length;
+    const unavailableCount = cleanedAssets.filter((a) => a.status === 'unavailable').length;
+
+    const issueParts = [
+      damagedCount > 0 ? `${damagedCount} مورد خراب/شکسته` : '',
+      missingCount > 0 ? `${missingCount} مورد مفقود` : '',
+      unavailableCount > 0 ? `${unavailableCount} مورد غیرفعال/ندارد` : '',
+    ].filter(Boolean);
+
+    Storage.addActivityLog({
+      category: 'dorm_structure',
+      action: `بروزرسانی لیست اموال و تجهیزات اتاق ${room.roomNumber}`,
+      details:
+        options?.changeSummary ||
+        `فهرست اموال اتاق ${room.roomNumber} (${dorm?.name || ''}) توسط ${actorName} بروزرسانی شد (${cleanedAssets.length} قلم${
+          issueParts.length > 0 ? `؛ وضعیت خاص: ${issueParts.join('، ')}` : ''
+        }).`,
+      targetName: `اتاق ${room.roomNumber}`,
+      severity: damagedCount > 0 || missingCount > 0 ? 'warning' : 'info',
+      actorName,
+      actorRole,
+    });
+
+    if (options?.notifyOccupants) {
+      const problemAssets = cleanedAssets.filter((a) => a.status === 'damaged' || a.status === 'missing');
+      if (problemAssets.length > 0) {
+        const nowFa = new Date().toLocaleDateString('fa-IR');
+        const problemLines = problemAssets
+          .map((a) => {
+            const stLabel = a.status === 'damaged' ? 'خراب / شکسته' : 'مفقودشده';
+            return `• ${a.name} (${stLabel})${a.note ? ` — توضیح: ${a.note}` : ''}`;
+          })
+          .join('\n');
+
+        const occupants = Storage.getBeds()
+          .filter((b) => b.roomId === room.id && b.studentId)
+          .map((b) => Storage.getStudents().find((s) => s.studentId === b.studentId))
+          .filter((s): s is Student => Boolean(s));
+
+        occupants.forEach((st) => {
+          Storage.addMessage({
+            senderId: options?.actorId || actorRole,
+            senderName: actorName,
+            senderRole: actorRole,
+            receiverType: 'student',
+            receiverId: st.studentId,
+            subject: `گزارش وضعیت اموال و تجهیزات اتاق ${room.roomNumber}`,
+            content: `در بررسی و بازدید سرپرستی، وضعیت زیر در اموال اتاق ${room.roomNumber} (${dorm?.name || 'سرا'}) ثبت گردید:\n${problemLines}\nلطفاً جهت پیگیری یا ارائه توضیحات به دفتر سرپرستی مراجعه نمایید.`,
+            category: 'discipline',
+            date: nowFa,
+          });
+        });
+
+        Storage.addRoomWarning({
+          dormId: room.dormId,
+          roomId: room.id,
+          title: `گزارش خرابی/مفقودی اموال اتاق ${room.roomNumber}`,
+          description: problemLines,
+          severity: 'warning',
+          date: nowFa,
+          supervisorName: actorName,
+          resolved: false,
+        });
+      }
+    }
+
+    return {
+      success: true,
+      message: `لیست اموال اتاق ${room.roomNumber} با موفقیت ذخیره شد.`,
+      assets: cleanedAssets,
     };
   },
 

@@ -36,6 +36,36 @@ import {
   ArrowRight,
 } from 'lucide-react';
 
+export type MessagingReceiverType =
+  | 'supervisor'
+  | 'admin'
+  | 'counselor'
+  | 'maintenance'
+  | 'finance'
+  | 'warehouse'
+  | 'procurement'
+  | 'education'
+  | 'academic_deputy'
+  | 'professor'
+  | 'cultural'
+  | 'student_affairs'
+  | 'security'
+  | 'vice_dean'
+  | 'library'
+  | 'smart_campus'
+  | 'graduation'
+  | 'student'
+  | 'all';
+
+export interface MessagingComposePreset {
+  openCompose?: boolean;
+  receiverType?: MessagingReceiverType;
+  category?: Message['category'];
+  lockReceiver?: boolean;
+  bannerTitle?: string;
+  bannerSubtitle?: string;
+}
+
 interface MessagingPanelProps {
   isOpen: boolean;
   onClose: () => void;
@@ -43,6 +73,7 @@ interface MessagingPanelProps {
   messages: Message[];
   onMessagesUpdated: () => void;
   initialMessageId?: string | null;
+  initialPreset?: MessagingComposePreset | null;
   returnLabel?: string;
 }
 
@@ -53,12 +84,15 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   messages,
   onMessagesUpdated,
   initialMessageId = null,
+  initialPreset = null,
   returnLabel = 'بازگشت',
 }) => {
   const [activeTab, setActiveTab] = useState<'inbox' | 'compose'>('inbox');
+  const [isReceiverLocked, setIsReceiverLocked] = useState(false);
+  const [sendFeedback, setSendFeedback] = useState<string | null>(null);
 
   // فرم پیام جدید
-  const [receiverType, setReceiverType] = useState<'supervisor' | 'admin' | 'counselor' | 'maintenance' | 'finance' | 'warehouse' | 'procurement' | 'education' | 'academic_deputy' | 'professor' | 'cultural' | 'student_affairs' | 'security' | 'vice_dean' | 'library' | 'smart_campus' | 'graduation' | 'student' | 'all'>('supervisor');
+  const [receiverType, setReceiverType] = useState<MessagingReceiverType>('supervisor');
   const [category, setCategory] = useState<Message['category']>('accommodation');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
@@ -87,11 +121,33 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   const [replyText, setReplyText] = useState('');
 
   useEffect(() => {
-    if (isOpen && initialMessageId) {
+    if (!isOpen) return;
+    setSendFeedback(null);
+    if (initialMessageId) {
       setActiveTab('inbox');
       setSelectedMessageId(initialMessageId);
+      setIsReceiverLocked(false);
+      return;
     }
-  }, [isOpen, initialMessageId]);
+    if (initialPreset) {
+      const wantsCompose = initialPreset.openCompose !== false;
+      setActiveTab(wantsCompose ? 'compose' : 'inbox');
+      setSelectedMessageId(null);
+      if (initialPreset.receiverType) {
+        setReceiverType(initialPreset.receiverType);
+      }
+      if (initialPreset.category) {
+        setCategory(initialPreset.category);
+      }
+      setIsReceiverLocked(Boolean(initialPreset.lockReceiver && initialPreset.receiverType));
+      setSubject('');
+      setContent('');
+      setStudentEduTargetId('auto');
+      setIsConfidential(false);
+      return;
+    }
+    setIsReceiverLocked(false);
+  }, [isOpen, initialMessageId, initialPreset]);
 
   // مودال ارجاع به واحد تأسیسات
   const [isReferModalOpen, setIsReferModalOpen] = useState(false);
@@ -300,7 +356,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
           ? allAcademicDeputyStaff.find((a) => a.id === profTargetStaffId)
           : undefined;
 
-      Storage.addMessage({
+    const createdProfMsg = Storage.addMessage({
         senderId: currentUser.professor.id,
         senderName: `${currentUser.professor.fullName} (استاد / مدرس)`,
         senderRole: 'professor',
@@ -325,6 +381,8 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       setSubject('');
       setContent('');
       setProfTargetStaffId('');
+      setSelectedMessageId(createdProfMsg.id);
+      setSendFeedback('پیام شما با موفقیت ثبت و ارسال شد.');
       setActiveTab('inbox');
       onMessagesUpdated();
       return;
@@ -353,11 +411,12 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
           ? 'graduation'
           : 'smart_campus';
 
+      let createdUnitMsg: Message | null = null;
       if (currentUser.role === 'education' && eduScope === 'colleague') {
         const targetColleague = eduAllActiveColleagues.find((c) => c.id === eduSelectedColleagueId);
         if (!targetColleague) return;
         const targetRoleLabel = getEducationStaffRoleLabel(targetColleague);
-        Storage.addMessage({
+        createdUnitMsg = Storage.addMessage({
           senderId: currentUser.staff.id,
           senderName: `${currentUser.staff.fullName} (${roleLabel})`,
           senderRole: 'education',
@@ -374,7 +433,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
         });
       } else if (eduScope === 'single') {
         if (!eduSelectedStudent) return;
-        Storage.addMessage({
+        createdUnitMsg = Storage.addMessage({
           senderId: currentUser.staff.id,
           senderName: `${currentUser.staff.fullName} (${roleLabel})`,
           senderRole: currentUser.role,
@@ -393,7 +452,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
         const count = allStudentsList.filter(
           (s) => normalizePersianSearch(s.fieldOfStudy || '') === normalizePersianSearch(eduSelectedField)
         ).length;
-        Storage.addMessage({
+        createdUnitMsg = Storage.addMessage({
           senderId: currentUser.staff.id,
           senderName: `${currentUser.staff.fullName} (${roleLabel})`,
           senderRole: currentUser.role,
@@ -413,7 +472,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
         const count = allStudentsList.filter(
           (s) => normalizePersianSearch(s.entryTerm || '') === normalizePersianSearch(eduSelectedEntryTerm)
         ).length;
-        Storage.addMessage({
+        createdUnitMsg = Storage.addMessage({
           senderId: currentUser.staff.id,
           senderName: `${currentUser.staff.fullName} (${roleLabel})`,
           senderRole: currentUser.role,
@@ -432,15 +491,18 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       setSubject('');
       setContent('');
       setIsConfidential(false);
+      if (createdUnitMsg) setSelectedMessageId(createdUnitMsg.id);
+      setSendFeedback('پیام شما با موفقیت ثبت و ارسال شد.');
       setActiveTab('inbox');
       onMessagesUpdated();
       return;
     }
 
     if (currentUser.role === 'security') {
+      let createdSecMsg: Message | null = null;
       if (secComposeMode === 'student') {
         if (!eduSelectedStudent) return;
-        Storage.addMessage({
+        createdSecMsg = Storage.addMessage({
           senderId: currentUser.staff.id,
           senderName: `${currentUser.staff.fullName} (حراست و انتظامات)`,
           senderRole: 'security',
@@ -473,7 +535,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
           academic_deputy: 'معاونت آموزشی',
           all: 'همه واحدها و سرپرستان',
         };
-        Storage.addMessage({
+        createdSecMsg = Storage.addMessage({
           senderId: currentUser.staff.id,
           senderName: `${currentUser.staff.fullName} (حراست و انتظامات)`,
           senderRole: 'security',
@@ -489,6 +551,8 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
       setSubject('');
       setContent('');
       setIsConfidential(false);
+      if (createdSecMsg) setSelectedMessageId(createdSecMsg.id);
+      setSendFeedback('پیام شما با موفقیت ثبت و ارسال شد.');
       setActiveTab('inbox');
       onMessagesUpdated();
       return;
@@ -574,7 +638,7 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
         ? allSchedProfessors.find((p) => p.id === targetProfId)
         : undefined;
 
-    Storage.addMessage({
+    const createdMsg = Storage.addMessage({
       senderId,
       senderName,
       senderRole,
@@ -604,6 +668,8 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
     setIsConfidential(false);
     setStudentEduTargetId('auto');
     setTargetProfId('');
+    setSelectedMessageId(createdMsg.id);
+    setSendFeedback('پیام شما با موفقیت ثبت و ارسال شد.');
     setActiveTab('inbox');
     onMessagesUpdated();
   };
@@ -786,25 +852,54 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
   };
 
   const selectedMsg = userMessages.find((m) => m.id === selectedMessageId);
+  const filteredMessagesList = userMessages.filter(
+    (m) =>
+      (inboxCategoryFilter === 'all' || m.category === inboxCategoryFilter) &&
+      (inboxRoleFilter === 'all' || m.senderRole === inboxRoleFilter || m.receiverType === inboxRoleFilter)
+  );
+
+  const receiverDisplayLabels: Record<MessagingReceiverType, string> = {
+    supervisor: 'سرپرست سرا و مدیر خوابگاه',
+    admin: 'مدیریت کل سامانه',
+    counselor: 'مشاور و روانشناس مرکز مشاوره',
+    maintenance: 'واحد تأسیسات و تعمیرات',
+    finance: 'امور مالی و حسابداری',
+    warehouse: 'مسئول انبار و تجهیزات',
+    procurement: 'کارپردازی و خرید',
+    education: 'کارشناس آموزش و مدیر گروه رشته',
+    academic_deputy: 'معاونت آموزشی پردیس',
+    professor: 'اساتید و مدرسان',
+    cultural: 'امور فرهنگی و تشکل‌ها',
+    student_affairs: 'امور دانشجویی و شورای صنفی',
+    security: 'حراست و انتظامات',
+    vice_dean: 'معاونت دانشجویی',
+    library: 'کتابخانه و پژوهش',
+    smart_campus: 'واحد هوشمندسازی',
+    graduation: 'واحد فارغ‌التحصیلان',
+    student: 'دانشجو',
+    all: 'همه واحدها',
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 relative max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-5xl w-full p-4 sm:p-6 shadow-2xl border border-slate-200 dark:border-slate-800 relative max-h-[92vh] flex flex-col">
 
         {/* سربرگ */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
+        <div className="flex items-center justify-between pb-3 sm:pb-4 border-b border-slate-100 dark:border-slate-800 gap-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2.5 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 shrink-0">
               <MessageSquare className="w-6 h-6" />
             </div>
-            <div>
-              <h3 className="font-extrabold text-base sm:text-lg text-slate-900 dark:text-white">
-                سامانه پیام‌ها و تیکت‌های پشتیبانی سرا
+            <div className="min-w-0">
+              <h3 className="font-extrabold text-sm sm:text-lg text-slate-900 dark:text-white truncate">
+                سامانه یکپارچه پیام‌ها و تیکت‌ها
               </h3>
-              <p className="text-xs text-slate-500">ارتباط مستقیم دانشجومعلمان با سرپرستان و مدیر سامانه</p>
+              <p className="text-[11px] sm:text-xs text-slate-500 truncate">
+                ارسال پیام جدید و مشاهده هم‌زمان سابقه پیام‌ها و پاسخ‌های قبلی
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={onClose}
@@ -824,40 +919,245 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
           </div>
         </div>
 
-        {/* تب‌ها */}
-        <div className="flex items-center gap-2 py-3 border-b border-slate-100 dark:border-slate-800">
-          <button
-            onClick={() => {
-              setActiveTab('inbox');
-              setSelectedMessageId(null);
-            }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
-              activeTab === 'inbox'
-                ? 'bg-teal-600 text-white shadow-xs'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            پیام‌های دریافتی و ارسالی ({userMessages.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('compose')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-              activeTab === 'compose'
-                ? 'bg-teal-600 text-white shadow-xs'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            <Send className="w-3.5 h-3.5" />
-            <span>ارسال پیام جدید</span>
-          </button>
+        {/* نوار وضعیت و جابه‌جایی سریع در موبایل */}
+        <div className="flex flex-wrap items-center justify-between gap-2 py-2.5 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('compose');
+                setSelectedMessageId(null);
+                setSendFeedback(null);
+              }}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'compose'
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-100'
+              }`}
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>ارسال پیام جدید</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('inbox');
+                setSendFeedback(null);
+              }}
+              className={`md:hidden px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                activeTab === 'inbox'
+                  ? 'bg-slate-800 text-white shadow-xs'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              سابقه پیام‌ها ({userMessages.length.toLocaleString('fa-IR')})
+            </button>
+          </div>
+          <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400">
+            <span>مجموع تیکت‌ها و پیام‌های شما:</span>
+            <span className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-extrabold">
+              {userMessages.length.toLocaleString('fa-IR')} مورد
+            </span>
+          </span>
         </div>
 
-        {/* بدنه محتوا */}
-        <div className="flex-1 overflow-y-auto py-4">
+        {sendFeedback && (
+          <div className="mt-3 px-4 py-2.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{sendFeedback}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSendFeedback(null);
+                setActiveTab('compose');
+                setSelectedMessageId(null);
+              }}
+              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer shrink-0"
+            >
+              + پیام جدید دیگر
+            </button>
+          </div>
+        )}
+
+        {/* بدنه دوسطحی همیشگی: سایدبار سمت راست (پیام‌های قبلی) + پنل اصلی چپ (پیام جدید یا جزئیات گفتگو) */}
+        <div className="flex-1 overflow-hidden py-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
+
+            {/* سایدبار سمت راست: همیشه در دسکتاپ قابل مشاهده حتی هنگام نوشتن پیام جدید */}
+            <div
+              className={`md:col-span-1 border-l border-slate-100 dark:border-slate-800 pl-2 flex flex-col gap-2 overflow-hidden ${
+                activeTab === 'compose' ? 'hidden md:flex' : selectedMsg ? 'hidden md:flex' : 'flex'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2 pb-1">
+                <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100">
+                  پیام‌های قبلی و تیکت‌ها ({filteredMessagesList.length.toLocaleString('fa-IR')})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('compose');
+                    setSelectedMessageId(null);
+                  }}
+                  className="px-2 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 text-[10px] font-extrabold hover:bg-teal-100 cursor-pointer shrink-0"
+                >
+                  + پیام جدید
+                </button>
+              </div>
+
+              <div className="space-y-1.5 shrink-0">
+                <select
+                  value={inboxCategoryFilter}
+                  onChange={(e) => setInboxCategoryFilter(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-bold"
+                >
+                  <option value="all">همه دسته‌ها ({userMessages.length})</option>
+                  <option value="security">حراست و انتظامات</option>
+                  <option value="education">امور آموزشی (کارشناس آموزش)</option>
+                  <option value="library">کتابخانه و پژوهش</option>
+                  <option value="smart_campus">واحد هوشمندسازی</option>
+                  <option value="graduation">واحد فارغ‌التحصیلان</option>
+                  <option value="cultural">امور فرهنگی و تشکل‌ها</option>
+                  <option value="student_affairs">امور دانشجویی و شورای صنفی</option>
+                  <option value="financial">امور مالی و حسابداری</option>
+                  <option value="counseling">مشاوره روانشناختی و فردی</option>
+                  <option value="maintenance">تأسیسات و تعمیرات</option>
+                  <option value="services_cleaning">خدمات و نظافت</option>
+                  <option value="rights_violation">عدم رعایت حقوق دیگران</option>
+                  <option value="social_personal">مشاوره و آسیب‌های فردی/اجتماعی</option>
+                  <option value="accommodation">امور اسکان</option>
+                  <option value="discipline">انضباطی</option>
+                  <option value="request">مرخصی و تردد</option>
+                </select>
+                {(currentUser.role === 'vice_dean' || currentUser.role === 'admin') && (
+                  <select
+                    value={inboxRoleFilter}
+                    onChange={(e) => setInboxRoleFilter(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/30 text-[11px] font-bold"
+                  >
+                    <option value="all">پایش همه حوزه‌ها (از دانشجو تا مدیر)</option>
+                    <option value="student">پیام‌های دانشجویان</option>
+                    <option value="supervisor">سرپرستان سراها</option>
+                    <option value="maintenance">واحد تأسیسات</option>
+                    <option value="security">حراست و انتظامات</option>
+                    <option value="student_affairs">امور دانشجویی و ورزش</option>
+                    <option value="cultural">امور فرهنگی</option>
+                    <option value="education">کارشناس آموزش</option>
+                    <option value="academic_deputy">معاونت آموزشی</option>
+                    <option value="professor">اساتید و مدرسان</option>
+                    <option value="library">کتابخانه و پژوهش</option>
+                    <option value="smart_campus">واحد هوشمندسازی</option>
+                    <option value="graduation">واحد فارغ‌التحصیلان</option>
+                    <option value="counselor">مرکز مشاوره</option>
+                    <option value="finance">امور مالی</option>
+                    <option value="warehouse">انبار و تجهیزات</option>
+                    <option value="procurement">کارپردازی</option>
+                    <option value="vice_dean">معاونت دانشجویی</option>
+                    <option value="admin">مدیریت کل</option>
+                  </select>
+                )}
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-2 max-h-[54vh] pl-1">
+                {filteredMessagesList.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    هیچ پیامی در این دسته ثبت نشده است.
+                  </div>
+                ) : (
+                  filteredMessagesList.map((msg) => (
+                    <button
+                      key={msg.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedMessageId(msg.id);
+                        setActiveTab('inbox');
+                      }}
+                      className={`w-full text-right p-3 rounded-2xl border text-xs transition block cursor-pointer ${
+                        selectedMessageId === msg.id && activeTab === 'inbox'
+                          ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40 shadow-xs'
+                          : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <div className="flex items-center gap-1 font-bold text-slate-800 dark:text-slate-100 truncate">
+                          {msg.isConfidential && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-extrabold" title="گزارش محرمانه">
+                              🔒 محرمانه
+                            </span>
+                          )}
+                          <span className="truncate">
+                            {msg.receiverName
+                              ? `${msg.senderName} ← ${msg.receiverName}`
+                              : msg.senderName}
+                          </span>
+                        </div>
+                        <span
+                          className={`text-[9px] px-1.5 py-0.2 rounded-md font-bold shrink-0 ${
+                            msg.status === 'answered'
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                              : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                          }`}
+                        >
+                          {msg.status === 'answered' ? 'پاسخ داده شد' : 'در انتظار پاسخ'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 truncate">
+                        {msg.subject}
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
+                          {msg.category === 'security'
+                            ? 'حراست و انتظامات'
+                            : msg.category === 'education'
+                            ? 'امور آموزشی'
+                            : msg.category === 'library'
+                            ? 'کتابخانه و پژوهش'
+                            : msg.category === 'smart_campus'
+                            ? 'واحد هوشمندسازی'
+                            : msg.category === 'graduation'
+                            ? 'واحد فارغ‌التحصیلان'
+                            : msg.category === 'cultural'
+                            ? 'امور فرهنگی'
+                            : msg.category === 'student_affairs'
+                            ? 'امور دانشجویی'
+                            : msg.category === 'financial'
+                            ? 'امور مالی'
+                            : msg.category === 'counseling'
+                            ? 'مشاوره'
+                            : msg.category === 'maintenance'
+                            ? 'تأسیسات'
+                            : msg.category === 'services_cleaning'
+                            ? 'خدمات و نظافت'
+                            : msg.category === 'rights_violation'
+                            ? 'حقوق دیگران'
+                            : msg.category === 'social_personal'
+                            ? 'مشاوره/آسیب‌ها'
+                            : msg.category === 'accommodation'
+                            ? 'اسکان'
+                            : msg.category === 'discipline'
+                            ? 'انضباطی'
+                            : 'عمومی'}
+                        </span>
+                        <span>{msg.date.split('-')[0]}</span>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* پنل اصلی سمت چپ: فرم ارسال پیام جدید یا جزئیات پیام انتخاب‌شده */}
+            <div
+              className={`md:col-span-2 overflow-y-auto max-h-[64vh] pr-1 ${
+                activeTab === 'inbox' && !selectedMsg ? 'hidden md:block' : 'block'
+              }`}
+            >
 
           {/* تب ارسال پیام جدید */}
           {activeTab === 'compose' && (
-            <form onSubmit={handleSendMessage} className="space-y-4 max-w-xl mx-auto">
+            <form onSubmit={handleSendMessage} className="space-y-4">
               {currentUser.role === 'professor' ? (
                 <div className="space-y-3 p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
                   <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-900 dark:text-indigo-200">
@@ -1206,6 +1506,83 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                     </div>
                   )}
                 </div>
+              ) : isReceiverLocked ? (
+                <div className="space-y-2">
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-l from-teal-50 via-sky-50/70 to-emerald-50/60 dark:from-teal-950/40 dark:via-sky-950/30 dark:to-emerald-950/30 border border-teal-200 dark:border-teal-800 flex flex-wrap items-center justify-between gap-2">
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="text-[11px] font-bold text-teal-700 dark:text-teal-300">
+                        گیرنده مستقیم پیام شما:
+                      </div>
+                      <div className="text-sm font-black text-slate-900 dark:text-white">
+                        {initialPreset?.bannerTitle || receiverDisplayLabels[receiverType]}
+                      </div>
+                      {initialPreset?.bannerSubtitle && (
+                        <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                          {initialPreset.bannerSubtitle}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsReceiverLocked(false)}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold hover:border-teal-400 transition cursor-pointer shrink-0"
+                    >
+                      تغییر گیرنده / سایر واحدها
+                    </button>
+                  </div>
+                  {currentUser.role === 'student' && (receiverType === 'education' || category === 'education') && (
+                    <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/35 border border-sky-200 dark:border-sky-800 text-[11px] font-bold text-sky-900 dark:text-sky-200 space-y-2">
+                      <div className="flex items-start gap-2">
+                        <GraduationCap className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span>
+                            ارجاع هوشمند بر اساس رشته تحصیلی شما (<b>{currentUser.student.fieldOfStudy || 'ثبت‌نشده'}</b>):
+                          </span>{' '}
+                          {studentMatchedEducationStaff.length > 0 ? (
+                            <span className="text-sky-700 dark:text-sky-300">
+                              {studentMatchedEducationStaff
+                                .map((s) => `${s.fullName} (${getEducationStaffRoleLabel(s)})`)
+                                .join('، ')}
+                            </span>
+                          ) : (
+                            <span>به کارتابل واحد آموزش ارسال می‌شود.</span>
+                          )}
+                        </div>
+                      </div>
+                      {studentMatchedEducationStaff.length > 1 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1 border-t border-sky-200/70 dark:border-sky-800/70">
+                          <button
+                            type="button"
+                            onClick={() => setStudentEduTargetId('auto')}
+                            className={`px-2.5 py-1 rounded-lg border text-[10px] font-extrabold transition cursor-pointer ${
+                              studentEduTargetId === 'auto'
+                                ? 'bg-sky-600 text-white border-sky-600'
+                                : 'bg-white dark:bg-slate-900 text-sky-800 dark:text-sky-200 border-sky-200 dark:border-sky-800'
+                            }`}
+                          >
+                            همه مسئولین آموزش رشته (کارشناس و مدیر گروه)
+                          </button>
+                          {studentMatchedEducationStaff.map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => setStudentEduTargetId(s.id)}
+                              className={`px-2.5 py-1 rounded-lg border text-[10px] font-extrabold transition cursor-pointer ${
+                                studentEduTargetId === s.id
+                                  ? isEducationDepartmentHead(s)
+                                    ? 'bg-indigo-600 text-white border-indigo-600'
+                                    : 'bg-sky-600 text-white border-sky-600'
+                                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                              }`}
+                            >
+                              {getEducationStaffRoleLabel(s)}: {s.fullName}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               ) : (
                 <>
                   <div>
@@ -1215,7 +1592,10 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => setReceiverType('supervisor')}
+                        onClick={() => {
+                          setReceiverType('supervisor');
+                          setCategory('accommodation');
+                        }}
                         className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
                           receiverType === 'supervisor'
                             ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300'
@@ -1310,34 +1690,38 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                       >
                         امور مالی و حسابداری
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReceiverType('warehouse');
-                          setCategory('maintenance');
-                        }}
-                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
-                          receiverType === 'warehouse'
-                            ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                        }`}
-                      >
-                        مسئول انبار و تجهیزات
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReceiverType('procurement');
-                          setCategory('other');
-                        }}
-                        className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
-                          receiverType === 'procurement'
-                            ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                        }`}
-                      >
-                        کارپرداز و خرید
-                      </button>
+                      {currentUser.role !== 'student' && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReceiverType('warehouse');
+                              setCategory('maintenance');
+                            }}
+                            className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                              receiverType === 'warehouse'
+                                ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300'
+                                : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                            }`}
+                          >
+                            مسئول انبار و تجهیزات
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReceiverType('procurement');
+                              setCategory('other');
+                            }}
+                            className={`flex-1 min-w-[120px] p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                              receiverType === 'procurement'
+                                ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300'
+                                : 'border-slate-200 dark:border-slate-700 text-slate-600'
+                            }`}
+                          >
+                            کارپرداز و خرید
+                          </button>
+                        </>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -1533,7 +1917,8 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                   currentUser.role !== 'smart_campus' &&
                   currentUser.role !== 'graduation' &&
                   currentUser.role !== 'professor' &&
-                  currentUser.role !== 'security' && (
+                  currentUser.role !== 'security' &&
+                  !(isReceiverLocked && (receiverType === 'education' || receiverType === 'counselor')) && (
                   <>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                       موضوع یا حوزه‌ درخواست *
@@ -1622,156 +2007,21 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
             </form>
           )}
 
-          {/* تب لیست پیام‌ها و مشاهده گفتگو */}
+          {/* ستون جزئیات پیام انتخاب‌شده و پاسخ */}
           {activeTab === 'inbox' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
-
-              {/* ستون لیست گفتگوها همراه با فیلتر دسته‌بندی */}
-              <div className="md:col-span-1 border-l border-slate-100 dark:border-slate-800 pl-2 space-y-2 overflow-y-auto max-h-[55vh]">
-                {/* فیلتر دسته‌بندی و نقش پیام‌ها */}
-                <div className="mb-2 space-y-1.5">
-                  <select
-                    value={inboxCategoryFilter}
-                    onChange={(e) => setInboxCategoryFilter(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-bold"
+            <div className="flex flex-col justify-between h-full">
+              {selectedMsg && (
+                <div className="md:hidden mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMessageId(null)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold cursor-pointer"
                   >
-                    <option value="all">همه دسته‌ها ({userMessages.length})</option>
-                    <option value="security">حراست و انتظامات</option>
-                    <option value="education">امور آموزشی (کارشناس آموزش)</option>
-                    <option value="library">کتابخانه و پژوهش</option>
-                    <option value="smart_campus">واحد هوشمندسازی</option>
-                    <option value="graduation">واحد فارغ‌التحصیلان</option>
-                    <option value="cultural">امور فرهنگی و تشکل‌ها</option>
-                    <option value="student_affairs">امور دانشجویی و شورای صنفی</option>
-                    <option value="financial">امور مالی و حسابداری</option>
-                    <option value="counseling">مشاوره روانشناختی و فردی</option>
-                    <option value="maintenance">تأسیسات و تعمیرات</option>
-                    <option value="services_cleaning">خدمات و نظافت</option>
-                    <option value="rights_violation">عدم رعایت حقوق دیگران</option>
-                    <option value="social_personal">مشاوره و آسیب‌های فردی/اجتماعی</option>
-                    <option value="accommodation">امور اسکان</option>
-                    <option value="discipline">انضباطی</option>
-                    <option value="request">مرخصی و تردد</option>
-                  </select>
-                  {(currentUser.role === 'vice_dean' || currentUser.role === 'admin') && (
-                    <select
-                      value={inboxRoleFilter}
-                      onChange={(e) => setInboxRoleFilter(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/30 text-[11px] font-bold"
-                    >
-                      <option value="all">پایش همه حوزه‌ها (از دانشجو تا مدیر)</option>
-                      <option value="student">پیام‌های دانشجویان</option>
-                      <option value="supervisor">سرپرستان سراها</option>
-                      <option value="maintenance">واحد تأسیسات</option>
-                      <option value="security">حراست و انتظامات</option>
-                      <option value="student_affairs">امور دانشجویی و ورزش</option>
-                      <option value="cultural">امور فرهنگی</option>
-                      <option value="education">کارشناس آموزش</option>
-                      <option value="academic_deputy">معاونت آموزشی</option>
-                      <option value="professor">اساتید و مدرسان</option>
-                      <option value="library">کتابخانه و پژوهش</option>
-                      <option value="smart_campus">واحد هوشمندسازی</option>
-                      <option value="graduation">واحد فارغ‌التحصیلان</option>
-                      <option value="counselor">مرکز مشاوره</option>
-                      <option value="finance">امور مالی</option>
-                      <option value="warehouse">انبار و تجهیزات</option>
-                      <option value="procurement">کارپردازی</option>
-                      <option value="vice_dean">معاونت دانشجویی</option>
-                      <option value="admin">مدیریت کل</option>
-                    </select>
-                  )}
+                    <ArrowRight className="w-3.5 h-3.5" />
+                    <span>بازگشت به فهرست پیام‌ها</span>
+                  </button>
                 </div>
-
-                {userMessages.filter(
-                  (m) =>
-                    (inboxCategoryFilter === 'all' || m.category === inboxCategoryFilter) &&
-                    (inboxRoleFilter === 'all' || m.senderRole === inboxRoleFilter || m.receiverType === inboxRoleFilter)
-                ).length === 0 ? (
-                  <div className="p-4 text-center text-xs text-slate-400">
-                    هیچ پیامی در این دسته ثبت نشده است.
-                  </div>
-                ) : (
-                  userMessages
-                    .filter(
-                      (m) =>
-                        (inboxCategoryFilter === 'all' || m.category === inboxCategoryFilter) &&
-                        (inboxRoleFilter === 'all' || m.senderRole === inboxRoleFilter || m.receiverType === inboxRoleFilter)
-                    )
-                    .map((msg) => (
-                      <button
-                        key={msg.id}
-                        onClick={() => setSelectedMessageId(msg.id)}
-                        className={`w-full text-right p-3 rounded-2xl border text-xs transition block ${
-                          selectedMessageId === msg.id
-                            ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40'
-                            : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-1 font-bold text-slate-800 dark:text-slate-100 truncate">
-                            {msg.isConfidential && (
-                              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-extrabold" title="گزارش محرمانه">
-                                🔒 محرمانه
-                              </span>
-                            )}
-                            <span className="truncate">{msg.senderName}</span>
-                          </div>
-                          <span
-                            className={`text-[9px] px-1.5 py-0.2 rounded-md font-bold shrink-0 ${
-                              msg.status === 'answered'
-                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                                : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                            }`}
-                          >
-                            {msg.status === 'answered' ? 'پاسخ داده شد' : 'در انتظار پاسخ'}
-                          </span>
-                        </div>
-
-                        <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 truncate">
-                          {msg.subject}
-                        </div>
-
-                        <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
-                            {msg.category === 'security'
-                              ? 'حراست و انتظامات'
-                              : msg.category === 'education'
-                              ? 'امور آموزشی'
-                              : msg.category === 'library'
-                              ? 'کتابخانه و پژوهش'
-                              : msg.category === 'smart_campus'
-                              ? 'واحد هوشمندسازی'
-                              : msg.category === 'graduation'
-                              ? 'واحد فارغ‌التحصیلان'
-                              : msg.category === 'cultural'
-                              ? 'امور فرهنگی'
-                              : msg.category === 'student_affairs'
-                              ? 'امور دانشجویی'
-                              : msg.category === 'financial'
-                              ? 'امور مالی'
-                              : msg.category === 'maintenance'
-                              ? 'تأسیسات'
-                              : msg.category === 'services_cleaning'
-                              ? 'خدمات و نظافت'
-                              : msg.category === 'rights_violation'
-                              ? 'حقوق دیگران'
-                              : msg.category === 'social_personal'
-                              ? 'مشاوره/آسیب‌ها'
-                              : msg.category === 'accommodation'
-                              ? 'اسکان'
-                              : msg.category === 'discipline'
-                              ? 'انضباطی'
-                              : 'عمومی'}
-                          </span>
-                          <span>{msg.date.split('-')[0]}</span>
-                        </div>
-                      </button>
-                    ))
-                )}
-              </div>
-
-              {/* ستون جزئیات پیام انتخاب شده و پاسخ */}
-              <div className="md:col-span-2 flex flex-col justify-between">
+              )}
                 {selectedMsg ? (
                   <div className="space-y-4">
                     <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
@@ -1928,15 +2178,26 @@ export const MessagingPanel: React.FC<MessagingPanelProps> = ({
                     )}
                   </div>
                 ) : (
-                  <div className="h-full flex items-center justify-center text-xs text-slate-400 p-8">
-                    یک پیام را از ستون کناری انتخاب کنید تا جزئیات و پاسخ‌ها نمایش داده شود.
+                  <div className="h-full flex flex-col items-center justify-center gap-3 text-xs text-slate-400 p-8 text-center">
+                    <span>یک پیام را از ستون سمت راست انتخاب کنید تا جزئیات و پاسخ‌ها نمایش داده شود.</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab('compose');
+                        setSelectedMessageId(null);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>ارسال پیام جدید</span>
+                    </button>
                   </div>
                 )}
               </div>
-
-            </div>
           )}
 
+            </div>
+          </div>
         </div>
 
         {/* مودال ارجاع مستقیم پیام به پرسنل تأسیسات */}
