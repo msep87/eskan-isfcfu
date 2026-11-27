@@ -418,6 +418,20 @@ export interface OfferingCompletenessReport {
   };
 }
 
+export function isInternshipClassroomRequired(
+  offering: Pick<
+    SchedCourseOffering,
+    'practicalType' | 'internshipSessionRole' | 'internshipSchoolOnlyFull'
+  >
+): boolean {
+  if (offering.practicalType !== 'internship') return true;
+  if (offering.internshipSessionRole === 'school_attendance') return false;
+  if (offering.internshipSessionRole === 'combined' && offering.internshipSchoolOnlyFull) {
+    return false;
+  }
+  return true;
+}
+
 export function evaluateOfferingCompleteness(
   offering: Pick<
     SchedCourseOffering,
@@ -427,6 +441,7 @@ export function evaluateOfferingCompleteness(
     | 'splitPart'
     | 'enrolledCount'
     | 'internshipSessionRole'
+    | 'internshipSchoolOnlyFull'
     | 'dayOfWeek'
     | 'slotIds'
     | 'slotParts'
@@ -447,10 +462,7 @@ export function evaluateOfferingCompleteness(
   const hourDiff = round2(scheduledHours - requiredTableHours);
   const hoursExact = hasDayAndSlots && Math.abs(hourDiff) < 0.01;
   const hasProfessor = Boolean(offering.professorId && offering.professorId.trim());
-  const classroomRequired = !(
-    offering.practicalType === 'internship' &&
-    offering.internshipSessionRole === 'school_attendance'
-  );
+  const classroomRequired = isInternshipClassroomRequired(offering);
   const hasClassroom = Boolean(offering.classroomId && offering.classroomId.trim());
 
   const missingItems: string[] = [];
@@ -876,12 +888,153 @@ function doTargetsOverlap(a: SchedCourseOffering, b: SchedCourseOffering): strin
   return null;
 }
 
+export interface TermSchedulingIndex {
+  termKey: string;
+  profById: Map<string, SchedProfessor>;
+  roomById: Map<string, SchedClassroom>;
+  completenessMap: Map<string, OfferingCompletenessReport>;
+  breakdownMap: Map<string, ReturnType<typeof calculateOfferingBreakdown>>;
+  profLoadMap: Map<string, ProfessorLoadSummary>;
+  slotBuckets: Map<string, SchedCourseOffering[]>;
+  examBuckets: Map<string, SchedCourseOffering[]>;
+  activeEqByOfferingId: Map<string, number>;
+  conflictMap: Map<string, OfferingConflictReport>;
+  roomSlotBuckets: Map<string, SchedCourseOffering[]>;
+}
+
+export function buildTermSchedulingIndex(
+  termOfferings: SchedCourseOffering[],
+  classrooms: SchedClassroom[],
+  professors: SchedProfessor[],
+  rules: SchedRulesSettings
+): TermSchedulingIndex {
+  const profById = new Map<string, SchedProfessor>();
+  for (const p of professors) profById.set(p.id, p);
+
+  const roomById = new Map<string, SchedClassroom>();
+  for (const r of classrooms) roomById.set(r.id, r);
+
+  const completenessMap = new Map<string, OfferingCompletenessReport>();
+  const breakdownMap = new Map<string, ReturnType<typeof calculateOfferingBreakdown>>();
+  const slotBuckets = new Map<string, SchedCourseOffering[]>();
+  const examBuckets = new Map<string, SchedCourseOffering[]>();
+  const roomSlotBuckets = new Map<string, SchedCourseOffering[]>();
+  const activeEqByOfferingId = new Map<string, number>();
+
+  const profAcc = new Map<
+    string,
+    {
+      offeringCount: number;
+      rawUnits: number;
+      theoreticalUnits: number;
+      practicalUnits: number;
+      weeklyHours: number;
+      equivalentUnits: number;
+      daySet: Set<SchedDayKey>;
+    }
+  >();
+
+  for (const o of termOfferings) {
+    const comp = evaluateOfferingCompleteness(o, rules);
+    completenessMap.set(o.id, comp);
+    const bd = calculateOfferingBreakdown(o, rules);
+    breakdownMap.set(o.id, bd);
+
+    const isActive = !comp.isEffectivelyInactive;
+
+    if (!o.isDisabled && !o.isProvisional && o.dayOfWeek && o.slotIds.length > 0) {
+      for (const sid of o.slotIds) {
+        const sKey = `${o.dayOfWeek}:${sid}`;
+        const list = slotBuckets.get(sKey);
+        if (list) list.push(o);
+        else slotBuckets.set(sKey, [o]);
+
+        if (o.classroomId) {
+          const rKey = `${o.dayOfWeek}:${sid}:${o.classroomId}`;
+          const rList = roomSlotBuckets.get(rKey);
+          if (rList) rList.push(o);
+          else roomSlotBuckets.set(rKey, [o]);
+        }
+      }
+    }
+
+    if (!o.isDisabled && isCourseEligibleForExam(o) && o.examDayId && o.examSlotId) {
+      const eKey = `${o.examDayId}:${o.examSlotId}`;
+      const eList = examBuckets.get(eKey);
+      if (eList) eList.push(o);
+      else examBuckets.set(eKey, [o]);
+    }
+
+    if (isActive && o.professorId) {
+      activeEqByOfferingId.set(o.id, bd.equivalentUnits);
+      let acc = profAcc.get(o.professorId);
+      if (!acc) {
+        acc = {
+          offeringCount: 0,
+          rawUnits: 0,
+          theoreticalUnits: 0,
+          practicalUnits: 0,
+          weeklyHours: 0,
+          equivalentUnits: 0,
+          daySet: new Set<SchedDayKey>(),
+        };
+        profAcc.set(o.professorId, acc);
+      }
+      acc.offeringCount += 1;
+      acc.rawUnits += bd.rawUnits;
+      acc.theoreticalUnits += bd.activeTheoryUnits;
+      acc.practicalUnits += bd.activePracticalUnits;
+      acc.weeklyHours += bd.weeklyHours;
+      acc.equivalentUnits += bd.equivalentUnits;
+      if (o.dayOfWeek) acc.daySet.add(o.dayOfWeek);
+    }
+  }
+
+  const profLoadMap = new Map<string, ProfessorLoadSummary>();
+  for (const [professorId, acc] of profAcc.entries()) {
+    profLoadMap.set(professorId, {
+      professorId,
+      offeringCount: acc.offeringCount,
+      rawUnits: round2(acc.rawUnits),
+      theoreticalUnits: round2(acc.theoreticalUnits),
+      practicalUnits: round2(acc.practicalUnits),
+      weeklyHours: round2(acc.weeklyHours),
+      equivalentUnits: round2(acc.equivalentUnits),
+      activeDays: SCHED_DAYS_ORDER.filter((d) => acc.daySet.has(d)),
+    });
+  }
+
+  const index: TermSchedulingIndex = {
+    termKey: termOfferings[0]?.termKey || rules.activeTerm,
+    profById,
+    roomById,
+    completenessMap,
+    breakdownMap,
+    profLoadMap,
+    slotBuckets,
+    examBuckets,
+    activeEqByOfferingId,
+    conflictMap: new Map<string, OfferingConflictReport>(),
+    roomSlotBuckets,
+  };
+
+  for (const o of termOfferings) {
+    index.conflictMap.set(
+      o.id,
+      detectOfferingConflicts(o, termOfferings, classrooms, professors, rules, index)
+    );
+  }
+
+  return index;
+}
+
 export function detectOfferingConflicts(
   candidate: SchedCourseOffering,
   allOfferings: SchedCourseOffering[],
   classrooms: SchedClassroom[],
   professors: SchedProfessor[],
-  rules?: SchedRulesSettings
+  rules?: SchedRulesSettings,
+  precomputedIndex?: TermSchedulingIndex
 ): OfferingConflictReport {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -903,22 +1056,42 @@ export function detectOfferingConflicts(
 
   // بررسی تداخل زمانی فقط در صورتی که روز و حداقل یک سانس انتخاب شده باشد (دروس غیرفعال/موقت تداخل ایجاد نمی‌کنند)
   if (!candidate.isDisabled && !candidate.isProvisional && candidate.dayOfWeek && candidate.slotIds.length > 0) {
-    const sameTermOthers = allOfferings.filter(
-      (o) =>
-        o.id !== candidate.id &&
-        !o.isDisabled &&
-        !o.isProvisional &&
-        o.termKey === candidate.termKey &&
-        o.dayOfWeek === candidate.dayOfWeek &&
-        o.slotIds.some(
-          (sid) =>
-            candidate.slotIds.includes(sid) &&
-            doSlotHalvesOverlap(
-              getOfferingSlotHalf(candidate, sid),
-              getOfferingSlotHalf(o, sid)
-            )
-        )
-    );
+    let sameTermOthers: SchedCourseOffering[];
+    if (precomputedIndex) {
+      const seenIds = new Set<string>();
+      const collected: SchedCourseOffering[] = [];
+      for (const sid of candidate.slotIds) {
+        const bucket = precomputedIndex.slotBuckets.get(`${candidate.dayOfWeek}:${sid}`);
+        if (!bucket) continue;
+        const candHalf = getOfferingSlotHalf(candidate, sid);
+        for (const o of bucket) {
+          if (o.id === candidate.id || seenIds.has(o.id)) continue;
+          if (o.termKey !== candidate.termKey) continue;
+          if (doSlotHalvesOverlap(candHalf, getOfferingSlotHalf(o, sid))) {
+            seenIds.add(o.id);
+            collected.push(o);
+          }
+        }
+      }
+      sameTermOthers = collected;
+    } else {
+      sameTermOthers = allOfferings.filter(
+        (o) =>
+          o.id !== candidate.id &&
+          !o.isDisabled &&
+          !o.isProvisional &&
+          o.termKey === candidate.termKey &&
+          o.dayOfWeek === candidate.dayOfWeek &&
+          o.slotIds.some(
+            (sid) =>
+              candidate.slotIds.includes(sid) &&
+              doSlotHalvesOverlap(
+                getOfferingSlotHalf(candidate, sid),
+                getOfferingSlotHalf(o, sid)
+              )
+          )
+      );
+    }
 
     for (const other of sameTermOthers) {
       // ۱. تداخل کلاس فیزیکی
@@ -950,7 +1123,9 @@ export function detectOfferingConflicts(
 
     // بررسی محدودیت زمان عدم حضور استاد
     if (candidate.professorId) {
-      const prof = professors.find((p) => p.id === candidate.professorId);
+      const prof = precomputedIndex
+        ? precomputedIndex.profById.get(candidate.professorId)
+        : professors.find((p) => p.id === candidate.professorId);
       if (prof?.unavailableKeys && prof.unavailableKeys.length > 0) {
         const hit = candidate.slotIds.some((sid) =>
           prof.unavailableKeys!.includes(`${candidate.dayOfWeek}:${sid}`)
@@ -966,7 +1141,9 @@ export function detectOfferingConflicts(
 
   // بررسی ظرفیت و نوع کلاس فیزیکی
   if (candidate.classroomId) {
-    const room = classrooms.find((r) => r.id === candidate.classroomId);
+    const room = precomputedIndex
+      ? precomputedIndex.roomById.get(candidate.classroomId)
+      : classrooms.find((r) => r.id === candidate.classroomId);
     if (room) {
       if (candidate.enrolledCount > room.capacity) {
         warnings.push(
@@ -986,23 +1163,28 @@ export function detectOfferingConflicts(
   if (!candidate.professorId) {
     warnings.push('استاد این درس هنوز تعیین نشده است.');
   }
-  if (!candidate.classroomId) {
-    if (candidate.practicalType !== 'internship') {
-      warnings.push('کلاس فیزیکی این درس هنوز تعیین نشده است.');
-    } else if (candidate.internshipSessionRole === 'university_orientation') {
+  if (!candidate.classroomId && isInternshipClassroomRequired(candidate)) {
+    if (candidate.practicalType === 'internship' && candidate.internshipSessionRole === 'university_orientation') {
       warnings.push('کلاس فیزیکی برای جلسه توجیهی کارورزی در دانشگاه هنوز تعیین نشده است.');
+    } else {
+      warnings.push('کلاس فیزیکی این درس هنوز تعیین نشده است.');
     }
   }
 
   // اخطار تداخل امتحان پایان ترم در همان ردیف (رشته/ورودی/شعبه) - صرفاً هشدار (مسدودکننده نیست)
   if (candidate.examDayId && candidate.examSlotId && isCourseEligibleForExam(candidate)) {
-    const examWarns = detectOfferingExamConflicts(candidate, allOfferings, rules);
+    const examSource = precomputedIndex
+      ? precomputedIndex.examBuckets.get(`${candidate.examDayId}:${candidate.examSlotId}`) || []
+      : allOfferings;
+    const examWarns = detectOfferingExamConflicts(candidate, examSource, rules);
     warnings.push(...examWarns);
   }
 
   // اخطار رعایت حداقل و حداکثر واحد معادل استاد (صرفاً هشدار؛ مانع ثبت نمی‌شود)
   if (candidate.professorId && !candidate.isDisabled && !candidate.isProvisional) {
-    const prof = professors.find((p) => p.id === candidate.professorId);
+    const prof = precomputedIndex
+      ? precomputedIndex.profById.get(candidate.professorId)
+      : professors.find((p) => p.id === candidate.professorId);
     if (prof) {
       const effectiveRules: SchedRulesSettings = rules || {
         activeTerm: candidate.termKey,
@@ -1024,15 +1206,22 @@ export function detectOfferingConflicts(
         activeDays: ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday'],
         timeSlots: [],
       };
-      const existingProfEq = allOfferings
-        .filter(
-          (o) =>
-            o.id !== candidate.id &&
-            o.termKey === candidate.termKey &&
-            o.professorId === prof.id &&
-            isOfferingEffectivelyActive(o, effectiveRules)
-        )
-        .reduce((acc, o) => acc + calculateOfferingBreakdown(o, effectiveRules).equivalentUnits, 0);
+      let existingProfEq: number;
+      if (precomputedIndex && precomputedIndex.termKey === candidate.termKey) {
+        const totalForProf = precomputedIndex.profLoadMap.get(prof.id)?.equivalentUnits || 0;
+        const alreadyIncluded = precomputedIndex.activeEqByOfferingId.get(candidate.id) || 0;
+        existingProfEq = Math.max(0, round2(totalForProf - alreadyIncluded));
+      } else {
+        existingProfEq = allOfferings
+          .filter(
+            (o) =>
+              o.id !== candidate.id &&
+              o.termKey === candidate.termKey &&
+              o.professorId === prof.id &&
+              isOfferingEffectivelyActive(o, effectiveRules)
+          )
+          .reduce((acc, o) => acc + calculateOfferingBreakdown(o, effectiveRules).equivalentUnits, 0);
+      }
       const candidateEq = calculateOfferingBreakdown(candidate, effectiveRules).equivalentUnits;
       const projectedEq = round2(existingProfEq + candidateEq);
       const limitCheck = evaluateProfessorEquivalentUnitStatus(prof, projectedEq, effectiveRules);
@@ -1957,14 +2146,29 @@ export async function parseSchedExcelFile(
   return { courses, skippedRows, errors };
 }
 
+function sanitizeExcelCellValue(val: unknown): unknown {
+  if (typeof val !== 'string') return val;
+  if (/^[=+@\t\r]|^-[^0-9.]/.test(val)) {
+    return `'${val}`;
+  }
+  return val;
+}
+
 export async function exportJsonRowsToExcel(
   rows: Record<string, unknown>[],
   sheetName: string,
   fileName: string
 ): Promise<void> {
+  const safeRows = rows.map((row) => {
+    const cleanRow: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(row)) {
+      cleanRow[k] = sanitizeExcelCellValue(v);
+    }
+    return cleanRow;
+  });
   const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows);
+  const ws = XLSX.utils.json_to_sheet(safeRows);
   XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
   XLSX.writeFile(wb, fileName);
 }

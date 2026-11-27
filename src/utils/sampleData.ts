@@ -313,10 +313,10 @@ export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
   },
   masterGridLayout: {
     metaColumns: {
-      major: { width: 114, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'wrap' },
-      entry: { width: 64, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'wrap' },
-      totalStudents: { width: 56, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'wrap' },
-      section: { width: 104, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'clip' },
+      major: { width: 114, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'wrap', textAlign: 'center', verticalAlign: 'middle' },
+      entry: { width: 64, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'wrap', textAlign: 'center', verticalAlign: 'middle' },
+      totalStudents: { width: 56, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'wrap', textAlign: 'center', verticalAlign: 'middle' },
+      section: { width: 104, headerOrientation: 'horizontal', bodyOrientation: 'horizontal', textFit: 'clip', textAlign: 'center', verticalAlign: 'middle' },
     },
     defaultSlotWidth: 168,
     slotWidthsBySlotId: {},
@@ -324,6 +324,8 @@ export const DEFAULT_SCHED_RULES: SchedRulesSettings = {
       headerOrientation: 'horizontal',
       bodyOrientation: 'horizontal',
       textFit: 'wrap',
+      textAlign: 'right',
+      verticalAlign: 'top',
       compactCards: false,
     },
     columnOverrides: {},

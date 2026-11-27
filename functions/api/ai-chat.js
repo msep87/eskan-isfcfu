@@ -18,10 +18,10 @@ function resolveCorsOrigin(request) {
     ) {
       return origin;
     }
+    return reqUrl.origin;
   } catch {
-    // ignore malformed origin
+    return 'null';
   }
-  return origin;
 }
 
 function getCorsHeaders(request) {

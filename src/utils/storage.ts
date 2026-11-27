@@ -679,8 +679,8 @@ let lastSyncRevision: string | number | null = null;
 let lastSyncEtag: string | null = null;
 let lastStudentsEtag: string | null = null;
 const SYNCABLE_KEYS = Object.values(STORAGE_KEYS).filter((k) => k !== STORAGE_KEYS.CURRENT_USER);
-const CLOUD_SYNC_DEBOUNCE_MS = 120;
-const CLOUD_SYNC_IMMEDIATE_MS = 15;
+const CLOUD_SYNC_DEBOUNCE_MS = 350;
+const CLOUD_SYNC_IMMEDIATE_MS = 25;
 const MAX_RETRY_QUEUE_KEYS = 45;
 const MAX_AUTO_RETRY_CYCLES = 5;
 
@@ -895,7 +895,7 @@ const IMMEDIATE_CLOUD_KEYS = new Set<string>([
 ]);
 
 // پنجره ادغام درخواست‌های همگام‌سازی غیرضروری و نشانگر آخرین تغییر جدول students برای Delta Sync
-const SYNC_COALESCE_WINDOW_MS = 4000;
+const SYNC_COALESCE_WINDOW_MS = 10000;
 const lastCompletedSyncAtByScope: Record<string, number> = {};
 let lastStudentsDeltaSyncIso: string | null = null;
 
@@ -1444,7 +1444,9 @@ function scheduleFailedRetryTimer(): void {
   if (typeof setTimeout !== 'function') return;
 
   const delays = [3000, 7000, 15000, 30000, 45000];
-  const waitMs = delays[Math.min(failedRetryAttempts, delays.length - 1)];
+  const baseWait = delays[Math.min(failedRetryAttempts, delays.length - 1)];
+  const jitterMs = Math.floor(Math.random() * 1400);
+  const waitMs = baseWait + jitterMs;
   failedRetryTimer = setTimeout(() => {
     failedRetryTimer = undefined;
     failedRetryAttempts += 1;
@@ -2993,10 +2995,19 @@ function upsertLocalSingleStudent(student: Student, replaceWithSingleOnly = fals
 // تابع کمکی برای نوشتن در localStorage و ارسال غیرهمگام تجمیع‌شده به سرور ابری
 function set<T>(key: string, value: T): boolean {
   try {
+    const serialized = JSON.stringify(value);
+    if (
+      lastAppliedSerializedByKey.get(key) === serialized &&
+      parsedCache.has(key) &&
+      !(key in pendingCloudValues) &&
+      !(key in failedCloudRetryQueue) &&
+      !persistedDirtyKeys.has(key)
+    ) {
+      return true;
+    }
     if (PUBLIC_CACHEABLE_KEY_SET.has(key)) {
       invalidatePublicSessionCache(key);
     }
-    const serialized = JSON.stringify(value);
     const written = safeLocalStorageSet(key, serialized, value);
     pushKeyToCloud(key, value);
     return written;
@@ -12887,10 +12898,11 @@ export const Storage = {
             });
           }
         } else if (typeof setTimeout === 'function') {
+          const jitterMs = Math.floor(Math.random() * 3000);
           initialSyncRetryTimer = setTimeout(() => {
             initialSyncRetryTimer = undefined;
             void Storage.syncFromCloud();
-          }, 7000);
+          }, 7000 + jitterMs);
         }
 
         return hasRemoteChanges;

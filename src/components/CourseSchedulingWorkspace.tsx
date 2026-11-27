@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   SchedCellComment,
@@ -49,15 +49,16 @@ import {
   buildExamDaysSequence,
   buildRecommendedSlotsForHours,
   buildSevenToEightSlot,
+  buildTermSchedulingIndex,
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
-  checkClassroomAvailabilityAtSlots,
   checkScheduleEditLock,
   checkScheduleViewLock,
   computeInternshipSplitPlan,
   computeOfferingDeltas,
   deactivateOfferingsForRemovedProfessors,
   detectOfferingConflicts,
+  doSlotHalvesOverlap,
   downloadSchedExcelTemplate,
   evaluateOfferingCompleteness,
   evaluateProfessorEquivalentUnitStatus,
@@ -74,6 +75,7 @@ import {
   getSlotDurationHours,
   getSlotHalfLabel,
   isCourseEligibleForExam,
+  isInternshipClassroomRequired,
   isOfferingEffectivelyActive,
   normalizeSchedCode,
   parseDecimalUnits,
@@ -211,17 +213,26 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     null
   );
 
-  const [nowTick, setNowTick] = useState<Date>(() => new Date());
-  useEffect(() => {
-    if (!isOpen) return;
-    const timer = window.setInterval(() => setNowTick(new Date()), 30000);
-    return () => window.clearInterval(timer);
-  }, [isOpen]);
-
-  const availWindowStatus = useMemo(
-    () => getProfessorAvailabilityWindowStatus(rules, nowTick),
-    [rules, nowTick]
+  const [availWindowStatus, setAvailWindowStatus] = useState(() =>
+    getProfessorAvailabilityWindowStatus(rules, new Date())
   );
+  useEffect(() => {
+    const syncStatus = () => {
+      const next = getProfessorAvailabilityWindowStatus(rules, new Date());
+      setAvailWindowStatus((prev) =>
+        prev.isOpen === next.isOpen &&
+        prev.status === next.status &&
+        prev.remainingText === next.remainingText &&
+        prev.message === next.message
+          ? prev
+          : next
+      );
+    };
+    syncStatus();
+    if (!isOpen || !rules.professorAvailabilityWindow?.enabled) return;
+    const timer = window.setInterval(syncStatus, 30000);
+    return () => window.clearInterval(timer);
+  }, [isOpen, rules]);
 
   const profAvailStats = useMemo(() => {
     const active = professors.filter((p) => p.isActive);
@@ -637,38 +648,43 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     [offerings, activeTerm]
   );
 
-  // آمار خلاصه پیشخوان
+  const termSchedulingIndex = useMemo(
+    () => buildTermSchedulingIndex(termOfferings, classrooms, professors, rules),
+    [termOfferings, classrooms, professors, rules]
+  );
+
+  // آمار خلاصه پیشخوان (محاسبه سریع O(N) با شاخص ازپیش‌محاسبه‌شده)
   const overviewStats = useMemo(() => {
     let totalHours = 0;
     let hardConflicts = 0;
-    const activeTermOfferings = termOfferings.filter((o) =>
-      isOfferingEffectivelyActive(o, rules)
-    );
-    const disabledOfferingsCount = termOfferings.length - activeTermOfferings.length;
-    for (const o of activeTermOfferings) {
-      totalHours += calculateOfferingBreakdown(o, rules).weeklyHours;
-      if (
-        detectOfferingConflicts(o, activeTermOfferings, classrooms, professors, rules)
-          .hasHardConflict
-      ) {
+    let activeCount = 0;
+    let sharedCount = 0;
+    for (const o of termOfferings) {
+      const comp = termSchedulingIndex.completenessMap.get(o.id);
+      if (comp?.isEffectivelyInactive) continue;
+      activeCount++;
+      totalHours += termSchedulingIndex.breakdownMap.get(o.id)?.weeklyHours || 0;
+      if (termSchedulingIndex.conflictMap.get(o.id)?.hasHardConflict) {
         hardConflicts++;
       }
+      if (o.sharedWithTargets && o.sharedWithTargets.length > 0) {
+        sharedCount++;
+      }
     }
+    const disabledOfferingsCount = termOfferings.length - activeCount;
     return {
       activeClassrooms: classrooms.filter((r) => r.isActive).length,
       totalCohorts: programs.length,
       totalSections: programs.reduce((s, p) => s + Math.max(1, p.sections.length), 0),
       activeProfessors: professors.filter((p) => p.isActive).length,
       totalCourses: courses.length,
-      termOfferingsCount: activeTermOfferings.length,
+      termOfferingsCount: activeCount,
       disabledOfferingsCount,
       totalWeeklyHours: round2(totalHours),
       hardConflicts,
-      sharedCount: activeTermOfferings.filter(
-        (o) => o.sharedWithTargets && o.sharedWithTargets.length > 0
-      ).length,
+      sharedCount,
     };
-  }, [classrooms, programs, professors, courses, termOfferings, rules]);
+  }, [classrooms, programs, professors, courses, termOfferings, termSchedulingIndex]);
 
   // =====================================================
   // اکسل گروهی اطلاعات اولیه
@@ -858,9 +874,27 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [progMajorName, setProgMajorName] = useState('');
   const [progEntryTerm, setProgEntryTerm] = useState('4031');
   const [progTotalStudents, setProgTotalStudents] = useState('35');
+  const [progSectionCount, setProgSectionCount] = useState('1');
   const [progSections, setProgSections] = useState<
     Array<{ id: string; name: string; studentCount: number }>
   >([]);
+
+  const distributeCohortSections = (
+    totalStudentsVal: number,
+    sectionCountVal: number,
+    existing?: Array<{ id: string; name: string; studentCount: number }>
+  ): Array<{ id: string; name: string; studentCount: number }> => {
+    const count = Math.max(1, Math.min(20, Math.floor(sectionCountVal) || 1));
+    const total = Math.max(0, Math.floor(totalStudentsVal) || 0);
+    const base = Math.floor(total / count);
+    const rem = total % count;
+    const now = Date.now();
+    return Array.from({ length: count }, (_, i) => ({
+      id: existing?.[i]?.id || `sec_${now}_${i + 1}`,
+      name: existing?.[i]?.name?.trim() || `گروه ${i + 1}`,
+      studentCount: total >= count ? base + (i < rem ? 1 : 0) : Math.max(1, i < total ? 1 : 1),
+    }));
+  };
 
   const openProgModal = (p?: SchedProgramCohort) => {
     if (p) {
@@ -869,7 +903,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       setProgMajorName(p.majorName);
       setProgEntryTerm(p.entryTerm);
       setProgTotalStudents(String(p.totalStudents));
-      setProgSections(p.sections.map((s) => ({ ...s })));
+      setProgSectionCount(String(Math.max(1, p.sections.length)));
+      setProgSections(
+        p.sections.length > 0
+          ? p.sections.map((s) => ({ ...s }))
+          : distributeCohortSections(p.totalStudents || 30, 1)
+      );
     } else {
       const firstApproved = approvedMajors[0];
       setEditingProgId(null);
@@ -877,7 +916,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       setProgMajorName(firstApproved ? firstApproved.name : '');
       setProgEntryTerm('4031');
       setProgTotalStudents('35');
-      setProgSections([{ id: `sec_${Date.now()}`, name: 'گروه ۱', studentCount: 35 }]);
+      setProgSectionCount('1');
+      setProgSections(distributeCohortSections(35, 1));
     }
     setProgModalOpen(true);
   };
@@ -958,6 +998,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   // مودال افزودن/ویرایش استاد + جدول عدم امکان حضور
   // =====================================================
   const [profSearch, setProfSearch] = useState('');
+  const deferredProfSearch = useDeferredValue(profSearch);
+  const [profPage, setProfPage] = useState(1);
+  const [profShowAll, setProfShowAll] = useState(false);
   const [profModalOpen, setProfModalOpen] = useState(false);
   const [editingProfId, setEditingProfId] = useState<string | null>(null);
   const [profCode, setProfCode] = useState('');
@@ -1162,6 +1205,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   // مودال افزودن/ویرایش سرفصل درس (کد ۷ رقمی)
   // =====================================================
   const [courseSearch, setCourseSearch] = useState('');
+  const deferredCourseSearch = useDeferredValue(courseSearch);
+  const [coursePage, setCoursePage] = useState(1);
+  const [courseShowAll, setCourseShowAll] = useState(false);
   const [courseMajorFilter, setCourseMajorFilter] = useState('all');
   const [courseModalOpen, setCourseModalOpen] = useState(false);
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
@@ -1296,6 +1342,41 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       .sort((a, b) => a.majorName.localeCompare(b.majorName, 'fa'));
   }, [programs, courses]);
 
+  const courseCodeMajorCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of courses) {
+      map.set(c.courseCode, (map.get(c.courseCode) || 0) + 1);
+    }
+    return map;
+  }, [courses]);
+
+  const filteredProfessors = useMemo(() => {
+    const q = deferredProfSearch.trim().toLowerCase();
+    if (!q) return professors;
+    return professors.filter((p) =>
+      `${p.fullName} ${p.firstName || ''} ${p.lastName || ''} ${p.professorCode} ${p.nationalId || ''} ${p.degreeLevel || ''} ${p.degreeField || ''} ${p.degreeSpecialization || ''} ${p.degreeFull || ''} ${p.departmentName || ''} ${p.unitCenterName || ''} ${p.academicRank || ''} ${p.employmentStatusRaw || ''}`
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [professors, deferredProfSearch]);
+
+  const filteredCourses = useMemo(() => {
+    const q = deferredCourseSearch.trim().toLowerCase();
+    return courses.filter((c) => {
+      if (courseMajorFilter !== 'all' && c.majorCode !== courseMajorFilter) return false;
+      if (!q) return true;
+      return `${c.courseCode} ${c.title} ${c.majorName}`.toLowerCase().includes(q);
+    });
+  }, [courses, courseMajorFilter, deferredCourseSearch]);
+
+  useEffect(() => {
+    setProfPage(1);
+  }, [deferredProfSearch]);
+
+  useEffect(() => {
+    setCoursePage(1);
+  }, [deferredCourseSearch, courseMajorFilter]);
+
   const filteredScheduleOfferings = useMemo(() => {
     return termOfferings.filter((o) => {
       if (!canManageMasterData && !allowCrossMajorView && normalizedAllowedMajors.length > 0) {
@@ -1333,6 +1414,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   // مودال ثبت / ویرایش ارائه درس
   const [offModalOpen, setOffModalOpen] = useState(false);
   const [editingOffId, setEditingOffId] = useState<string | null>(null);
+  const [offMajorCode, setOffMajorCode] = useState('');
   const [offCourseId, setOffCourseId] = useState('');
   const [offCohortId, setOffCohortId] = useState('');
   const [offSectionId, setOffSectionId] = useState('');
@@ -1345,11 +1427,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [offSplitPart, setOffSplitPart] = useState<'full' | 'theory' | 'practical'>('full');
   const [offInternshipSessionRole, setOffInternshipSessionRole] =
     useState<SchedInternshipSessionRole>('combined');
+  const [offInternshipSchoolOnlyFull, setOffInternshipSchoolOnlyFull] = useState(false);
   const [offInternshipSubLabel, setOffInternshipSubLabel] = useState('');
   const [offInternshipGroups, setOffInternshipGroups] = useState<
     Array<{ id: string; label: string; studentCount: number; professorId: string }>
   >([]);
-  const [modalAllChartCourses, setModalAllChartCourses] = useState(false);
   const [offSharedTargets, setOffSharedTargets] = useState<SchedSharedTarget[]>([]);
   const [offNotes, setOffNotes] = useState('');
   const [offExamDayId, setOffExamDayId] = useState('');
@@ -1358,6 +1440,37 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [offDisabledReason, setOffDisabledReason] = useState('');
   const [sharePickerCohortId, setSharePickerCohortId] = useState('');
   const [sharePickerSectionId, setSharePickerSectionId] = useState('');
+
+  const modalAvailableMajors = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of uniqueMajors) {
+      const code = normalizeMajorCode(m.majorCode) || m.majorCode;
+      if (code) map.set(code, m.majorName);
+    }
+    for (const am of approvedMajors) {
+      const code = normalizeMajorCode(am.code);
+      if (code && !map.has(code)) map.set(code, am.name);
+    }
+    const list = Array.from(map.entries())
+      .map(([majorCode, majorName]) => ({ majorCode, majorName }))
+      .sort((a, b) => a.majorName.localeCompare(b.majorName, 'fa'));
+    if (canManageMasterData || allowCrossMajorView || normalizedAllowedMajors.length === 0) {
+      return list;
+    }
+    return list.filter((m) => isOwnMajorName(m.majorName));
+  }, [uniqueMajors, approvedMajors, canManageMasterData, allowCrossMajorView, normalizedAllowedMajors]);
+
+  const cohortsForSelectedMajor = useMemo(() => {
+    const targetCode = normalizeMajorCode(offMajorCode);
+    if (!targetCode) return programs;
+    return programs.filter((p) => normalizeMajorCode(p.majorCode) === targetCode);
+  }, [programs, offMajorCode]);
+
+  const coursesForSelectedMajor = useMemo(() => {
+    const targetCode = normalizeMajorCode(offMajorCode);
+    if (!targetCode) return [];
+    return courses.filter((c) => normalizeMajorCode(c.majorCode) === targetCode);
+  }, [courses, offMajorCode]);
 
   const selectedOffCourse = useMemo(
     () => courses.find((c) => c.id === offCourseId),
@@ -1427,24 +1540,27 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       return;
     }
 
-    const visibleCourses = canManageMasterData
-      ? courses
-      : allowCrossMajorView
-      ? courses
-      : courses.filter((c) => isOwnMajorName(c.majorName));
-
-    // اگر هدف مشخص شده، اول درس هم‌رشته یا درس چارت گروه را برگزین
-    const firstCourse =
-      (targetCohort
-        ? visibleCourses.find((c) => c.majorCode === targetCohort.majorCode)
-        : undefined) ||
-      visibleCourses[0] ||
-      courses[0];
-
-    const matchingCohort =
+    const fallbackCohort =
       targetCohort ||
-      programs.find((p) => p.majorCode === firstCourse?.majorCode) ||
+      programs.find((p) =>
+        canManageMasterData || allowCrossMajorView || isOwnMajorName(p.majorName)
+      ) ||
       programs[0];
+
+    const resolvedMajorCode =
+      normalizeMajorCode(fallbackCohort?.majorCode) ||
+      modalAvailableMajors[0]?.majorCode ||
+      '';
+
+    const majorCohorts = programs.filter(
+      (p) => normalizeMajorCode(p.majorCode) === resolvedMajorCode
+    );
+    const matchingCohort = targetCohort || majorCohorts[0] || fallbackCohort;
+
+    const majorCourses = courses.filter(
+      (c) => normalizeMajorCode(c.majorCode) === resolvedMajorCode
+    );
+    const firstCourse = majorCourses[0];
 
     const matchingSec = opts.sectionId
       ? matchingCohort?.sections.find((s) => s.id === opts.sectionId)
@@ -1456,7 +1572,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     const initHalf: SchedSlotHalf = opts.slotHalf || 'full';
 
     setEditingOffId(null);
-    setModalAllChartCourses(false);
+    setOffMajorCode(resolvedMajorCode);
     setOffCourseId(firstCourse?.id || '');
     setOffCohortId(matchingCohort?.id || '');
     setOffSectionId(matchingSec?.id || '');
@@ -1468,6 +1584,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setOffSlotParts(initSlotId ? { [initSlotId]: initHalf } : {});
     setOffSplitPart('full');
     setOffInternshipSessionRole('combined');
+    setOffInternshipSchoolOnlyFull(false);
     setOffInternshipSubLabel('');
     initInternshipGroupsForCourse(firstCourse, baseEnrolled, '');
     setOffSharedTargets([]);
@@ -1482,8 +1599,15 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   };
 
   const openEditOfferingModal = (o: SchedCourseOffering) => {
+    const matchingCohort = programs.find((p) => p.id === o.cohortId);
+    const matchingCourse = courses.find((c) => c.id === o.courseId);
+    const resolvedMajorCode =
+      normalizeMajorCode(o.ownerMajorCode) ||
+      normalizeMajorCode(matchingCohort?.majorCode) ||
+      normalizeMajorCode(matchingCourse?.majorCode) ||
+      '';
     setEditingOffId(o.id);
-    setModalAllChartCourses(true);
+    setOffMajorCode(resolvedMajorCode);
     setOffCourseId(o.courseId);
     setOffCohortId(o.cohortId);
     setOffSectionId(o.sectionId || '');
@@ -1499,6 +1623,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setOffSlotParts(parts);
     setOffSplitPart(o.splitPart || 'full');
     setOffInternshipSessionRole(o.internshipSessionRole || 'combined');
+    setOffInternshipSchoolOnlyFull(Boolean(o.internshipSchoolOnlyFull));
     setOffInternshipSubLabel(o.internshipSubGroupLabel || '');
     setOffInternshipGroups([]);
     setOffSharedTargets([...(o.sharedWithTargets || [])]);
@@ -1514,12 +1639,18 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
   // پیش‌نمایش زنده تداخل‌ها و واحد معادل در مودال ثبت درس
   const candidateOffering = useMemo<SchedCourseOffering | null>(() => {
-    if (!selectedOffCourse) return null;
+    if (!offModalOpen || !selectedOffCourse) return null;
     const cohort = programs.find((p) => p.id === offCohortId);
     if (!cohort) return null;
     const sec = cohort.sections.find((s) => s.id === offSectionId);
     const prof = professors.find((p) => p.id === offProfessorId);
-    const room = classrooms.find((r) => r.id === offClassroomId);
+    const isSchoolOnlyInternship =
+      selectedOffCourse.practicalType === 'internship' &&
+      (offInternshipSessionRole === 'school_attendance' ||
+        (offInternshipSessionRole === 'combined' && offInternshipSchoolOnlyFull));
+    const room = isSchoolOnlyInternship
+      ? undefined
+      : classrooms.find((r) => r.id === offClassroomId);
     const enrolled = Math.max(1, Number(normalizeSchedCode(offEnrolledCount)) || 1);
     const bd = calculateOfferingBreakdown(
       {
@@ -1562,6 +1693,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       splitPart: offSplitPart,
       internshipSessionRole:
         selectedOffCourse.practicalType === 'internship' ? offInternshipSessionRole : undefined,
+      internshipSchoolOnlyFull:
+        selectedOffCourse.practicalType === 'internship' &&
+        offInternshipSessionRole === 'combined' &&
+        offInternshipSchoolOnlyFull
+          ? true
+          : undefined,
       examDayId:
         isCourseEligibleForExam(selectedOffCourse) && offExamDayId && offExamSlotId
           ? offExamDayId
@@ -1582,6 +1719,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       updatedAt: new Date().toISOString(),
     };
   }, [
+    offModalOpen,
     selectedOffCourse,
     programs,
     offCohortId,
@@ -1593,6 +1731,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     offEnrolledCount,
     offInternshipSubLabel,
     offInternshipSessionRole,
+    offInternshipSchoolOnlyFull,
     offSplitPart,
     rules,
     editingOffId,
@@ -1630,15 +1769,21 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   }, [offModalOpen, programs, offCohortId, editingOffId, offerings, rules, userRole, actor.id, offDay, offSlotIds]);
 
   const candidateConflictReport = useMemo(() => {
-    if (!candidateOffering) return { hasHardConflict: false, errors: [], warnings: [] };
-    // در پیش‌نمایش فرم، حتی اگر درس قبلاً موقت بوده باشد، تداخل‌های فعال را بررسی کن تا کاربر قبل از ثبت نهایی آگاه شود
+    if (!offModalOpen || !candidateOffering) return { hasHardConflict: false, errors: [], warnings: [] };
     const probe: SchedCourseOffering = {
       ...candidateOffering,
       isDisabled: false,
       isProvisional: false,
     };
-    return detectOfferingConflicts(probe, termOfferings, classrooms, professors, rules);
-  }, [candidateOffering, termOfferings, classrooms, professors, rules]);
+    return detectOfferingConflicts(
+      probe,
+      termOfferings,
+      classrooms,
+      professors,
+      rules,
+      termSchedulingIndex
+    );
+  }, [offModalOpen, candidateOffering, termOfferings, classrooms, professors, rules, termSchedulingIndex]);
 
   const candidateBreakdown = useMemo(() => {
     if (!candidateOffering) return null;
@@ -1658,23 +1803,42 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   }, [candidateOffering, rules]);
 
   const modalClassroomAvailability = useMemo(() => {
+    if (!offModalOpen) {
+      return {
+        totalActiveCount: classrooms.filter((r) => r.isActive).length,
+        freeRooms: [] as Array<{
+          room: SchedClassroom;
+          isFree: boolean;
+          occupiedBy?: SchedCourseOffering;
+          capOk: boolean;
+        }>,
+        selectedOccupiedItem: undefined,
+      };
+    }
     const enrolled = Math.max(1, Number(normalizeSchedCode(offEnrolledCount)) || 1);
     const activeRooms = classrooms.filter((r) => r.isActive);
+    const occupiedMap = new Map<string, SchedCourseOffering>();
+    if (offDay && offSlotIds.length > 0) {
+      for (const sid of offSlotIds) {
+        const bucket = termSchedulingIndex.slotBuckets.get(`${offDay}:${sid}`);
+        if (!bucket) continue;
+        const candHalf = offSlotParts?.[sid] || 'full';
+        for (const o of bucket) {
+          if (o.id === editingOffId || !o.classroomId) continue;
+          if (occupiedMap.has(o.classroomId)) continue;
+          if (doSlotHalvesOverlap(candHalf, getOfferingSlotHalf(o, sid))) {
+            occupiedMap.set(o.classroomId, o);
+          }
+        }
+      }
+    }
     const evaluated = activeRooms.map((r) => {
-      const avail = checkClassroomAvailabilityAtSlots(
-        r.id,
-        activeTerm,
-        offDay || undefined,
-        offSlotIds,
-        offSlotParts,
-        termOfferings,
-        editingOffId || undefined
-      );
+      const hit = occupiedMap.get(r.id);
       const capOk = r.capacity >= enrolled;
       return {
         room: r,
-        isFree: avail.isFree,
-        occupiedBy: avail.occupiedBy,
+        isFree: !hit,
+        occupiedBy: hit,
         capOk,
       };
     });
@@ -1694,12 +1858,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         selectedItem && !selectedItem.isFree ? selectedItem : undefined,
     };
   }, [
+    offModalOpen,
     classrooms,
-    activeTerm,
     offDay,
     offSlotIds,
     offSlotParts,
-    termOfferings,
+    termSchedulingIndex,
     editingOffId,
     offEnrolledCount,
     offClassroomId,
@@ -2733,6 +2897,29 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     </label>
                     <button
                       type="button"
+                      onClick={() => {
+                        const rows = classrooms.map((r) => ({
+                          'کد کلاس': r.code,
+                          'نام کلاس': r.name,
+                          'ساختمان / طبقه': r.building || '',
+                          'ظرفیت': r.capacity,
+                          'نوع کلاس': SCHED_ROOM_TYPE_LABELS[r.roomType],
+                          'وضعیت': r.isActive ? 'فعال' : 'غیرفعال',
+                          'توضیحات': r.notes || '',
+                        }));
+                        void exportJsonRowsToExcel(
+                          rows,
+                          'کلاس‌های فیزیکی',
+                          `کلاسهای_فیزیکی_${activeTerm}.xlsx`
+                        );
+                      }}
+                      className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>خروجی اکسل کلاس‌ها</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => openRoomModal()}
                       className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
                     >
@@ -2844,6 +3031,35 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         className="hidden"
                       />
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rows = programs.flatMap((p) =>
+                          (p.sections.length > 0
+                            ? p.sections
+                            : [{ id: 'default', name: 'گروه ۱', studentCount: p.totalStudents }]
+                          ).map((sec) => ({
+                            'کد رشته ۶ رقمی': p.majorCode,
+                            'نام رشته': p.majorName,
+                            'ورودی': p.entryTerm,
+                            'تعداد نفرات کل ورودی': p.totalStudents,
+                            'تعداد شعبه‌ها': p.sections.length || 1,
+                            'نام شعبه / گروه': sec.name,
+                            'تعداد نفرات شعبه': sec.studentCount,
+                            'توضیحات': p.notes || '',
+                          }))
+                        );
+                        void exportJsonRowsToExcel(
+                          rows,
+                          'رشته‌ها و شعب',
+                          `رشته_ورودی_شعب_${activeTerm}.xlsx`
+                        );
+                      }}
+                      className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>خروجی اکسل رشته‌ها و شعب</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => openProgModal()}
@@ -3014,23 +3230,27 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 tabular-nums">
-                    {professors
-                      .filter((p) => {
-                        const q = profSearch.trim().toLowerCase();
-                        if (!q) return true;
-                        return `${p.fullName} ${p.firstName || ''} ${p.lastName || ''} ${p.professorCode} ${p.nationalId || ''} ${p.degreeLevel || ''} ${p.degreeField || ''} ${p.degreeSpecialization || ''} ${p.degreeFull || ''} ${p.departmentName || ''} ${p.unitCenterName || ''} ${p.academicRank || ''} ${p.employmentStatusRaw || ''}`
-                          .toLowerCase()
-                          .includes(q);
-                      })
-                      .map((p) => {
-                        const summary = calculateProfessorLoadSummary(p.id, termOfferings, rules);
-                        const unitStatus = evaluateProfessorEquivalentUnitStatus(
-                          p,
-                          summary.equivalentUnits,
-                          rules
-                        );
-                        return (
-                          <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                    {(profShowAll
+                      ? filteredProfessors
+                      : filteredProfessors.slice((profPage - 1) * 50, profPage * 50)
+                    ).map((p) => {
+                      const summary = termSchedulingIndex.profLoadMap.get(p.id) || {
+                        professorId: p.id,
+                        offeringCount: 0,
+                        rawUnits: 0,
+                        theoreticalUnits: 0,
+                        practicalUnits: 0,
+                        weeklyHours: 0,
+                        equivalentUnits: 0,
+                        activeDays: [],
+                      };
+                      const unitStatus = evaluateProfessorEquivalentUnitStatus(
+                        p,
+                        summary.equivalentUnits,
+                        rules
+                      );
+                      return (
+                        <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                             <td className="p-3 font-mono font-bold text-teal-700 dark:text-teal-400">
                               {p.professorCode}
                             </td>
@@ -3191,6 +3411,58 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   </tbody>
                 </table>
               </div>
+              {filteredProfessors.length > 50 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5">
+                  <span>
+                    نمایش{' '}
+                    <strong>
+                      {profShowAll
+                        ? `همه ${filteredProfessors.length.toLocaleString('fa-IR')}`
+                        : `${(((profPage - 1) * 50) + 1).toLocaleString('fa-IR')} تا ${Math.min(
+                            profPage * 50,
+                            filteredProfessors.length
+                          ).toLocaleString('fa-IR')} از ${filteredProfessors.length.toLocaleString('fa-IR')}`}
+                    </strong>{' '}
+                    استاد
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {!profShowAll && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={profPage <= 1}
+                          onClick={() => setProfPage((p) => Math.max(1, p - 1))}
+                          className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 disabled:opacity-40 font-bold cursor-pointer"
+                        >
+                          قبلی
+                        </button>
+                        <span className="px-2 font-mono font-bold">
+                          {profPage} / {Math.max(1, Math.ceil(filteredProfessors.length / 50))}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={profPage >= Math.ceil(filteredProfessors.length / 50)}
+                          onClick={() =>
+                            setProfPage((p) =>
+                              Math.min(Math.ceil(filteredProfessors.length / 50), p + 1)
+                            )
+                          }
+                          className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 disabled:opacity-40 font-bold cursor-pointer"
+                        >
+                          بعدی
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setProfShowAll((v) => !v)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 font-bold cursor-pointer"
+                    >
+                      {profShowAll ? 'صفحه‌بندی (۵۰تایی)' : 'نمایش همه'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -3226,6 +3498,32 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         className="hidden"
                       />
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rows = courses.map((c) => ({
+                          'کد درس ۷ رقمی': c.courseCode,
+                          'نام درس': c.title,
+                          'کد رشته ۶ رقمی': c.majorCode,
+                          'نام رشته': c.majorName,
+                          'نوع درس': SCHED_COURSE_TYPE_LABELS[c.courseType],
+                          'واحد نظری': c.theoreticalUnits,
+                          'واحد عملی': c.practicalUnits,
+                          'نوع واحد عملی': SCHED_PRACTICAL_TYPE_LABELS[c.practicalType],
+                          'ترم پیشنهادی': c.recommendedTerm || '',
+                          'توضیحات': c.notes || '',
+                        }));
+                        void exportJsonRowsToExcel(
+                          rows,
+                          'سرفصل دروس',
+                          `لیست_دروس_${activeTerm}.xlsx`
+                        );
+                      }}
+                      className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>خروجی اکسل دروس</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => openCourseModal()}
@@ -3278,77 +3576,122 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 tabular-nums">
-                    {courses
-                      .filter((c) => {
-                        if (courseMajorFilter !== 'all' && c.majorCode !== courseMajorFilter)
-                          return false;
-                        const q = courseSearch.trim().toLowerCase();
-                        if (!q) return true;
-                        return `${c.courseCode} ${c.title} ${c.majorName}`.toLowerCase().includes(q);
-                      })
-                      .map((c) => {
-                        const bd = calculateOfferingBreakdown(c, rules);
-                        const sharedMajorsCount = courses.filter(
-                          (other) => other.courseCode === c.courseCode
-                        ).length;
-                        return (
-                          <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                            <td className="p-3 font-mono font-bold text-indigo-700 dark:text-indigo-400">
-                              {c.courseCode}
-                              {sharedMajorsCount > 1 && (
-                                <span className="block text-[10px] font-sans text-teal-600 dark:text-teal-400">
-                                  مشترک در {sharedMajorsCount} رشته
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-3 font-bold text-slate-900 dark:text-white">
-                              {c.title}
-                            </td>
-                            <td className="p-3">
-                              {c.majorName} <span className="font-mono text-slate-400">({c.majorCode})</span>
-                            </td>
-                            <td className="p-3">{SCHED_COURSE_TYPE_LABELS[c.courseType]}</td>
-                            <td className="p-3 text-center font-bold">{c.theoreticalUnits}</td>
-                            <td className="p-3 text-center">
-                              {c.practicalUnits > 0 ? (
-                                <span>
-                                  <strong>{c.practicalUnits}</strong> ({SCHED_PRACTICAL_TYPE_LABELS[c.practicalType]})
-                                </span>
-                              ) : (
-                                '۰'
-                              )}
-                            </td>
-                            <td className="p-3 text-center font-bold text-teal-700 dark:text-teal-400">
-                              {bd.weeklyHours} ساعت
-                            </td>
-                            {canManageMasterData && (
-                              <td className="p-3 text-center">
-                                <div className="inline-flex items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => openCourseModal(c)}
-                                    className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 cursor-pointer"
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      persistCourses(courses.filter((x) => x.id !== c.id))
-                                    }
-                                    className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-600 border border-rose-200 dark:border-rose-800 cursor-pointer"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </td>
+                    {(courseShowAll
+                      ? filteredCourses
+                      : filteredCourses.slice((coursePage - 1) * 50, coursePage * 50)
+                    ).map((c) => {
+                      const bd = calculateOfferingBreakdown(c, rules);
+                      const sharedMajorsCount = courseCodeMajorCountMap.get(c.courseCode) || 1;
+                      return (
+                        <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="p-3 font-mono font-bold text-indigo-700 dark:text-indigo-400">
+                            {c.courseCode}
+                            {sharedMajorsCount > 1 && (
+                              <span className="block text-[10px] font-sans text-teal-600 dark:text-teal-400">
+                                مشترک در {sharedMajorsCount} رشته
+                              </span>
                             )}
-                          </tr>
-                        );
-                      })}
+                          </td>
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            {c.title}
+                          </td>
+                          <td className="p-3">
+                            {c.majorName} <span className="font-mono text-slate-400">({c.majorCode})</span>
+                          </td>
+                          <td className="p-3">{SCHED_COURSE_TYPE_LABELS[c.courseType]}</td>
+                          <td className="p-3 text-center font-bold">{c.theoreticalUnits}</td>
+                          <td className="p-3 text-center">
+                            {c.practicalUnits > 0 ? (
+                              <span>
+                                <strong>{c.practicalUnits}</strong> ({SCHED_PRACTICAL_TYPE_LABELS[c.practicalType]})
+                              </span>
+                            ) : (
+                              '۰'
+                            )}
+                          </td>
+                          <td className="p-3 text-center font-bold text-teal-700 dark:text-teal-400">
+                            {bd.weeklyHours} ساعت
+                          </td>
+                          {canManageMasterData && (
+                            <td className="p-3 text-center">
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => openCourseModal(c)}
+                                  className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 cursor-pointer"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    persistCourses(courses.filter((x) => x.id !== c.id))
+                                  }
+                                  className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-600 border border-rose-200 dark:border-rose-800 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
+              {filteredCourses.length > 50 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5">
+                  <span>
+                    نمایش{' '}
+                    <strong>
+                      {courseShowAll
+                        ? `همه ${filteredCourses.length.toLocaleString('fa-IR')}`
+                        : `${(((coursePage - 1) * 50) + 1).toLocaleString('fa-IR')} تا ${Math.min(
+                            coursePage * 50,
+                            filteredCourses.length
+                          ).toLocaleString('fa-IR')} از ${filteredCourses.length.toLocaleString('fa-IR')}`}
+                    </strong>{' '}
+                    درس
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {!courseShowAll && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={coursePage <= 1}
+                          onClick={() => setCoursePage((p) => Math.max(1, p - 1))}
+                          className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 disabled:opacity-40 font-bold cursor-pointer"
+                        >
+                          قبلی
+                        </button>
+                        <span className="px-2 font-mono font-bold">
+                          {coursePage} / {Math.max(1, Math.ceil(filteredCourses.length / 50))}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={coursePage >= Math.ceil(filteredCourses.length / 50)}
+                          onClick={() =>
+                            setCoursePage((p) =>
+                              Math.min(Math.ceil(filteredCourses.length / 50), p + 1)
+                            )
+                          }
+                          className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 disabled:opacity-40 font-bold cursor-pointer"
+                        >
+                          بعدی
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setCourseShowAll((v) => !v)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 font-bold cursor-pointer"
+                    >
+                      {courseShowAll ? 'صفحه‌بندی (۵۰تایی)' : 'نمایش همه'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -3996,7 +4339,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   };
                   const draftWinStatus = getProfessorAvailabilityWindowStatus(
                     { ...draftRules, professorAvailabilityWindow: winCfg },
-                    nowTick
+                    new Date()
                   );
                   const updateWinCfg = (
                     patch: Partial<NonNullable<SchedRulesSettings['professorAvailabilityWindow']>>
@@ -5513,6 +5856,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 setOffModalOpen(false);
                 setCommonExamModalOpen(false);
               }}
+              precomputedIndex={termSchedulingIndex}
               onNotify={notify}
             />
           )}
@@ -5755,21 +6099,28 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                               >
                                 <div className="space-y-1.5">
                                   {items.map((o) => {
-                                    const conf = detectOfferingConflicts(
-                                      o,
-                                      termOfferings,
-                                      classrooms,
-                                      professors,
-                                      rules
-                                    );
+                                    const conf =
+                                      termSchedulingIndex.conflictMap.get(o.id) ||
+                                      detectOfferingConflicts(
+                                        o,
+                                        termOfferings,
+                                        classrooms,
+                                        professors,
+                                        rules,
+                                        termSchedulingIndex
+                                      );
                                     const examLabel = isCourseEligibleForExam(o)
                                       ? formatExamAssignmentShort(o, activeTermExamSettings)
                                       : '';
                                     const hasExamWarn = conf.warnings.some((w) =>
                                       w.includes('تداخل امتحان')
                                     );
-                                    const bd = calculateOfferingBreakdown(o, rules);
-                                    const comp = evaluateOfferingCompleteness(o, rules);
+                                    const bd =
+                                      termSchedulingIndex.breakdownMap.get(o.id) ||
+                                      calculateOfferingBreakdown(o, rules);
+                                    const comp =
+                                      termSchedulingIndex.completenessMap.get(o.id) ||
+                                      evaluateOfferingCompleteness(o, rules);
                                     const isProvisionalOrDisabled = comp.isEffectivelyInactive;
                                     const hoverIssues = [
                                       ...comp.missingItems,
@@ -5814,7 +6165,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                           <div className="text-[10px] text-teal-700 dark:text-teal-400 font-semibold">
                                             {o.professorName || 'بدون استاد'} ·{' '}
                                             {o.classroomName ||
-                                              (o.internshipSessionRole === 'school_attendance'
+                                              (!isInternshipClassroomRequired(o)
                                                 ? 'محل: مدرسه'
                                                 : 'بدون کلاس')}
                                           </div>
@@ -5887,19 +6238,26 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 tabular-nums">
                       {filteredScheduleOfferings.map((o) => {
-                        const bd = calculateOfferingBreakdown(o, rules);
-                        const conf = detectOfferingConflicts(
-                          o,
-                          termOfferings,
-                          classrooms,
-                          professors,
-                          rules
-                        );
+                        const bd =
+                          termSchedulingIndex.breakdownMap.get(o.id) ||
+                          calculateOfferingBreakdown(o, rules);
+                        const conf =
+                          termSchedulingIndex.conflictMap.get(o.id) ||
+                          detectOfferingConflicts(
+                            o,
+                            termOfferings,
+                            classrooms,
+                            professors,
+                            rules,
+                            termSchedulingIndex
+                          );
                         const examLabel = isCourseEligibleForExam(o)
                           ? formatExamAssignmentShort(o, activeTermExamSettings)
                           : '';
                         const examWarns = conf.warnings.filter((w) => w.includes('تداخل امتحان'));
-                        const comp = evaluateOfferingCompleteness(o, rules);
+                        const comp =
+                          termSchedulingIndex.completenessMap.get(o.id) ||
+                          evaluateOfferingCompleteness(o, rules);
                         const isProvisionalOrDisabled = comp.isEffectivelyInactive;
                         const hoverIssues = [...comp.missingItems, ...conf.errors];
                         return (
@@ -5964,7 +6322,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             </td>
                             <td className="p-3">{o.professorName || 'تعیین‌نشده'}</td>
                             <td className="p-3">
-                              <div>{o.classroomName || 'بدون کلاس'}</div>
+                              <div>
+                                {o.classroomName ||
+                                  (!isInternshipClassroomRequired(o) ? 'محل: مدرسه' : 'بدون کلاس')}
+                              </div>
                               <div className="text-[10px] text-slate-500">
                                 {o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'بدون روز'} ·{' '}
                                 {o.slotIds
@@ -6262,7 +6623,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       </div>
                     );
                   })()}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <label className="space-y-1">
                       <span className="font-bold">ورودی (مثلاً 4031) *</span>
                       <input
@@ -6275,12 +6636,47 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       />
                     </label>
                     <label className="space-y-1">
-                      <span className="font-bold">کل نفرات ورودی</span>
+                      <span className="font-bold">تعداد دانشجویان کل *</span>
                       <input
                         type="number"
                         min={1}
+                        required
                         value={progTotalStudents}
-                        onChange={(e) => setProgTotalStudents(e.target.value)}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setProgTotalStudents(raw);
+                          const totalVal = Number(normalizeSchedCode(raw));
+                          const countVal = Number(normalizeSchedCode(progSectionCount)) || progSections.length || 1;
+                          if (Number.isFinite(totalVal) && totalVal > 0) {
+                            setProgSections((prev) =>
+                              distributeCohortSections(totalVal, countVal, prev)
+                            );
+                          }
+                        }}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold">تعداد شعبه‌ها *</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        required
+                        value={progSectionCount}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setProgSectionCount(raw);
+                          const countVal = Math.max(
+                            1,
+                            Math.min(20, Number(normalizeSchedCode(raw)) || 1)
+                          );
+                          const totalVal =
+                            Number(normalizeSchedCode(progTotalStudents)) || countVal;
+                          setProgSections((prev) =>
+                            distributeCohortSections(totalVal, countVal, prev)
+                          );
+                        }}
                         className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
                       />
                     </label>
@@ -6314,8 +6710,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       />
                     </label>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <label className="col-span-2 space-y-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <label className="sm:col-span-2 space-y-1">
                       <span className="font-bold">نام رشته *</span>
                       <input
                         type="text"
@@ -6326,12 +6722,47 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       />
                     </label>
                     <label className="space-y-1">
-                      <span className="font-bold">کل نفرات ورودی</span>
+                      <span className="font-bold">تعداد دانشجویان کل *</span>
                       <input
                         type="number"
                         min={1}
+                        required
                         value={progTotalStudents}
-                        onChange={(e) => setProgTotalStudents(e.target.value)}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setProgTotalStudents(raw);
+                          const totalVal = Number(normalizeSchedCode(raw));
+                          const countVal = Number(normalizeSchedCode(progSectionCount)) || progSections.length || 1;
+                          if (Number.isFinite(totalVal) && totalVal > 0) {
+                            setProgSections((prev) =>
+                              distributeCohortSections(totalVal, countVal, prev)
+                            );
+                          }
+                        }}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold">تعداد شعبه‌ها *</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        required
+                        value={progSectionCount}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setProgSectionCount(raw);
+                          const countVal = Math.max(
+                            1,
+                            Math.min(20, Number(normalizeSchedCode(raw)) || 1)
+                          );
+                          const totalVal =
+                            Number(normalizeSchedCode(progTotalStudents)) || countVal;
+                          setProgSections((prev) =>
+                            distributeCohortSections(totalVal, countVal, prev)
+                          );
+                        }}
                         className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
                       />
                     </label>
@@ -6340,24 +6771,56 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               )}
 
               <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold">شعب / گروه‌های این ورودی</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setProgSections((prev) => [
-                        ...prev,
-                        {
-                          id: `sec_${Date.now()}`,
-                          name: `گروه ${prev.length + 1}`,
-                          studentCount: 25,
-                        },
-                      ])
-                    }
-                    className="text-teal-600 font-bold hover:underline cursor-pointer"
-                  >
-                    + افزودن شعبه
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="font-extrabold">شعب / گروه‌های این ورودی</span>
+                    <span className="mr-2 text-[10.5px] font-bold text-slate-500">
+                      (مجموع فعلی شعب:{' '}
+                      {progSections.reduce((s, x) => s + (Number(x.studentCount) || 0), 0).toLocaleString('fa-IR')}{' '}
+                      نفر)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const totalVal = Math.max(
+                          1,
+                          Number(normalizeSchedCode(progTotalStudents)) || 30
+                        );
+                        const countVal = Math.max(
+                          1,
+                          Math.min(20, Number(normalizeSchedCode(progSectionCount)) || progSections.length || 1)
+                        );
+                        setProgSections((prev) =>
+                          distributeCohortSections(totalVal, countVal, prev)
+                        );
+                      }}
+                      className="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold cursor-pointer"
+                    >
+                      تقسیم خودکار بین شعب
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setProgSections((prev) => {
+                          const next = [
+                            ...prev,
+                            {
+                              id: `sec_${Date.now()}`,
+                              name: `گروه ${prev.length + 1}`,
+                              studentCount: 25,
+                            },
+                          ];
+                          setProgSectionCount(String(next.length));
+                          return next;
+                        })
+                      }
+                      className="text-teal-600 font-bold hover:underline cursor-pointer"
+                    >
+                      + افزودن شعبه
+                    </button>
+                  </div>
                 </div>
                 {progSections.map((sec, idx) => (
                   <div key={sec.id} className="flex items-center gap-2">
@@ -6378,17 +6841,21 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       onChange={(e) =>
                         setProgSections((prev) =>
                           prev.map((x, i) =>
-                            i === idx ? { ...x, studentCount: Number(e.target.value) || 1 } : x
+                            i === idx ? { ...x, studentCount: Math.max(1, Number(e.target.value) || 1) } : x
                           )
                         )
                       }
-                      className="w-20 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                      className="w-24 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
                     />
                     {progSections.length > 1 && (
                       <button
                         type="button"
                         onClick={() =>
-                          setProgSections((prev) => prev.filter((_, i) => i !== idx))
+                          setProgSections((prev) => {
+                            const next = prev.filter((_, i) => i !== idx);
+                            setProgSectionCount(String(Math.max(1, next.length)));
+                            return next;
+                          })
                         }
                         className="text-rose-500 cursor-pointer"
                       >
@@ -7141,67 +7608,47 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
             )}
 
             <form onSubmit={handleSaveOffering} className="space-y-3.5 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold">انتخاب درس از چارت (کد ۷ رقمی) *</span>
-                    {!canManageMasterData && (
-                      <label className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={modalAllChartCourses}
-                          onChange={(e) => setModalAllChartCourses(e.target.checked)}
-                          className="rounded text-indigo-600"
-                        />
-                        <span>همه دروس دانشگاه</span>
-                      </label>
-                    )}
-                  </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className="space-y-1">
+                  <span className="font-bold block">۱. رشته تحصیلی *</span>
                   <select
                     required
-                    value={offCourseId}
+                    value={offMajorCode}
                     onChange={(e) => {
-                      const nextId = e.target.value;
-                      setOffCourseId(nextId);
-                      const c = courses.find((x) => x.id === nextId);
-                      if (c) {
-                        let currentEnrolled = Number(normalizeSchedCode(offEnrolledCount)) || 28;
-                        if (!offCohortId) {
-                          const coh = programs.find((p) => p.majorCode === c.majorCode);
-                          if (coh) {
-                            setOffCohortId(coh.id);
-                            const sec = coh.sections[0];
-                            setOffSectionId(sec?.id || '');
-                            currentEnrolled = sec?.studentCount || coh.totalStudents;
-                            setOffEnrolledCount(String(currentEnrolled));
-                          }
-                        }
-                        if (!editingOffId) {
-                          initInternshipGroupsForCourse(c, currentEnrolled, offProfessorId);
-                        }
-                        setOffSharedTargets([]);
+                      const nextMajorCode = e.target.value;
+                      setOffMajorCode(nextMajorCode);
+                      const normNext = normalizeMajorCode(nextMajorCode);
+                      const firstCoh = programs.find(
+                        (p) => normalizeMajorCode(p.majorCode) === normNext
+                      );
+                      setOffCohortId(firstCoh?.id || '');
+                      const sec = firstCoh?.sections[0];
+                      setOffSectionId(sec?.id || '');
+                      const countVal = sec?.studentCount || firstCoh?.totalStudents || 28;
+                      setOffEnrolledCount(String(countVal));
+                      const firstCrs = courses.find(
+                        (c) => normalizeMajorCode(c.majorCode) === normNext
+                      );
+                      setOffCourseId(firstCrs?.id || '');
+                      setOffInternshipSchoolOnlyFull(false);
+                      if (!editingOffId) {
+                        initInternshipGroupsForCourse(firstCrs, countVal, offProfessorId);
                       }
+                      setOffSharedTargets([]);
                     }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                   >
-                    {courses
-                      .filter(
-                        (c) =>
-                          canManageMasterData ||
-                          allowCrossMajorView ||
-                          modalAllChartCourses ||
-                          isOwnMajorName(c.majorName)
-                      )
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.title} — کد {c.courseCode} ({c.majorName})
-                        </option>
-                      ))}
+                    <option value="">-- انتخاب رشته تحصیلی --</option>
+                    {modalAvailableMajors.map((m) => (
+                      <option key={m.majorCode} value={m.majorCode}>
+                        {m.majorName} ({m.majorCode})
+                      </option>
+                    ))}
                   </select>
-                </div>
+                </label>
 
                 <label className="space-y-1">
-                  <span className="font-bold">رشته و ورودی میزبان *</span>
+                  <span className="font-bold block">۲. ورودی میزبان (این رشته) *</span>
                   <select
                     required
                     value={offCohortId}
@@ -7219,11 +7666,51 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                   >
-                    {programs.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.majorName} ({p.majorCode}) — ورودی {p.entryTerm}
-                      </option>
-                    ))}
+                    {cohortsForSelectedMajor.length === 0 ? (
+                      <option value="">ورودی‌ای برای این رشته ثبت نشده است</option>
+                    ) : (
+                      cohortsForSelectedMajor.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.majorName} — ورودی {p.entryTerm}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+
+                <label className="space-y-1">
+                  <span className="font-bold block">
+                    ۳. نام درس از چارت همین رشته ({coursesForSelectedMajor.length.toLocaleString('fa-IR')} درس) *
+                  </span>
+                  <select
+                    required
+                    value={offCourseId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setOffCourseId(nextId);
+                      const c = coursesForSelectedMajor.find((x) => x.id === nextId);
+                      if (c) {
+                        const currentEnrolled = Number(normalizeSchedCode(offEnrolledCount)) || 28;
+                        if (c.practicalType !== 'internship') {
+                          setOffInternshipSchoolOnlyFull(false);
+                        }
+                        if (!editingOffId) {
+                          initInternshipGroupsForCourse(c, currentEnrolled, offProfessorId);
+                        }
+                        setOffSharedTargets([]);
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                  >
+                    {coursesForSelectedMajor.length === 0 ? (
+                      <option value="">هیچ درسی برای این رشته در سرفصل دروس ثبت نشده است</option>
+                    ) : (
+                      coursesForSelectedMajor.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.title} — کد {c.courseCode}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </label>
               </div>
@@ -7367,17 +7854,17 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                           {
                             value: 'school_attendance' as SchedInternshipSessionRole,
                             title: 'حضور در مدرسه (۶ ساعت · ۷ تا ۱۳)',
-                            desc: 'بدون نیاز به کلاس فیزیکی دانشگاه',
+                            desc: 'بدون نیاز به انتخاب کلاس فیزیکی',
                           },
                           {
                             value: 'university_orientation' as SchedInternshipSessionRole,
                             title: 'جلسه توجیهی دانشگاه (۲ ساعت)',
-                            desc: 'برگزاری در کلاس‌های دانشگاه',
+                            desc: 'انتخاب کلاس فیزیکی در دانشگاه الزامی است',
                           },
                           {
                             value: 'combined' as SchedInternshipSessionRole,
                             title: 'کل کارورزی یکجا (۸ ساعت)',
-                            desc: 'ثبت یکباره کل ساعت کارورزی',
+                            desc: 'با کلاس دانشگاه یا به‌صورت حضور در مدرسه',
                           },
                         ] as const
                       ).map((opt) => (
@@ -7388,6 +7875,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             setOffInternshipSessionRole(opt.value);
                             if (opt.value === 'school_attendance') {
                               setOffClassroomId('');
+                              setOffInternshipSchoolOnlyFull(false);
+                            } else if (opt.value === 'university_orientation') {
+                              setOffInternshipSchoolOnlyFull(false);
                             }
                           }}
                           className={`p-2 rounded-lg border text-right transition cursor-pointer ${
@@ -7409,6 +7899,23 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         </button>
                       ))}
                     </div>
+                    {offInternshipSessionRole === 'combined' && (
+                      <label className="mt-2 flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50/90 dark:bg-emerald-950/35 border border-emerald-300 dark:border-emerald-800 text-[11px] font-bold text-emerald-950 dark:text-emerald-100 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={offInternshipSchoolOnlyFull}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setOffInternshipSchoolOnlyFull(checked);
+                            if (checked) setOffClassroomId('');
+                          }}
+                          className="accent-emerald-600 rounded w-4 h-4 shrink-0"
+                        />
+                        <span>
+                          ثبت ۸ ساعته یکسره به‌عنوان حضور در مدرسه (بدون نیاز به تعیین کلاس فیزیکی در دانشگاه)
+                        </span>
+                      </label>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -7656,7 +8163,16 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     {professors
                       .filter((p) => p.isActive)
                       .map((p) => {
-                        const ld = calculateProfessorLoadSummary(p.id, termOfferings, rules);
+                        const ld = termSchedulingIndex.profLoadMap.get(p.id) || {
+                          professorId: p.id,
+                          offeringCount: 0,
+                          rawUnits: 0,
+                          theoreticalUnits: 0,
+                          practicalUnits: 0,
+                          weeklyHours: 0,
+                          equivalentUnits: 0,
+                          activeDays: [],
+                        };
                         const deptField = formatProfessorDepartmentAndField(p);
                         const bounds = getProfessorEquivalentUnitBounds(p, rules);
                         const limitEval = evaluateProfessorEquivalentUnitStatus(
@@ -7686,7 +8202,16 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       selectedProf.degreeField,
                       selectedProf.degreeSpecialization
                     );
-                    const ld = calculateProfessorLoadSummary(selectedProf.id, termOfferings, rules);
+                    const ld = termSchedulingIndex.profLoadMap.get(selectedProf.id) || {
+                      professorId: selectedProf.id,
+                      offeringCount: 0,
+                      rawUnits: 0,
+                      theoreticalUnits: 0,
+                      practicalUnits: 0,
+                      weeklyHours: 0,
+                      equivalentUnits: 0,
+                      activeDays: [],
+                    };
                     const bounds = getProfessorEquivalentUnitBounds(selectedProf, rules);
                     const limitStatus = evaluateProfessorEquivalentUnitStatus(
                       selectedProf,
@@ -7726,63 +8251,94 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   })()}
                 </label>
 
-                <label className="space-y-1">
-                  <div className="flex flex-wrap items-center justify-between gap-1">
-                    <span className="font-bold">تخصیص کلاس فیزیکی</span>
-                    <span className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300">
-                      {offDay && offSlotIds.length > 0
-                        ? `فقط کلاس‌های خالی (${modalClassroomAvailability.freeRooms.length.toLocaleString('fa-IR')} از ${modalClassroomAvailability.totalActiveCount.toLocaleString('fa-IR')})`
-                        : `(${modalClassroomAvailability.totalActiveCount.toLocaleString('fa-IR')} کلاس فعال)`}
-                    </span>
-                  </div>
-                  <select
-                    value={offClassroomId}
-                    onChange={(e) => setOffClassroomId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                  >
-                    <option value="">-- بدون کلاس فیزیکی --</option>
-                    {modalClassroomAvailability.selectedOccupiedItem && (
-                      <option value={modalClassroomAvailability.selectedOccupiedItem.room.id}>
-                        ⛔ اشغال‌شده در این ساعت —{' '}
-                        {modalClassroomAvailability.selectedOccupiedItem.room.name} (توسط «
-                        {modalClassroomAvailability.selectedOccupiedItem.occupiedBy?.courseTitle ||
-                          'درس دیگر'}
-                        »)
-                      </option>
-                    )}
-                    {modalClassroomAvailability.freeRooms.map(({ room, capOk }) => (
-                      <option key={room.id} value={room.id}>
-                        {capOk ? '✅' : '🟡 ظرفیت کمتر —'} {room.name} (کد {room.code} · ظرفیت{' '}
-                        {room.capacity} · {SCHED_ROOM_TYPE_LABELS[room.roomType]})
-                      </option>
-                    ))}
-                  </select>
-                  {modalClassroomAvailability.selectedOccupiedItem && (
-                    <div className="mt-1 p-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[10.5px] text-rose-700 dark:text-rose-200 flex flex-wrap items-center justify-between gap-1.5">
-                      <span>
-                        کلاس انتخاب‌شده قبلی در این روز و سانس اشغال است؛ یکی از کلاس‌های خالی را انتخاب کنید.
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setOffClassroomId(modalClassroomAvailability.freeRooms[0]?.room.id || '')
-                        }
-                        className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
-                      >
-                        {modalClassroomAvailability.freeRooms[0]
-                          ? `انتخاب ${modalClassroomAvailability.freeRooms[0].room.name}`
-                          : 'پاک کردن کلاس'}
-                      </button>
-                    </div>
-                  )}
-                  {offDay &&
-                    offSlotIds.length > 0 &&
-                    modalClassroomAvailability.freeRooms.length === 0 && (
-                      <div className="mt-1 text-[10.5px] font-bold text-amber-700 dark:text-amber-300">
-                        در این روز و سانس هیچ کلاس فیزیکی خالی یافت نشد.
+                {(() => {
+                  const isSchoolExempt = Boolean(
+                    selectedOffCourse?.practicalType === 'internship' &&
+                      (offInternshipSessionRole === 'school_attendance' ||
+                        (offInternshipSessionRole === 'combined' && offInternshipSchoolOnlyFull))
+                  );
+                  return (
+                    <label className="space-y-1">
+                      <div className="flex flex-wrap items-center justify-between gap-1">
+                        <span className="font-bold">تخصیص کلاس فیزیکی</span>
+                        <span
+                          className={`text-[10px] font-extrabold ${
+                            isSchoolExempt
+                              ? 'text-emerald-700 dark:text-emerald-300'
+                              : 'text-emerald-700 dark:text-emerald-300'
+                          }`}
+                        >
+                          {isSchoolExempt
+                            ? 'حضور در مدرسه — بدون نیاز به کلاس فیزیکی'
+                            : offDay && offSlotIds.length > 0
+                            ? `فقط کلاس‌های خالی (${modalClassroomAvailability.freeRooms.length.toLocaleString('fa-IR')} از ${modalClassroomAvailability.totalActiveCount.toLocaleString('fa-IR')})`
+                            : `(${modalClassroomAvailability.totalActiveCount.toLocaleString('fa-IR')} کلاس فعال)`}
+                        </span>
                       </div>
-                    )}
-                </label>
+                      {isSchoolExempt ? (
+                        <div className="px-3 py-2 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200 font-bold text-[11px]">
+                          ✓ برای حضور در مدرسه نیازی به انتخاب کلاس فیزیکی دانشگاه نیست.
+                        </div>
+                      ) : (
+                        <>
+                          <select
+                            value={offClassroomId}
+                            onChange={(e) => setOffClassroomId(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                          >
+                            <option value="">-- بدون کلاس فیزیکی --</option>
+                            {modalClassroomAvailability.selectedOccupiedItem && (
+                              <option value={modalClassroomAvailability.selectedOccupiedItem.room.id}>
+                                ⛔ اشغال‌شده در این ساعت —{' '}
+                                {modalClassroomAvailability.selectedOccupiedItem.room.name} (توسط «
+                                {modalClassroomAvailability.selectedOccupiedItem.occupiedBy?.courseTitle ||
+                                  'درس دیگر'}
+                                »)
+                              </option>
+                            )}
+                            {modalClassroomAvailability.freeRooms.map(({ room, capOk }) => (
+                              <option key={room.id} value={room.id}>
+                                {capOk ? '✅' : '🟡 ظرفیت کمتر —'} {room.name} (کد {room.code} · ظرفیت{' '}
+                                {room.capacity} · {SCHED_ROOM_TYPE_LABELS[room.roomType]})
+                              </option>
+                            ))}
+                          </select>
+                          {selectedOffCourse?.practicalType === 'internship' &&
+                            offInternshipSessionRole === 'university_orientation' && (
+                              <div className="mt-1 text-[10.5px] font-bold text-violet-700 dark:text-violet-300">
+                                برای ۲ ساعت جلسه توجیهی کارورزی در دانشگاه، انتخاب کلاس فیزیکی الزامی است.
+                              </div>
+                            )}
+                          {modalClassroomAvailability.selectedOccupiedItem && (
+                            <div className="mt-1 p-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[10.5px] text-rose-700 dark:text-rose-200 flex flex-wrap items-center justify-between gap-1.5">
+                              <span>
+                                کلاس انتخاب‌شده قبلی در این روز و سانس اشغال است؛ یکی از کلاس‌های خالی را انتخاب کنید.
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setOffClassroomId(modalClassroomAvailability.freeRooms[0]?.room.id || '')
+                                }
+                                className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
+                              >
+                                {modalClassroomAvailability.freeRooms[0]
+                                  ? `انتخاب ${modalClassroomAvailability.freeRooms[0].room.name}`
+                                  : 'پاک کردن کلاس'}
+                              </button>
+                            </div>
+                          )}
+                          {offDay &&
+                            offSlotIds.length > 0 &&
+                            modalClassroomAvailability.freeRooms.length === 0 && (
+                              <div className="mt-1 text-[10.5px] font-bold text-amber-700 dark:text-amber-300">
+                                در این روز و سانس هیچ کلاس فیزیکی خالی یافت نشد.
+                              </div>
+                            )}
+                        </>
+                      )}
+                    </label>
+                  );
+                })()}
               </div>
 
               {/* روز و سانس و تفکیک دو تک‌ساعت */}

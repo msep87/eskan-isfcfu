@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SchedCellComment,
+  SchedCellTextAlign,
   SchedCellTextFit,
+  SchedCellVerticalAlign,
   SchedClassroom,
   SchedCourseOffering,
   SchedCurriculumCourse,
@@ -26,9 +28,10 @@ import {
   SCHED_DAY_LABELS,
   SCHED_PAPER_SIZES_MM,
   SCHED_ROOM_TYPE_LABELS,
+  TermSchedulingIndex,
   buildTermExamConflictMap,
+  buildTermSchedulingIndex,
   calculateOfferingBreakdown,
-  calculateProfessorLoadSummary,
   checkScheduleEditLock,
   detectOfferingConflicts,
   evaluateOfferingCompleteness,
@@ -43,6 +46,7 @@ import {
   getSlotDurationHours,
   getSlotHalfLabel,
   isCourseEligibleForExam,
+  isInternshipClassroomRequired,
   isOfferingEffectivelyActive,
   normalizePersianText,
   printSchedHtml,
@@ -135,6 +139,7 @@ interface CourseSchedulingMasterGridProps {
   onFullscreenContainerChange?: (el: HTMLElement | null) => void;
   hasExternalModalOpen?: boolean;
   onCloseExternalModals?: () => void;
+  precomputedIndex?: TermSchedulingIndex;
   onNotify: (type: 'success' | 'error', text: string) => void;
 }
 
@@ -270,6 +275,44 @@ const ORIENTATION_LABELS: Record<SchedTextOrientation, string> = {
   vertical_down: 'عمودی ↓ (بالا به پایین)',
 };
 
+const TEXT_ALIGN_LABELS: Record<SchedCellTextAlign, string> = {
+  right: 'راست‌چین',
+  center: 'وسط‌چین (افقی)',
+  left: 'چپ‌چین',
+};
+
+const VERTICAL_ALIGN_LABELS: Record<SchedCellVerticalAlign, string> = {
+  top: 'بالا',
+  middle: 'وسط (عمودی)',
+  bottom: 'پایین',
+};
+
+const getRtlHorizontalAlignItems = (
+  align?: SchedCellTextAlign
+): React.CSSProperties['alignItems'] => {
+  if (align === 'center') return 'center';
+  if (align === 'left') return 'flex-end';
+  return 'flex-start';
+};
+
+const getRtlHorizontalJustifyContent = (
+  align?: SchedCellTextAlign
+): React.CSSProperties['justifyContent'] => {
+  if (align === 'center') return 'center';
+  if (align === 'left') return 'flex-end';
+  return 'flex-start';
+};
+
+const getVerticalJustifyContent = (
+  vAlign?: SchedCellVerticalAlign
+): React.CSSProperties['justifyContent'] => {
+  if (vAlign === 'bottom') return 'flex-end';
+  if (vAlign === 'middle') return 'center';
+  return 'flex-start';
+};
+
+const EMPTY_CELL_OFFERINGS: SchedCourseOffering[] = [];
+
 const cloneDefaultLayout = (): SchedMasterGridLayoutSettings => ({
   metaColumns: {
     major: { ...DEFAULT_MASTER_GRID_LAYOUT.metaColumns.major },
@@ -328,10 +371,10 @@ const getOrientationStyleObj = (orientation?: SchedTextOrientation): React.CSSPr
 
 const getOrientationPrintCss = (orientation?: SchedTextOrientation): string => {
   if (orientation === 'vertical_up') {
-    return 'writing-mode:vertical-rl;transform:rotate(180deg);display:inline-block;margin:0 auto;';
+    return 'writing-mode:vertical-rl;transform:rotate(180deg);display:inline-block;';
   }
   if (orientation === 'vertical_down') {
-    return 'writing-mode:vertical-rl;display:inline-block;margin:0 auto;';
+    return 'writing-mode:vertical-rl;display:inline-block;';
   }
   return '';
 };
@@ -389,6 +432,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   onFullscreenContainerChange,
   hasExternalModalOpen = false,
   onCloseExternalModals,
+  precomputedIndex,
   onNotify,
 }) => {
   const isSystemAdmin = userRole === 'admin';
@@ -407,6 +451,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
   // فیلترهای سطر و تمرکز فراگیر
   const [rowSearch, setRowSearch] = useState('');
+  const deferredRowSearch = useDeferredValue(rowSearch);
   const [majorFilter, setMajorFilter] = useState('all');
   const [entryFilter, setEntryFilter] = useState('all');
   const [alwaysShowHalfSlots, setAlwaysShowHalfSlots] = useState(false);
@@ -505,12 +550,18 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   const [batchMetaBodyOri, setBatchMetaBodyOri] = useState<SchedTextOrientation>('vertical_up');
   const [batchMetaApplyToHeader, setBatchMetaApplyToHeader] = useState<boolean>(false);
   const [batchMetaTextFit, setBatchMetaTextFit] = useState<SchedCellTextFit>('wrap');
+  const [batchMetaTextAlign, setBatchMetaTextAlign] = useState<SchedCellTextAlign>('center');
+  const [batchMetaVerticalAlign, setBatchMetaVerticalAlign] =
+    useState<SchedCellVerticalAlign>('middle');
 
   const [selectedBatchSlotKeys, setSelectedBatchSlotKeys] = useState<string[]>([]);
   const [batchSlotColWidthInput, setBatchSlotColWidthInput] = useState('140');
   const [batchSlotHeaderOri, setBatchSlotHeaderOri] = useState<SchedTextOrientation>('horizontal');
   const [batchSlotBodyOri, setBatchSlotBodyOri] = useState<SchedTextOrientation>('horizontal');
   const [batchSlotTextFit, setBatchSlotTextFit] = useState<SchedCellTextFit>('shrink');
+  const [batchSlotTextAlign, setBatchSlotTextAlign] = useState<SchedCellTextAlign>('right');
+  const [batchSlotVerticalAlign, setBatchSlotVerticalAlign] =
+    useState<SchedCellVerticalAlign>('top');
 
   const [indDay, setIndDay] = useState<SchedDayKey>(() => activeDays[0] || 'saturday');
   const [indSlotId, setIndSlotId] = useState<string>(() => sortedSlots[0]?.id || '');
@@ -789,6 +840,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     onRedo,
   ]);
 
+  const effectiveIndex = useMemo(
+    () =>
+      precomputedIndex || buildTermSchedulingIndex(termOfferings, classrooms, professors, rules),
+    [precomputedIndex, termOfferings, classrooms, professors, rules]
+  );
+
   const globalLockStatus = useMemo(
     () => checkScheduleEditLock(rules, userRole, actor.id),
     [rules, userRole, actor.id]
@@ -870,6 +927,16 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     return map;
   }, [cellComments, activeTerm]);
 
+  const courseMajorByIdOrCodeMap = useMemo(() => {
+    const byId = new Map<string, string>();
+    const byCode = new Map<string, string>();
+    for (const c of courses) {
+      if (!byId.has(c.id)) byId.set(c.id, c.majorName);
+      if (!byCode.has(c.courseCode)) byCode.set(c.courseCode, c.majorName);
+    }
+    return { byId, byCode };
+  }, [courses]);
+
   // بررسی مجوز ویرایش/جابجایی یک درس همراه با اعمال قفل‌های مدیر سامانه
   const canEditOffering = (o: SchedCourseOffering): boolean => {
     const lockRes = checkScheduleEditLock(rules, userRole, actor.id, {
@@ -881,8 +948,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     if (canManageMasterData) return true;
     if (o.createdById === actor.id) return true;
     if (isOwnMajorName(o.ownerMajorName)) return true;
-    const crs = courses.find((c) => c.id === o.courseId || c.courseCode === o.courseCode);
-    if (crs && isOwnMajorName(crs.majorName)) return true;
+    const majorFromCatalog =
+      courseMajorByIdOrCodeMap.byId.get(o.courseId) ||
+      courseMajorByIdOrCodeMap.byCode.get(o.courseCode);
+    if (majorFromCatalog && isOwnMajorName(majorFromCatalog)) return true;
     return false;
   };
 
@@ -956,9 +1025,77 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     return rows;
   }, [programs, rowGrouping, majorColorIndexMap, entryColorIndexMap]);
 
+  // ایندکس O(N) دروس هر سطر و هر سلول برای رندر پرسرعت ماتریس بدون فیلتر تکراری O(Rows * Days * Slots * Offerings)
+  const { rowAllOfferingsMap, rowSummaryMap, cellOfferingsMap } = useMemo(() => {
+    const rowsByCohort = new Map<string, MasterRowRaw[]>();
+    for (const r of allRawRows) {
+      const list = rowsByCohort.get(r.cohortId);
+      if (list) list.push(r);
+      else rowsByCohort.set(r.cohortId, [r]);
+    }
+
+    const allMap = new Map<string, SchedCourseOffering[]>();
+    const activeMap = new Map<string, SchedCourseOffering[]>();
+    const cellMap = new Map<string, SchedCourseOffering[]>();
+
+    for (const o of termOfferings) {
+      const seenRowKeys = new Set<string>();
+      const candidateCohorts = [o.cohortId];
+      if (o.sharedWithTargets && o.sharedWithTargets.length > 0) {
+        for (const t of o.sharedWithTargets) {
+          if (!candidateCohorts.includes(t.cohortId)) {
+            candidateCohorts.push(t.cohortId);
+          }
+        }
+      }
+      const comp = effectiveIndex.completenessMap.get(o.id);
+      const isAct = comp ? !comp.isEffectivelyInactive : isOfferingEffectivelyActive(o, rules);
+
+      for (const cid of candidateCohorts) {
+        const cohortRows = rowsByCohort.get(cid);
+        if (!cohortRows) continue;
+        for (const r of cohortRows) {
+          if (seenRowKeys.has(r.rowKey) || !doesOfferingBelongToRow(o, r)) continue;
+          seenRowKeys.add(r.rowKey);
+
+          const rList = allMap.get(r.rowKey);
+          if (rList) rList.push(o);
+          else allMap.set(r.rowKey, [o]);
+
+          if (isAct) {
+            const aList = activeMap.get(r.rowKey);
+            if (aList) aList.push(o);
+            else activeMap.set(r.rowKey, [o]);
+          }
+
+          if (o.dayOfWeek && o.slotIds.length > 0) {
+            for (const sid of o.slotIds) {
+              const cKey = `${r.rowKey}|${o.dayOfWeek}|${sid}`;
+              const cList = cellMap.get(cKey);
+              if (cList) cList.push(o);
+              else cellMap.set(cKey, [o]);
+            }
+          }
+        }
+      }
+    }
+
+    const summaryMap = new Map<string, ReturnType<typeof summarizeSectionOfferings>>();
+    for (const r of allRawRows) {
+      const actList = activeMap.get(r.rowKey) || EMPTY_CELL_OFFERINGS;
+      summaryMap.set(r.rowKey, summarizeSectionOfferings(actList, rules));
+    }
+
+    return {
+      rowAllOfferingsMap: allMap,
+      rowSummaryMap: summaryMap,
+      cellOfferingsMap: cellMap,
+    };
+  }, [allRawRows, termOfferings, rules, effectiveIndex]);
+
   // فیلتر کردن سطرها و محاسبه rowSpan دقیق متناسب با چیدمان انتخابی + حالت محدودشده به دروس ثبت‌شده
   const displayRows = useMemo<MasterRowDisplay[]>(() => {
-    const q = normalizePersianText(rowSearch).toLowerCase();
+    const q = normalizePersianText(deferredRowSearch).toLowerCase();
     let filtered = allRawRows.filter((r) => {
       if (majorFilter !== 'all' && r.majorCode !== majorFilter) return false;
       if (entryFilter !== 'all' && r.entryTerm !== entryFilter) return false;
@@ -969,22 +1106,22 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         if (!hay.includes(q)) return false;
       }
       if (isFocusActive && hideUnmatchedRows) {
-        const rowOffs = termOfferings.filter((o) => doesOfferingBelongToRow(o, r));
+        const rowOffs = rowAllOfferingsMap.get(r.rowKey) || EMPTY_CELL_OFFERINGS;
         if (!rowOffs.some(doesOfferingMatchFocus)) return false;
       }
       return true;
     });
 
     if (onlyPopulatedView) {
-      const populatedRows = filtered.filter((r) =>
-        termOfferings.some(
+      const populatedRows = filtered.filter((r) => {
+        const rowOffs = rowAllOfferingsMap.get(r.rowKey) || EMPTY_CELL_OFFERINGS;
+        return rowOffs.some(
           (o) =>
             o.dayOfWeek &&
             o.slotIds.length > 0 &&
-            doesOfferingBelongToRow(o, r) &&
             (!isFocusActive || !hideUnmatchedRows || doesOfferingMatchFocus(o))
-        )
-      );
+        );
+      });
       if (populatedRows.length > 0) {
         filtered = populatedRows;
       }
@@ -995,11 +1132,11 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     allRawRows,
     majorFilter,
     entryFilter,
-    rowSearch,
+    deferredRowSearch,
     isFocusActive,
     hideUnmatchedRows,
     onlyPopulatedView,
-    termOfferings,
+    rowAllOfferingsMap,
     focusMode,
     focusCourseCode,
     focusProfId,
@@ -1059,13 +1196,22 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         hiddenEmptyDaysCount: 0,
       };
     }
-    const relevantOfferings = termOfferings.filter(
-      (o) =>
-        o.dayOfWeek &&
-        o.slotIds.length > 0 &&
-        displayRows.some((r) => doesOfferingBelongToRow(o, r)) &&
-        (!isFocusActive || !hideUnmatchedRows || doesOfferingMatchFocus(o))
-    );
+    const relevantOfferings: SchedCourseOffering[] = [];
+    const seenIds = new Set<string>();
+    for (const r of displayRows) {
+      const list = rowAllOfferingsMap.get(r.rowKey) || EMPTY_CELL_OFFERINGS;
+      for (const o of list) {
+        if (
+          !seenIds.has(o.id) &&
+          o.dayOfWeek &&
+          o.slotIds.length > 0 &&
+          (!isFocusActive || !hideUnmatchedRows || doesOfferingMatchFocus(o))
+        ) {
+          seenIds.add(o.id);
+          relevantOfferings.push(o);
+        }
+      }
+    }
     if (relevantOfferings.length === 0) {
       return {
         displayedDays: activeDays,
@@ -1099,7 +1245,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     onlyPopulatedView,
     activeDays,
     sortedSlots,
-    termOfferings,
+    rowAllOfferingsMap,
     displayRows,
     isFocusActive,
     hideUnmatchedRows,
@@ -1146,6 +1292,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       bodyOrientation:
         override?.bodyOrientation ?? liveLayout.scheduleCells.bodyOrientation ?? 'horizontal',
       textFit: override?.textFit ?? liveLayout.scheduleCells.textFit ?? 'wrap',
+      textAlign: override?.textAlign ?? liveLayout.scheduleCells.textAlign ?? 'right',
+      verticalAlign: override?.verticalAlign ?? liveLayout.scheduleCells.verticalAlign ?? 'top',
       fontSizePx: override?.fontSizePx ?? liveLayout.scheduleCells.fontSizePx,
     };
   };
@@ -1343,13 +1491,13 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       const c = uniqueCoursesCatalog.find((x) => x.courseCode === focusCourseCode);
       label = c ? `درس «${c.title}» (کد ${c.courseCode})` : `کد درس ${focusCourseCode}`;
     } else if (focusMode === 'professor') {
-      const p = professors.find((x) => x.id === focusProfId);
-      const ld = p ? calculateProfessorLoadSummary(p.id, termOfferings, rules) : null;
+      const p = effectiveIndex.profById.get(focusProfId);
+      const ld = p ? effectiveIndex.profLoadMap.get(p.id) : undefined;
       label = p
         ? `استاد «${p.fullName}» (کد ${p.professorCode}${ld ? ` · ${ld.equivalentUnits} معادل` : ''})`
         : 'استاد انتخاب‌شده';
     } else if (focusMode === 'classroom') {
-      const r = classrooms.find((x) => x.id === focusRoomId);
+      const r = effectiveIndex.roomById.get(focusRoomId);
       label = r
         ? `کلاس «${r.name}» (ظرفیت ${r.capacity} نفر · ${SCHED_ROOM_TYPE_LABELS[r.roomType]})`
         : 'کلاس انتخاب‌شده';
@@ -1374,8 +1522,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     focusProfId,
     focusRoomId,
     uniqueCoursesCatalog,
-    professors,
-    classrooms,
+    effectiveIndex,
   ]);
 
   const focusProfUnavailableSet = useMemo(() => {
@@ -1493,7 +1640,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           disabledReason: movedComp.missingItems.join(' | ') || dragged.disabledReason,
         };
 
-    const report = detectOfferingConflicts(candidateBase, termOfferings, classrooms, professors, rules);
+    const report = detectOfferingConflicts(
+      candidateBase,
+      termOfferings,
+      classrooms,
+      professors,
+      rules,
+      effectiveIndex
+    );
     const hasProfUnavail = report.warnings.some((w) => w.includes('عدم امکان حضور'));
 
     if (!report.hasHardConflict && !hasProfUnavail) {
@@ -1525,8 +1679,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
   const pendingResolutionEval = useMemo(() => {
     if (!pendingDrop) return null;
-    const prof = professors.find((p) => p.id === pendingDrop.pickedProfessorId);
-    const room = classrooms.find((r) => r.id === pendingDrop.pickedClassroomId);
+    const prof = effectiveIndex.profById.get(pendingDrop.pickedProfessorId);
+    const room = effectiveIndex.roomById.get(pendingDrop.pickedClassroomId);
 
     const candidateDraft: SchedCourseOffering = {
       ...pendingDrop.originalOffering,
@@ -1555,7 +1709,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           disabledReason: compAfterFix.missingItems.join(' | '),
         };
 
-    const report = detectOfferingConflicts(candidateDraft, termOfferings, classrooms, professors, rules);
+    const report = detectOfferingConflicts(
+      candidateDraft,
+      termOfferings,
+      classrooms,
+      professors,
+      rules,
+      effectiveIndex
+    );
 
     const professorOptions = professors
       .filter((p) => p.isActive)
@@ -1566,12 +1727,24 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           professorCode: p.professorCode,
           professorName: p.fullName,
         };
-        const testRep = detectOfferingConflicts(testCand, termOfferings, classrooms, professors, rules);
+        const testRep = detectOfferingConflicts(
+          testCand,
+          termOfferings,
+          classrooms,
+          professors,
+          rules,
+          effectiveIndex
+        );
         const profErr = testRep.errors.find((err) => err.includes('تداخل استاد'));
         const profWarn = testRep.warnings.find(
           (w) => w.includes('عدم امکان حضور') || w.includes('واحد معادل')
         );
-        const load = calculateProfessorLoadSummary(p.id, termOfferings, rules);
+        const load = effectiveIndex.profLoadMap.get(p.id) || {
+          offeringCount: 0,
+          rawUnits: 0,
+          equivalentUnits: 0,
+          weeklyHours: 0,
+        };
         const bounds = getProfessorEquivalentUnitBounds(p, rules);
         return {
           prof: p,
@@ -1591,7 +1764,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           classroomId: r.id,
           classroomName: r.name,
         };
-        const testRep = detectOfferingConflicts(testCand, termOfferings, classrooms, professors, rules);
+        const testRep = detectOfferingConflicts(
+          testCand,
+          termOfferings,
+          classrooms,
+          professors,
+          rules,
+          effectiveIndex
+        );
         const roomErr = testRep.errors.find((err) => err.includes('تداخل مکان'));
         const capOk = r.capacity >= candidate.enrolledCount;
         return {
@@ -1613,7 +1793,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       professorOptions,
       classroomOptions,
     };
-  }, [pendingDrop, professors, classrooms, termOfferings, rules]);
+  }, [pendingDrop, professors, classrooms, termOfferings, rules, effectiveIndex, actor.id, actor.name]);
 
   const handleOpenCellFromGrid = (
     row: MasterRowDisplay,
@@ -1684,8 +1864,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       );
       targetDays = popDays.length > 0 ? popDays : activeDays;
       const popRaw = allRawRows.filter((r) =>
-        termOfferings.some(
-          (o) => o.dayOfWeek && o.slotIds.length > 0 && doesOfferingBelongToRow(o, r)
+        (rowAllOfferingsMap.get(r.rowKey) || EMPTY_CELL_OFFERINGS).some(
+          (o) => o.dayOfWeek && o.slotIds.length > 0
         )
       );
       targetRows = buildMasterDisplayRows(popRaw.length > 0 ? popRaw : allRawRows);
@@ -1766,12 +1946,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       const cells: string[] = [];
       resolved.targetDays.slice(0, 3).forEach((d) => {
         displayedSlots.slice(0, 2).forEach((s) => {
-          const item = termOfferings.find(
-            (o) =>
-              doesOfferingBelongToRow(o, r) &&
-              o.dayOfWeek === d &&
-              o.slotIds.includes(s.id)
-          );
+          const item = (cellOfferingsMap.get(`${r.rowKey}|${d}|${s.id}`) || EMPTY_CELL_OFFERINGS)[0];
           cells.push(item ? item.courseTitle : '');
         });
       });
@@ -1804,6 +1979,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     allRawRows,
     activeDays,
     termOfferings,
+    cellOfferingsMap,
+    rowAllOfferingsMap,
     liveLayout,
     metaColWidths,
     slotOriginalIndexMap,
@@ -1838,7 +2015,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       '#ede9fe',
     ];
 
-    const wrapPrintSpan = (txt: string, ori?: SchedTextOrientation, fit?: SchedCellTextFit) => {
+    const wrapPrintSpan = (
+      txt: string,
+      ori?: SchedTextOrientation,
+      fit?: SchedCellTextFit,
+      hAlign: SchedCellTextAlign = 'center'
+    ) => {
       const oriCss = useLayout ? getOrientationPrintCss(ori) : '';
       const fitCss =
         fit === 'shrink'
@@ -1846,7 +2028,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           : fit === 'clip'
           ? 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;'
           : 'white-space:normal;word-break:break-word;line-height:1.22;';
-      return `<div style="${oriCss}${fitCss}">${txt}</div>`;
+      return `<div style="${oriCss}${fitCss}text-align:${hAlign};">${txt}</div>`;
     };
 
     const dayThs = resolved.targetDays
@@ -1881,33 +2063,47 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           )}px;">${wrapPrintSpan(
             content,
             useLayout ? cStyle.headerOrientation : 'horizontal',
-            'wrap'
+            'wrap',
+            'center'
           )}</th>`;
         })
       )
       .join('');
+
+    const mMajorAlign = (useLayout ? mMajor.textAlign : undefined) || 'center';
+    const mMajorVAlign = (useLayout ? mMajor.verticalAlign : undefined) || 'middle';
+    const mEntryAlign = (useLayout ? mEntry.textAlign : undefined) || 'center';
+    const mEntryVAlign = (useLayout ? mEntry.verticalAlign : undefined) || 'middle';
+    const mTotalAlign = (useLayout ? mTotal.textAlign : undefined) || 'center';
+    const mTotalVAlign = (useLayout ? mTotal.verticalAlign : undefined) || 'middle';
+    const mSecAlign = (useLayout ? mSec.textAlign : undefined) || 'center';
+    const mSecVAlign = (useLayout ? mSec.verticalAlign : undefined) || 'middle';
 
     const bodyRows = resolved.targetRows
       .map((row) => {
         const majorHtml = wrapPrintSpan(
           escapeHtml(row.majorName),
           mMajor.bodyOrientation,
-          mMajor.textFit
+          mMajor.textFit,
+          mMajorAlign
         );
         const entryHtml = wrapPrintSpan(
           escapeHtml(row.entryTerm),
           mEntry.bodyOrientation,
-          mEntry.textFit
+          mEntry.textFit,
+          mEntryAlign
         );
         const totalHtml = wrapPrintSpan(
           row.totalCohortStudents.toLocaleString('fa-IR'),
           mTotal.bodyOrientation,
-          mTotal.textFit
+          mTotal.textFit,
+          mTotalAlign
         );
         const sectionHtml = wrapPrintSpan(
           `${escapeHtml(row.sectionName)}<div class="muted">${row.sectionStudentCount.toLocaleString('fa-IR')} نفر</div>`,
           mSec.bodyOrientation,
-          mSec.textFit
+          mSec.textFit,
+          mSecAlign
         );
         const majorBg = cfg.includeColors
           ? `background:${MAJOR_PRINT_BG[row.majorColorIdx % MAJOR_PRINT_BG.length]};`
@@ -1917,27 +2113,27 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           rowGrouping === 'by_entry'
             ? [
                 row.isFirstEntryBlock
-                  ? `<td rowspan="${row.entryBlockSpan}" class="mono" style="width:${resolved.wEntry}px;font-weight:800;vertical-align:middle;text-align:center;">${entryHtml}</td>`
+                  ? `<td rowspan="${row.entryBlockSpan}" class="mono" style="width:${resolved.wEntry}px;font-weight:800;vertical-align:${mEntryVAlign};text-align:${mEntryAlign};">${entryHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wMajor}px;${majorBg}font-weight:800;vertical-align:middle;text-align:center;">${majorHtml}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wMajor}px;${majorBg}font-weight:800;vertical-align:${mMajorVAlign};text-align:${mMajorAlign};">${majorHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wTotal}px;vertical-align:middle;text-align:center;">${totalHtml}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wTotal}px;vertical-align:${mTotalVAlign};text-align:${mTotalAlign};">${totalHtml}</td>`
                   : '',
-                `<td style="width:${resolved.wSec}px;text-align:center;font-weight:700;">${sectionHtml}</td>`,
+                `<td style="width:${resolved.wSec}px;vertical-align:${mSecVAlign};text-align:${mSecAlign};font-weight:700;">${sectionHtml}</td>`,
               ].join('')
             : [
                 row.isFirstMajorBlock
-                  ? `<td rowspan="${row.majorBlockSpan}" style="width:${resolved.wMajor}px;${majorBg}font-weight:800;vertical-align:middle;text-align:center;">${majorHtml}</td>`
+                  ? `<td rowspan="${row.majorBlockSpan}" style="width:${resolved.wMajor}px;${majorBg}font-weight:800;vertical-align:${mMajorVAlign};text-align:${mMajorAlign};">${majorHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" class="mono" style="width:${resolved.wEntry}px;font-weight:700;vertical-align:middle;text-align:center;">${entryHtml}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" class="mono" style="width:${resolved.wEntry}px;font-weight:700;vertical-align:${mEntryVAlign};text-align:${mEntryAlign};">${entryHtml}</td>`
                   : '',
                 row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wTotal}px;vertical-align:middle;text-align:center;">${totalHtml}</td>`
+                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wTotal}px;vertical-align:${mTotalVAlign};text-align:${mTotalAlign};">${totalHtml}</td>`
                   : '',
-                `<td style="width:${resolved.wSec}px;text-align:center;font-weight:700;">${sectionHtml}</td>`,
+                `<td style="width:${resolved.wSec}px;vertical-align:${mSecVAlign};text-align:${mSecAlign};font-weight:700;">${sectionHtml}</td>`,
               ].join('');
 
         const scheduleCells = resolved.targetDays
@@ -1945,16 +2141,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
             displayedSlots.map((slot, sIdx) => {
               const cStyle = getSlotColumnStyle(day, slot.id);
               const colW = useLayout ? cStyle.width : 145;
+              const cellHAlign = (useLayout ? cStyle.textAlign : undefined) || 'right';
+              const cellVAlign = (useLayout ? cStyle.verticalAlign : undefined) || 'top';
               const firstBorder =
                 cfg.boldDayBorders && sIdx === 0 ? 'border-right:2.5px solid #0f172a;' : '';
               const zebraBg =
                 cfg.includeColors && dIdx % 2 === 1 ? 'background:#f8fafc;' : '';
-              const items = termOfferings.filter(
-                (o) =>
-                  doesOfferingBelongToRow(o, row) &&
-                  o.dayOfWeek === day &&
-                  o.slotIds.includes(slot.id)
-              );
+              const items =
+                cellOfferingsMap.get(`${row.rowKey}|${day}|${slot.id}`) || EMPTY_CELL_OFFERINGS;
               const commentsHere = cfg.includeComments
                 ? commentsByCellKey.get(`${row.rowKey}|${day}|${slot.id}`) || []
                 : [];
@@ -1977,13 +2171,19 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       ? ' [مدرسه]'
                       : o.internshipSessionRole === 'university_orientation'
                       ? ' [توجیهی دانشگاه]'
+                      : o.internshipSchoolOnlyFull
+                      ? ' [حضور مدرسه ۸ ساعته]'
                       : '';
                   const subParts: string[] = [];
                   if (cfg.includeProfessor) {
                     subParts.push(escapeHtml(o.professorName || 'بدون استاد'));
                   }
-                  if (cfg.includeClassroom && o.classroomName) {
-                    subParts.push(escapeHtml(o.classroomName));
+                  if (cfg.includeClassroom) {
+                    if (o.classroomName) {
+                      subParts.push(escapeHtml(o.classroomName));
+                    } else if (!isInternshipClassroomRequired(o)) {
+                      subParts.push('محل: مدرسه');
+                    }
                   }
                   if (
                     cfg.includeExamInfo &&
@@ -2004,7 +2204,9 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                     subParts.length > 0
                       ? `<div class="muted">${subParts.join(' · ')}</div>`
                       : '';
-                  const compPrint = evaluateOfferingCompleteness(o, rules);
+                  const compPrint =
+                    effectiveIndex.completenessMap.get(o.id) ||
+                    evaluateOfferingCompleteness(o, rules);
                   const provTag = compPrint.isEffectivelyInactive ? ' [موقت/ناقص]' : '';
                   const inner = `<strong>${escapeHtml(o.courseTitle)}${escapeHtml(internTag)}${escapeHtml(roleTag)}${escapeHtml(halfTag)}${escapeHtml(provTag)}</strong>${subLine}`;
                   const itemBg = cfg.includeColors
@@ -2016,10 +2218,11 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       ? 'background:#eef2ff;border-color:#c7d2fe;'
                       : 'background:#f0fdfa;border-color:#99f6e4;'
                     : 'background:#ffffff;border-color:#cbd5e1;';
-                  return `<div class="cell-item" style="${itemBg}">${wrapPrintSpan(
+                  return `<div class="cell-item" style="${itemBg}text-align:${cellHAlign};">${wrapPrintSpan(
                     inner,
                     useLayout ? cStyle.bodyOrientation : 'horizontal',
-                    cStyle.textFit
+                    cStyle.textFit,
+                    cellHAlign
                   )}</div>`;
                 })
                 .join('');
@@ -2031,7 +2234,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       .join(' | ')}</div>`
                   : '';
 
-              return `<td style="width:${colW}px;${firstBorder}${zebraBg}">${htmlItems}${cmtHtml}</td>`;
+              return `<td style="width:${colW}px;text-align:${cellHAlign};vertical-align:${cellVAlign};${firstBorder}${zebraBg}">${htmlItems}${cmtHtml}</td>`;
             })
           )
           .join('');
@@ -2138,12 +2341,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         displayedSlots.forEach((slot) => {
           const origIdx = slotOriginalIndexMap.get(slot.id) ?? 0;
           const colTitle = `${SCHED_DAY_LABELS[day]} · ${getSchedSlotTitle(slot, origIdx)} (${slot.startTime}-${slot.endTime})`;
-          const items = termOfferings.filter(
-            (o) =>
-              doesOfferingBelongToRow(o, row) &&
-              o.dayOfWeek === day &&
-              o.slotIds.includes(slot.id)
-          );
+          const items =
+            cellOfferingsMap.get(`${row.rowKey}|${day}|${slot.id}`) || EMPTY_CELL_OFFERINGS;
           rec[colTitle] =
             items.length === 0
               ? ''
@@ -2162,7 +2361,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       isCourseEligibleForExam(o) && o.examDayId && o.examSlotId
                         ? ` {آزمون: ${formatExamAssignmentShort(o, examSettings)}}`
                         : '';
-                    return `${hLabel}${o.courseTitle}${intern} - ${o.professorName || 'بدون استاد'}${o.classroomName ? ` [${o.classroomName}]` : ''}${examStr}`;
+                    const roomStr = o.classroomName
+                      ? ` [${o.classroomName}]`
+                      : !isInternshipClassroomRequired(o)
+                      ? ' [محل: مدرسه]'
+                      : '';
+                    return `${hLabel}${o.courseTitle}${intern} - ${o.professorName || 'بدون استاد'}${roomStr}${examStr}`;
                   })
                   .join(' | ');
         });
@@ -3138,10 +3342,9 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   userRole !== 'admin' &&
                   Boolean(rules.programLocks?.lockedMajorCodes?.includes(row.majorCode));
                 const isDraggingThisRow = draggingState?.rowKey === row.rowKey;
-                const rowActiveOfferings = termOfferings.filter(
-                  (o) => doesOfferingBelongToRow(o, row) && isOfferingEffectivelyActive(o, rules)
-                );
-                const rowSummary = summarizeSectionOfferings(rowActiveOfferings, rules);
+                const rowSummary =
+                  rowSummaryMap.get(row.rowKey) ||
+                  summarizeSectionOfferings(EMPTY_CELL_OFFERINGS, rules);
 
                 const majorCfg = liveLayout.metaColumns.major;
                 const entryCfg = liveLayout.metaColumns.entry;
@@ -3161,6 +3364,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   const bodyOri = cfg?.bodyOrientation || 'horizontal';
                   const isVert = bodyOri !== 'horizontal';
                   const fit = cfg?.textFit || 'wrap';
+                  const hAlign: SchedCellTextAlign = cfg?.textAlign || 'center';
+                  const vAlign: SchedCellVerticalAlign = cfg?.verticalAlign || 'middle';
                   const fsPx =
                     cfg?.fontSizePx ||
                     (fit === 'shrink'
@@ -3176,43 +3381,58 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
                   return (
                     <div
+                      className="w-full flex flex-col"
                       style={{
-                        ...getOrientationStyleObj(bodyOri),
-                        ...(fsPx ? { fontSize: `${fsPx}px`, lineHeight: 1.15 } : {}),
+                        alignItems: getRtlHorizontalAlignItems(hAlign),
+                        justifyContent: getVerticalJustifyContent(vAlign),
+                        textAlign: hAlign,
                       }}
-                      className={`mx-auto flex flex-col items-center justify-center gap-0.5 ${
-                        isVert
-                          ? fit === 'clip'
-                            ? 'max-h-[110px] overflow-hidden whitespace-nowrap'
-                            : 'leading-tight'
-                          : fit === 'clip'
-                          ? 'w-full overflow-hidden'
-                          : 'w-full whitespace-normal break-words leading-snug'
-                      }`}
                     >
-                      <span
-                        className={
-                          fit === 'clip' && !isVert
-                            ? 'w-full truncate block'
-                            : 'inline-flex items-center justify-center gap-1 flex-wrap'
-                        }
+                      <div
+                        style={{
+                          ...getOrientationStyleObj(bodyOri),
+                          ...(fsPx ? { fontSize: `${fsPx}px`, lineHeight: 1.15 } : {}),
+                          textAlign: hAlign,
+                        }}
+                        className={`flex flex-col gap-0.5 ${
+                          isVert
+                            ? fit === 'clip'
+                              ? 'max-h-[110px] overflow-hidden whitespace-nowrap'
+                              : 'leading-tight'
+                            : fit === 'clip'
+                            ? 'w-full overflow-hidden'
+                            : 'w-full whitespace-normal break-words leading-snug'
+                        }`}
                       >
-                        <span>{text}</span>
-                        {lockIcon && (
-                          <span title="تغییرات این رشته مسدود شده است" className="inline-flex">
-                            <Lock className="w-3 h-3 text-rose-600" />
+                        <span
+                          style={
+                            fit === 'clip' && !isVert
+                              ? undefined
+                              : { justifyContent: getRtlHorizontalJustifyContent(hAlign) }
+                          }
+                          className={
+                            fit === 'clip' && !isVert
+                              ? 'w-full truncate block'
+                              : 'inline-flex items-center gap-1 flex-wrap w-full'
+                          }
+                        >
+                          <span>{text}</span>
+                          {lockIcon && (
+                            <span title="تغییرات این رشته مسدود شده است" className="inline-flex">
+                              <Lock className="w-3 h-3 text-rose-600" />
+                            </span>
+                          )}
+                        </span>
+                        {subText && (
+                          <span
+                            className={`${subClass} ${
+                              fit === 'clip' && !isVert ? 'w-full truncate block' : ''
+                            }`}
+                          >
+                            {subText}
                           </span>
                         )}
-                      </span>
-                      {subText && (
-                        <span
-                          className={`${subClass} ${
-                            fit === 'clip' && !isVert ? 'w-full truncate block' : ''
-                          }`}
-                        >
-                          {subText}
-                        </span>
-                      )}
+                      </div>
                     </div>
                   );
                 };
@@ -3233,8 +3453,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                               width: `${metaColWidths.major}px`,
                               minWidth: `${metaColWidths.major}px`,
                               maxWidth: `${metaColWidths.major}px`,
+                              textAlign: majorCfg?.textAlign || 'center',
+                              verticalAlign: majorCfg?.verticalAlign || 'middle',
                             }}
-                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1.5 text-center font-black align-middle overflow-hidden ${majorPalette.cell}`}
+                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1.5 font-black overflow-hidden ${majorPalette.cell}`}
                           >
                             {renderMetaInner(
                               row.majorName,
@@ -3258,8 +3480,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                               width: `${metaColWidths.entry}px`,
                               minWidth: `${metaColWidths.entry}px`,
                               maxWidth: `${metaColWidths.entry}px`,
+                              textAlign: entryCfg?.textAlign || 'center',
+                              verticalAlign: entryCfg?.verticalAlign || 'middle',
                             }}
-                            className="sticky z-20 border border-slate-300 dark:border-slate-700 p-1 text-center font-mono font-black align-middle bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 overflow-hidden"
+                            className="sticky z-20 border border-slate-300 dark:border-slate-700 p-1 font-mono font-black bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 overflow-hidden"
                           >
                             {renderMetaInner(
                               row.entryTerm,
@@ -3283,8 +3507,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                               width: `${metaColWidths.entry}px`,
                               minWidth: `${metaColWidths.entry}px`,
                               maxWidth: `${metaColWidths.entry}px`,
+                              textAlign: entryCfg?.textAlign || 'center',
+                              verticalAlign: entryCfg?.verticalAlign || 'middle',
                             }}
-                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1 text-center font-mono font-black align-middle overflow-hidden ${entryPalette}`}
+                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1 font-mono font-black overflow-hidden ${entryPalette}`}
                           >
                             {renderMetaInner(
                               row.entryTerm,
@@ -3306,8 +3532,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                               width: `${metaColWidths.major}px`,
                               minWidth: `${metaColWidths.major}px`,
                               maxWidth: `${metaColWidths.major}px`,
+                              textAlign: majorCfg?.textAlign || 'center',
+                              verticalAlign: majorCfg?.verticalAlign || 'middle',
                             }}
-                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1.5 text-center font-black align-middle overflow-hidden ${majorPalette.cell}`}
+                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1.5 font-black overflow-hidden ${majorPalette.cell}`}
                           >
                             {renderMetaInner(
                               row.majorName,
@@ -3333,8 +3561,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                           width: `${metaColWidths.totalStudents}px`,
                           minWidth: `${metaColWidths.totalStudents}px`,
                           maxWidth: `${metaColWidths.totalStudents}px`,
+                          textAlign: totalCfg?.textAlign || 'center',
+                          verticalAlign: totalCfg?.verticalAlign || 'middle',
                         }}
-                        className="sticky z-20 border border-slate-300 dark:border-slate-700 p-1 text-center font-mono font-bold tabular-nums align-middle bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 overflow-hidden"
+                        className="sticky z-20 border border-slate-300 dark:border-slate-700 p-1 font-mono font-bold tabular-nums bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 overflow-hidden"
                       >
                         {renderMetaInner(
                           row.totalCohortStudents.toLocaleString('fa-IR'),
@@ -3354,6 +3584,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         width: `${metaColWidths.section}px`,
                         minWidth: `${metaColWidths.section}px`,
                         maxWidth: `${metaColWidths.section}px`,
+                        textAlign: secCfg?.textAlign || 'center',
+                        verticalAlign: secCfg?.verticalAlign || 'middle',
                       }}
                       title={`${row.sectionName} · ${row.sectionStudentCount.toLocaleString('fa-IR')} نفر${
                         rowSummary.courseCount > 0
@@ -3364,7 +3596,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                           ? ' — شعبه‌های کارورزی این ردیف معادل ۱ درس برای دانشجو محاسبه شده است.'
                           : ''
                       }`}
-                      className="sticky z-20 border-y border-r border-slate-300 dark:border-slate-700 border-l-[3px] border-l-slate-900 dark:border-l-slate-300 p-1 text-center align-middle bg-slate-50 dark:bg-slate-900 overflow-hidden"
+                      className="sticky z-20 border-y border-r border-slate-300 dark:border-slate-700 border-l-[3px] border-l-slate-900 dark:border-l-slate-300 p-1 bg-slate-50 dark:bg-slate-900 overflow-hidden"
                     >
                       {renderMetaInner(
                         row.sectionName,
@@ -3386,12 +3618,9 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         const isLastSlotOfDay = sIdx === displayedSlots.length - 1;
                         const slotDuration = getSlotDurationHours(slot);
 
-                        const cellOfferings = termOfferings.filter(
-                          (o) =>
-                            doesOfferingBelongToRow(o, row) &&
-                            o.dayOfWeek === day &&
-                            o.slotIds.includes(slot.id)
-                        );
+                        const cellOfferings =
+                          cellOfferingsMap.get(`${row.rowKey}|${day}|${slot.id}`) ||
+                          EMPTY_CELL_OFFERINGS;
 
                         const fullItems = cellOfferings.filter(
                           (o) => getOfferingSlotHalf(o, slot.id) === 'full'
@@ -3436,18 +3665,28 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         const slotColWidth = colStyle.width;
                         const slotTextFit = colStyle.textFit;
                         const slotBodyOri = colStyle.bodyOrientation;
+                        const slotTextAlign = colStyle.textAlign;
+                        const slotVerticalAlign = colStyle.verticalAlign;
                         const isVertSlotBody = slotBodyOri !== 'horizontal';
                         const isCompactCards = Boolean(liveLayout.scheduleCells.compactCards);
 
                         const renderOfferingChip = (o: SchedCourseOffering, compactHalf = false) => {
-                          const conf = detectOfferingConflicts(
-                            o,
-                            termOfferings,
-                            classrooms,
-                            professors,
-                            rules
-                          );
-                          const comp = evaluateOfferingCompleteness(o, rules);
+                          const conf =
+                            effectiveIndex.conflictMap.get(o.id) ||
+                            detectOfferingConflicts(
+                              o,
+                              termOfferings,
+                              classrooms,
+                              professors,
+                              rules,
+                              effectiveIndex
+                            );
+                          const comp =
+                            effectiveIndex.completenessMap.get(o.id) ||
+                            evaluateOfferingCompleteness(o, rules);
+                          const bd =
+                            effectiveIndex.breakdownMap.get(o.id) ||
+                            calculateOfferingBreakdown(o, rules);
                           const isProvisionalOrDisabled = comp.isEffectivelyInactive;
                           const hoverIssues = [...comp.missingItems, ...conf.errors];
                           const examWarns = examConflictMap.get(o.id) || [];
@@ -3520,9 +3759,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                 onOpenEditOffering(o);
                               }}
                               title={cardTooltip}
+                              style={{ textAlign: slotTextAlign }}
                               className={`group/card relative rounded-lg border ${
                                 isCompactCards ? 'p-1' : 'p-1.5'
-                              } text-right transition select-none ${
+                              } transition select-none ${
                                 editable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
                               } ${
                                 isProvisionalOrDisabled
@@ -3539,134 +3779,181 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                               } ${dimmed ? 'opacity-25 grayscale' : ''}`}
                             >
                               <div
-                                style={getOrientationStyleObj(slotBodyOri)}
-                                className={`overflow-hidden ${isVertSlotBody ? 'mx-auto max-h-[120px]' : ''}`}
+                                className="w-full flex flex-col"
+                                style={{
+                                  alignItems: isVertSlotBody
+                                    ? getRtlHorizontalAlignItems(slotTextAlign)
+                                    : 'stretch',
+                                  justifyContent: getVerticalJustifyContent(slotVerticalAlign),
+                                  textAlign: slotTextAlign,
+                                }}
                               >
-                                {isProvisionalOrDisabled && (
-                                  <div className="mb-0.5 px-1 py-0.5 rounded bg-amber-200/80 dark:bg-amber-900/60 text-amber-950 dark:text-amber-100 text-[8px] font-black inline-flex items-center gap-0.5">
-                                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
-                                    <span>
-                                      موقت / غیرفعال ({comp.scheduledHours.toLocaleString('fa-IR')}/
-                                      {comp.requiredTableHours.toLocaleString('fa-IR')} س)
-                                    </span>
-                                  </div>
-                                )}
-                                <div className="flex items-start justify-between gap-1">
-                                  <span
-                                    style={{ fontSize: `${titlePx}px` }}
-                                    className={`font-black text-slate-900 dark:text-white ${textFitClass}`}
-                                  >
-                                    {o.courseTitle}
-                                    {o.practicalType === 'internship' && (
-                                      <span className="text-violet-700 dark:text-violet-300 font-bold">
-                                        {' '}
-                                        (ظرفیت {o.enrolledCount.toLocaleString('fa-IR')})
-                                      </span>
-                                    )}
-                                  </span>
-                                  {editable && !isCompactCards && (
-                                    <GripVertical className="w-3 h-3 text-slate-400 shrink-0 opacity-50 group-hover/card:opacity-100" />
-                                  )}
-                                </div>
-
-                                {(o.internshipSubGroupLabel || o.internshipSessionRole) && (
-                                  <div className="text-[8.5px] font-bold text-violet-700 dark:text-violet-300 flex flex-wrap items-center gap-1">
-                                    {o.internshipSubGroupLabel && (
-                                      <span>{o.internshipSubGroupLabel}</span>
-                                    )}
-                                    {o.internshipSessionRole === 'school_attendance' && (
-                                      <span className="px-1 rounded bg-violet-100 dark:bg-violet-900/60">
-                                        حضور مدرسه
-                                      </span>
-                                    )}
-                                    {o.internshipSessionRole === 'university_orientation' && (
-                                      <span className="px-1 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200">
-                                        توجیهی دانشگاه
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-
                                 <div
-                                  style={{ fontSize: `${subPx}px` }}
-                                  className={`font-semibold text-slate-700 dark:text-slate-300 mt-0.5 ${textFitClass}`}
+                                  style={{
+                                    ...getOrientationStyleObj(slotBodyOri),
+                                    textAlign: slotTextAlign,
+                                  }}
+                                  className={`overflow-hidden ${
+                                    isVertSlotBody ? 'max-h-[120px] flex flex-col' : 'w-full'
+                                  }`}
                                 >
-                                  {o.professorName || (
-                                    <span className="text-amber-700 dark:text-amber-400">
-                                      بدون استاد
-                                    </span>
+                                  {isProvisionalOrDisabled && (
+                                    <div
+                                      style={{
+                                        justifyContent:
+                                          getRtlHorizontalJustifyContent(slotTextAlign),
+                                      }}
+                                      className="mb-0.5 flex w-full"
+                                    >
+                                      <span className="px-1 py-0.5 rounded bg-amber-200/80 dark:bg-amber-900/60 text-amber-950 dark:text-amber-100 text-[8px] font-black inline-flex items-center gap-0.5">
+                                        <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                                        <span>
+                                          موقت / غیرفعال ({comp.scheduledHours.toLocaleString('fa-IR')}/
+                                          {comp.requiredTableHours.toLocaleString('fa-IR')} س)
+                                        </span>
+                                      </span>
+                                    </div>
                                   )}
-                                </div>
+                                  <div
+                                    style={{
+                                      justifyContent:
+                                        editable && !isCompactCards
+                                          ? 'space-between'
+                                          : getRtlHorizontalJustifyContent(slotTextAlign),
+                                    }}
+                                    className="flex items-start gap-1 w-full"
+                                  >
+                                    <span
+                                      style={{ fontSize: `${titlePx}px`, textAlign: slotTextAlign }}
+                                      className={`flex-1 font-black text-slate-900 dark:text-white ${textFitClass}`}
+                                    >
+                                      {o.courseTitle}
+                                      {o.practicalType === 'internship' && (
+                                        <span className="text-violet-700 dark:text-violet-300 font-bold">
+                                          {' '}
+                                          (ظرفیت {o.enrolledCount.toLocaleString('fa-IR')})
+                                        </span>
+                                      )}
+                                    </span>
+                                    {editable && !isCompactCards && (
+                                      <GripVertical className="w-3 h-3 text-slate-400 shrink-0 opacity-50 group-hover/card:opacity-100" />
+                                    )}
+                                  </div>
 
-                                {o.classroomName ? (
-                                  <div
-                                    style={{ fontSize: `${Math.max(7, subPx - 0.5)}px` }}
-                                    className={`text-slate-500 dark:text-slate-400 ${textFitClass}`}
-                                  >
-                                    کلاس: {o.classroomName}
-                                  </div>
-                                ) : o.internshipSessionRole === 'school_attendance' ? (
-                                  <div
-                                    style={{ fontSize: `${Math.max(7, subPx - 0.5)}px` }}
-                                    className={`text-violet-600 dark:text-violet-300 ${textFitClass}`}
-                                  >
-                                    محل: مدرسه
-                                  </div>
-                                ) : (
-                                  <div
-                                    style={{ fontSize: `${Math.max(7, subPx - 0.5)}px` }}
-                                    className={`text-amber-700 dark:text-amber-400 font-bold ${textFitClass}`}
-                                  >
-                                    بدون کلاس
-                                  </div>
-                                )}
+                                  {(o.internshipSubGroupLabel ||
+                                    o.internshipSessionRole ||
+                                    o.internshipSchoolOnlyFull) && (
+                                    <div
+                                      style={{
+                                        justifyContent:
+                                          getRtlHorizontalJustifyContent(slotTextAlign),
+                                      }}
+                                      className="text-[8.5px] font-bold text-violet-700 dark:text-violet-300 flex flex-wrap items-center gap-1"
+                                    >
+                                      {o.internshipSubGroupLabel && (
+                                        <span>{o.internshipSubGroupLabel}</span>
+                                      )}
+                                      {o.internshipSessionRole === 'school_attendance' && (
+                                        <span className="px-1 rounded bg-violet-100 dark:bg-violet-900/60">
+                                          حضور مدرسه
+                                        </span>
+                                      )}
+                                      {o.internshipSessionRole === 'university_orientation' && (
+                                        <span className="px-1 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200">
+                                          توجیهی دانشگاه
+                                        </span>
+                                      )}
+                                      {o.internshipSchoolOnlyFull && !o.internshipSessionRole && (
+                                        <span className="px-1 rounded bg-violet-100 dark:bg-violet-900/60">
+                                          حضور مدرسه (۸ ساعته)
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
 
-                                {o.sharedWithTargets && o.sharedWithTargets.length > 0 && (
                                   <div
-                                    style={{ fontSize: `${Math.max(7, subPx - 1)}px` }}
-                                    className={`font-bold text-indigo-700 dark:text-indigo-300 mt-0.5 ${textFitClass}`}
+                                    style={{ fontSize: `${subPx}px` }}
+                                    className={`font-semibold text-slate-700 dark:text-slate-300 mt-0.5 ${textFitClass}`}
                                   >
-                                    {isSharedHost
-                                      ? `مشترک از ${o.ownerMajorName}`
-                                      : `مشترک با ${o.sharedWithTargets.length} گروه`}
+                                    {o.professorName || (
+                                      <span className="text-amber-700 dark:text-amber-400">
+                                        بدون استاد
+                                      </span>
+                                    )}
                                   </div>
-                                )}
 
-                                {(() => {
-                                  const bd = calculateOfferingBreakdown(o, rules);
-                                  if (bd.weeklyHours % 1 === 0) return null;
-                                  return (
+                                  {o.classroomName ? (
+                                    <div
+                                      style={{ fontSize: `${Math.max(7, subPx - 0.5)}px` }}
+                                      className={`text-slate-500 dark:text-slate-400 ${textFitClass}`}
+                                    >
+                                      کلاس: {o.classroomName}
+                                    </div>
+                                  ) : !isInternshipClassroomRequired(o) ? (
+                                    <div
+                                      style={{ fontSize: `${Math.max(7, subPx - 0.5)}px` }}
+                                      className={`text-violet-600 dark:text-violet-300 ${textFitClass}`}
+                                    >
+                                      محل: مدرسه{o.internshipSchoolOnlyFull ? ' (۸ ساعته)' : ''}
+                                    </div>
+                                  ) : (
+                                    <div
+                                      style={{ fontSize: `${Math.max(7, subPx - 0.5)}px` }}
+                                      className={`text-amber-700 dark:text-amber-400 font-bold ${textFitClass}`}
+                                    >
+                                      بدون کلاس
+                                    </div>
+                                  )}
+
+                                  {o.sharedWithTargets && o.sharedWithTargets.length > 0 && (
+                                    <div
+                                      style={{ fontSize: `${Math.max(7, subPx - 1)}px` }}
+                                      className={`font-bold text-indigo-700 dark:text-indigo-300 mt-0.5 ${textFitClass}`}
+                                    >
+                                      {isSharedHost
+                                        ? `مشترک از ${o.ownerMajorName}`
+                                        : `مشترک با ${o.sharedWithTargets.length} گروه`}
+                                    </div>
+                                  )}
+
+                                  {bd.weeklyHours % 1 !== 0 && (
                                     <div className="text-[8.5px] font-bold text-sky-700 dark:text-sky-300 mt-0.5">
                                       {bd.weeklyHours.toLocaleString('fa-IR')} س واقعی ({bd.rawUnits.toLocaleString('fa-IR')} واحد)
                                     </div>
-                                  );
-                                })()}
+                                  )}
 
-                                {examLabel && (
-                                  <div
-                                    style={{ fontSize: `${Math.max(7, subPx - 1)}px` }}
-                                    className={`font-bold mt-0.5 px-1 py-0.2 rounded ${textFitClass} ${
-                                      examWarns.length > 0
-                                        ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
-                                        : 'bg-indigo-100/70 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200'
-                                    }`}
-                                    title={
-                                      examWarns.length > 0
-                                        ? `اخطار تداخل امتحان: ${examWarns.join(' | ')}`
-                                        : `زمان امتحان: ${examLabel}`
-                                    }
-                                  >
-                                    {examWarns.length > 0 ? '⚠️ ' : '📝 '}
-                                    {examLabel}
-                                  </div>
-                                )}
+                                  {examLabel && (
+                                    <div
+                                      style={{ fontSize: `${Math.max(7, subPx - 1)}px` }}
+                                      className={`font-bold mt-0.5 px-1 py-0.2 rounded ${textFitClass} ${
+                                        examWarns.length > 0
+                                          ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
+                                          : 'bg-indigo-100/70 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200'
+                                      }`}
+                                      title={
+                                        examWarns.length > 0
+                                          ? `اخطار تداخل امتحان: ${examWarns.join(' | ')}`
+                                          : `زمان امتحان: ${examLabel}`
+                                      }
+                                    >
+                                      {examWarns.length > 0 ? '⚠️ ' : '📝 '}
+                                      {examLabel}
+                                    </div>
+                                  )}
 
-                                {!isProvisionalOrDisabled && conf.hasHardConflict && (
-                                  <div className="text-[8.5px] font-black text-rose-600 dark:text-rose-400 flex items-center gap-0.5 mt-0.5">
-                                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
-                                    <span>تداخل!</span>
-                                  </div>
-                                )}
+                                  {!isProvisionalOrDisabled && conf.hasHardConflict && (
+                                    <div
+                                      style={{
+                                        justifyContent:
+                                          getRtlHorizontalJustifyContent(slotTextAlign),
+                                      }}
+                                      className="text-[8.5px] font-black text-rose-600 dark:text-rose-400 flex items-center gap-0.5 mt-0.5"
+                                    >
+                                      <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                                      <span>تداخل!</span>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
 
                               {/* تولتیپ شناور نمایش خطاها و نواقص هنگام قرار گرفتن نشانگر ماوس روی کارت */}
@@ -3747,6 +4034,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                               width: `${slotColWidth}px`,
                               minWidth: `${slotColWidth}px`,
                               maxWidth: `${slotColWidth}px`,
+                              textAlign: slotTextAlign,
+                              verticalAlign: slotVerticalAlign,
                             }}
                             onClick={() => {
                               if (isEmptyDirectClickable) {
@@ -3771,7 +4060,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             }}
                             className={`group/cell relative border border-slate-300 dark:border-slate-700 ${
                               isCompactCards ? 'p-0.5' : 'p-1'
-                            } align-top overflow-hidden transition ${
+                            } overflow-hidden transition ${
                               isEmptyDirectClickable ? 'cursor-pointer' : ''
                             } ${
                               isFirstSlotOfDay
@@ -4393,7 +4682,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                     تنظیمات اکسل‌مانند ستون‌ها و سلول‌های برنامه جامع
                   </h3>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    تغییر عرض عددی یا با کشیدن لبه ستون‌ها با ماوس، تنظیم Wrap / Shrink نوشته‌ها، و چرخش عمودی یا افقی هر ستون (با یا بدون سطر اول/سرتیتر)
+                    تغییر عرض عددی یا با کشیدن لبه ستون‌ها با ماوس، تنظیم Wrap / Shrink نوشته‌ها، چرخش عمودی یا افقی، و تراز افقی (راست/وسط/چپ) و عمودی (بالا/وسط/پایین) متن سلول‌ها
                   </p>
                 </div>
               </div>
@@ -4438,24 +4727,32 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             headerOrientation: 'horizontal',
                             bodyOrientation: 'vertical_up',
                             textFit: 'wrap',
+                            textAlign: 'center',
+                            verticalAlign: 'middle',
                           },
                           entry: {
                             width: 34,
                             headerOrientation: 'horizontal',
                             bodyOrientation: 'vertical_up',
                             textFit: 'shrink',
+                            textAlign: 'center',
+                            verticalAlign: 'middle',
                           },
                           totalStudents: {
                             width: 34,
                             headerOrientation: 'horizontal',
                             bodyOrientation: 'vertical_up',
                             textFit: 'shrink',
+                            textAlign: 'center',
+                            verticalAlign: 'middle',
                           },
                           section: {
                             width: 48,
                             headerOrientation: 'horizontal',
                             bodyOrientation: 'vertical_up',
                             textFit: 'wrap',
+                            textAlign: 'center',
+                            verticalAlign: 'middle',
                           },
                         },
                         defaultSlotWidth: 136,
@@ -4464,6 +4761,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                           headerOrientation: 'horizontal',
                           bodyOrientation: 'horizontal',
                           textFit: 'shrink',
+                          textAlign: liveLayout.scheduleCells.textAlign || 'right',
+                          verticalAlign: liveLayout.scheduleCells.verticalAlign || 'top',
                           compactCards: true,
                         },
                         columnOverrides: {},
@@ -4486,24 +4785,32 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             headerOrientation: 'vertical_up',
                             bodyOrientation: 'vertical_up',
                             textFit: 'wrap',
+                            textAlign: 'center',
+                            verticalAlign: 'middle',
                           },
                           entry: {
                             width: 30,
                             headerOrientation: 'vertical_up',
                             bodyOrientation: 'vertical_up',
                             textFit: 'shrink',
+                            textAlign: 'center',
+                            verticalAlign: 'middle',
                           },
                           totalStudents: {
                             width: 30,
                             headerOrientation: 'vertical_up',
                             bodyOrientation: 'vertical_up',
                             textFit: 'shrink',
+                            textAlign: 'center',
+                            verticalAlign: 'middle',
                           },
                           section: {
                             width: 40,
                             headerOrientation: 'vertical_up',
                             bodyOrientation: 'vertical_up',
                             textFit: 'wrap',
+                            textAlign: 'center',
+                            verticalAlign: 'middle',
                           },
                         },
                         defaultSlotWidth: 118,
@@ -4512,6 +4819,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                           headerOrientation: 'horizontal',
                           bodyOrientation: 'horizontal',
                           textFit: 'shrink',
+                          textAlign: liveLayout.scheduleCells.textAlign || 'right',
+                          verticalAlign: liveLayout.scheduleCells.verticalAlign || 'top',
                           compactCards: true,
                         },
                         columnOverrides: {},
@@ -4601,7 +4910,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 items-end">
                     <label className="space-y-1">
                       <span className="font-bold block">پهنا (px):</span>
                       <input
@@ -4628,6 +4937,38 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       </select>
                     </label>
                     <label className="space-y-1">
+                      <span className="font-bold block">تراز افقی متن:</span>
+                      <select
+                        value={batchMetaTextAlign}
+                        onChange={(e) => setBatchMetaTextAlign(e.target.value as SchedCellTextAlign)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(TEXT_ALIGN_LABELS) as SchedCellTextAlign[]).map((ak) => (
+                          <option key={ak} value={ak}>
+                            {TEXT_ALIGN_LABELS[ak]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">تراز عمودی متن:</span>
+                      <select
+                        value={batchMetaVerticalAlign}
+                        onChange={(e) =>
+                          setBatchMetaVerticalAlign(e.target.value as SchedCellVerticalAlign)
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(VERTICAL_ALIGN_LABELS) as SchedCellVerticalAlign[]).map(
+                          (vk) => (
+                            <option key={vk} value={vk}>
+                              {VERTICAL_ALIGN_LABELS[vk]}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
                       <span className="font-bold block">نحوه جاگیری متن:</span>
                       <select
                         value={batchMetaTextFit}
@@ -4648,7 +4989,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         onChange={(e) => setBatchMetaApplyToHeader(e.target.checked)}
                         className="accent-teal-600 rounded"
                       />
-                      <span>سطر اول (سرتیتر) هم هم‌جهت شود</span>
+                      <span>سرتیتر هم‌جهت شود</span>
                     </label>
                   </div>
 
@@ -4671,6 +5012,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                               ? batchMetaBodyOri
                               : 'horizontal',
                             textFit: batchMetaTextFit,
+                            textAlign: batchMetaTextAlign,
+                            verticalAlign: batchMetaVerticalAlign,
                           };
                         });
                         commitLayoutSettings(
@@ -4690,12 +5033,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-right">
-                        <th className="p-2.5">ستون</th>
-                        <th className="p-2.5">پهنا (px)</th>
-                        <th className="p-2.5">جهت متن ردیف‌ها (بدنه)</th>
-                        <th className="p-2.5">جهت سطر اول (سرتیتر)</th>
-                        <th className="p-2.5">Wrap / Shrink</th>
-                        <th className="p-2.5">فونت (px)</th>
+                        <th className="p-2">ستون</th>
+                        <th className="p-2">پهنا (px)</th>
+                        <th className="p-2">جهت بدنه</th>
+                        <th className="p-2">جهت سرتیتر</th>
+                        <th className="p-2">تراز افقی</th>
+                        <th className="p-2">تراز عمودی</th>
+                        <th className="p-2">Wrap / Shrink</th>
+                        <th className="p-2">فونت</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -4713,10 +5058,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                           };
                           return (
                             <tr key={`rowcfg_${k}`}>
-                              <td className="p-2.5 font-black text-slate-900 dark:text-white">
+                              <td className="p-2 font-black text-slate-900 dark:text-white whitespace-nowrap">
                                 {META_COL_LABELS[k]}
                               </td>
-                              <td className="p-2.5">
+                              <td className="p-2">
                                 <input
                                   type="number"
                                   min={24}
@@ -4730,10 +5075,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                       ),
                                     })
                                   }
-                                  className="w-20 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
+                                  className="w-16 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
                                 />
                               </td>
-                              <td className="p-2.5">
+                              <td className="p-2">
                                 <select
                                   value={cfg.bodyOrientation || 'horizontal'}
                                   onChange={(e) =>
@@ -4752,7 +5097,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                   )}
                                 </select>
                               </td>
-                              <td className="p-2.5">
+                              <td className="p-2">
                                 <select
                                   value={cfg.headerOrientation || 'horizontal'}
                                   onChange={(e) =>
@@ -4771,7 +5116,45 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                   )}
                                 </select>
                               </td>
-                              <td className="p-2.5">
+                              <td className="p-2">
+                                <select
+                                  value={cfg.textAlign || 'center'}
+                                  onChange={(e) =>
+                                    updateOne({
+                                      textAlign: e.target.value as SchedCellTextAlign,
+                                    })
+                                  }
+                                  className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                                >
+                                  {(Object.keys(TEXT_ALIGN_LABELS) as SchedCellTextAlign[]).map(
+                                    (ak) => (
+                                      <option key={ak} value={ak}>
+                                        {TEXT_ALIGN_LABELS[ak]}
+                                      </option>
+                                    )
+                                  )}
+                                </select>
+                              </td>
+                              <td className="p-2">
+                                <select
+                                  value={cfg.verticalAlign || 'middle'}
+                                  onChange={(e) =>
+                                    updateOne({
+                                      verticalAlign: e.target.value as SchedCellVerticalAlign,
+                                    })
+                                  }
+                                  className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                                >
+                                  {(
+                                    Object.keys(VERTICAL_ALIGN_LABELS) as SchedCellVerticalAlign[]
+                                  ).map((vk) => (
+                                    <option key={vk} value={vk}>
+                                      {VERTICAL_ALIGN_LABELS[vk]}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="p-2">
                                 <select
                                   value={cfg.textFit || 'wrap'}
                                   onChange={(e) =>
@@ -4788,7 +5171,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                   )}
                                 </select>
                               </td>
-                              <td className="p-2.5">
+                              <td className="p-2">
                                 <input
                                   type="number"
                                   min={7}
@@ -4822,9 +5205,9 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   <div className="font-black text-teal-950 dark:text-teal-100">
                     تنظیمات عمومی کل سلول‌ها و ستون‌های سانس هفته
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                     <label className="space-y-1">
-                      <span className="font-bold block">پهنای پیش‌فرض ستون سانس (px):</span>
+                      <span className="font-bold block">پهنای پیش‌فرض ستون (px):</span>
                       <input
                         type="number"
                         min={64}
@@ -4906,6 +5289,52 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             {ORIENTATION_LABELS[ok]}
                           </option>
                         ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">تراز افقی متن سلول‌ها:</span>
+                      <select
+                        value={liveLayout.scheduleCells.textAlign || 'right'}
+                        onChange={(e) =>
+                          commitLayoutSettings({
+                            ...liveLayout,
+                            scheduleCells: {
+                              ...liveLayout.scheduleCells,
+                              textAlign: e.target.value as SchedCellTextAlign,
+                            },
+                          })
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(TEXT_ALIGN_LABELS) as SchedCellTextAlign[]).map((ak) => (
+                          <option key={ak} value={ak}>
+                            {TEXT_ALIGN_LABELS[ak]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">تراز عمودی متن سلول‌ها:</span>
+                      <select
+                        value={liveLayout.scheduleCells.verticalAlign || 'top'}
+                        onChange={(e) =>
+                          commitLayoutSettings({
+                            ...liveLayout,
+                            scheduleCells: {
+                              ...liveLayout.scheduleCells,
+                              verticalAlign: e.target.value as SchedCellVerticalAlign,
+                            },
+                          })
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(VERTICAL_ALIGN_LABELS) as SchedCellVerticalAlign[]).map(
+                          (vk) => (
+                            <option key={vk} value={vk}>
+                              {VERTICAL_ALIGN_LABELS[vk]}
+                            </option>
+                          )
+                        )}
                       </select>
                     </label>
                   </div>
@@ -5072,7 +5501,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       })
                     )}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 items-end">
                     <label className="space-y-1">
                       <span className="font-bold block">عرض (px):</span>
                       <input
@@ -5117,6 +5546,38 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       </select>
                     </label>
                     <label className="space-y-1">
+                      <span className="font-bold block">تراز افقی متن:</span>
+                      <select
+                        value={batchSlotTextAlign}
+                        onChange={(e) => setBatchSlotTextAlign(e.target.value as SchedCellTextAlign)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(TEXT_ALIGN_LABELS) as SchedCellTextAlign[]).map((ak) => (
+                          <option key={ak} value={ak}>
+                            {TEXT_ALIGN_LABELS[ak]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">تراز عمودی متن:</span>
+                      <select
+                        value={batchSlotVerticalAlign}
+                        onChange={(e) =>
+                          setBatchSlotVerticalAlign(e.target.value as SchedCellVerticalAlign)
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(VERTICAL_ALIGN_LABELS) as SchedCellVerticalAlign[]).map(
+                          (vk) => (
+                            <option key={vk} value={vk}>
+                              {VERTICAL_ALIGN_LABELS[vk]}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
                       <span className="font-bold block">Wrap / Shrink:</span>
                       <select
                         value={batchSlotTextFit}
@@ -5148,6 +5609,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             headerOrientation: batchSlotHeaderOri,
                             bodyOrientation: batchSlotBodyOri,
                             textFit: batchSlotTextFit,
+                            textAlign: batchSlotTextAlign,
+                            verticalAlign: batchSlotVerticalAlign,
                           };
                         });
                         commitLayoutSettings(
@@ -5215,7 +5678,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                     </label>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                     <label className="space-y-1">
                       <span className="font-bold block">پهنای این ستون (px):</span>
                       <input
@@ -5261,6 +5724,40 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             {ORIENTATION_LABELS[ok]}
                           </option>
                         ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">تراز افقی متن:</span>
+                      <select
+                        value={curStyle.textAlign}
+                        onChange={(e) =>
+                          updateCol({ textAlign: e.target.value as SchedCellTextAlign })
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(TEXT_ALIGN_LABELS) as SchedCellTextAlign[]).map((ak) => (
+                          <option key={ak} value={ak}>
+                            {TEXT_ALIGN_LABELS[ak]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold block">تراز عمودی متن:</span>
+                      <select
+                        value={curStyle.verticalAlign}
+                        onChange={(e) =>
+                          updateCol({ verticalAlign: e.target.value as SchedCellVerticalAlign })
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {(Object.keys(VERTICAL_ALIGN_LABELS) as SchedCellVerticalAlign[]).map(
+                          (vk) => (
+                            <option key={vk} value={vk}>
+                              {VERTICAL_ALIGN_LABELS[vk]}
+                            </option>
+                          )
+                        )}
                       </select>
                     </label>
                     <label className="space-y-1">

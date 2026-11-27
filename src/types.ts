@@ -1996,12 +1996,16 @@ export interface SchedProgramLockSettings {
 export type SchedMetaColumnKey = 'major' | 'entry' | 'totalStudents' | 'section';
 export type SchedTextOrientation = 'horizontal' | 'vertical_up' | 'vertical_down';
 export type SchedCellTextFit = 'wrap' | 'shrink' | 'clip';
+export type SchedCellTextAlign = 'right' | 'center' | 'left';
+export type SchedCellVerticalAlign = 'top' | 'middle' | 'bottom';
 
 export interface SchedMasterColumnStyle {
   width?: number;
   headerOrientation?: SchedTextOrientation;
   bodyOrientation?: SchedTextOrientation;
   textFit?: SchedCellTextFit;
+  textAlign?: SchedCellTextAlign;
+  verticalAlign?: SchedCellVerticalAlign;
   fontSizePx?: number;
 }
 
@@ -2013,6 +2017,8 @@ export interface SchedMasterGridLayoutSettings {
     headerOrientation: SchedTextOrientation;
     bodyOrientation: SchedTextOrientation;
     textFit: SchedCellTextFit;
+    textAlign?: SchedCellTextAlign;
+    verticalAlign?: SchedCellVerticalAlign;
     fontSizePx?: number;
     compactCards?: boolean;
   };
@@ -2152,6 +2158,7 @@ export interface SchedCourseOffering {
   enrolledCount: number; // تعداد کل دانشجویان کلاس (اثرگذار در محاسبه واحد معادل کارورزی)
   internshipSubGroupLabel?: string; // عنوان شعبه کارورزی (مثلاً گروه کارورزی ۱ - حداکثر ۱۲ نفر)
   internshipSessionRole?: SchedInternshipSessionRole; // تفکیک ۶ ساعت حضور در مدرسه (۷ تا ۱۳) یا ۲ ساعت جلسه توجیهی دانشگاه
+  internshipSchoolOnlyFull?: boolean; // ثبت ۸ ساعته یکسره کارورزی به‌عنوان حضور در مدرسه (بدون نیاز به کلاس فیزیکی)
   professorId?: string;
   professorCode?: string;
   professorName?: string;
