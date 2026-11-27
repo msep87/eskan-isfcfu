@@ -29,6 +29,12 @@ import {
 import { Storage, normalizeAssignedFieldsList, normalizePersianSearch } from '../utils/storage';
 import { addDaysToJalaliDate, formatJalaliDate, getTodayJalali } from '../utils/jalaliCalendar';
 import {
+  findClosestApprovedMajor,
+  formatApprovedMajorLabel,
+  getEffectiveApprovedMajors,
+  normalizeMajorCode,
+} from '../utils/academicMajors';
+import {
   DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS,
   SCHED_COURSE_TYPE_LABELS,
   SCHED_DAY_LABELS,
@@ -162,6 +168,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
   const [section, setSection] = useState<WorkspaceSection>(
     canManageMasterData ? 'overview' : 'master_grid'
+  );
+  const approvedMajors = useMemo(
+    () => getEffectiveApprovedMajors(Storage.getSettings(), false),
+    [isOpen, section]
   );
   const [classrooms, setClassrooms] = useState<SchedClassroom[]>(() =>
     Storage.getSchedClassrooms()
@@ -683,7 +693,20 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         notify('success', `${res.classrooms.length} کلاس فیزیکی از اکسل پردازش و ذخیره شد.`);
       } else if (kind === 'programs' && res.programs) {
         const merged = [...programs];
-        for (const item of res.programs) {
+        let normalizedExcelCount = 0;
+        for (const rawItem of res.programs) {
+          let item = rawItem;
+          if (approvedMajors.length > 0) {
+            const matched = findClosestApprovedMajor(rawItem.majorName, approvedMajors, rawItem.majorCode);
+            if (matched && matched.score >= 80) {
+              item = {
+                ...rawItem,
+                majorCode: normalizeMajorCode(matched.major.code) || rawItem.majorCode,
+                majorName: matched.major.name,
+              };
+              normalizedExcelCount++;
+            }
+          }
           const idx = merged.findIndex(
             (x) => x.majorCode === item.majorCode && x.entryTerm === item.entryTerm
           );
@@ -691,7 +714,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           else merged.push(item);
         }
         persistPrograms(merged);
-        notify('success', `${res.programs.length} ورودی و شعبه از اکسل پردازش و ذخیره شد.`);
+        notify(
+          'success',
+          `${res.programs.length} ورودی و شعبه از اکسل پردازش و ذخیره شد${
+            normalizedExcelCount > 0 ? ` (${normalizedExcelCount} ردیف با رشته‌های مصوب تطبیق داده شد)` : ''
+          }.`
+        );
       } else if (kind === 'professors' && res.professors) {
         const merged = [...professors];
         for (const item of res.professors) {
@@ -711,7 +739,20 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         notify('success', `${res.professors.length} استاد از اکسل پردازش و ذخیره شد.`);
       } else if (kind === 'courses' && res.courses) {
         const merged = [...courses];
-        for (const item of res.courses) {
+        let normalizedCoursesCount = 0;
+        for (const rawItem of res.courses) {
+          let item = rawItem;
+          if (approvedMajors.length > 0) {
+            const matched = findClosestApprovedMajor(rawItem.majorName, approvedMajors, rawItem.majorCode);
+            if (matched && matched.score >= 80) {
+              item = {
+                ...rawItem,
+                majorCode: normalizeMajorCode(matched.major.code) || rawItem.majorCode,
+                majorName: matched.major.name,
+              };
+              normalizedCoursesCount++;
+            }
+          }
           const idx = merged.findIndex(
             (x) => x.courseCode === item.courseCode && x.majorCode === item.majorCode
           );
@@ -719,7 +760,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           else merged.push(item);
         }
         persistCourses(merged);
-        notify('success', `${res.courses.length} سرفصل درس از اکسل پردازش و ذخیره شد.`);
+        notify(
+          'success',
+          `${res.courses.length} سرفصل درس از اکسل پردازش و ذخیره شد${
+            normalizedCoursesCount > 0 ? ` (${normalizedCoursesCount} ردیف با رشته‌های مصوب تطبیق داده شد)` : ''
+          }.`
+        );
       }
       if (res.errors.length > 0) {
         notify('error', `برخی ردیف‌ها دارای خطا بودند: ${res.errors.slice(0, 2).join(' | ')}`);
@@ -825,9 +871,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       setProgTotalStudents(String(p.totalStudents));
       setProgSections(p.sections.map((s) => ({ ...s })));
     } else {
+      const firstApproved = approvedMajors[0];
       setEditingProgId(null);
-      setProgMajorCode('');
-      setProgMajorName('');
+      setProgMajorCode(firstApproved ? normalizeMajorCode(firstApproved.code) : '');
+      setProgMajorName(firstApproved ? firstApproved.name : '');
       setProgEntryTerm('4031');
       setProgTotalStudents('35');
       setProgSections([{ id: `sec_${Date.now()}`, name: 'گروه ۱', studentCount: 35 }]);
@@ -837,14 +884,26 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
   const handleSaveProgram = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanCode = normalizeSchedCode(progMajorCode);
-    const cleanName = progMajorName.trim();
+    let cleanCode = normalizeSchedCode(progMajorCode);
+    let cleanName = progMajorName.trim();
     const cleanEntry = normalizeSchedCode(progEntryTerm);
-    if (!cleanCode || !cleanName || !cleanEntry) return;
-    if (!/^\d{6}$/.test(cleanCode)) {
+    if (approvedMajors.length > 0) {
+      const matched = approvedMajors.find(
+        (m) =>
+          normalizeMajorCode(m.code) === normalizeMajorCode(cleanCode) ||
+          m.name.trim() === cleanName
+      );
+      if (!matched) {
+        notify('error', 'لطفاً یکی از رشته‌های مصوب ثبت‌شده در تنظیمات سامانه را انتخاب کنید.');
+        return;
+      }
+      cleanCode = normalizeMajorCode(matched.code) || cleanCode;
+      cleanName = matched.name;
+    } else if (!/^\d{6}$/.test(cleanCode)) {
       notify('error', 'کد رشته باید دقیقاً ۶ رقم عددی باشد.');
       return;
     }
+    if (!cleanCode || !cleanName || !cleanEntry) return;
     const cleanSections =
       progSections.length > 0
         ? progSections.map((s, idx) => ({
@@ -1129,11 +1188,14 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       setCrsPrType(crs.practicalType);
       setCrsTerm(crs.recommendedTerm || '');
     } else {
+      const firstApproved = approvedMajors[0];
       setEditingCourseId(null);
       setCrsCode('');
       setCrsTitle('');
-      setCrsMajorCode(programs[0]?.majorCode || '');
-      setCrsMajorName(programs[0]?.majorName || '');
+      setCrsMajorCode(
+        programs[0]?.majorCode || (firstApproved ? normalizeMajorCode(firstApproved.code) : '')
+      );
+      setCrsMajorName(programs[0]?.majorName || (firstApproved ? firstApproved.name : ''));
       setCrsType('theoretical');
       setCrsThUnits('2');
       setCrsPrUnits('0');
@@ -1146,13 +1208,27 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const handleSaveCourse = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanCode = normalizeSchedCode(crsCode);
-    const cleanMajor = normalizeSchedCode(crsMajorCode);
+    let cleanMajor = normalizeSchedCode(crsMajorCode);
+    let cleanMajorName = crsMajorName.trim();
     if (!/^\d{7}$/.test(cleanCode)) {
       notify('error', 'کد درس باید دقیقاً ۷ رقم عددی باشد (مبنای تشخیص دروس مشترک).');
       return;
     }
-    if (!crsTitle.trim() || !cleanMajor || !crsMajorName.trim()) {
-      notify('error', 'لطفاً عنوان درس، کد رشته ۶ رقمی و نام رشته را وارد نمایید.');
+    if (approvedMajors.length > 0) {
+      const matched = approvedMajors.find(
+        (m) =>
+          normalizeMajorCode(m.code) === normalizeMajorCode(cleanMajor) ||
+          m.name.trim() === cleanMajorName
+      );
+      if (!matched) {
+        notify('error', 'لطفاً یکی از رشته‌های مصوب ثبت‌شده در تنظیمات کل سامانه را انتخاب کنید.');
+        return;
+      }
+      cleanMajor = normalizeMajorCode(matched.code) || cleanMajor;
+      cleanMajorName = matched.name;
+    }
+    if (!crsTitle.trim() || !cleanMajor || !cleanMajorName) {
+      notify('error', 'لطفاً عنوان درس، کد رشته و نام رشته را وارد نمایید.');
       return;
     }
     const th = Math.max(0, parseDecimalUnits(crsThUnits));
@@ -1167,7 +1243,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 courseCode: cleanCode,
                 title: crsTitle.trim(),
                 majorCode: cleanMajor,
-                majorName: crsMajorName.trim(),
+                majorName: cleanMajorName,
                 courseType: crsType,
                 theoreticalUnits: th,
                 practicalUnits: pr,
@@ -1186,7 +1262,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           courseCode: cleanCode,
           title: crsTitle.trim(),
           majorCode: cleanMajor,
-          majorName: crsMajorName.trim(),
+          majorName: cleanMajorName,
           courseType: crsType,
           theoreticalUnits: th,
           practicalUnits: pr,
@@ -6124,54 +6200,144 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               </button>
             </div>
             <form onSubmit={handleSaveProgram} className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <label className="space-y-1">
-                  <span className="font-bold">کد رشته ۶ رقمی *</span>
-                  <input
-                    type="text"
-                    required
-                    maxLength={6}
-                    value={progMajorCode}
-                    onChange={(e) => setProgMajorCode(e.target.value)}
-                    placeholder="112233"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
-                    dir="ltr"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="font-bold">ورودی (مثلاً 4031) *</span>
-                  <input
-                    type="text"
-                    required
-                    value={progEntryTerm}
-                    onChange={(e) => setProgEntryTerm(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
-                    dir="ltr"
-                  />
-                </label>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <label className="col-span-2 space-y-1">
-                  <span className="font-bold">نام رشته *</span>
-                  <input
-                    type="text"
-                    required
-                    value={progMajorName}
-                    onChange={(e) => setProgMajorName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="font-bold">کل نفرات ورودی</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={progTotalStudents}
-                    onChange={(e) => setProgTotalStudents(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
-                  />
-                </label>
-              </div>
+              {approvedMajors.length > 0 ? (
+                <>
+                  {(() => {
+                    const matchedMajor = approvedMajors.find(
+                      (m) =>
+                        normalizeMajorCode(m.code) === normalizeMajorCode(progMajorCode) ||
+                        m.name.trim() === progMajorName.trim()
+                    );
+                    const closest =
+                      !matchedMajor && (progMajorName.trim() || progMajorCode.trim())
+                        ? findClosestApprovedMajor(progMajorName, approvedMajors, progMajorCode)
+                        : null;
+                    return (
+                      <div className="space-y-1.5">
+                        <label className="block space-y-1">
+                          <span className="font-bold">رشته تحصیلی مصوب (همراه با کد رشته) *</span>
+                          <select
+                            required
+                            value={matchedMajor ? matchedMajor.id : ''}
+                            onChange={(e) => {
+                              const picked = approvedMajors.find((m) => m.id === e.target.value);
+                              if (picked) {
+                                setProgMajorCode(normalizeMajorCode(picked.code));
+                                setProgMajorName(picked.name);
+                              }
+                            }}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                          >
+                            <option value="">-- انتخاب رشته تحصیلی مصوب --</option>
+                            {approvedMajors.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {formatApprovedMajorLabel(m)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {matchedMajor ? (
+                          <div className="text-[10px] text-teal-700 dark:text-teal-300 font-bold">
+                            کد رشته: {matchedMajor.code} • مقطع: {matchedMajor.degreeLevelName}
+                          </div>
+                        ) : progMajorName.trim() ? (
+                          <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 text-[10px] text-amber-800 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
+                            <span>
+                              مقدار قبلی: «{progMajorName}» ({progMajorCode})
+                            </span>
+                            {closest && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setProgMajorCode(normalizeMajorCode(closest.major.code));
+                                  setProgMajorName(closest.major.name);
+                                }}
+                                className="px-2 py-0.5 rounded bg-amber-600 text-white font-bold cursor-pointer"
+                              >
+                                تطبیق با «{closest.major.name}» ({closest.score}٪)
+                              </button>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="space-y-1">
+                      <span className="font-bold">ورودی (مثلاً 4031) *</span>
+                      <input
+                        type="text"
+                        required
+                        value={progEntryTerm}
+                        onChange={(e) => setProgEntryTerm(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                        dir="ltr"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold">کل نفرات ورودی</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={progTotalStudents}
+                        onChange={(e) => setProgTotalStudents(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                      />
+                    </label>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="space-y-1">
+                      <span className="font-bold">کد رشته ۶ رقمی *</span>
+                      <input
+                        type="text"
+                        required
+                        maxLength={6}
+                        value={progMajorCode}
+                        onChange={(e) => setProgMajorCode(e.target.value)}
+                        placeholder="112233"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                        dir="ltr"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold">ورودی (مثلاً 4031) *</span>
+                      <input
+                        type="text"
+                        required
+                        value={progEntryTerm}
+                        onChange={(e) => setProgEntryTerm(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                        dir="ltr"
+                      />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <label className="col-span-2 space-y-1">
+                      <span className="font-bold">نام رشته *</span>
+                      <input
+                        type="text"
+                        required
+                        value={progMajorName}
+                        onChange={(e) => setProgMajorName(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold">کل نفرات ورودی</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={progTotalStudents}
+                        onChange={(e) => setProgTotalStudents(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                      />
+                    </label>
+                  </div>
+                </>
+              )}
 
               <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <div className="flex items-center justify-between">
@@ -6332,8 +6498,13 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               </div>
 
               <div className="p-3 rounded-xl bg-teal-50/70 dark:bg-teal-950/25 border border-teal-200 dark:border-teal-800 space-y-2.5">
-                <div className="font-extrabold text-teal-900 dark:text-teal-200">
-                  مشخصات تحصیلی (به‌صورت مجزا: مقطع، رشته و گرایش)
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span className="font-extrabold text-teal-900 dark:text-teal-200">
+                    مشخصات تحصیلی (به‌صورت مجزا: مقطع، رشته و گرایش)
+                  </span>
+                  <span className="text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                    (رشته مدرک اساتید آزاد و مستثنی از رشته‌های مصوب دانشگاه است)
+                  </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <label className="space-y-1">
@@ -6709,60 +6880,146 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   درج الگوی تربیت بدنی (۰.۵ نظری + ۰.۵ عملی)
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="space-y-1">
-                  <span className="font-bold">کد درس ۷ رقمی *</span>
-                  <input
-                    type="text"
-                    required
-                    maxLength={7}
-                    value={crsCode}
-                    onChange={(e) => setCrsCode(e.target.value)}
-                    placeholder="1102001"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
-                    dir="ltr"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="font-bold">کد رشته ۶ رقمی *</span>
-                  <input
-                    type="text"
-                    required
-                    maxLength={6}
-                    value={crsMajorCode}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCrsMajorCode(val);
-                      const matched = programs.find((p) => p.majorCode === normalizeSchedCode(val));
-                      if (matched) setCrsMajorName(matched.majorName);
-                    }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
-                    dir="ltr"
-                  />
-                </label>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="space-y-1">
-                  <span className="font-bold">عنوان درس *</span>
-                  <input
-                    type="text"
-                    required
-                    value={crsTitle}
-                    onChange={(e) => setCrsTitle(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="font-bold">نام رشته *</span>
-                  <input
-                    type="text"
-                    required
-                    value={crsMajorName}
-                    onChange={(e) => setCrsMajorName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                  />
-                </label>
-              </div>
+              {approvedMajors.length > 0 ? (
+                (() => {
+                  const matchedCourseMajor = approvedMajors.find(
+                    (m) =>
+                      normalizeMajorCode(m.code) === normalizeMajorCode(crsMajorCode) ||
+                      m.name.trim() === crsMajorName.trim()
+                  );
+                  const closest =
+                    !matchedCourseMajor && (crsMajorName.trim() || crsMajorCode.trim())
+                      ? findClosestApprovedMajor(crsMajorName, approvedMajors, crsMajorCode)
+                      : null;
+                  return (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label className="space-y-1">
+                          <span className="font-bold">کد درس ۷ رقمی *</span>
+                          <input
+                            type="text"
+                            required
+                            maxLength={7}
+                            value={crsCode}
+                            onChange={(e) => setCrsCode(e.target.value)}
+                            placeholder="1102001"
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                            dir="ltr"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="font-bold">عنوان درس *</span>
+                          <input
+                            type="text"
+                            required
+                            value={crsTitle}
+                            onChange={(e) => setCrsTitle(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                          />
+                        </label>
+                      </div>
+                      <label className="block space-y-1">
+                        <span className="font-bold">رشته تحصیلی مصوب (با کد رشته) *</span>
+                        <select
+                          required
+                          value={matchedCourseMajor ? matchedCourseMajor.id : ''}
+                          onChange={(e) => {
+                            const picked = approvedMajors.find((m) => m.id === e.target.value);
+                            if (picked) {
+                              setCrsMajorCode(normalizeMajorCode(picked.code));
+                              setCrsMajorName(picked.name);
+                            }
+                          }}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                        >
+                          <option value="">-- انتخاب رشته تحصیلی مصوب --</option>
+                          {approvedMajors.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {formatApprovedMajorLabel(m)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {!matchedCourseMajor && crsMajorName.trim() && (
+                        <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 text-[10px] text-amber-800 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
+                          <span>
+                            مقدار قبلی: «{crsMajorName}» ({crsMajorCode})
+                          </span>
+                          {closest && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCrsMajorCode(normalizeMajorCode(closest.major.code));
+                                setCrsMajorName(closest.major.name);
+                              }}
+                              className="px-2 py-0.5 rounded bg-amber-600 text-white font-bold cursor-pointer"
+                            >
+                              تطبیق با «{closest.major.name}» ({closest.score}٪)
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="space-y-1">
+                      <span className="font-bold">کد درس ۷ رقمی *</span>
+                      <input
+                        type="text"
+                        required
+                        maxLength={7}
+                        value={crsCode}
+                        onChange={(e) => setCrsCode(e.target.value)}
+                        placeholder="1102001"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                        dir="ltr"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold">کد رشته ۶ رقمی *</span>
+                      <input
+                        type="text"
+                        required
+                        maxLength={6}
+                        value={crsMajorCode}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCrsMajorCode(val);
+                          const matched = programs.find((p) => p.majorCode === normalizeSchedCode(val));
+                          if (matched) setCrsMajorName(matched.majorName);
+                        }}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                        dir="ltr"
+                      />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="space-y-1">
+                      <span className="font-bold">عنوان درس *</span>
+                      <input
+                        type="text"
+                        required
+                        value={crsTitle}
+                        onChange={(e) => setCrsTitle(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold">نام رشته *</span>
+                      <input
+                        type="text"
+                        required
+                        value={crsMajorName}
+                        onChange={(e) => setCrsMajorName(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                      />
+                    </label>
+                  </div>
+                </>
+              )}
               <div className="grid grid-cols-3 gap-3">
                 <label className="space-y-1">
                   <span className="font-bold">نوع درس</span>

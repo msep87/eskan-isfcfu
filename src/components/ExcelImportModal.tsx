@@ -22,6 +22,11 @@ import {
 } from '../utils/excelUtils';
 import { Storage } from '../utils/storage';
 import {
+  findClosestApprovedMajor,
+  findExactApprovedMajorForStudent,
+  normalizeMajorCode,
+} from '../utils/academicMajors';
+import {
   Student,
   StudentResidenceType,
   StudentAdmissionStatus,
@@ -184,7 +189,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
     setSuccessMsg('');
 
     try {
-      const result = await parseStudentExcel(file);
+      const approvedMajors = Storage.getApprovedMajors();
+      const result = await parseStudentExcel(file, approvedMajors);
       setPreviewStudents(result.students);
       setDetectedCustomCols(result.customColumns);
     } catch (err: any) {
@@ -1231,13 +1237,63 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                   </div>
                 </div>
 
+                {(() => {
+                  const approvedMajors = Storage.getApprovedMajors();
+                  if (approvedMajors.length === 0) return null;
+                  const unmatchedCount = previewStudents.filter(
+                    (st) => !findExactApprovedMajorForStudent(st, approvedMajors)
+                  ).length;
+                  if (unmatchedCount === 0) return null;
+                  return (
+                    <div className="p-3 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-bold text-amber-900 dark:text-amber-200">
+                        {unmatchedCount} دانشجو در فایل اکسل دارای نام رشته ناهمگون با فهرست رشته‌های مصوب سامانه هستند.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          let converted = 0;
+                          setPreviewStudents((prev) =>
+                            prev
+                              ? prev.map((st) => {
+                                  if (findExactApprovedMajorForStudent(st, approvedMajors)) return st;
+                                  const best = findClosestApprovedMajor(
+                                    st.fieldOfStudy,
+                                    approvedMajors,
+                                    st.majorCode
+                                  );
+                                  if (best && best.score >= 45) {
+                                    converted++;
+                                    return {
+                                      ...st,
+                                      fieldOfStudy: best.major.name,
+                                      majorCode: normalizeMajorCode(best.major.code),
+                                      degreeLevel: best.major.degreeLevelName || st.degreeLevel,
+                                    };
+                                  }
+                                  return st;
+                                })
+                              : prev
+                          );
+                          if (converted > 0) {
+                            setSuccessMsg(`${converted} ردیف با نزدیک‌ترین رشته مصوب و کد رشته تطبیق داده شد.`);
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-extrabold cursor-pointer"
+                      >
+                        تطبیق خودکار با نزدیک‌ترین رشته مصوب
+                      </button>
+                    </div>
+                  );
+                })()}
+
                 <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-56">
                   <table className="w-full text-right text-xs">
                     <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 font-bold sticky top-0">
                       <tr>
                         <th className="p-2.5">کد دانشجویی</th>
                         <th className="p-2.5">نام و نام خانوادگی</th>
-                        <th className="p-2.5">رشته</th>
+                        <th className="p-2.5">رشته و کد رشته</th>
                         <th className="p-2.5">ورودی</th>
                         <th className="p-2.5">شهر</th>
                         <th className="p-2.5">همراه</th>
@@ -1260,7 +1316,14 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                           <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                             <td className="p-2.5 font-bold">{st.studentId}</td>
                             <td className="p-2.5">{st.fullName}</td>
-                            <td className="p-2.5">{st.fieldOfStudy}</td>
+                            <td className="p-2.5">
+                              <span>{st.fieldOfStudy}</span>
+                              {st.majorCode && (
+                                <span className="mr-1 px-1.5 py-0.5 rounded bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 font-mono text-[10px]">
+                                  {st.majorCode}
+                                </span>
+                              )}
+                            </td>
                             <td className="p-2.5">{st.entryTerm}</td>
                             <td className="p-2.5">{st.city}</td>
                             <td className="p-2.5" dir="ltr">{st.mobile}</td>

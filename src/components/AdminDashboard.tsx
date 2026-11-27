@@ -98,8 +98,16 @@ import { CloudConnectionDiagnosticsPanel } from './CloudConnectionDiagnosticsPan
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { CommunityChatHub } from './CommunityChatHub';
 import { AdminStudentPortalsEditor } from './AdminStudentPortalsEditor';
+import { AdminAcademicMajorsSettings } from './AdminAcademicMajorsSettings';
 import { CourseSchedulingWorkspace } from './CourseSchedulingWorkspace';
 import { getStudentResidenceType, getStudentAdmissionStatus } from '../utils/financeUtils';
+import {
+  findClosestApprovedMajor,
+  findExactApprovedMajorForStudent,
+  formatApprovedMajorLabel,
+  getEffectiveApprovedMajors,
+  normalizeMajorCode,
+} from '../utils/academicMajors';
 import {
   ARTISTIC_SKILL_OPTIONS,
   COMMUTER_ELIGIBILITY_OPTIONS,
@@ -850,6 +858,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'backup'
     | 'home_notes'
     | 'student_portals'
+    | 'academic_majors'
     | 'about'
     | 'quick_users';
   const [openSettingsSection, setOpenSettingsSection] = useState<AdminSettingsSectionKey | null>(null);
@@ -878,6 +887,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [stFormStudentId, setStFormStudentId] = useState('');
   const [stFormNationalId, setStFormNationalId] = useState('');
   const [stFormField, setStFormField] = useState('آموزش ابتدایی');
+  const [stFormMajorCode, setStFormMajorCode] = useState('');
+  const [stFormDegreeLevel, setStFormDegreeLevel] = useState('');
   const [stFormEntryTerm, setStFormEntryTerm] = useState('۴۰۲۱');
   const [stFormFatherName, setStFormFatherName] = useState('');
   const [stFormMobile, setStFormMobile] = useState('');
@@ -933,12 +944,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [stFormProfileCompleted, setStFormProfileCompleted] = useState<boolean>(true);
   const [stFormError, setStFormError] = useState<string | null>(null);
 
+  const activeApprovedMajorsList = getEffectiveApprovedMajors(localSettings, false);
+
   const handleOpenAddStudent = () => {
+    const firstMajor = activeApprovedMajorsList[0];
     setEditingStudent(null);
     setStFormFullName('');
     setStFormStudentId('');
     setStFormNationalId('');
-    setStFormField('آموزش ابتدایی');
+    setStFormField(firstMajor ? firstMajor.name : '');
+    setStFormMajorCode(firstMajor ? normalizeMajorCode(firstMajor.code) : '');
+    setStFormDegreeLevel(firstMajor ? firstMajor.degreeLevelName : '');
     setStFormEntryTerm('۴۰۲۱');
     setStFormFatherName('');
     setStFormMobile('');
@@ -1002,6 +1018,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStFormStudentId(st.studentId);
     setStFormNationalId(st.nationalId);
     setStFormField(st.fieldOfStudy);
+    setStFormMajorCode(st.majorCode || '');
+    setStFormDegreeLevel(st.degreeLevel || '');
     setStFormEntryTerm(st.entryTerm);
     setStFormFatherName(st.fatherName || '');
     setStFormMobile(st.mobile || '');
@@ -1221,12 +1239,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         ? parsedScoreNum
         : stFormPreviousScore.trim();
 
+    let resolvedFieldName = stFormField.trim();
+    let resolvedMajorCode = normalizeMajorCode(stFormMajorCode) || undefined;
+    let resolvedDegreeLevel = stFormDegreeLevel.trim() || undefined;
+
+    if (activeApprovedMajorsList.length > 0) {
+      const matchedApproved = findExactApprovedMajorForStudent(
+        { fieldOfStudy: resolvedFieldName, majorCode: resolvedMajorCode },
+        activeApprovedMajorsList
+      );
+      if (!matchedApproved) {
+        setStFormError('لطفاً یکی از رشته‌های تحصیلی مصوب ثبت‌شده در تنظیمات کل سامانه را انتخاب نمایید.');
+        return;
+      }
+      resolvedFieldName = matchedApproved.name;
+      resolvedMajorCode = normalizeMajorCode(matchedApproved.code);
+      resolvedDegreeLevel = matchedApproved.degreeLevelName || resolvedDegreeLevel;
+    }
+
     if (editingStudent) {
       const res = Storage.updateStudentAdmin(editingStudent.studentId, {
         studentId: targetStudentId,
         fullName: stFormFullName.trim(),
         nationalId: toEnglishDigits(stFormNationalId.trim()),
-        fieldOfStudy: stFormField.trim(),
+        fieldOfStudy: resolvedFieldName,
+        majorCode: resolvedMajorCode,
+        degreeLevel: resolvedDegreeLevel,
         entryTerm: stFormEntryTerm.trim(),
         fatherName: stFormFatherName.trim(),
         mobile: stFormMobile.trim(),
@@ -1267,7 +1305,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         studentId: targetStudentId,
         nationalId: toEnglishDigits(stFormNationalId.trim()),
         fullName: stFormFullName.trim(),
-        fieldOfStudy: stFormField.trim(),
+        fieldOfStudy: resolvedFieldName,
+        majorCode: resolvedMajorCode,
+        degreeLevel: resolvedDegreeLevel,
         entryTerm: stFormEntryTerm.trim(),
         fatherName: stFormFatherName.trim(),
         birthDate: stFormBirthDate.trim() || '1382/01/01',
@@ -3654,6 +3694,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           smartCampusStaff={smartCampusStaffList}
           graduationStaff={graduationStaffList}
           academicDeputyStaff={academicDeputyStaffList}
+          settings={localSettings}
           onRefreshData={handleUsersRefresh}
           onOpenExcelModal={onOpenExcelModal}
           onOpenReports={onOpenReports}
@@ -8574,6 +8615,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     icon: Info,
                   },
                   {
+                    key: 'academic_majors' as const,
+                    title: 'مقاطع و رشته‌های تحصیلی مصوب',
+                    desc: 'ثبت مقاطع، کد رشته‌ها و یکسان‌سازی داده‌های قبلی دانشجویان',
+                    icon: GraduationCap,
+                  },
+                  {
                     key: 'student_portals' as const,
                     title: 'سامانه‌های دانشجویان',
                     desc: 'ایجاد، ویرایش، ترتیب‌بندی و حذف لینک‌های تب «سامانه‌ها»',
@@ -8647,6 +8694,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
           </div>
+
+          {/* مدیریت مقاطع و رشته‌های تحصیلی مصوب دانشگاه */}
+          {openSettingsSection === 'academic_majors' && (
+            <div className="animate-in fade-in duration-150">
+              <AdminAcademicMajorsSettings
+                settings={localSettings}
+                students={students}
+                onUpdateSettings={(updated) => {
+                  setLocalSettings(updated);
+                  onUpdateSettings(updated);
+                }}
+                onRefreshData={onRefreshData}
+              />
+            </div>
+          )}
 
           {/* مدیریت سامانه‌ها و درگاه‌های بیرونی در کارتابل دانشجویان */}
           {openSettingsSection === 'student_portals' && (
@@ -10202,14 +10264,89 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       رشته تحصیلی *
                     </label>
-                    <input
-                      type="text"
-                      value={stFormField}
-                      onChange={(e) => setStFormField(e.target.value)}
-                      placeholder="آموزش ابتدایی، آموزش ریاضی و..."
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                      required
-                    />
+                    {activeApprovedMajorsList.length > 0 ? (
+                      (() => {
+                        const exactMatched = findExactApprovedMajorForStudent(
+                          { fieldOfStudy: stFormField, majorCode: stFormMajorCode },
+                          activeApprovedMajorsList
+                        );
+                        const closest = !exactMatched && stFormField.trim()
+                          ? findClosestApprovedMajor(stFormField, activeApprovedMajorsList, stFormMajorCode)
+                          : null;
+                        return (
+                          <div className="space-y-1.5">
+                            <select
+                              value={exactMatched ? exactMatched.id : ''}
+                              onChange={(e) => {
+                                const picked = activeApprovedMajorsList.find((m) => m.id === e.target.value);
+                                if (picked) {
+                                  setStFormField(picked.name);
+                                  setStFormMajorCode(normalizeMajorCode(picked.code));
+                                  setStFormDegreeLevel(picked.degreeLevelName || '');
+                                }
+                              }}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                              required
+                            >
+                              <option value="">-- انتخاب رشته تحصیلی مصوب --</option>
+                              {activeApprovedMajorsList.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {formatApprovedMajorLabel(m)}
+                                </option>
+                              ))}
+                            </select>
+                            {exactMatched ? (
+                              <div className="text-[10px] text-teal-700 dark:text-teal-300 font-bold flex items-center gap-2">
+                                <span>کد رشته: {exactMatched.code}</span>
+                                <span>•</span>
+                                <span>مقطع: {exactMatched.degreeLevelName}</span>
+                              </div>
+                            ) : stFormField.trim() ? (
+                              <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-[10px] text-amber-800 dark:text-amber-200 space-y-1">
+                                <div>
+                                  رشته قبلی ثبت‌شده: <span className="font-bold">{stFormField}</span> (ناهمگون با لیست مصوب)
+                                </div>
+                                {closest && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setStFormField(closest.major.name);
+                                      setStFormMajorCode(normalizeMajorCode(closest.major.code));
+                                      setStFormDegreeLevel(closest.major.degreeLevelName || '');
+                                    }}
+                                    className="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
+                                  >
+                                    انتخاب نزدیک‌ترین رشته ({closest.major.name} - {closest.score}٪)
+                                  </button>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <div className="space-y-1">
+                        <input
+                          type="text"
+                          value={stFormField}
+                          onChange={(e) => setStFormField(e.target.value)}
+                          placeholder="آموزش ابتدایی، آموزش ریاضی و..."
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAddStudentModalOpen(false);
+                            setMainTab('settings');
+                            setOpenSettingsSection('academic_majors');
+                          }}
+                          className="text-[10px] font-bold text-teal-600 hover:underline cursor-pointer"
+                        >
+                          تعریف رشته‌های مصوب در تنظیمات کل سامانه →
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div>

@@ -20,8 +20,13 @@ import {
   GraduationStaff,
   AcademicDeputyStaff,
   CurrentUser,
+  AppSettings,
 } from '../types';
 import { Storage, compressAvatarImageFile, normalizeAssignedFieldsList } from '../utils/storage';
+import {
+  findClosestApprovedMajor,
+  getEffectiveApprovedMajors,
+} from '../utils/academicMajors';
 import { toEnglishDigits } from '../utils/excelUtils';
 import { getStudentResidenceType, getStudentAdmissionStatus } from '../utils/financeUtils';
 import { compareStudents } from '../utils/studentSearchSort';
@@ -139,6 +144,7 @@ interface AdminUsersPanelProps {
   onEvictStudent: (student: Student) => void;
   studentSecondaryEditEnabled?: boolean;
   onToggleStudentSecondaryEdit?: () => void;
+  settings?: AppSettings;
   actorId?: string;
   actorName?: string;
   actorRole?: 'admin' | 'supervisor' | 'vice_dean';
@@ -205,6 +211,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   onEvictStudent,
   studentSecondaryEditEnabled = false,
   onToggleStudentSecondaryEdit,
+  settings,
   actorId = 'admin',
   actorName = 'مدیریت کل سامانه جامع خدمات دانشجویی',
   actorRole = 'admin',
@@ -280,7 +287,20 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
   const isAcademicDeputyCategory =
     activeCategory === 'education' || activeCategory === 'graduation';
 
+  const activeApprovedMajors = useMemo(
+    () => getEffectiveApprovedMajors(settings || Storage.getSettings(), false),
+    [settings]
+  );
+
+  const approvedMajorByName = useMemo(
+    () => new Map(activeApprovedMajors.map((m) => [m.name.trim(), m])),
+    [activeApprovedMajors]
+  );
+
   const availableEducationFields = useMemo(() => {
+    if (activeApprovedMajors.length > 0) {
+      return activeApprovedMajors.map((m) => m.name.trim());
+    }
     const raw: string[] = [];
     students.forEach((s) => {
       if (s.fieldOfStudy && s.fieldOfStudy.trim()) raw.push(s.fieldOfStudy.trim());
@@ -294,7 +314,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
       if (f && f.trim()) raw.push(f.trim());
     });
     return normalizeAssignedFieldsList(raw).sort((a, b) => a.localeCompare(b, 'fa'));
-  }, [students, educationStaff, formAssignedFields]);
+  }, [activeApprovedMajors, students, educationStaff, formAssignedFields]);
 
   // وضعیت بارگذاری جمعی عکس‌ها (پوشه یا چند فایل)
   const [batchPhotoStatus, setBatchPhotoStatus] = useState<{
@@ -3214,8 +3234,17 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                           </div>
                         </td>
                         <td className="p-3">
-                          <div className="font-medium">{st.fieldOfStudy || '-'}</div>
-                          <div className="text-[10px] text-slate-400">ورودی {st.entryTerm || '-'}</div>
+                          <div className="font-medium flex flex-wrap items-center gap-1">
+                            <span>{st.fieldOfStudy || '-'}</span>
+                            {st.majorCode && (
+                              <span className="px-1.5 py-0.5 rounded bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 font-mono text-[10px] font-bold">
+                                {st.majorCode}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {st.degreeLevel ? `${st.degreeLevel} • ` : ''}ورودی {st.entryTerm || '-'}
+                          </div>
                         </td>
                         <td className="p-3">
                           {(() => {
@@ -6780,24 +6809,57 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
 
                   {formAssignedFields.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
-                      {formAssignedFields.map((fld) => (
-                        <span
-                          key={fld}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-sky-600 text-white text-[11px] font-bold"
-                        >
-                          <span>{fld}</span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setFormAssignedFields((prev) => prev.filter((item) => item !== fld))
-                            }
-                            className="hover:text-rose-200 cursor-pointer"
-                            title="حذف رشته"
+                      {formAssignedFields.map((fld) => {
+                        const approvedInfo = approvedMajorByName.get(fld.trim());
+                        const isLegacy = activeApprovedMajors.length > 0 && !approvedInfo;
+                        const closest = isLegacy
+                          ? findClosestApprovedMajor(fld, activeApprovedMajors)
+                          : null;
+                        return (
+                          <span
+                            key={fld}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold ${
+                              isLegacy
+                                ? 'bg-amber-500 text-white'
+                                : 'bg-sky-600 text-white'
+                            }`}
                           >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
+                            <span>
+                              {fld}
+                              {approvedInfo?.code ? ` (${approvedInfo.code})` : ''}
+                              {isLegacy ? ' [قدیمی]' : ''}
+                            </span>
+                            {closest && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setFormAssignedFields((prev) =>
+                                    normalizeAssignedFieldsList(
+                                      prev.map((item) =>
+                                        item === fld ? closest.major.name : item
+                                      )
+                                    )
+                                  )
+                                }
+                                title={`جایگزینی با رشته مصوب «${closest.major.name}»`}
+                                className="px-1.5 py-0.2 rounded bg-white/20 hover:bg-white/30 text-[10px] cursor-pointer"
+                              >
+                                → {closest.major.name}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setFormAssignedFields((prev) => prev.filter((item) => item !== fld))
+                              }
+                              className="hover:text-rose-200 cursor-pointer"
+                              title="حذف رشته"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -6805,6 +6867,7 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-0.5">
                       {availableEducationFields.map((fld) => {
                         const checked = formAssignedFields.includes(fld);
+                        const approvedInfo = approvedMajorByName.get(fld.trim());
                         return (
                           <label
                             key={fld}
@@ -6828,51 +6891,62 @@ export const AdminUsersPanel: React.FC<AdminUsersPanelProps> = ({
                               }}
                               className="w-4 h-4 rounded text-sky-600 cursor-pointer shrink-0"
                             />
-                            <span className="truncate" title={fld}>
+                            <span className="truncate flex-1" title={fld}>
                               {fld}
                             </span>
+                            {approvedInfo && (
+                              <span className="text-[10px] font-mono text-sky-700 dark:text-sky-300 shrink-0">
+                                {approvedInfo.code}
+                              </span>
+                            )}
                           </label>
                         );
                       })}
                     </div>
                   )}
 
-                  <div className="flex items-center gap-2 pt-1">
-                    <input
-                      type="text"
-                      value={customFieldInput}
-                      onChange={(e) => setCustomFieldInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          const trimmed = customFieldInput.trim();
-                          if (trimmed) {
-                            setFormAssignedFields((prev) =>
-                              normalizeAssignedFieldsList([...prev, trimmed])
-                            );
-                            setCustomFieldInput('');
+                  {activeApprovedMajors.length > 0 ? (
+                    <div className="text-[11px] text-sky-800 dark:text-sky-200 bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 rounded-xl px-3 py-2">
+                      انتخاب رشته‌های کارشناس و مدیر گروه صرفاً از فهرست رشته‌های مصوب ثبت‌شده در «تنظیمات کل سامانه ← مقاطع و رشته‌های تحصیلی مصوب» انجام می‌شود.
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        type="text"
+                        value={customFieldInput}
+                        onChange={(e) => setCustomFieldInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const trimmed = customFieldInput.trim();
+                            if (trimmed) {
+                              setFormAssignedFields((prev) =>
+                                normalizeAssignedFieldsList([...prev, trimmed])
+                              );
+                              setCustomFieldInput('');
+                            }
                           }
-                        }
-                      }}
-                      placeholder="افزودن نام رشته جدید به صورت دستی (مثلاً آموزش ابتدایی)..."
-                      className="flex-1 px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-800 text-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const trimmed = customFieldInput.trim();
-                        if (!trimmed) return;
-                        setFormAssignedFields((prev) =>
-                          normalizeAssignedFieldsList([...prev, trimmed])
-                        );
-                        setCustomFieldInput('');
-                      }}
-                      className="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>افزودن رشته</span>
-                    </button>
-                  </div>
+                        }}
+                        placeholder="افزودن نام رشته جدید به صورت دستی (مثلاً آموزش ابتدایی)..."
+                        className="flex-1 px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-800 text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const trimmed = customFieldInput.trim();
+                          if (!trimmed) return;
+                          setFormAssignedFields((prev) =>
+                            normalizeAssignedFieldsList([...prev, trimmed])
+                          );
+                          setCustomFieldInput('');
+                        }}
+                        className="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>افزودن رشته</span>
+                      </button>
+                    </div>
+                  )}
                   </>
                   )}
 

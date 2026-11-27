@@ -39,7 +39,12 @@ import {
   DisciplinaryReferral,
   SportsProgram,
   SportsRegistration,
+  ApprovedAcademicMajor,
 } from '../types';
+import {
+  findClosestApprovedMajor,
+  normalizeMajorCode,
+} from './academicMajors';
 import {
   computeStudentFinancialInfo,
   FINANCIAL_STATUS_LABELS,
@@ -104,6 +109,16 @@ const KNOWN_STUDENT_FIELD_MAP: Record<string, keyof Student> = {
   'رشته تحصیلی': 'fieldOfStudy',
   'major': 'fieldOfStudy',
   'field_of_study': 'fieldOfStudy',
+
+  'کد رشته': 'majorCode',
+  'کد رشته تحصیلی': 'majorCode',
+  'majorcode': 'majorCode',
+  'major_code': 'majorCode',
+
+  'مقطع': 'degreeLevel',
+  'مقطع تحصیلی': 'degreeLevel',
+  'degreelevel': 'degreeLevel',
+  'degree_level': 'degreeLevel',
 
   'ترم ورود': 'entryTerm',
   'ورودی': 'entryTerm',
@@ -221,7 +236,10 @@ const KNOWN_STUDENT_FIELD_MAP: Record<string, keyof Student> = {
 };
 
 // خواندن اکسل دانشجویان
-export async function parseStudentExcel(file: File): Promise<{
+export async function parseStudentExcel(
+  file: File,
+  approvedMajors?: ApprovedAcademicMajor[]
+): Promise<{
   students: Student[];
   customColumns: string[];
   totalRows: number;
@@ -313,6 +331,22 @@ export async function parseStudentExcel(file: File): Promise<{
           if (studentObj.mobile) studentObj.mobile = toEnglishDigits(studentObj.mobile);
           if (studentObj.emergencyPhone) studentObj.emergencyPhone = toEnglishDigits(studentObj.emergencyPhone);
           if (studentObj.parentPhone) studentObj.parentPhone = toEnglishDigits(studentObj.parentPhone);
+          if (studentObj.majorCode) studentObj.majorCode = normalizeMajorCode(studentObj.majorCode);
+
+          if (Array.isArray(approvedMajors) && approvedMajors.length > 0 && (studentObj.fieldOfStudy || studentObj.majorCode)) {
+            const matched = findClosestApprovedMajor(
+              String(studentObj.fieldOfStudy || ''),
+              approvedMajors,
+              studentObj.majorCode ? String(studentObj.majorCode) : undefined
+            );
+            if (matched && matched.score >= 78) {
+              studentObj.fieldOfStudy = matched.major.name;
+              studentObj.majorCode = normalizeMajorCode(matched.major.code);
+              if (!studentObj.degreeLevel && matched.major.degreeLevelName) {
+                studentObj.degreeLevel = matched.major.degreeLevelName;
+              }
+            }
+          }
 
           // تولید آواتار رنگی
           const colors = ['#0d9488', '#0284c7', '#6366f1', '#8b5cf6', '#ec4899', '#f59e0b'];
@@ -735,7 +769,9 @@ export async function exportStudentsToExcel(students: Student[], dormsMap: Map<s
       'کد ملی': s.nationalId,
       'نام و نام خانوادگی': s.fullName,
       'نام پدر': s.fatherName || '',
+      'کد رشته': s.majorCode || '',
       'رشته تحصیلی': s.fieldOfStudy,
+      'مقطع تحصیلی': s.degreeLevel || '',
       'ترم ورود': s.entryTerm,
       'وضعیت تأهل': s.maritalStatus ? MARITAL_STATUS_LABELS[s.maritalStatus] : 'ثبت نشده',
       'سرپرست خانوار': s.isHeadOfHousehold ? 'بله' : 'خیر',

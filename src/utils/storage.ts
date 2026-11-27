@@ -101,8 +101,15 @@ import {
   StaffChatDirectoryItem,
   SchedCellComment,
   SchedUserHistoryState,
+  AcademicDegreeLevel,
+  ApprovedAcademicMajor,
 } from '../types';
 import { getSchedSlotTitle } from './schedulingUtils';
+import {
+  DEFAULT_ACADEMIC_DEGREE_LEVELS,
+  normalizeMajorCode,
+  normalizeMajorText,
+} from './academicMajors';
 
 export const DEFAULT_COMMON_ROOM_ASSETS: string[] = [
   'یخچال',
@@ -2908,6 +2915,8 @@ function normalizeStudentRecord(raw: Record<string, unknown>): Student {
     nationalId: String(r.nationalId ?? ''),
     fullName: String(r.fullName ?? ''),
     fieldOfStudy: String(r.fieldOfStudy ?? ''),
+    majorCode: r.majorCode ? normalizeMajorCode(String(r.majorCode)) : undefined,
+    degreeLevel: r.degreeLevel ? String(r.degreeLevel).trim() : undefined,
     entryTerm: String(r.entryTerm ?? ''),
     fatherName: String(r.fatherName ?? ''),
     birthDate: String(r.birthDate ?? ''),
@@ -3000,6 +3009,11 @@ function set<T>(key: string, value: T): boolean {
 export const Storage = {
   getSettings: (): AppSettings => {
     const raw = get(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
+    const normalizedMajors = Array.isArray(raw?.approvedMajors) ? raw.approvedMajors : [];
+    const normalizedLevels =
+      Array.isArray(raw?.academicDegreeLevels) && raw.academicDegreeLevels.length > 0
+        ? raw.academicDegreeLevels
+        : DEFAULT_ACADEMIC_DEGREE_LEVELS;
     const banner = (raw?.announcementBanner || '').trim();
     if (
       banner &&
@@ -3009,11 +3023,349 @@ export const Storage = {
       return {
         ...raw,
         announcementBanner: INITIAL_SETTINGS.announcementBanner,
+        academicDegreeLevels: normalizedLevels,
+        approvedMajors: normalizedMajors,
       };
     }
-    return raw;
+    return {
+      ...raw,
+      academicDegreeLevels: normalizedLevels,
+      approvedMajors: normalizedMajors,
+    };
   },
   setSettings: (settings: AppSettings): boolean => set(STORAGE_KEYS.SETTINGS, settings),
+
+  getAcademicDegreeLevels: (includeInactive = false): AcademicDegreeLevel[] => {
+    const list = Storage.getSettings().academicDegreeLevels || DEFAULT_ACADEMIC_DEGREE_LEVELS;
+    return includeInactive ? list : list.filter((d) => d.isActive !== false);
+  },
+
+  getApprovedMajors: (includeInactive = false): ApprovedAcademicMajor[] => {
+    const list = Storage.getSettings().approvedMajors || [];
+    const filtered = includeInactive ? list : list.filter((m) => m.isActive !== false);
+    return [...filtered].sort((a, b) => {
+      const degCmp = (a.degreeLevelName || '').localeCompare(b.degreeLevelName || '', 'fa');
+      if (degCmp !== 0) return degCmp;
+      return (a.name || '').localeCompare(b.name || '', 'fa');
+    });
+  },
+
+  standardizeLegacyAcademicMajors: (params: {
+    mappings: Array<{ legacyText: string; targetMajorId: string }>;
+    syncEducationStaff?: boolean;
+    syncScheduling?: boolean;
+    syncRelatedRecords?: boolean;
+    saveAliases?: boolean;
+  }): {
+    updatedStudentsCount: number;
+    updatedStaffCount: number;
+    updatedProgramsCount: number;
+    updatedCoursesCount: number;
+    updatedOfferingsCount: number;
+    updatedRelatedCount: number;
+  } => {
+    const settings = Storage.getSettings();
+    const majors = settings.approvedMajors || [];
+    const majorById = new Map(majors.map((m) => [m.id, m]));
+    const normMap = new Map<string, ApprovedAcademicMajor>();
+    const rawAliasAdditions = new Map<string, Set<string>>();
+
+    for (const item of params.mappings) {
+      const target = majorById.get(item.targetMajorId);
+      const rawLegacy = String(item.legacyText || '').trim();
+      if (!target || !rawLegacy) continue;
+      const normKey = normalizeMajorText(rawLegacy);
+      if (normKey) normMap.set(normKey, target);
+      if (params.saveAliases !== false && normalizeMajorText(target.name) !== normKey) {
+        if (!rawAliasAdditions.has(target.id)) rawAliasAdditions.set(target.id, new Set());
+        rawAliasAdditions.get(target.id)!.add(rawLegacy);
+      }
+    }
+
+    const resolveTargetForText = (
+      rawField?: string | null,
+      rawCode?: string | null
+    ): ApprovedAcademicMajor | undefined => {
+      const key = normalizeMajorText(rawField);
+      if (key && normMap.has(key)) return normMap.get(key);
+      const cleanCode = normalizeMajorCode(rawCode);
+      if (cleanCode) {
+        const byCode = majors.find((m) => normalizeMajorCode(m.code) === cleanCode);
+        if (byCode) return byCode;
+      }
+      if (key) {
+        const byName = majors.find(
+          (m) =>
+            normalizeMajorText(m.name) === key ||
+            (m.aliases || []).some((a) => normalizeMajorText(a) === key)
+        );
+        if (byName) return byName;
+      }
+      return undefined;
+    };
+
+    let updatedStudentsCount = 0;
+    const students = Storage.getStudents();
+    const nextStudents = students.map((st) => {
+      const target = resolveTargetForText(st.fieldOfStudy, st.majorCode);
+      if (!target) return st;
+      const needsUpdate =
+        st.fieldOfStudy !== target.name ||
+        normalizeMajorCode(st.majorCode) !== normalizeMajorCode(target.code) ||
+        (target.degreeLevelName && st.degreeLevel !== target.degreeLevelName);
+      if (!needsUpdate) return st;
+      updatedStudentsCount++;
+      return {
+        ...st,
+        fieldOfStudy: target.name,
+        majorCode: normalizeMajorCode(target.code),
+        degreeLevel: target.degreeLevelName || st.degreeLevel,
+      };
+    });
+    if (updatedStudentsCount > 0) {
+      Storage.setStudents(nextStudents);
+    }
+
+    let updatedStaffCount = 0;
+    if (params.syncEducationStaff !== false) {
+      const eduList = Storage.getEducationStaff();
+      const nextEduList = eduList.map((edu) => {
+        if (!Array.isArray(edu.assignedFields) || edu.assignedFields.length === 0) return edu;
+        let changed = false;
+        const mappedFields = edu.assignedFields.map((fld) => {
+          const target = resolveTargetForText(fld);
+          if (target && target.name !== fld.trim()) {
+            changed = true;
+            return target.name;
+          }
+          return fld;
+        });
+        const deduped = normalizeAssignedFieldsList(mappedFields);
+        if (changed || deduped.length !== edu.assignedFields.length) {
+          updatedStaffCount++;
+          return { ...edu, assignedFields: deduped };
+        }
+        return edu;
+      });
+      if (updatedStaffCount > 0) {
+        Storage.setEducationStaff(nextEduList);
+      }
+    }
+
+    let updatedProgramsCount = 0;
+    let updatedCoursesCount = 0;
+    let updatedOfferingsCount = 0;
+    if (params.syncScheduling) {
+      const programs = Storage.getSchedPrograms();
+      const nextPrograms = programs.map((p) => {
+        const target = resolveTargetForText(p.majorName, p.majorCode);
+        if (!target) return p;
+        const targetCode = normalizeMajorCode(target.code);
+        if (p.majorName !== target.name || (targetCode && p.majorCode !== targetCode)) {
+          updatedProgramsCount++;
+          return {
+            ...p,
+            majorName: target.name,
+            majorCode: targetCode || p.majorCode,
+          };
+        }
+        return p;
+      });
+      if (updatedProgramsCount > 0) Storage.setSchedPrograms(nextPrograms);
+
+      const courses = Storage.getSchedCourses();
+      const nextCourses = courses.map((c) => {
+        const target = resolveTargetForText(c.majorName, c.majorCode);
+        if (!target) return c;
+        const targetCode = normalizeMajorCode(target.code);
+        if (c.majorName !== target.name || (targetCode && c.majorCode !== targetCode)) {
+          updatedCoursesCount++;
+          return {
+            ...c,
+            majorName: target.name,
+            majorCode: targetCode || c.majorCode,
+          };
+        }
+        return c;
+      });
+      if (updatedCoursesCount > 0) Storage.setSchedCourses(nextCourses);
+
+      const offerings = Storage.getSchedOfferings();
+      const nextOfferings = offerings.map((o) => {
+        let changed = false;
+        const target = resolveTargetForText(o.ownerMajorName, o.ownerMajorCode);
+        let nextOwnerMajorName = o.ownerMajorName;
+        let nextOwnerMajorCode = o.ownerMajorCode;
+        if (target) {
+          const targetCode = normalizeMajorCode(target.code);
+          if (o.ownerMajorName !== target.name || (targetCode && o.ownerMajorCode !== targetCode)) {
+            nextOwnerMajorName = target.name;
+            nextOwnerMajorCode = targetCode || o.ownerMajorCode;
+            changed = true;
+          }
+        }
+        let nextShared = o.sharedWithTargets;
+        if (Array.isArray(o.sharedWithTargets) && o.sharedWithTargets.length > 0) {
+          nextShared = o.sharedWithTargets.map((sh) => {
+            const shTarget = resolveTargetForText(sh.majorName, sh.majorCode);
+            if (!shTarget) return sh;
+            const shCode = normalizeMajorCode(shTarget.code);
+            if (sh.majorName !== shTarget.name || (shCode && sh.majorCode !== shCode)) {
+              changed = true;
+              return { ...sh, majorName: shTarget.name, majorCode: shCode || sh.majorCode };
+            }
+            return sh;
+          });
+        }
+        if (changed) {
+          updatedOfferingsCount++;
+          return {
+            ...o,
+            ownerMajorName: nextOwnerMajorName,
+            ownerMajorCode: nextOwnerMajorCode,
+            sharedWithTargets: nextShared,
+          };
+        }
+        return o;
+      });
+      if (updatedOfferingsCount > 0) Storage.setSchedOfferings(nextOfferings);
+    }
+
+    let updatedRelatedCount = 0;
+    if (params.syncRelatedRecords) {
+      const notices = Storage.getAcademicNotices();
+      let noticesChanged = false;
+      const nextNotices = notices.map((n) => {
+        const target = resolveTargetForText(n.studentFieldOfStudy);
+        if (target && n.studentFieldOfStudy !== target.name) {
+          noticesChanged = true;
+          updatedRelatedCount++;
+          return { ...n, studentFieldOfStudy: target.name };
+        }
+        return n;
+      });
+      if (noticesChanged) Storage.setAcademicNotices(nextNotices);
+
+      const refs = Storage.getDisciplinaryReferrals();
+      let refsChanged = false;
+      const nextRefs = refs.map((r) => {
+        const target = resolveTargetForText(r.studentFieldOfStudy);
+        if (target && r.studentFieldOfStudy !== target.name) {
+          refsChanged = true;
+          updatedRelatedCount++;
+          return { ...r, studentFieldOfStudy: target.name };
+        }
+        return r;
+      });
+      if (refsChanged) Storage.setDisciplinaryReferrals(nextRefs);
+
+      const wfList = Storage.getAcademicWorkflowRequests();
+      let wfChanged = false;
+      const nextWf = wfList.map((w) => {
+        const target = resolveTargetForText(w.studentFieldOfStudy);
+        if (target && w.studentFieldOfStudy !== target.name) {
+          wfChanged = true;
+          updatedRelatedCount++;
+          return { ...w, studentFieldOfStudy: target.name };
+        }
+        return w;
+      });
+      if (wfChanged) Storage.setAcademicWorkflowRequests(nextWf);
+
+      const elections = Storage.getGuildElections();
+      let elChanged = false;
+      const nextElections = elections.map((el) => {
+        let candChanged = false;
+        const nextCands = el.candidates.map((c) => {
+          const target = resolveTargetForText(c.fieldOfStudy);
+          if (target && c.fieldOfStudy !== target.name) {
+            candChanged = true;
+            updatedRelatedCount++;
+            return { ...c, fieldOfStudy: target.name };
+          }
+          return c;
+        });
+        if (candChanged) {
+          elChanged = true;
+          return { ...el, candidates: nextCands };
+        }
+        return el;
+      });
+      if (elChanged) Storage.setGuildElections(nextElections);
+
+      const msgs = Storage.getMessages();
+      let msgChanged = false;
+      const nextMsgs = msgs.map((m) => {
+        let mUpdated = false;
+        let nextSenderField = m.senderFieldOfStudy;
+        let nextTargetField = m.targetFieldOfStudy;
+        if (m.senderFieldOfStudy) {
+          const t1 = resolveTargetForText(m.senderFieldOfStudy);
+          if (t1 && t1.name !== m.senderFieldOfStudy) {
+            nextSenderField = t1.name;
+            mUpdated = true;
+          }
+        }
+        if (m.targetFieldOfStudy) {
+          const t2 = resolveTargetForText(m.targetFieldOfStudy);
+          if (t2 && t2.name !== m.targetFieldOfStudy) {
+            nextTargetField = t2.name;
+            mUpdated = true;
+          }
+        }
+        if (mUpdated) {
+          msgChanged = true;
+          updatedRelatedCount++;
+          return { ...m, senderFieldOfStudy: nextSenderField, targetFieldOfStudy: nextTargetField };
+        }
+        return m;
+      });
+      if (msgChanged) Storage.setMessages(nextMsgs);
+    }
+
+    if (params.saveAliases !== false && rawAliasAdditions.size > 0) {
+      let aliasesUpdated = false;
+      const nextMajors = majors.map((m) => {
+        const additions = rawAliasAdditions.get(m.id);
+        if (!additions || additions.size === 0) return m;
+        const existingNorms = new Set(
+          [m.name, ...(m.aliases || [])].map((x) => normalizeMajorText(x)).filter(Boolean)
+        );
+        const mergedAliases = [...(m.aliases || [])];
+        additions.forEach((rawAlias) => {
+          const k = normalizeMajorText(rawAlias);
+          if (k && !existingNorms.has(k)) {
+            existingNorms.add(k);
+            mergedAliases.push(rawAlias);
+            aliasesUpdated = true;
+          }
+        });
+        return { ...m, aliases: mergedAliases };
+      });
+      if (aliasesUpdated) {
+        Storage.setSettings({
+          ...settings,
+          approvedMajors: nextMajors,
+        });
+      }
+    }
+
+    Storage.addActivityLog({
+      category: 'settings',
+      action: 'استانداردسازی و یکسان‌سازی رشته‌های تحصیلی',
+      details: `${updatedStudentsCount} دانشجو، ${updatedStaffCount} کاربر آموزش، ${updatedProgramsCount + updatedCoursesCount + updatedOfferingsCount} رکورد برنامه درسی و ${updatedRelatedCount} رکورد مرتبط به رشته‌های مصوب استاندارد تبدیل شدند.`,
+      targetName: 'رشته‌های تحصیلی مصوب',
+    });
+
+    return {
+      updatedStudentsCount,
+      updatedStaffCount,
+      updatedProgramsCount,
+      updatedCoursesCount,
+      updatedOfferingsCount,
+      updatedRelatedCount,
+    };
+  },
   
   getDormitories: (): Dormitory[] => get(STORAGE_KEYS.DORMITORIES, INITIAL_DORMITORIES),
   setDormitories: (dorms: Dormitory[]) => set(STORAGE_KEYS.DORMITORIES, dorms),

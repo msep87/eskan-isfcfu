@@ -22,6 +22,10 @@ import {
 import { Storage } from '../utils/storage';
 import { isStudentDormResident } from '../utils/financeUtils';
 import {
+  formatApprovedMajorLabel,
+  getEffectiveApprovedMajors,
+} from '../utils/academicMajors';
+import {
   exportStudentAffairsDirectoryToExcel,
   exportGuildElectionResultsToExcel,
   exportDisciplinaryReferralsToExcel,
@@ -193,6 +197,10 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [isSendSecurityModalOpen, setIsSendSecurityModalOpen] = useState(false);
   const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
+  const approvedMajors = useMemo(
+    () => getEffectiveApprovedMajors(Storage.getSettings(), false),
+    [cloudSyncTick]
+  );
 
   // ۱. تب دانشجویان خوابگاهی و ترددی
   const [residencyFilter, setResidencyFilter] = useState<'all' | 'dorm' | 'commuter'>('all');
@@ -1989,13 +1997,28 @@ export const StudentAffairsDashboard: React.FC<StudentAffairsDashboardProps> = (
                     placeholder="نام کاندیدا (ثبت دستی)"
                     className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                   />
-                  <input
-                    type="text"
-                    value={manualCandField}
-                    onChange={(e) => setManualCandField(e.target.value)}
-                    placeholder="رشته / ورودی"
-                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                  />
+                  {approvedMajors.length > 0 ? (
+                    <select
+                      value={manualCandField}
+                      onChange={(e) => setManualCandField(e.target.value)}
+                      className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    >
+                      <option value="">-- انتخاب رشته مصوب --</option>
+                      {approvedMajors.map((m) => (
+                        <option key={m.id} value={m.name}>
+                          {formatApprovedMajorLabel(m)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={manualCandField}
+                      onChange={(e) => setManualCandField(e.target.value)}
+                      placeholder="رشته / ورودی"
+                      className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  )}
                   <div className="flex gap-1.5">
                     <input
                       type="text"

@@ -63,6 +63,7 @@ import {
   SchedRulesSettings,
   SchedCellComment,
 } from '../types';
+import { DEFAULT_ACADEMIC_DEGREE_LEVELS } from './academicMajors';
 
 export const INITIAL_SETTINGS: AppSettings = {
   selectionActive: true,
@@ -80,6 +81,8 @@ export const INITIAL_SETTINGS: AppSettings = {
   darkMode: false,
   adminPassword: '261',
   studentSecondaryEditEnabled: false,
+  academicDegreeLevels: DEFAULT_ACADEMIC_DEGREE_LEVELS,
+  approvedMajors: [],
 };
 
 // سراهای دانشجویی اولیه (کاملاً خالی برای نسخه نهایی انتشار)

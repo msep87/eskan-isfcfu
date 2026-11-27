@@ -14,6 +14,8 @@ export interface Student {
   password?: string; // کلمه عبور اختیاری (در صورت عدم تنظیم یا ریست، همان کد ملی خواهد بود)
   fullName: string;
   fieldOfStudy: string; // رشته تحصیلی
+  majorCode?: string; // کد رشته مصوب (از لیست رشته‌های ثبت‌شده در تنظیمات سامانه)
+  degreeLevel?: string; // مقطع تحصیلی دانشجو
   entryTerm: string; // ترم ورود مثلاً ۴۰۲۱
   fatherName: string;
   birthDate: string;
@@ -840,6 +842,25 @@ export interface AppSettings {
   studentSecondaryEditEnabled?: boolean; // اجازه ویرایش ثانویه اطلاعات و عکس توسط دانشجو پس از تکمیل اولیه پرونده
   aboutContent?: AboutContentSettings; // محتوا و فایل‌های قابل ویرایش بخش درباره ما توسط مدیر
   studentPortals?: StudentPortalLink[]; // فهرست سامانه‌ها و درگاه‌های بیرونی قابل مدیریت توسط مدیر برای کارتابل دانشجو
+  academicDegreeLevels?: AcademicDegreeLevel[]; // فهرست مقاطع تحصیلی مصوب دانشگاه
+  approvedMajors?: ApprovedAcademicMajor[]; // فهرست ثابت رشته‌های تحصیلی مصوب دانشگاه همراه با کد رشته و مقطع
+}
+
+export interface AcademicDegreeLevel {
+  id: string;
+  name: string; // مثلاً: کارشناسی پیوسته، کارشناسی ناپیوسته، کارشناسی ارشد، دکتری تخصصی
+  code?: string; // کد اختیاری مقطع
+  isActive: boolean;
+}
+
+export interface ApprovedAcademicMajor {
+  id: string;
+  code: string; // کد رشته مصوب (مثلاً کد ۶ رقمی)
+  name: string; // نام رسمی و استاندارد رشته
+  degreeLevelId?: string;
+  degreeLevelName: string; // مقطع تحصیلی مرتبط
+  aliases?: string[]; // املاها و نام‌های مشابه قدیمی برای یکسان‌سازی خودکار
+  isActive: boolean;
 }
 
 export interface CounselorStaff {
