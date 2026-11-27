@@ -10,7 +10,9 @@ import {
   detectOfferingExamConflicts,
   exportJsonRowsToExcel,
   formatExamAssignmentShort,
+  formatGolestanCourseCode,
   getExamSettingsForTerm,
+  getOfferingSessions,
   isCourseEligibleForExam,
   normalizePersianText,
   normalizeSchedCode,
@@ -113,6 +115,7 @@ export const CourseSchedulingCommonExamModal: React.FC<
       majorCode: o.ownerMajorCode,
       dayOfWeek: o.dayOfWeek,
       slotIds: o.slotIds,
+      sessions: getOfferingSessions(o),
     });
     if (lockRes.locked) return false;
     if (canManageMasterData || userRole === 'education_expert') return true;
@@ -375,6 +378,8 @@ export const CourseSchedulingCommonExamModal: React.FC<
       const slot = examSettings.examSlots.find((s) => s.id === o.examSlotId);
       return {
         'کد درس ۷ رقمی': o.courseCode,
+        'کد گروه': o.courseGroupCode || '---',
+        'کد گلستان (درس_گروه)': formatGolestanCourseCode(o.courseCode, o.courseGroupCode),
         'عنوان درس': o.courseTitle,
         'رشته': o.ownerMajorName,
         'ورودی': o.entryTerm,

@@ -3,6 +3,9 @@ import {
   AcademicDegreeLevel,
   AppSettings,
   ApprovedAcademicMajor,
+  SchedCourseType,
+  SchedCurriculumCourse,
+  SchedPracticalUnitType,
   Student,
 } from '../types';
 import { Storage } from '../utils/storage';
@@ -17,20 +20,41 @@ import {
   normalizeMajorText,
 } from '../utils/academicMajors';
 import {
+  EIGHT_TERM_KEYS,
+  EIGHT_TERM_LABELS,
+  EightTermKey,
+  SCHED_COURSE_TYPE_LABELS,
+  SCHED_PRACTICAL_TYPE_LABELS,
+  calculateOfferingBreakdown,
+  downloadSchedExcelTemplate,
+  exportJsonRowsToExcel,
+  getMajorEightTermPlanCourseCodes,
+  normalizeCurriculumTermKey,
+  normalizeSchedCode,
+  parseDecimalUnits,
+  parseSchedExcelFile,
+  round2,
+} from '../utils/schedulingUtils';
+import {
   AlertTriangle,
   Award,
   BookOpen,
+  CalendarRange,
   Check,
   CheckCircle2,
+  Download,
   Edit3,
+  FileSpreadsheet,
   GraduationCap,
   Layers,
+  ListChecks,
   Plus,
   RefreshCw,
   Save,
   Search,
   Sparkles,
   Trash2,
+  Upload,
   Wand2,
   X,
 } from 'lucide-react';
@@ -42,7 +66,7 @@ interface AdminAcademicMajorsSettingsProps {
   onRefreshData: () => void;
 }
 
-type SubTabKey = 'majors' | 'levels' | 'standardize';
+type SubTabKey = 'majors' | 'levels' | 'standardize' | 'curriculum' | 'eight_term_plan';
 
 export const AdminAcademicMajorsSettings: React.FC<AdminAcademicMajorsSettingsProps> = ({
   settings,
@@ -522,6 +546,382 @@ export const AdminAcademicMajorsSettings: React.FC<AdminAcademicMajorsSettingsPr
     setManualOverrides(next);
   };
 
+  // =========================================================================
+  // ۴ و ۵. مدیریت سرفصل دروس هر کد رشته و برنامه هشت‌ترمه پیش‌فرض
+  // =========================================================================
+  const [schedCourses, setSchedCourses] = useState<SchedCurriculumCourse[]>(() =>
+    Storage.getSchedCourses()
+  );
+  const schedRules = useMemo(() => Storage.getSchedRules(), []);
+
+  const [selectedPlanMajorId, setSelectedPlanMajorId] = useState<string>(
+    () => approvedMajors[0]?.id || ''
+  );
+  const activePlanMajor = useMemo(
+    () =>
+      approvedMajors.find((m) => m.id === selectedPlanMajorId) ||
+      approvedMajors[0] ||
+      null,
+    [approvedMajors, selectedPlanMajorId]
+  );
+  const activePlanMajorCode = activePlanMajor ? normalizeMajorCode(activePlanMajor.code) : '';
+
+  const [curSearch, setCurSearch] = useState('');
+  const [curTermFilter, setCurTermFilter] = useState<string>('all');
+  const [editingCurId, setEditingCurId] = useState<string | null>(null);
+  const [curCode, setCurCode] = useState('');
+  const [curTitle, setCurTitle] = useState('');
+  const [curType, setCurType] = useState<SchedCourseType>('theoretical');
+  const [curThUnits, setCurThUnits] = useState('2');
+  const [curPrUnits, setCurPrUnits] = useState('0');
+  const [curPrType, setCurPrType] = useState<SchedPracticalUnitType>('normal_lab');
+  const [curRecTerm, setCurRecTerm] = useState('');
+  const [curNotes, setCurNotes] = useState('');
+  const [confirmDeleteCurId, setConfirmDeleteCurId] = useState<string | null>(null);
+
+  const persistSchedCoursesAndSyncPlan = (
+    nextCourses: SchedCurriculumCourse[],
+    nextPlans?: Record<string, Record<string, string[]>>
+  ) => {
+    setSchedCourses(nextCourses);
+    Storage.setSchedCourses(nextCourses);
+    if (nextPlans) {
+      onUpdateSettings({
+        ...settings,
+        academicDegreeLevels: degreeLevels,
+        approvedMajors: settings.approvedMajors ?? approvedMajors,
+        majorEightTermPlans: nextPlans,
+      });
+    }
+    onRefreshData();
+  };
+
+  const resetCurForm = () => {
+    setEditingCurId(null);
+    setCurCode('');
+    setCurTitle('');
+    setCurType('theoretical');
+    setCurThUnits('2');
+    setCurPrUnits('0');
+    setCurPrType('normal_lab');
+    setCurRecTerm('');
+    setCurNotes('');
+  };
+
+  const activeMajorCourses = useMemo(() => {
+    if (!activePlanMajorCode) return [];
+    return schedCourses
+      .filter((c) => normalizeMajorCode(c.majorCode) === activePlanMajorCode)
+      .sort((a, b) => {
+        const ta = Number(normalizeCurriculumTermKey(a.recommendedTerm) || 99);
+        const tb = Number(normalizeCurriculumTermKey(b.recommendedTerm) || 99);
+        if (ta !== tb) return ta - tb;
+        return a.courseCode.localeCompare(b.courseCode);
+      });
+  }, [schedCourses, activePlanMajorCode]);
+
+  const filteredActiveMajorCourses = useMemo(() => {
+    const q = curSearch.trim().toLowerCase();
+    return activeMajorCourses.filter((c) => {
+      if (curTermFilter !== 'all') {
+        const tk = normalizeCurriculumTermKey(c.recommendedTerm);
+        if (curTermFilter === 'unassigned') {
+          if (tk) return false;
+        } else if (tk !== curTermFilter) {
+          return false;
+        }
+      }
+      if (!q) return true;
+      return (
+        c.title.toLowerCase().includes(q) ||
+        normalizeSchedCode(c.courseCode).includes(normalizeSchedCode(q))
+      );
+    });
+  }, [activeMajorCourses, curSearch, curTermFilter]);
+
+  const activeMajorCourseCountsByCode = useMemo(() => {
+    const map = new Map<string, number>();
+    schedCourses.forEach((c) => {
+      const mCode = normalizeMajorCode(c.majorCode);
+      if (mCode) map.set(mCode, (map.get(mCode) || 0) + 1);
+    });
+    return map;
+  }, [schedCourses]);
+
+  const activeMajorEightTermCodes = useMemo(() => {
+    if (!activePlanMajorCode) {
+      return {
+        '1': [],
+        '2': [],
+        '3': [],
+        '4': [],
+        '5': [],
+        '6': [],
+        '7': [],
+        '8': [],
+      } as Record<EightTermKey, string[]>;
+    }
+    return getMajorEightTermPlanCourseCodes(settings, activePlanMajorCode, schedCourses);
+  }, [settings, activePlanMajorCode, schedCourses]);
+
+  const updateEightTermPlanForMajor = (
+    nextTermCodes: Record<EightTermKey, string[]>,
+    overrideCourses?: SchedCurriculumCourse[]
+  ) => {
+    if (!activePlanMajorCode) return;
+    const baseCourses = overrideCourses || schedCourses;
+    const courseTermLookup = new Map<string, EightTermKey>();
+    EIGHT_TERM_KEYS.forEach((tk) => {
+      (nextTermCodes[tk] || []).forEach((code) => {
+        courseTermLookup.set(normalizeSchedCode(code), tk);
+      });
+    });
+
+    const syncedCourses = baseCourses.map((c) => {
+      if (normalizeMajorCode(c.majorCode) !== activePlanMajorCode) return c;
+      const tk = courseTermLookup.get(normalizeSchedCode(c.courseCode));
+      return {
+        ...c,
+        recommendedTerm: tk || undefined,
+      };
+    });
+
+    const nextPlans: Record<string, Record<string, string[]>> = {
+      ...(settings.majorEightTermPlans || {}),
+      [activePlanMajorCode]: {
+        '1': [...(nextTermCodes['1'] || [])],
+        '2': [...(nextTermCodes['2'] || [])],
+        '3': [...(nextTermCodes['3'] || [])],
+        '4': [...(nextTermCodes['4'] || [])],
+        '5': [...(nextTermCodes['5'] || [])],
+        '6': [...(nextTermCodes['6'] || [])],
+        '7': [...(nextTermCodes['7'] || [])],
+        '8': [...(nextTermCodes['8'] || [])],
+      },
+    };
+    persistSchedCoursesAndSyncPlan(syncedCourses, nextPlans);
+  };
+
+  const handleAssignCourseToEightTerm = (courseCode: string, targetTerm: EightTermKey | '') => {
+    const normCode = normalizeSchedCode(courseCode);
+    if (!normCode) return;
+    const next: Record<EightTermKey, string[]> = {
+      '1': [...activeMajorEightTermCodes['1']],
+      '2': [...activeMajorEightTermCodes['2']],
+      '3': [...activeMajorEightTermCodes['3']],
+      '4': [...activeMajorEightTermCodes['4']],
+      '5': [...activeMajorEightTermCodes['5']],
+      '6': [...activeMajorEightTermCodes['6']],
+      '7': [...activeMajorEightTermCodes['7']],
+      '8': [...activeMajorEightTermCodes['8']],
+    };
+    EIGHT_TERM_KEYS.forEach((tk) => {
+      next[tk] = next[tk].filter((c) => normalizeSchedCode(c) !== normCode);
+    });
+    if (targetTerm) {
+      next[targetTerm].push(normCode);
+    }
+    updateEightTermPlanForMajor(next);
+  };
+
+  const handleSaveCurriculumCourse = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activePlanMajor || !activePlanMajorCode) {
+      setFeedback({ type: 'error', message: 'ابتدا یک رشته مصوب را انتخاب کنید.' });
+      return;
+    }
+    const cleanCode = normalizeSchedCode(curCode);
+    const cleanTitle = curTitle.trim();
+    if (!/^\d{7}$/.test(cleanCode)) {
+      setFeedback({ type: 'error', message: 'کد درس باید دقیقاً ۷ رقم عددی باشد.' });
+      return;
+    }
+    if (!cleanTitle) {
+      setFeedback({ type: 'error', message: 'لطفاً عنوان درس را وارد کنید.' });
+      return;
+    }
+    const dup = schedCourses.find(
+      (c) =>
+        c.id !== editingCurId &&
+        normalizeMajorCode(c.majorCode) === activePlanMajorCode &&
+        normalizeSchedCode(c.courseCode) === cleanCode
+    );
+    if (dup) {
+      setFeedback({
+        type: 'error',
+        message: `کد درس «${cleanCode}» قبلاً در سرفصل رشته «${activePlanMajor.name}» با عنوان «${dup.title}» ثبت شده است.`,
+      });
+      return;
+    }
+
+    const th = Math.max(0, parseDecimalUnits(curThUnits));
+    const pr = Math.max(0, parseDecimalUnits(curPrUnits));
+    const normTerm = normalizeCurriculumTermKey(curRecTerm) || '';
+
+    let nextCourses: SchedCurriculumCourse[];
+    if (editingCurId) {
+      nextCourses = schedCourses.map((c) =>
+        c.id === editingCurId
+          ? {
+              ...c,
+              courseCode: cleanCode,
+              title: cleanTitle,
+              majorCode: activePlanMajorCode,
+              majorName: activePlanMajor.name,
+              courseType: curType,
+              theoreticalUnits: th,
+              practicalUnits: pr,
+              practicalType: curPrType,
+              recommendedTerm: normTerm || undefined,
+              notes: curNotes.trim() || undefined,
+            }
+          : c
+      );
+    } else {
+      const created: SchedCurriculumCourse = {
+        id: `crs_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        courseCode: cleanCode,
+        title: cleanTitle,
+        majorCode: activePlanMajorCode,
+        majorName: activePlanMajor.name,
+        courseType: curType,
+        theoreticalUnits: th,
+        practicalUnits: pr,
+        practicalType: curPrType,
+        recommendedTerm: normTerm || undefined,
+        notes: curNotes.trim() || undefined,
+      };
+      nextCourses = [...schedCourses, created];
+    }
+
+    // همگام‌سازی برنامه ۸ ترمه این رشته در صورت تعیین یا تغییر ترم پیشنهادی
+    const updatedTermPlan: Record<EightTermKey, string[]> = {
+      '1': [...activeMajorEightTermCodes['1']],
+      '2': [...activeMajorEightTermCodes['2']],
+      '3': [...activeMajorEightTermCodes['3']],
+      '4': [...activeMajorEightTermCodes['4']],
+      '5': [...activeMajorEightTermCodes['5']],
+      '6': [...activeMajorEightTermCodes['6']],
+      '7': [...activeMajorEightTermCodes['7']],
+      '8': [...activeMajorEightTermCodes['8']],
+    };
+    EIGHT_TERM_KEYS.forEach((tk) => {
+      updatedTermPlan[tk] = updatedTermPlan[tk].filter(
+        (code) => normalizeSchedCode(code) !== cleanCode
+      );
+    });
+    if (normTerm) {
+      updatedTermPlan[normTerm].push(cleanCode);
+    }
+    const nextPlans: Record<string, Record<string, string[]>> = {
+      ...(settings.majorEightTermPlans || {}),
+      [activePlanMajorCode]: {
+        '1': updatedTermPlan['1'],
+        '2': updatedTermPlan['2'],
+        '3': updatedTermPlan['3'],
+        '4': updatedTermPlan['4'],
+        '5': updatedTermPlan['5'],
+        '6': updatedTermPlan['6'],
+        '7': updatedTermPlan['7'],
+        '8': updatedTermPlan['8'],
+      },
+    };
+    persistSchedCoursesAndSyncPlan(nextCourses, nextPlans);
+    setFeedback({
+      type: 'success',
+      message: editingCurId
+        ? `سرفصل درس «${cleanTitle}» (${cleanCode}) ویرایش شد.`
+        : `درس جدید «${cleanTitle}» (${cleanCode}) به سرفصل رشته «${activePlanMajor.name}» اضافه شد.`,
+    });
+    resetCurForm();
+  };
+
+  const handleDeleteCurriculumCourse = (crs: SchedCurriculumCourse) => {
+    const cleanCode = normalizeSchedCode(crs.courseCode);
+    const mCode = normalizeMajorCode(crs.majorCode);
+    const nextCourses = schedCourses.filter((c) => c.id !== crs.id);
+    const currentPlan = settings.majorEightTermPlans?.[mCode];
+    let nextPlans: Record<string, Record<string, string[]>> | undefined;
+    if (currentPlan) {
+      const cleanedPlan: Record<string, string[]> = {};
+      EIGHT_TERM_KEYS.forEach((tk) => {
+        cleanedPlan[tk] = (currentPlan[tk] || []).filter(
+          (code) => normalizeSchedCode(code) !== cleanCode
+        );
+      });
+      nextPlans = {
+        ...(settings.majorEightTermPlans || {}),
+        [mCode]: cleanedPlan,
+      };
+    }
+    persistSchedCoursesAndSyncPlan(nextCourses, nextPlans);
+    setConfirmDeleteCurId(null);
+    setFeedback({
+      type: 'success',
+      message: `درس «${crs.title}» (${crs.courseCode}) از سرفصل حذف شد.`,
+    });
+  };
+
+  const handleImportCurriculumExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const res = await parseSchedExcelFile(file, 'courses');
+      if (!res.courses || res.courses.length === 0) {
+        setFeedback({
+          type: 'error',
+          message: res.errors[0] || 'هیچ درس معتبری در فایل اکسل یافت نشد.',
+        });
+        return;
+      }
+      const merged = [...schedCourses];
+      let addedOrUpdated = 0;
+      for (const rawItem of res.courses) {
+        let targetMajorCode = normalizeMajorCode(rawItem.majorCode) || activePlanMajorCode;
+        let targetMajorName = rawItem.majorName || activePlanMajor?.name || '';
+        const matched = findClosestApprovedMajor(
+          rawItem.majorName,
+          approvedMajors,
+          rawItem.majorCode
+        );
+        if (matched && matched.score >= 80) {
+          targetMajorCode = normalizeMajorCode(matched.major.code) || targetMajorCode;
+          targetMajorName = matched.major.name;
+        } else if (!targetMajorCode && activePlanMajor) {
+          targetMajorCode = activePlanMajorCode;
+          targetMajorName = activePlanMajor.name;
+        }
+        const item: SchedCurriculumCourse = {
+          ...rawItem,
+          majorCode: targetMajorCode,
+          majorName: targetMajorName,
+        };
+        const idx = merged.findIndex(
+          (x) =>
+            normalizeSchedCode(x.courseCode) === normalizeSchedCode(item.courseCode) &&
+            normalizeMajorCode(x.majorCode) === normalizeMajorCode(item.majorCode)
+        );
+        if (idx >= 0) {
+          merged[idx] = { ...merged[idx], ...item, id: merged[idx].id };
+        } else {
+          merged.push(item);
+        }
+        addedOrUpdated++;
+      }
+      persistSchedCoursesAndSyncPlan(merged);
+      setFeedback({
+        type: 'success',
+        message: `${addedOrUpdated.toLocaleString('fa-IR')} سرفصل درس از اکسل پردازش و ذخیره شد.`,
+      });
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'خطا در خواندن فایل اکسل سرفصل.',
+      });
+    }
+  };
+
   return (
     <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
       {/* هدر بخش */}
@@ -622,7 +1022,7 @@ export const AdminAcademicMajorsSettings: React.FC<AdminAcademicMajorsSettingsPr
         <button
           type="button"
           onClick={() => setSubTab('standardize')}
-          className={`flex-1 min-w-[200px] px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`flex-1 min-w-[180px] px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 cursor-pointer ${
             subTab === 'standardize'
               ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-xs'
               : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
@@ -630,8 +1030,32 @@ export const AdminAcademicMajorsSettings: React.FC<AdminAcademicMajorsSettingsPr
         >
           <Wand2 className="w-4 h-4" />
           <span>
-            ۳. یکسان‌سازی داده‌های قبلی دانشجویان ({studentAudit.legacyGroups.length} مورد)
+            ۳. یکسان‌سازی دانشجویان ({studentAudit.legacyGroups.length} مورد)
           </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('curriculum')}
+          className={`flex-1 min-w-[170px] px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+            subTab === 'curriculum'
+              ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-xs'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+          }`}
+        >
+          <ListChecks className="w-4 h-4" />
+          <span>۴. سرفصل دروس رشته ({schedCourses.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('eight_term_plan')}
+          className={`flex-1 min-w-[180px] px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+            subTab === 'eight_term_plan'
+              ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-xs'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+          }`}
+        >
+          <CalendarRange className="w-4 h-4" />
+          <span>۵. برنامه ۸ ترمه پیش‌فرض</span>
         </button>
       </div>
 
@@ -1318,6 +1742,719 @@ export const AdminAcademicMajorsSettings: React.FC<AdminAcademicMajorsSettingsPr
           )}
         </div>
       )}
+
+      {/* ===================================================================== */}
+      {/* تب ۴: مدیریت سرفصل دروس هر کد رشته                                  */}
+      {/* ===================================================================== */}
+      {subTab === 'curriculum' && (
+        <div className="space-y-5 text-xs">
+          {approvedMajors.length === 0 ? (
+            <div className="p-6 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 flex flex-wrap items-center justify-between gap-3">
+              <span className="font-bold text-amber-900 dark:text-amber-200">
+                برای ثبت سرفصل دروس، ابتدا باید حداقل یک رشته مصوب همراه با کد رشته ثبت کنید.
+              </span>
+              <button
+                type="button"
+                onClick={() => setSubTab('majors')}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold cursor-pointer"
+              >
+                ثبت رشته مصوب
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* نوار انتخاب رشته و اقدامات اکسل */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                  <span className="font-extrabold text-slate-700 dark:text-slate-200">
+                    انتخاب کد و عنوان رشته:
+                  </span>
+                  <select
+                    value={activePlanMajor?.id || ''}
+                    onChange={(e) => {
+                      setSelectedPlanMajorId(e.target.value);
+                      resetCurForm();
+                    }}
+                    className="min-w-[260px] flex-1 max-w-md px-3 py-2 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 font-extrabold text-slate-900 dark:text-white"
+                  >
+                    {approvedMajors.map((m) => {
+                      const cnt = activeMajorCourseCountsByCode.get(normalizeMajorCode(m.code)) || 0;
+                      return (
+                        <option key={m.id} value={m.id}>
+                          {formatApprovedMajorLabel(m)} — ({cnt} درس)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void downloadSchedExcelTemplate('courses')}
+                    className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>اکسل نمونه</span>
+                  </button>
+                  <label className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold inline-flex items-center gap-1.5 cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>ورود از اکسل</span>
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={(e) => void handleImportCurriculumExcel(e)}
+                      className="hidden"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const rows = activeMajorCourses.map((c) => ({
+                        'کد درس ۷ رقمی': c.courseCode,
+                        'نام درس': c.title,
+                        'کد رشته ۶ رقمی': c.majorCode,
+                        'نام رشته': c.majorName,
+                        'نوع درس': SCHED_COURSE_TYPE_LABELS[c.courseType],
+                        'واحد نظری': c.theoreticalUnits,
+                        'واحد عملی': c.practicalUnits,
+                        'نوع واحد عملی': SCHED_PRACTICAL_TYPE_LABELS[c.practicalType],
+                        'ترم پیشنهادی': c.recommendedTerm || '',
+                        'توضیحات': c.notes || '',
+                      }));
+                      void exportJsonRowsToExcel(
+                        rows,
+                        'سرفصل دروس',
+                        `سرفصل_${activePlanMajorCode || 'major'}.xlsx`
+                      );
+                    }}
+                    className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>خروجی اکسل این رشته</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('eight_term_plan')}
+                    className="px-3 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <CalendarRange className="w-3.5 h-3.5" />
+                    <span>چینش برنامه ۸ ترمه این رشته</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* فرم افزودن / ویرایش سرفصل درس برای رشته انتخاب‌شده */}
+              <form
+                onSubmit={handleSaveCurriculumCourse}
+                className="p-4 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800/70 space-y-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-extrabold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                    {editingCurId ? <Edit3 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                    <span>
+                      {editingCurId
+                        ? `ویرایش درس در سرفصل «${activePlanMajor?.name}» (${activePlanMajorCode})`
+                        : `افزودن درس جدید به سرفصل «${activePlanMajor?.name}» (${activePlanMajorCode})`}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!curTitle.trim()) setCurTitle('تربیت بدنی');
+                        setCurType('theoretical_practical');
+                        setCurThUnits('0.5');
+                        setCurPrUnits('0.5');
+                        setCurPrType('normal_lab');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold cursor-pointer"
+                    >
+                      الگوی تربیت بدنی (۰.۵ + ۰.۵)
+                    </button>
+                    {editingCurId && (
+                      <button
+                        type="button"
+                        onClick={resetCurForm}
+                        className="px-3 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold cursor-pointer"
+                      >
+                        انصراف از ویرایش
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <label className="space-y-1">
+                    <span className="font-bold">کد درس ۷ رقمی *</span>
+                    <input
+                      type="text"
+                      required
+                      maxLength={7}
+                      value={curCode}
+                      onChange={(e) => setCurCode(e.target.value)}
+                      placeholder="1111405"
+                      dir="ltr"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                    />
+                  </label>
+                  <label className="space-y-1 lg:col-span-2">
+                    <span className="font-bold">عنوان رسمی درس *</span>
+                    <input
+                      type="text"
+                      required
+                      value={curTitle}
+                      onChange={(e) => setCurTitle(e.target.value)}
+                      placeholder="مثلاً: اصول و مبانی تعلیم و تربیت اسلامی"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="font-bold">ترم پیش‌فرض (برنامه ۸ ترمه)</span>
+                    <select
+                      value={curRecTerm}
+                      onChange={(e) => setCurRecTerm(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                    >
+                      <option value="">-- تعیین‌نشده --</option>
+                      {EIGHT_TERM_KEYS.map((tk) => (
+                        <option key={tk} value={tk}>
+                          {EIGHT_TERM_LABELS[tk]} (ترم {tk})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 items-end">
+                  <label className="space-y-1">
+                    <span className="font-bold">نوع درس</span>
+                    <select
+                      value={curType}
+                      onChange={(e) => setCurType(e.target.value as SchedCourseType)}
+                      className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    >
+                      {(Object.keys(SCHED_COURSE_TYPE_LABELS) as SchedCourseType[]).map((k) => (
+                        <option key={k} value={k}>
+                          {SCHED_COURSE_TYPE_LABELS[k]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1">
+                    <span className="font-bold">واحد نظری</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.5"
+                      value={curThUnits}
+                      onChange={(e) => setCurThUnits(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="font-bold">واحد عملی</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.5"
+                      value={curPrUnits}
+                      onChange={(e) => setCurPrUnits(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="font-bold">نوع واحد عملی</span>
+                    <select
+                      value={curPrType}
+                      onChange={(e) => setCurPrType(e.target.value as SchedPracticalUnitType)}
+                      className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    >
+                      {(Object.keys(SCHED_PRACTICAL_TYPE_LABELS) as SchedPracticalUnitType[]).map(
+                        (k) => (
+                          <option key={k} value={k}>
+                            {SCHED_PRACTICAL_TYPE_LABELS[k]}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </label>
+                  <button
+                    type="submit"
+                    className="py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{editingCurId ? 'ثبت تغییرات درس' : 'افزودن به سرفصل'}</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* فیلتر و جدول دروس سرفصل رشته */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="relative flex-1 min-w-[220px] max-w-sm">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={curSearch}
+                    onChange={(e) => setCurSearch(e.target.value)}
+                    placeholder="جستجو بر اساس کد ۷ رقمی یا نام درس..."
+                    className="w-full pr-9 pl-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={curTermFilter}
+                    onChange={(e) => setCurTermFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                  >
+                    <option value="all">همه ترم‌ها ({activeMajorCourses.length})</option>
+                    {EIGHT_TERM_KEYS.map((tk) => (
+                      <option key={tk} value={tk}>
+                        {EIGHT_TERM_LABELS[tk]}
+                      </option>
+                    ))}
+                    <option value="unassigned">بدون ترم پیشنهادی</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto">
+                <table className="w-full text-right">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                    <tr>
+                      <th className="p-3">کد درس ۷ رقمی</th>
+                      <th className="p-3">عنوان درس</th>
+                      <th className="p-3">نوع درس</th>
+                      <th className="p-3 text-center">واحد نظری / عملی</th>
+                      <th className="p-3 text-center">ساعت هفتگی</th>
+                      <th className="p-3 text-center">ترم برنامه ۸ ترمه</th>
+                      <th className="p-3 text-center">عملیات</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 tabular-nums">
+                    {filteredActiveMajorCourses.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-slate-400 font-bold">
+                          درسی برای رشته «{activePlanMajor?.name}» با این فیلتر ثبت نشده است.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredActiveMajorCourses.map((c) => {
+                        const bd = calculateOfferingBreakdown(c, schedRules);
+                        const termKey = normalizeCurriculumTermKey(c.recommendedTerm);
+                        return (
+                          <tr key={c.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                            <td className="p-3 font-mono font-black text-indigo-700 dark:text-indigo-300">
+                              {c.courseCode}
+                            </td>
+                            <td className="p-3 font-bold text-slate-900 dark:text-white">
+                              {c.title}
+                            </td>
+                            <td className="p-3 text-slate-600 dark:text-slate-300">
+                              {SCHED_COURSE_TYPE_LABELS[c.courseType]}
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className="font-bold">
+                                {(c.theoreticalUnits + c.practicalUnits).toLocaleString('fa-IR')} واحد
+                              </span>
+                              <span className="block text-[10px] text-slate-500">
+                                ({c.theoreticalUnits} ن + {c.practicalUnits} ع
+                                {c.practicalUnits > 0
+                                  ? ` · ${SCHED_PRACTICAL_TYPE_LABELS[c.practicalType]}`
+                                  : ''}
+                                )
+                              </span>
+                            </td>
+                            <td className="p-3 text-center font-bold text-teal-700 dark:text-teal-300">
+                              {bd.weeklyHours.toLocaleString('fa-IR')} ساعت
+                            </td>
+                            <td className="p-3 text-center">
+                              {termKey ? (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200 text-[10.5px] font-extrabold">
+                                  {EIGHT_TERM_LABELS[termKey]}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-[10.5px]">تعیین‌نشده</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingCurId(c.id);
+                                    setCurCode(c.courseCode);
+                                    setCurTitle(c.title);
+                                    setCurType(c.courseType);
+                                    setCurThUnits(String(c.theoreticalUnits));
+                                    setCurPrUnits(String(c.practicalUnits));
+                                    setCurPrType(c.practicalType);
+                                    setCurRecTerm(normalizeCurriculumTermKey(c.recommendedTerm) || '');
+                                    setCurNotes(c.notes || '');
+                                  }}
+                                  className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 cursor-pointer"
+                                  title="ویرایش"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                {confirmDeleteCurId === c.id ? (
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteCurriculumCourse(c)}
+                                      className="px-2 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-bold cursor-pointer"
+                                    >
+                                      تأیید حذف
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteCurId(null)}
+                                      className="px-2 py-1 rounded-lg bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
+                                    >
+                                      لغو
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteCurId(c.id)}
+                                    className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 hover:text-rose-600 cursor-pointer"
+                                    title="حذف از سرفصل"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* تب ۵: تنظیم برنامه هشت‌ترمه پیش‌فرض هر رشته                         */}
+      {/* ===================================================================== */}
+      {subTab === 'eight_term_plan' && (() => {
+        const courseByCode = new Map(
+          activeMajorCourses.map((c) => [normalizeSchedCode(c.courseCode), c])
+        );
+        const assignedCodeSet = new Set<string>();
+        EIGHT_TERM_KEYS.forEach((tk) => {
+          (activeMajorEightTermCodes[tk] || []).forEach((code) =>
+            assignedCodeSet.add(normalizeSchedCode(code))
+          );
+        });
+        const unassignedCourses = activeMajorCourses.filter(
+          (c) => !assignedCodeSet.has(normalizeSchedCode(c.courseCode))
+        );
+        const totalAssignedUnits = round2(
+          Array.from(assignedCodeSet).reduce((sum, code) => {
+            const c = courseByCode.get(code);
+            return sum + (c ? c.theoreticalUnits + c.practicalUnits : 0);
+          }, 0)
+        );
+        const totalAssignedHours = round2(
+          Array.from(assignedCodeSet).reduce((sum, code) => {
+            const c = courseByCode.get(code);
+            return sum + (c ? calculateOfferingBreakdown(c, schedRules).weeklyHours : 0);
+          }, 0)
+        );
+
+        return (
+          <div className="space-y-5 text-xs">
+            {approvedMajors.length === 0 ? (
+              <div className="p-6 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 flex flex-wrap items-center justify-between gap-3">
+                <span className="font-bold text-amber-900 dark:text-amber-200">
+                  ابتدا باید رشته‌های مصوب و کد رشته آن‌ها را ثبت کنید.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSubTab('majors')}
+                  className="px-4 py-2 rounded-xl bg-amber-600 text-white font-extrabold cursor-pointer"
+                >
+                  ثبت رشته مصوب
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* نوار انتخاب رشته و خلاصه آماری برنامه ۸ ترمه */}
+                <div className="p-4 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                    <span className="font-extrabold text-emerald-950 dark:text-emerald-200">
+                      انتخاب رشته برای چارت ۸ ترمه:
+                    </span>
+                    <select
+                      value={activePlanMajor?.id || ''}
+                      onChange={(e) => setSelectedPlanMajorId(e.target.value)}
+                      className="min-w-[260px] flex-1 max-w-md px-3 py-2 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-900 font-extrabold"
+                    >
+                      {approvedMajors.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {formatApprovedMajorLabel(m)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 tabular-nums">
+                    <span className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 font-bold">
+                      دروس چیده‌شده: {assignedCodeSet.size.toLocaleString('fa-IR')} از{' '}
+                      {activeMajorCourses.length.toLocaleString('fa-IR')}
+                    </span>
+                    <span className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-extrabold">
+                      جمع کل واحدها: {totalAssignedUnits.toLocaleString('fa-IR')} واحد ({totalAssignedHours.toLocaleString('fa-IR')} ساعت)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rows = EIGHT_TERM_KEYS.flatMap((tk) =>
+                          (activeMajorEightTermCodes[tk] || [])
+                            .map((code) => courseByCode.get(normalizeSchedCode(code)))
+                            .filter((c): c is SchedCurriculumCourse => Boolean(c))
+                            .map((c) => ({
+                              'ترم پیشنهادی': EIGHT_TERM_LABELS[tk],
+                              'شماره ترم': Number(tk),
+                              'کد رشته': activePlanMajorCode,
+                              'نام رشته': activePlanMajor?.name || '',
+                              'کد درس ۷ رقمی': c.courseCode,
+                              'عنوان درس': c.title,
+                              'نوع درس': SCHED_COURSE_TYPE_LABELS[c.courseType],
+                              'واحد نظری': c.theoreticalUnits,
+                              'واحد عملی': c.practicalUnits,
+                              'مجموع واحد': c.theoreticalUnits + c.practicalUnits,
+                            }))
+                        );
+                        void exportJsonRowsToExcel(
+                          rows,
+                          'برنامه هشت ترمه',
+                          `برنامه_۸ترمه_${activePlanMajorCode || 'major'}.xlsx`
+                        );
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 font-bold inline-flex items-center gap-1.5 cursor-pointer hover:bg-emerald-100"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>خروجی اکسل</span>
+                    </button>
+                  </div>
+                </div>
+
+                {activeMajorCourses.length === 0 ? (
+                  <div className="p-8 rounded-2xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-center space-y-3">
+                    <div className="font-extrabold text-amber-900 dark:text-amber-200">
+                      هنوز هیچ درسی در سرفصل رشته «{activePlanMajor?.name}» ثبت نشده است.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSubTab('curriculum')}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold cursor-pointer"
+                    >
+                      رفتن به تب ۴ و افزودن سرفصل دروس این رشته
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* دروس سرفصل که هنوز به ترمی تخصیص داده نشده‌اند */}
+                    {unassignedCourses.length > 0 && (
+                      <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                        <div className="font-extrabold text-slate-800 dark:text-slate-100 flex items-center justify-between gap-2">
+                          <span>
+                            دروس موجود در سرفصل بدون جایگاه در برنامه ۸ ترمه ({unassignedCourses.length.toLocaleString('fa-IR')} درس):
+                          </span>
+                          <span className="text-[11px] font-normal text-slate-500">
+                            از منوی روبه‌روی هر درس، ترم مورد نظر را انتخاب کنید تا به برنامه افزوده شود.
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                          {unassignedCourses.map((c) => (
+                            <div
+                              key={c.id}
+                              className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0">
+                                <div className="font-bold text-slate-900 dark:text-white truncate">
+                                  {c.title}
+                                </div>
+                                <div className="text-[10.5px] text-slate-500 font-mono">
+                                  {c.courseCode} · {(c.theoreticalUnits + c.practicalUnits).toLocaleString('fa-IR')} واحد
+                                </div>
+                              </div>
+                              <select
+                                value=""
+                                onChange={(e) => {
+                                  const tk = e.target.value as EightTermKey | '';
+                                  if (tk) handleAssignCourseToEightTerm(c.courseCode, tk);
+                                }}
+                                className="px-2 py-1 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 text-[11px] font-bold text-emerald-800 dark:text-emerald-200 cursor-pointer shrink-0"
+                              >
+                                <option value="">+ تخصیص به ترم...</option>
+                                {EIGHT_TERM_KEYS.map((tk) => (
+                                  <option key={tk} value={tk}>
+                                    {EIGHT_TERM_LABELS[tk]}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* شبکه ۸ ترمه (ترم اول تا ترم هشتم) */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {EIGHT_TERM_KEYS.map((tk) => {
+                        const termCodes = activeMajorEightTermCodes[tk] || [];
+                        const termCourses = termCodes
+                          .map((code) => courseByCode.get(normalizeSchedCode(code)))
+                          .filter((c): c is SchedCurriculumCourse => Boolean(c));
+                        const termUnits = round2(
+                          termCourses.reduce(
+                            (sum, c) => sum + c.theoreticalUnits + c.practicalUnits,
+                            0
+                          )
+                        );
+                        const termHours = round2(
+                          termCourses.reduce(
+                            (sum, c) => sum + calculateOfferingBreakdown(c, schedRules).weeklyHours,
+                            0
+                          )
+                        );
+                        const availableToAddHere = activeMajorCourses.filter(
+                          (c) =>
+                            !termCodes.some(
+                              (tc) => normalizeSchedCode(tc) === normalizeSchedCode(c.courseCode)
+                            )
+                        );
+
+                        return (
+                          <div
+                            key={tk}
+                            className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex flex-col overflow-hidden"
+                          >
+                            <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-7 h-7 rounded-xl bg-teal-600 text-white font-black flex items-center justify-center font-mono">
+                                  {tk}
+                                </span>
+                                <div>
+                                  <div className="font-black text-slate-900 dark:text-white">
+                                    {EIGHT_TERM_LABELS[tk]}
+                                  </div>
+                                  <div className="text-[10.5px] text-slate-500">
+                                    {termCourses.length.toLocaleString('fa-IR')} درس
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="text-left tabular-nums">
+                                <span className="px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-200 font-extrabold">
+                                  {termUnits.toLocaleString('fa-IR')} واحد ({termHours.toLocaleString('fa-IR')} ساعت)
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="p-3 space-y-2 flex-1">
+                              {termCourses.length === 0 ? (
+                                <div className="py-5 text-center text-slate-400 text-[11px]">
+                                  هنوز درسی برای {EIGHT_TERM_LABELS[tk]} تعیین نشده است.
+                                </div>
+                              ) : (
+                                termCourses.map((c) => (
+                                  <div
+                                    key={c.id}
+                                    className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="font-bold text-slate-900 dark:text-white truncate">
+                                        {c.title}
+                                      </div>
+                                      <div className="text-[10.5px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
+                                        <span className="font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                                          {c.courseCode}
+                                        </span>
+                                        <span>·</span>
+                                        <span>
+                                          {(c.theoreticalUnits + c.practicalUnits).toLocaleString('fa-IR')} واحد
+                                        </span>
+                                        <span>·</span>
+                                        <span>{SCHED_COURSE_TYPE_LABELS[c.courseType]}</span>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <select
+                                        value={tk}
+                                        onChange={(e) =>
+                                          handleAssignCourseToEightTerm(
+                                            c.courseCode,
+                                            e.target.value as EightTermKey
+                                          )
+                                        }
+                                        className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-[10.5px] font-bold cursor-pointer"
+                                        title="جابه‌جایی به ترم دیگر"
+                                      >
+                                        {EIGHT_TERM_KEYS.map((optTk) => (
+                                          <option key={optTk} value={optTk}>
+                                            ترم {optTk}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleAssignCourseToEightTerm(c.courseCode, '')
+                                        }
+                                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                                        title="خروج از این ترم"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            {availableToAddHere.length > 0 && (
+                              <div className="px-3 py-2.5 bg-slate-50/70 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800">
+                                <select
+                                  value=""
+                                  onChange={(e) => {
+                                    if (e.target.value) {
+                                      handleAssignCourseToEightTerm(e.target.value, tk);
+                                    }
+                                  }}
+                                  className="w-full px-2.5 py-1.5 rounded-xl border border-dashed border-teal-400 dark:border-teal-700 bg-white dark:bg-slate-900 text-[11px] font-bold text-teal-800 dark:text-teal-200 cursor-pointer"
+                                >
+                                  <option value="">
+                                    + افزودن یا انتقال درس از سرفصل به {EIGHT_TERM_LABELS[tk]}...
+                                  </option>
+                                  {availableToAddHere.map((c) => {
+                                    const curTk = normalizeCurriculumTermKey(c.recommendedTerm);
+                                    return (
+                                      <option key={c.id} value={c.courseCode}>
+                                        {c.title} ({c.courseCode}) —{' '}
+                                        {(c.theoreticalUnits + c.practicalUnits).toLocaleString('fa-IR')} و
+                                        {curTk ? ` [فعلاً در ترم ${curTk}]` : ''}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };

@@ -3025,6 +3025,10 @@ export const Storage = {
       Array.isArray(raw?.academicDegreeLevels) && raw.academicDegreeLevels.length > 0
         ? raw.academicDegreeLevels
         : DEFAULT_ACADEMIC_DEGREE_LEVELS;
+    const normalizedEightTermPlans =
+      raw?.majorEightTermPlans && typeof raw.majorEightTermPlans === 'object'
+        ? raw.majorEightTermPlans
+        : {};
     const banner = (raw?.announcementBanner || '').trim();
     if (
       banner &&
@@ -3036,12 +3040,14 @@ export const Storage = {
         announcementBanner: INITIAL_SETTINGS.announcementBanner,
         academicDegreeLevels: normalizedLevels,
         approvedMajors: normalizedMajors,
+        majorEightTermPlans: normalizedEightTermPlans,
       };
     }
     return {
       ...raw,
       academicDegreeLevels: normalizedLevels,
       approvedMajors: normalizedMajors,
+      majorEightTermPlans: normalizedEightTermPlans,
     };
   },
   setSettings: (settings: AppSettings): boolean => set(STORAGE_KEYS.SETTINGS, settings),
@@ -14528,6 +14534,11 @@ export const Storage = {
           },
         };
       })(),
+      termOfferedCoursesByCohort:
+        stored.termOfferedCoursesByCohort &&
+        typeof stored.termOfferedCoursesByCohort === 'object'
+          ? stored.termOfferedCoursesByCohort
+          : {},
     };
   },
   setSchedRules: (rules: SchedRulesSettings): boolean =>

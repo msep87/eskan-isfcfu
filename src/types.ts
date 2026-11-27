@@ -844,6 +844,7 @@ export interface AppSettings {
   studentPortals?: StudentPortalLink[]; // فهرست سامانه‌ها و درگاه‌های بیرونی قابل مدیریت توسط مدیر برای کارتابل دانشجو
   academicDegreeLevels?: AcademicDegreeLevel[]; // فهرست مقاطع تحصیلی مصوب دانشگاه
   approvedMajors?: ApprovedAcademicMajor[]; // فهرست ثابت رشته‌های تحصیلی مصوب دانشگاه همراه با کد رشته و مقطع
+  majorEightTermPlans?: Record<string, Record<string, string[]>>; // برنامه هشت‌ترمه پیش‌فرض هر رشته (کد رشته -> ترم ۱ تا ۸ -> کدهای ۷ رقمی دروس)
 }
 
 export interface AcademicDegreeLevel {
@@ -2112,6 +2113,7 @@ export interface SchedRulesSettings {
   };
   masterGridLayout?: SchedMasterGridLayoutSettings;
   masterPrintSettings?: SchedMasterPrintSettings;
+  termOfferedCoursesByCohort?: Record<string, Record<string, string[]>>; // دروس انتخاب‌شده از سرفصل برای ارائه به هر رشته-ورودی در هر ترم (termKey -> cohortId -> courseCodes)
 }
 
 export interface SchedSharedTarget {
@@ -2137,11 +2139,21 @@ export type SchedWorkspaceRole =
   | 'department_head'
   | 'education_expert';
 
+export interface SchedOfferingSession {
+  id?: string;
+  dayOfWeek: SchedDayKey;
+  slotIds: string[];
+  slotParts?: Record<string, SchedSlotHalf>;
+  classroomId?: string;
+  classroomName?: string;
+}
+
 export interface SchedCourseOffering {
   id: string;
   termKey: string; // نیمسال فعال مثلاً 1405-1
   courseId: string;
   courseCode: string; // کد درس ۷ رقمی
+  courseGroupCode?: string; // کد گروه دو رقمی گلستان (مثلاً 01، 07 برای قالب 1111405_07)
   courseTitle: string;
   courseType: SchedCourseType;
   practicalType: SchedPracticalUnitType;
@@ -2165,8 +2177,9 @@ export interface SchedCourseOffering {
   classroomId?: string;
   classroomName?: string;
   dayOfWeek?: SchedDayKey;
-  slotIds: string[]; // سانس‌های اشغال‌شده
+  slotIds: string[]; // سانس‌های اشغال‌شده (در حالت چندجلسه‌ای منطبق با جلسه اول برای سازگاری)
   slotParts?: Record<string, SchedSlotHalf>; // تفکیک ساعت اول (راست) / ساعت دوم (چپ) / کل سانس
+  sessions?: SchedOfferingSession[]; // جلسات هفتگی درس با پشتیبانی از روزها و سانس‌های مجزا (مثلاً ۲ ساعت یکشنبه + ۱ ساعت سه‌شنبه)
   splitPart?: 'full' | 'theory' | 'practical';
   examDayId?: string; // روز امتحان پایان ترم (صرفاً برای دروس نظری)
   examSlotId?: string; // سانس امتحان پایان ترم (صرفاً برای دروس نظری)

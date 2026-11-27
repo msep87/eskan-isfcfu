@@ -13,8 +13,11 @@ import {
   SCHED_PRACTICAL_TYPE_LABELS,
   SmartSchedulerResult,
   calculateOfferingBreakdown,
+  formatGolestanCourseCode,
+  formatOfferingSessionsSummary,
   formatProfessorDepartmentAndField,
   getSchedSlotTitle,
+  getSelectedTermCoursesForCohort,
   normalizeSchedCode,
   round2,
   runSmartAutoScheduler,
@@ -104,20 +107,23 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
   const activeSections = selectedCohort?.sections || [];
 
   const candidateCourses = useMemo(() => {
+    if (!selectedCohort) return [];
+    const termState = getSelectedTermCoursesForCohort({
+      termKey: activeTerm,
+      cohortId: selectedCohort.id,
+      majorCode: selectedCohort.majorCode,
+      allCourses: courses,
+      rules,
+    });
     const q = courseSearch.trim().toLowerCase();
-    return courses.filter((c) => {
-      const majorOk =
-        !selectedCohort ||
-        normalizeSchedCode(c.majorCode) === normalizeSchedCode(selectedCohort.majorCode) ||
-        c.majorName === selectedCohort.majorName;
-      if (!majorOk) return false;
+    return termState.selectedCourses.filter((c) => {
       if (!q) return true;
       return (
         c.title.toLowerCase().includes(q) ||
         normalizeSchedCode(c.courseCode).includes(normalizeSchedCode(q))
       );
     });
-  }, [courses, selectedCohort, courseSearch]);
+  }, [courses, selectedCohort, courseSearch, activeTerm, rules]);
 
   const handleAddCourseToQueue = (course: SchedCurriculumCourse) => {
     if (!selectedCohort) return;
@@ -306,8 +312,8 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
 
                   <div className="max-h-72 overflow-y-auto divide-y divide-slate-200 dark:divide-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900">
                     {candidateCourses.length === 0 ? (
-                      <div className="p-4 text-center text-xs text-slate-400">
-                        درسی برای این رشته یافت نشد.
+                      <div className="p-4 text-center text-xs text-amber-700 dark:text-amber-300 font-bold">
+                        هنوز درسی از سرفصل این رشته برای ارائه در ترم {activeTerm} انتخاب نشده است. ابتدا در بخش «دروس قابل ارائه ترم» دروس این ورودی را تیک بزنید.
                       </div>
                     ) : (
                       candidateCourses.map((c) => {
@@ -790,22 +796,8 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {previewResult.placedOfferings.map((o) => {
                       const bd = calculateOfferingBreakdown(o, rules);
-                      const slotLabels = o.slotIds
-                        .map((sid) => {
-                          const idx = sortedSlots.findIndex((s) => s.id === sid);
-                          const sl = idx >= 0 ? sortedSlots[idx] : undefined;
-                          const half = o.slotParts?.[sid];
-                          const halfSuffix =
-                            half === 'first_hour'
-                              ? ' [۱س اول]'
-                              : half === 'second_hour'
-                              ? ' [۱س دوم]'
-                              : '';
-                          return sl
-                            ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})${halfSuffix}`
-                            : sid;
-                        })
-                        .join(' + ');
+                      const golestanCode = formatGolestanCourseCode(o.courseCode, o.courseGroupCode);
+                      const scheduleSummary = formatOfferingSessionsSummary(o, sortedSlots, true);
                       return (
                         <tr
                           key={o.id}
@@ -818,7 +810,9 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
                         >
                           <td className="p-2.5">
                             <div className="font-bold text-slate-900 dark:text-white">{o.courseTitle}</div>
-                            <div className="text-[11px] text-slate-500 font-mono">{o.courseCode}</div>
+                            <div className="text-[11px] text-slate-500 font-mono" dir="ltr">
+                              {golestanCode}
+                            </div>
                             {(o.isProvisional || o.isDisabled) && (
                               <div className="text-[10px] font-black text-amber-800 dark:text-amber-300 mt-0.5">
                                 ⚠ موقت / نیازمند تکمیل ({o.disabledReason || 'استاد یا کلاس'})
@@ -829,7 +823,7 @@ export const CourseSchedulingAutoWizard: React.FC<CourseSchedulingAutoWizardProp
                             {o.ownerMajorName} ({o.entryTerm}){o.sectionName ? ` · ${o.sectionName}` : ''}
                           </td>
                           <td className="p-2.5 text-[11px] font-bold text-indigo-700 dark:text-indigo-300">
-                            {o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : '-'} · <span className="font-mono">{slotLabels}</span>
+                            {scheduleSummary}
                           </td>
                           <td className="p-2.5 text-[11px]">{o.classroomName || 'کارورزی / بدون کلاس'}</td>
                           <td className="p-2.5 text-[11px]">{o.professorName || 'تعیین‌نشده'}</td>

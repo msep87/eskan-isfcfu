@@ -19,7 +19,16 @@ import {
   detectOfferingConflicts,
   evaluateProfessorEquivalentUnitStatus,
   exportJsonRowsToExcel,
+  formatGolestanCourseCode,
+  formatOfferingSessionsSummary,
+  getOfferingClassroomAtSession,
+  getOfferingSessionSlotHalf,
+  getOfferingSessions,
   getSchedSlotTitle,
+  getSlotDurationHours,
+  getSlotHalfLabel,
+  hasOfferingAnySchedule,
+  isOfferingAtDaySlot,
   isOfferingEffectivelyActive,
   printSchedHtml,
   round2,
@@ -102,11 +111,24 @@ function renderMatrixTableHtml(
     .map((day) => {
       const cols = sortedSlots
         .map((slot) => {
-          const matched = items.filter((o) => o.dayOfWeek === day && o.slotIds.includes(slot.id));
+          const matched = items.filter((o) => isOfferingAtDaySlot(o, day, slot.id));
           if (matched.length === 0) return '<td style="text-align:center;color:#94a3b8;">—</td>';
           const cards = matched
             .map((o) => {
               const bd = calculateOfferingBreakdown(o, rules);
+              const sessList = getOfferingSessions(o);
+              const sessIdx = sessList.findIndex(
+                (s) => s.dayOfWeek === day && s.slotIds.includes(slot.id)
+              );
+              const sessHere = sessIdx >= 0 ? sessList[sessIdx] : undefined;
+              const sessRoom = getOfferingClassroomAtSession(o, sessHere);
+              const half = getOfferingSessionSlotHalf(o, day, slot.id);
+              const halfBadge = half !== 'full' ? ` [${getSlotHalfLabel(half)}]` : '';
+              const sessBadge =
+                sessList.length > 1
+                  ? ` [جلسه ${(sessIdx + 1).toLocaleString('fa-IR')}/${sessList.length.toLocaleString('fa-IR')}]`
+                  : '';
+              const golestanCode = formatGolestanCourseCode(o.courseCode, o.courseGroupCode);
               const sharedTxt =
                 o.sharedWithTargets && o.sharedWithTargets.length > 0
                   ? ` + مشترک (${o.sharedWithTargets.map((t) => `${t.majorName} ${t.entryTerm}`).join('، ')})`
@@ -115,10 +137,10 @@ function renderMatrixTableHtml(
                 mode === 'classroom'
                   ? `استاد: ${o.professorName || 'تعیین‌نشده'} | ${o.ownerMajorName} (${o.entryTerm}${o.sectionName ? ` - ${o.sectionName}` : ''})${sharedTxt}`
                   : mode === 'program'
-                  ? `استاد: ${o.professorName || 'تعیین‌نشده'} | مکان: ${o.classroomName || 'نامشخص'}`
-                  : `رشته: ${o.ownerMajorName} (${o.entryTerm}${o.sectionName ? ` - ${o.sectionName}` : ''})${sharedTxt} | مکان: ${o.classroomName || 'نامشخص'}`;
+                  ? `استاد: ${o.professorName || 'تعیین‌نشده'} | مکان: ${sessRoom.classroomName || 'نامشخص'}`
+                  : `رشته: ${o.ownerMajorName} (${o.entryTerm}${o.sectionName ? ` - ${o.sectionName}` : ''})${sharedTxt} | مکان: ${sessRoom.classroomName || 'نامشخص'}`;
               return `<div class="cell-item">
-                <div><strong>${escapeHtml(o.courseTitle)}</strong> <span class="mono muted">(${escapeHtml(o.courseCode)})</span></div>
+                <div><strong>${escapeHtml(o.courseTitle)}</strong>${escapeHtml(halfBadge)}${escapeHtml(sessBadge)} <span class="mono muted">(${escapeHtml(golestanCode)})</span></div>
                 <div class="muted">${escapeHtml(detailLine)}</div>
                 <div class="muted">${bd.rawUnits} واحد | ${bd.weeklyHours} ساعت</div>
               </div>`;
@@ -279,8 +301,22 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
 
         for (const o of secOffs) {
           const bd = calculateOfferingBreakdown(o, rules);
-          if (o.dayOfWeek) {
-            dayHourMap.set(o.dayOfWeek, round2((dayHourMap.get(o.dayOfWeek) || 0) + bd.weeklyHours));
+          const sessions = getOfferingSessions(o);
+          if (sessions.length <= 1 && sessions[0]) {
+            const dKey = sessions[0].dayOfWeek;
+            dayHourMap.set(dKey, round2((dayHourMap.get(dKey) || 0) + bd.weeklyHours));
+          } else {
+            for (const sess of sessions) {
+              const sessHours = round2(
+                sess.slotIds.reduce((sum, sid) => {
+                  const half = sess.slotParts?.[sid];
+                  if (half === 'first_hour' || half === 'second_hour') return sum + 1;
+                  const sl = rules.timeSlots.find((s) => s.id === sid);
+                  return sum + (sl ? getSlotDurationHours(sl) : 2);
+                }, 0)
+              );
+              dayHourMap.set(sess.dayOfWeek, round2((dayHourMap.get(sess.dayOfWeek) || 0) + sessHours));
+            }
           }
         }
 
@@ -321,16 +357,43 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
       return true;
     });
 
+    const getSessionHours = (sess: { slotIds: string[]; slotParts?: Record<string, string> }) =>
+      round2(
+        sess.slotIds.reduce((sum, sid) => {
+          const half = sess.slotParts?.[sid];
+          if (half === 'first_hour' || half === 'second_hour') return sum + 1;
+          const sl = rules.timeSlots.find((s) => s.id === sid);
+          return sum + (sl ? getSlotDurationHours(sl) : 2);
+        }, 0)
+      );
+
     const daysStats = activeDays.map((day) => {
-      const dayOffs = filtered.filter((o) => o.dayOfWeek === day);
+      const dayOffs = filtered.filter((o) =>
+        getOfferingSessions(o).some((s) => s.dayOfWeek === day)
+      );
       let theoryUnits = 0;
       let practicalUnits = 0;
       let totalHours = 0;
       for (const o of dayOffs) {
         const bd = calculateOfferingBreakdown(o, rules);
-        theoryUnits += bd.activeTheoryUnits;
-        practicalUnits += bd.activePracticalUnits;
-        totalHours += bd.weeklyHours;
+        const sessions = getOfferingSessions(o);
+        if (sessions.length <= 1) {
+          theoryUnits += bd.activeTheoryUnits;
+          practicalUnits += bd.activePracticalUnits;
+          totalHours += bd.weeklyHours;
+        } else {
+          const totalSessHours = Math.max(
+            1,
+            sessions.reduce((acc, s) => acc + getSessionHours(s), 0)
+          );
+          const daySessHours = sessions
+            .filter((s) => s.dayOfWeek === day)
+            .reduce((acc, s) => acc + getSessionHours(s), 0);
+          const ratio = daySessHours / totalSessHours;
+          theoryUnits += bd.activeTheoryUnits * ratio;
+          practicalUnits += bd.activePracticalUnits * ratio;
+          totalHours += daySessHours;
+        }
       }
       return {
         day,
@@ -343,7 +406,7 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
       };
     });
 
-    const unscheduled = filtered.filter((o) => !o.dayOfWeek || o.slotIds.length === 0);
+    const unscheduled = filtered.filter((o) => !hasOfferingAnySchedule(o));
     const maxHours = Math.max(1, ...daysStats.map((d) => d.totalHours));
     const maxUnits = Math.max(1, ...daysStats.map((d) => d.totalUnits));
 
@@ -396,18 +459,18 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
     const missingRoom = termOfferings.filter(
       (o) => !o.classroomId && o.practicalType !== 'internship'
     );
-    const unscheduled = termOfferings.filter((o) => !o.dayOfWeek || o.slotIds.length === 0);
+    const unscheduled = termOfferings.filter((o) => !hasOfferingAnySchedule(o));
     const conflicts: Array<{ offering: SchedCourseOffering; errors: string[]; warnings: string[] }> = [];
 
     for (const o of termOfferings) {
-      const rep = detectOfferingConflicts(o, termOfferings, classrooms, professors);
+      const rep = detectOfferingConflicts(o, termOfferings, classrooms, professors, rules);
       if (rep.errors.length > 0 || rep.warnings.length > 0) {
         conflicts.push({ offering: o, errors: rep.errors, warnings: rep.warnings });
       }
     }
 
     return { sharedOfferings, missingProf, missingRoom, unscheduled, disabledOfferings, conflicts };
-  }, [termOfferings, disabledOfferings, classrooms, professors]);
+  }, [termOfferings, disabledOfferings, classrooms, professors, rules]);
 
   const termLabel = selectedTerm === 'all' ? 'کل ترم‌ها' : `ترم ${selectedTerm}`;
 
@@ -442,9 +505,7 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                 {SCHED_DAY_LABELS[day]}
               </td>
               {sortedSlots.map((slot) => {
-                const cellItems = items.filter(
-                  (o) => o.dayOfWeek === day && o.slotIds.includes(slot.id)
-                );
+                const cellItems = items.filter((o) => isOfferingAtDaySlot(o, day, slot.id));
                 return (
                   <td
                     key={slot.id}
@@ -458,16 +519,41 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                       <div className="space-y-1.5">
                         {cellItems.map((o) => {
                           const bd = calculateOfferingBreakdown(o, rules);
+                          const sessList = getOfferingSessions(o);
+                          const sessIdx = sessList.findIndex(
+                            (s) => s.dayOfWeek === day && s.slotIds.includes(slot.id)
+                          );
+                          const sessHere = sessIdx >= 0 ? sessList[sessIdx] : undefined;
+                          const sessRoom = getOfferingClassroomAtSession(o, sessHere);
+                          const half = getOfferingSessionSlotHalf(o, day, slot.id);
+                          const golestanCode = formatGolestanCourseCode(
+                            o.courseCode,
+                            o.courseGroupCode
+                          );
                           return (
                             <div
-                              key={o.id}
+                              key={`${o.id}_${day}_${slot.id}`}
                               className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 space-y-0.5"
                             >
                               <div className="font-bold text-slate-900 dark:text-white leading-snug">
                                 {o.courseTitle}
                               </div>
-                              <div className="text-[10px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                                کد {o.courseCode} · {bd.rawUnits} واحد ({bd.weeklyHours} ساعت)
+                              <div className="text-[10px] font-mono tabular-nums text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-1">
+                                <span dir="ltr">{golestanCode}</span>
+                                <span>
+                                  · {bd.rawUnits} واحد ({bd.weeklyHours} ساعت)
+                                </span>
+                                {half !== 'full' && (
+                                  <span className="px-1 rounded bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 font-sans font-bold">
+                                    {getSlotHalfLabel(half)}
+                                  </span>
+                                )}
+                                {sessList.length > 1 && (
+                                  <span className="px-1 rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-sans font-bold">
+                                    جلسه {(sessIdx + 1).toLocaleString('fa-IR')}/
+                                    {sessList.length.toLocaleString('fa-IR')}
+                                  </span>
+                                )}
                               </div>
                               {cellMode === 'classroom' && (
                                 <div className="text-[10px] text-slate-600 dark:text-slate-300">
@@ -477,14 +563,14 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                               )}
                               {cellMode === 'program' && (
                                 <div className="text-[10px] text-slate-600 dark:text-slate-300">
-                                  {o.professorName || 'بدون استاد'} · {o.classroomName || 'بدون کلاس'}
+                                  {o.professorName || 'بدون استاد'} · {sessRoom.classroomName || 'بدون کلاس'}
                                 </div>
                               )}
                               {cellMode === 'professor' && (
                                 <div className="text-[10px] text-slate-600 dark:text-slate-300">
                                   {o.ownerMajorName} ({o.entryTerm}
                                   {o.sectionName ? ` - ${o.sectionName}` : ''}) ·{' '}
-                                  {o.classroomName || 'بدون کلاس'}
+                                  {sessRoom.classroomName || 'بدون کلاس'}
                                 </div>
                               )}
                               {o.sharedWithTargets && o.sharedWithTargets.length > 0 && (
@@ -528,8 +614,16 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
   const roomOfferings = useMemo(
     () =>
       selectedRoomId === 'all'
-        ? termOfferings.filter((o) => Boolean(o.classroomId))
-        : termOfferings.filter((o) => o.classroomId === selectedRoomId),
+        ? termOfferings.filter(
+            (o) => Boolean(o.classroomId) || getOfferingSessions(o).some((s) => Boolean(s.classroomId))
+          )
+        : termOfferings.filter(
+            (o) =>
+              o.classroomId === selectedRoomId ||
+              getOfferingSessions(o).some(
+                (s) => getOfferingClassroomAtSession(o, s).classroomId === selectedRoomId
+              )
+          ),
     [termOfferings, selectedRoomId]
   );
 
@@ -633,16 +727,21 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                 ))}
               </select>
               {(() => {
-                const slotOccCount = new Set(
-                  roomOfferings.flatMap((o) =>
-                    o.dayOfWeek ? o.slotIds.map((sid) => `${o.dayOfWeek}:${sid}`) : []
-                  )
-                ).size;
+                const slotKeys = roomOfferings.flatMap((o) =>
+                  getOfferingSessions(o).flatMap((sess) => {
+                    const sessRoom = getOfferingClassroomAtSession(o, sess);
+                    if (selectedRoomId !== 'all' && sessRoom.classroomId !== selectedRoomId) {
+                      return [];
+                    }
+                    return sess.slotIds.map((sid) => `${sess.dayOfWeek}:${sid}`);
+                  })
+                );
+                const slotOccCount = new Set(slotKeys).size;
                 const capSlots = Math.max(1, activeDays.length * sortedSlots.length);
                 const utilPct =
                   selectedRoomId === 'all'
                     ? Math.round(
-                        (roomOfferings.reduce((acc, o) => acc + o.slotIds.length, 0) /
+                        (slotKeys.length /
                           Math.max(1, classrooms.filter((r) => r.isActive).length * capSlots)) *
                           100
                       )
@@ -677,15 +776,10 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                 onClick={() => {
                   const rows = roomOfferings.map((o) => ({
                     'کلاس فیزیکی': o.classroomName || '-',
-                    'روز': o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'تعیین‌نشده',
-                    'سانس‌ها': o.slotIds
-                      .map((id) => {
-                        const idx = sortedSlots.findIndex((s) => s.id === id);
-                        const sl = idx >= 0 ? sortedSlots[idx] : undefined;
-                        return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : id;
-                      })
-                      .join(' + '),
+                    'برنامه جلسات هفتگی': formatOfferingSessionsSummary(o, sortedSlots, true),
                     'کد درس': o.courseCode,
+                    'کد گروه': o.courseGroupCode || '-',
+                    'کد گلستان (درس_گروه)': formatGolestanCourseCode(o.courseCode, o.courseGroupCode),
                     'عنوان درس': o.courseTitle,
                     'رشته اصلی': `${o.ownerMajorName} (${o.entryTerm})`,
                     'شعبه/گروه': o.sectionName || '-',
@@ -754,6 +848,8 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                     return {
                       'کد رشته': selectedMajorCode,
                       'کد درس ۷ رقمی': o.courseCode,
+                      'کد گروه': o.courseGroupCode || '-',
+                      'کد گلستان (درس_گروه)': formatGolestanCourseCode(o.courseCode, o.courseGroupCode),
                       'عنوان درس': o.courseTitle,
                       'ورودی/شعبه': `${o.entryTerm} ${o.sectionName || ''}`,
                       'نوع ارائه': o.ownerMajorCode === selectedMajorCode ? 'اصلی' : `مشترک (میزبان: ${o.ownerMajorName})`,
@@ -761,7 +857,7 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                       'ساعت هفتگی': bd.weeklyHours,
                       'استاد': o.professorName || '-',
                       'کلاس': o.classroomName || '-',
-                      'روز': o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : '-',
+                      'برنامه جلسات هفتگی': formatOfferingSessionsSummary(o, sortedSlots, true),
                     };
                   });
                   void exportJsonRowsToExcel(rows, 'برنامه رشته', `برنامه_رشته_${selectedMajorCode}_${selectedTerm}.xlsx`);
@@ -812,7 +908,9 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
               </select>
 
               {(() => {
-                const daysSet = new Set(cohortOfferings.map((o) => o.dayOfWeek).filter(Boolean));
+                const daysSet = new Set(
+                  cohortOfferings.flatMap((o) => getOfferingSessions(o).map((s) => s.dayOfWeek))
+                );
                 const cohortSummary = summarizeSectionOfferings(cohortOfferings, rules, {
                   groupByCohortSection: selectedSectionId === 'all',
                 });
@@ -852,17 +950,12 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                     const bd = calculateOfferingBreakdown(o, rules);
                     return {
                       'کد درس': o.courseCode,
+                      'کد گروه': o.courseGroupCode || '-',
+                      'کد گلستان (درس_گروه)': formatGolestanCourseCode(o.courseCode, o.courseGroupCode),
                       'عنوان درس': o.courseTitle,
                       'استاد': o.professorName || '-',
                       'کلاس': o.classroomName || '-',
-                      'روز': o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : '-',
-                      'سانس': o.slotIds
-                        .map((id) => {
-                          const idx = sortedSlots.findIndex((s) => s.id === id);
-                          const sl = idx >= 0 ? sortedSlots[idx] : undefined;
-                          return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : id;
-                        })
-                        .join(' + '),
+                      'برنامه جلسات هفتگی': formatOfferingSessionsSummary(o, sortedSlots, true),
                       'واحد': bd.rawUnits,
                       'ساعت هفتگی': bd.weeklyHours,
                     };
@@ -1550,8 +1643,8 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                   ) : (
                     auditData.sharedOfferings.map((o) => (
                       <tr key={o.id}>
-                        <td className="p-3 font-mono font-bold text-indigo-700 dark:text-indigo-300">
-                          {o.courseCode}
+                        <td className="p-3 font-mono font-bold text-indigo-700 dark:text-indigo-300" dir="ltr">
+                          {formatGolestanCourseCode(o.courseCode, o.courseGroupCode)}
                         </td>
                         <td className="p-3 font-bold">{o.courseTitle}</td>
                         <td className="p-3">
@@ -1569,7 +1662,7 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                         <td className="p-3 font-mono tabular-nums">{o.enrolledCount} نفر</td>
                         <td className="p-3">
                           {o.professorName || '—'} ·{' '}
-                          {o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'بدون زمان'}
+                          {formatOfferingSessionsSummary(o, sortedSlots, true)}
                         </td>
                       </tr>
                     ))
@@ -1598,7 +1691,11 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                     className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 text-xs space-y-1"
                   >
                     <div className="font-extrabold text-slate-900 dark:text-white">
-                      {offering.courseTitle} (<span className="font-mono">{offering.courseCode}</span>) —{' '}
+                      {offering.courseTitle} (
+                      <span className="font-mono" dir="ltr">
+                        {formatGolestanCourseCode(offering.courseCode, offering.courseGroupCode)}
+                      </span>
+                      ) —{' '}
                       {offering.ownerMajorName} ({offering.entryTerm}
                       {offering.sectionName ? ` - ${offering.sectionName}` : ''}) ·{' '}
                       {SCHED_PRACTICAL_TYPE_LABELS[offering.practicalType]}
@@ -1638,8 +1735,11 @@ export const CourseSchedulingReports: React.FC<CourseSchedulingReportsProps> = (
                       <span className="font-extrabold text-slate-900 dark:text-white">
                         {o.courseTitle}
                       </span>{' '}
-                      (<span className="font-mono">{o.courseCode}</span>) — {o.ownerMajorName} (
-                      {o.entryTerm}
+                      (
+                      <span className="font-mono" dir="ltr">
+                        {formatGolestanCourseCode(o.courseCode, o.courseGroupCode)}
+                      </span>
+                      ) — {o.ownerMajorName} ({o.entryTerm}
                       {o.sectionName ? ` - ${o.sectionName}` : ''})
                       {o.disabledReason && (
                         <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">

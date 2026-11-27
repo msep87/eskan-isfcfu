@@ -14,6 +14,7 @@ import {
   SchedExamSlot,
   SchedInternshipSessionRole,
   SchedOfferingHistoryEntry,
+  SchedOfferingSession,
   SchedPracticalUnitType,
   SchedProfessor,
   SchedProfessorUnitLimit,
@@ -36,6 +37,9 @@ import {
 } from '../utils/academicMajors';
 import {
   DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS,
+  EIGHT_TERM_KEYS,
+  EIGHT_TERM_LABELS,
+  EightTermKey,
   SCHED_COURSE_TYPE_LABELS,
   SCHED_DAY_LABELS,
   SCHED_DAYS_ORDER,
@@ -43,6 +47,7 @@ import {
   SCHED_PRACTICAL_TYPE_LABELS,
   SCHED_ROOM_TYPE_LABELS,
   applyOfferingHistoryStep,
+  assignSequentialGolestanGroupCodes,
   buildDefaultExamSlots,
   buildDefaultProfessorAvailabilityWindowDates,
   buildDefaultTimeSlots,
@@ -52,35 +57,53 @@ import {
   buildTermSchedulingIndex,
   calculateOfferingBreakdown,
   calculateProfessorLoadSummary,
+  cascadeRemovedProgramsFromSchedule,
+  checkClassroomAvailabilityForSessions,
   checkScheduleEditLock,
   checkScheduleViewLock,
   computeInternshipSplitPlan,
   computeOfferingDeltas,
+  deactivateOfferingsForRemovedClassrooms,
   deactivateOfferingsForRemovedProfessors,
   detectOfferingConflicts,
   doSlotHalvesOverlap,
   downloadSchedExcelTemplate,
+  estimateCohortCurrentSemester,
   evaluateOfferingCompleteness,
   evaluateProfessorEquivalentUnitStatus,
   exportJsonRowsToExcel,
+  findDuplicateGolestanGroupOffering,
   formatExamAssignmentShort,
+  formatGolestanCourseCode,
+  formatOfferingSessionsSummary,
   formatProfessorDegreeFull,
   formatProfessorDepartmentAndField,
   getExamSettingsForTerm,
+  getMajorEightTermPlanCourseCodes,
+  getNextGolestanCourseGroupInfo,
+  getOfferingClassroomAtSession,
+  getOfferingSessionSlotHalf,
+  getOfferingSessions,
   getOfferingSlotHalf,
   getProfessorAvailabilityWindowStatus,
   getProfessorEquivalentUnitBounds,
   getSchedSlotOrdinalLabel,
   getSchedSlotTitle,
+  getSelectedTermCoursesForCohort,
   getSlotDurationHours,
   getSlotHalfLabel,
   isCourseEligibleForExam,
   isInternshipClassroomRequired,
+  isOfferingAtDaySlot,
   isOfferingEffectivelyActive,
+  normalizeCourseGroupCode,
+  normalizeCurriculumTermKey,
+  normalizeOfferingWithSessions,
   normalizeSchedCode,
   parseDecimalUnits,
   parseSchedExcelFile,
   printSchedHtml,
+  reconcileScheduleWithMasterData,
   round2,
 } from '../utils/schedulingUtils';
 import { CourseSchedulingAutoWizard } from './CourseSchedulingAutoWizard';
@@ -113,6 +136,7 @@ import {
   Layers,
   LayoutDashboard,
   LayoutGrid,
+  ListChecks,
   Lock,
   Plus,
   Printer,
@@ -145,6 +169,7 @@ interface CourseSchedulingWorkspaceProps {
 
 type WorkspaceSection =
   | 'overview'
+  | 'term_courses'
   | 'classrooms'
   | 'programs'
   | 'professors'
@@ -194,6 +219,45 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [cellComments, setCellComments] = useState<SchedCellComment[]>(() =>
     Storage.getSchedCellComments()
   );
+  const [appSettingsSnapshot, setAppSettingsSnapshot] = useState(() => Storage.getSettings());
+
+  // همگام‌سازی خودکار داده‌ها با تنظیمات کل سامانه و پاک‌سازی مغایرت‌های احتمالی در زمان باز شدن پنجره
+  useEffect(() => {
+    if (!isOpen) return;
+    const latestRooms = Storage.getSchedClassrooms();
+    const latestPrograms = Storage.getSchedPrograms();
+    const latestProfs = Storage.getSchedProfessors();
+    const latestCourses = Storage.getSchedCourses();
+    const latestOfferings = Storage.getSchedOfferings();
+    const latestComments = Storage.getSchedCellComments();
+    const latestRules = Storage.getSchedRules();
+    const latestSettings = Storage.getSettings();
+
+    setClassrooms(latestRooms);
+    setPrograms(latestPrograms);
+    setProfessors(latestProfs);
+    setCourses(latestCourses);
+    setRules(latestRules);
+    setAppSettingsSnapshot(latestSettings);
+
+    const rec = reconcileScheduleWithMasterData({
+      offerings: latestOfferings,
+      cellComments: latestComments,
+      programs: latestPrograms,
+      professors: latestProfs,
+      classrooms: latestRooms,
+      actor,
+    });
+    if (rec.changed) {
+      setOfferings(rec.nextOfferings);
+      setCellComments(rec.nextCellComments);
+      Storage.setSchedOfferings(rec.nextOfferings);
+      Storage.setSchedCellComments(rec.nextCellComments);
+    } else {
+      setOfferings(latestOfferings);
+      setCellComments(latestComments);
+    }
+  }, [isOpen]);
 
   const deptHeadUsers = useMemo(
     () => Storage.getEducationStaff().filter((s) => s.educationRole === 'department_head'),
@@ -349,6 +413,67 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     );
   };
 
+  const handleDeleteClassroom = (roomToDelete: SchedClassroom) => {
+    const roomMap = new Map<string, string>([[roomToDelete.id, roomToDelete.name]]);
+    const { nextOfferings, affectedCount } = deactivateOfferingsForRemovedClassrooms(
+      offerings,
+      [roomToDelete.id],
+      actor,
+      roomMap
+    );
+    persistClassrooms(classrooms.filter((x) => x.id !== roomToDelete.id));
+    if (affectedCount > 0) {
+      commitOfferingsWithHistory(
+        nextOfferings,
+        `حذف کلاس «${roomToDelete.name}» و غیرفعال‌سازی ${affectedCount} درس`
+      );
+      notify(
+        'success',
+        `کلاس «${roomToDelete.name}» حذف شد؛ تخصیص کلاس در ${affectedCount.toLocaleString('fa-IR')} درس حذف و آن دروس غیرفعال شدند.`
+      );
+    } else {
+      notify('success', `کلاس «${roomToDelete.name}» از فهرست کلاس‌های فیزیکی حذف شد.`);
+    }
+  };
+
+  const handleDeleteProgramCohort = (progToDelete: SchedProgramCohort) => {
+    const remainingPrograms = programs.filter((x) => x.id !== progToDelete.id);
+    const res = cascadeRemovedProgramsFromSchedule(
+      offerings,
+      cellComments,
+      [progToDelete.id],
+      remainingPrograms,
+      actor
+    );
+    persistPrograms(remainingPrograms);
+
+    if (rules.termOfferedCoursesByCohort) {
+      const nextByTerm: Record<string, Record<string, string[]>> = {};
+      Object.entries(rules.termOfferedCoursesByCohort).forEach(([tKey, cohortMap]) => {
+        if (!cohortMap || typeof cohortMap !== 'object') return;
+        const { [progToDelete.id]: _removed, ...restCohorts } = cohortMap;
+        nextByTerm[tKey] = restCohorts;
+      });
+      persistRules({ ...rules, termOfferedCoursesByCohort: nextByTerm });
+    }
+
+    if (res.removedOfferingsCount > 0 || res.updatedSharedCount > 0) {
+      commitOfferingsWithHistory(
+        res.nextOfferings,
+        `حذف رشته-ورودی «${progToDelete.majorName} (${progToDelete.entryTerm})» و پاک‌سازی ${res.removedOfferingsCount} درس`
+      );
+    }
+    if (res.removedCommentsCount > 0) {
+      persistCellComments(res.nextCellComments);
+    }
+    notify(
+      'success',
+      res.removedOfferingsCount > 0
+        ? `رشته-ورودی «${progToDelete.majorName} - ورودی ${progToDelete.entryTerm}» و تمام ${res.removedOfferingsCount.toLocaleString('fa-IR')} درس ثبت‌شده آن از جدول برنامه حذف شد.`
+        : `رشته-ورودی «${progToDelete.majorName} - ورودی ${progToDelete.entryTerm}» حذف شد.`
+    );
+  };
+
   const handleConfirmDeleteProfessor = () => {
     if (!profToDelete) return;
     const map = new Map<string, string>([[profToDelete.id, profToDelete.fullName]]);
@@ -454,12 +579,24 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         `تمامی ${removedCount.toLocaleString('fa-IR')} درس برنامه‌ریزی‌شده همه ترم‌ها حذف شد؛ اطلاعات پایه حفظ گردید.`
       );
     } else if (dangerActionModal === 'clear_classrooms') {
-      persistClassrooms([]);
-      const updatedOffs = offerings.map((o) =>
-        o.classroomId ? { ...o, classroomId: undefined, classroomName: undefined } : o
+      const roomNameMap = new Map(classrooms.map((r) => [r.id, r.name]));
+      const { nextOfferings, affectedCount } = deactivateOfferingsForRemovedClassrooms(
+        offerings,
+        classrooms.map((r) => r.id),
+        actor,
+        roomNameMap
       );
-      persistOfferings(updatedOffs);
-      notify('success', 'لیست کلاس‌های فیزیکی پاک‌سازی و تخصیص کلاس در دروس آزاد شد.');
+      persistClassrooms([]);
+      if (affectedCount > 0) {
+        commitOfferingsWithHistory(
+          nextOfferings,
+          `پاک‌سازی کلاس‌های فیزیکی و غیرفعال‌سازی ${affectedCount} درس`
+        );
+      }
+      notify(
+        'success',
+        `لیست کلاس‌های فیزیکی پاک‌سازی شد؛ کلاس ${affectedCount.toLocaleString('fa-IR')} درس مرتبط حذف و آن دروس غیرفعال شدند.`
+      );
     } else if (dangerActionModal === 'clear_professors') {
       const profNameMap = new Map(professors.map((p) => [p.id, p.fullName]));
       const { nextOfferings, affectedCount } = deactivateOfferingsForRemovedProfessors(
@@ -478,8 +615,30 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       persistCourses([]);
       notify('success', 'لیست سرفصل دروس (کد ۷ رقمی) پاک‌سازی شد.');
     } else if (dangerActionModal === 'clear_programs') {
+      const res = cascadeRemovedProgramsFromSchedule(
+        offerings,
+        cellComments,
+        programs.map((p) => p.id),
+        [],
+        actor
+      );
       persistPrograms([]);
-      notify('success', 'فهرست رشته‌ها، سال‌های ورود و شعب پاک‌سازی شد.');
+      if (res.removedOfferingsCount > 0 || res.updatedSharedCount > 0) {
+        commitOfferingsWithHistory(
+          res.nextOfferings,
+          `پاک‌سازی رشته‌ها و ورودی‌ها و حذف ${res.removedOfferingsCount} درس جدول`
+        );
+      }
+      if (res.removedCommentsCount > 0) {
+        persistCellComments(res.nextCellComments);
+      }
+      if (rules.termOfferedCoursesByCohort && Object.keys(rules.termOfferedCoursesByCohort).length > 0) {
+        persistRules({ ...rules, termOfferedCoursesByCohort: {} });
+      }
+      notify(
+        'success',
+        `فهرست رشته‌ها، سال‌های ورود و شعب پاک‌سازی و ${res.removedOfferingsCount.toLocaleString('fa-IR')} درس مرتبط از جدول برنامه حذف شد.`
+      );
     } else if (dangerActionModal === 'clear_comments_history') {
       persistCellComments([]);
       const emptyHist: SchedUserHistoryState = { undoStack: [], redoStack: [] };
@@ -962,21 +1121,59 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     const tot = Math.max(Number(normalizeSchedCode(progTotalStudents)) || 0, sumSec);
 
     if (editingProgId) {
-      persistPrograms(
-        programs.map((p) =>
-          p.id === editingProgId
-            ? {
-                ...p,
-                majorCode: cleanCode,
-                majorName: cleanName,
-                entryTerm: cleanEntry,
-                totalStudents: tot,
-                sections: cleanSections,
-              }
-            : p
-        )
+      const nextPrograms = programs.map((p) =>
+        p.id === editingProgId
+          ? {
+              ...p,
+              majorCode: cleanCode,
+              majorName: cleanName,
+              entryTerm: cleanEntry,
+              totalStudents: tot,
+              sections: cleanSections,
+            }
+          : p
       );
-      notify('success', `اطلاعات رشته «${cleanName} - ورودی ${cleanEntry}» بروزرسانی شد.`);
+      persistPrograms(nextPrograms);
+
+      const secNameMap = new Map(cleanSections.map((s) => [s.id, s.name]));
+      const res = cascadeRemovedProgramsFromSchedule(
+        offerings,
+        cellComments,
+        [],
+        nextPrograms,
+        actor
+      );
+      const syncedOfferings = res.nextOfferings.map((o) => {
+        if (o.cohortId === editingProgId) {
+          return {
+            ...o,
+            ownerMajorCode: cleanCode,
+            ownerMajorName: cleanName,
+            entryTerm: cleanEntry,
+            sectionName: o.sectionId ? secNameMap.get(o.sectionId) || o.sectionName : o.sectionName,
+          };
+        }
+        return o;
+      });
+      const offeringsMetadataChanged =
+        res.removedOfferingsCount > 0 ||
+        res.updatedSharedCount > 0 ||
+        syncedOfferings.some((o, i) => o !== offerings[i]);
+      if (offeringsMetadataChanged) {
+        commitOfferingsWithHistory(
+          syncedOfferings,
+          `بروزرسانی اطلاعات و شعب «${cleanName} - ورودی ${cleanEntry}»`
+        );
+      }
+      if (res.removedCommentsCount > 0) {
+        persistCellComments(res.nextCellComments);
+      }
+      notify(
+        'success',
+        res.removedOfferingsCount > 0
+          ? `اطلاعات رشته «${cleanName} - ورودی ${cleanEntry}» بروزرسانی و ${res.removedOfferingsCount.toLocaleString('fa-IR')} درس مربوط به شعب حذف‌شده از جدول حذف شد.`
+          : `اطلاعات رشته «${cleanName} - ورودی ${cleanEntry}» بروزرسانی شد.`
+      );
     } else {
       persistPrograms([
         ...programs,
@@ -1412,18 +1609,28 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   ]);
 
   // مودال ثبت / ویرایش ارائه درس
+  interface DraftModalSession {
+    id: string;
+    dayOfWeek: SchedDayKey | '';
+    slotIds: string[];
+    slotParts: Record<string, SchedSlotHalf>;
+    classroomId?: string;
+  }
+
   const [offModalOpen, setOffModalOpen] = useState(false);
   const [editingOffId, setEditingOffId] = useState<string | null>(null);
   const [offMajorCode, setOffMajorCode] = useState('');
   const [offCourseId, setOffCourseId] = useState('');
+  const [offCourseGroupCode, setOffCourseGroupCode] = useState('01');
+  const [offGroupCodeManual, setOffGroupCodeManual] = useState(false);
   const [offCohortId, setOffCohortId] = useState('');
   const [offSectionId, setOffSectionId] = useState('');
   const [offEnrolledCount, setOffEnrolledCount] = useState('28');
   const [offProfessorId, setOffProfessorId] = useState('');
   const [offClassroomId, setOffClassroomId] = useState('');
-  const [offDay, setOffDay] = useState<SchedDayKey | ''>('saturday');
-  const [offSlotIds, setOffSlotIds] = useState<string[]>([]);
-  const [offSlotParts, setOffSlotParts] = useState<Record<string, SchedSlotHalf>>({});
+  const [offSessions, setOffSessions] = useState<DraftModalSession[]>([
+    { id: 'sess_1', dayOfWeek: 'saturday', slotIds: [], slotParts: {} },
+  ]);
   const [offSplitPart, setOffSplitPart] = useState<'full' | 'theory' | 'practical'>('full');
   const [offInternshipSessionRole, setOffInternshipSessionRole] =
     useState<SchedInternshipSessionRole>('combined');
@@ -1466,16 +1673,131 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     return programs.filter((p) => normalizeMajorCode(p.majorCode) === targetCode);
   }, [programs, offMajorCode]);
 
+  const [termCoursesCohortId, setTermCoursesCohortId] = useState<string>('');
+  const [termCoursesSearch, setTermCoursesSearch] = useState('');
+  const [termCoursesTypeFilter, setTermCoursesTypeFilter] = useState<'all' | SchedCourseType>('all');
+  const [termCoursesPlanTerm, setTermCoursesPlanTerm] = useState<EightTermKey>('1');
+
+  const visibleCohortsForWorkspace = useMemo(() => {
+    const sorted = [...programs].sort((a, b) => {
+      const mc = a.majorName.localeCompare(b.majorName, 'fa');
+      if (mc !== 0) return mc;
+      return b.entryTerm.localeCompare(a.entryTerm);
+    });
+    if (canManageMasterData || allowCrossMajorView || normalizedAllowedMajors.length === 0) {
+      return sorted;
+    }
+    return sorted.filter((p) => isOwnMajorName(p.majorName));
+  }, [programs, canManageMasterData, allowCrossMajorView, normalizedAllowedMajors]);
+
+  const activeTermCoursesCohort = useMemo(() => {
+    return (
+      visibleCohortsForWorkspace.find((p) => p.id === termCoursesCohortId) ||
+      visibleCohortsForWorkspace[0] ||
+      null
+    );
+  }, [visibleCohortsForWorkspace, termCoursesCohortId]);
+
+  useEffect(() => {
+    if (!activeTermCoursesCohort) return;
+    setTermCoursesPlanTerm(
+      estimateCohortCurrentSemester(activeTermCoursesCohort.entryTerm, activeTerm)
+    );
+  }, [activeTermCoursesCohort?.id, activeTerm]);
+
+  const setCohortTermSelectedCourseCodes = (cohort: SchedProgramCohort, nextCodes: string[]) => {
+    const lockCheck = checkScheduleEditLock(rules, userRole, actor.id, {
+      majorCode: cohort.majorCode,
+    });
+    if (lockCheck.locked) {
+      notify('error', lockCheck.reason || 'امکان تغییر دروس قابل ارائه این رشته مسدود شده است.');
+      return;
+    }
+    const cleanUnique = Array.from(
+      new Set(nextCodes.map((c) => normalizeSchedCode(c)).filter(Boolean))
+    );
+    const currentTermMap = rules.termOfferedCoursesByCohort?.[activeTerm] || {};
+    const nextRules: SchedRulesSettings = {
+      ...rules,
+      termOfferedCoursesByCohort: {
+        ...(rules.termOfferedCoursesByCohort || {}),
+        [activeTerm]: {
+          ...currentTermMap,
+          [cohort.id]: cleanUnique,
+        },
+      },
+    };
+    persistRules(nextRules);
+  };
+
   const coursesForSelectedMajor = useMemo(() => {
     const targetCode = normalizeMajorCode(offMajorCode);
     if (!targetCode) return [];
     return courses.filter((c) => normalizeMajorCode(c.majorCode) === targetCode);
   }, [courses, offMajorCode]);
 
+  const selectedTermCourseState = useMemo(() => {
+    if (!offMajorCode || !offCohortId) {
+      return {
+        majorCourses: coursesForSelectedMajor,
+        selectedCourses: [] as SchedCurriculumCourse[],
+        selectedCourseCodes: [] as string[],
+        hasExplicitSelection: false,
+      };
+    }
+    return getSelectedTermCoursesForCohort({
+      termKey: activeTerm,
+      cohortId: offCohortId,
+      majorCode: offMajorCode,
+      allCourses: courses,
+      rules,
+    });
+  }, [activeTerm, offCohortId, offMajorCode, courses, rules, coursesForSelectedMajor]);
+
+  const modalSelectableCourses = useMemo(() => {
+    const selected = selectedTermCourseState.selectedCourses;
+    if (!editingOffId) return selected;
+    const editingOriginal = offerings.find((x) => x.id === editingOffId);
+    const existingCourse =
+      courses.find((c) => c.id === offCourseId) ||
+      (editingOriginal ? courses.find((c) => c.id === editingOriginal.courseId) : undefined);
+    if (existingCourse && !selected.some((c) => c.id === existingCourse.id)) {
+      return [existingCourse, ...selected];
+    }
+    return selected;
+  }, [selectedTermCourseState.selectedCourses, editingOffId, offerings, courses, offCourseId]);
+
   const selectedOffCourse = useMemo(
     () => courses.find((c) => c.id === offCourseId),
     [courses, offCourseId]
   );
+
+  // پیشنهاد خودکار کد گروه دو رقمی گلستان بر اساس تعداد دفعات ثبت کد درس ۷ رقمی در کل برنامه جامع ترم
+  const golestanGroupSuggestion = useMemo(() => {
+    if (!selectedOffCourse) return null;
+    return getNextGolestanCourseGroupInfo(
+      selectedOffCourse.courseCode,
+      termOfferings,
+      editingOffId || undefined
+    );
+  }, [selectedOffCourse, termOfferings, editingOffId]);
+
+  useEffect(() => {
+    if (!offModalOpen || editingOffId || offGroupCodeManual || !golestanGroupSuggestion) return;
+    setOffCourseGroupCode(golestanGroupSuggestion.nextGroupCode);
+  }, [offModalOpen, editingOffId, offGroupCodeManual, golestanGroupSuggestion]);
+
+  const duplicateGroupConflictOffering = useMemo(() => {
+    if (!offModalOpen || !selectedOffCourse) return undefined;
+    const normGrp = normalizeCourseGroupCode(offCourseGroupCode);
+    if (!normGrp) return undefined;
+    return findDuplicateGolestanGroupOffering(
+      selectedOffCourse.courseCode,
+      normGrp,
+      termOfferings,
+      editingOffId || undefined
+    );
+  }, [offModalOpen, selectedOffCourse, offCourseGroupCode, termOfferings, editingOffId]);
 
   // رشته‌ها/ورودی‌هایی که دقیقاً همین کد ۷ رقمی درس را در سرفصل خود دارند (یا برای مشترک‌سازی مجاز هستند)
   const matchingCourseMajorCodes = useMemo(() => {
@@ -1557,10 +1879,16 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     );
     const matchingCohort = targetCohort || majorCohorts[0] || fallbackCohort;
 
-    const majorCourses = courses.filter(
-      (c) => normalizeMajorCode(c.majorCode) === resolvedMajorCode
-    );
-    const firstCourse = majorCourses[0];
+    const cohortTermCourses = matchingCohort
+      ? getSelectedTermCoursesForCohort({
+          termKey: activeTerm,
+          cohortId: matchingCohort.id,
+          majorCode: resolvedMajorCode,
+          allCourses: courses,
+          rules,
+        }).selectedCourses
+      : [];
+    const firstCourse = cohortTermCourses[0];
 
     const matchingSec = opts.sectionId
       ? matchingCohort?.sections.find((s) => s.id === opts.sectionId)
@@ -1570,18 +1898,28 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       matchingSec?.studentCount || matchingCohort?.totalStudents || 28;
     const initSlotId = opts.slotId || sortedSlots[0]?.id || '';
     const initHalf: SchedSlotHalf = opts.slotHalf || 'full';
+    const initGroup = firstCourse
+      ? getNextGolestanCourseGroupInfo(firstCourse.courseCode, termOfferings).nextGroupCode
+      : '01';
 
     setEditingOffId(null);
     setOffMajorCode(resolvedMajorCode);
     setOffCourseId(firstCourse?.id || '');
+    setOffCourseGroupCode(initGroup);
+    setOffGroupCodeManual(false);
     setOffCohortId(matchingCohort?.id || '');
     setOffSectionId(matchingSec?.id || '');
     setOffEnrolledCount(String(baseEnrolled));
     setOffProfessorId('');
     setOffClassroomId('');
-    setOffDay(opts.dayOfWeek || activeDays[0] || 'saturday');
-    setOffSlotIds(initSlotId ? [initSlotId] : []);
-    setOffSlotParts(initSlotId ? { [initSlotId]: initHalf } : {});
+    setOffSessions([
+      {
+        id: 'sess_1',
+        dayOfWeek: opts.dayOfWeek || activeDays[0] || 'saturday',
+        slotIds: initSlotId ? [initSlotId] : [],
+        slotParts: initSlotId ? { [initSlotId]: initHalf } : {},
+      },
+    ]);
     setOffSplitPart('full');
     setOffInternshipSessionRole('combined');
     setOffInternshipSchoolOnlyFull(false);
@@ -1606,21 +1944,49 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       normalizeMajorCode(matchingCohort?.majorCode) ||
       normalizeMajorCode(matchingCourse?.majorCode) ||
       '';
+    const existingSessions = getOfferingSessions(o);
+    const loadedSessions: DraftModalSession[] =
+      existingSessions.length > 0
+        ? existingSessions.map((s, idx) => {
+            const parts: Record<string, SchedSlotHalf> = {};
+            s.slotIds.forEach((sid) => {
+              parts[sid] = s.slotParts?.[sid] || 'full';
+            });
+            return {
+              id: s.id || `sess_${idx + 1}`,
+              dayOfWeek: s.dayOfWeek,
+              slotIds: [...s.slotIds],
+              slotParts: parts,
+              classroomId: s.classroomId && s.classroomId !== o.classroomId ? s.classroomId : undefined,
+            };
+          })
+        : [
+            {
+              id: 'sess_1',
+              dayOfWeek: o.dayOfWeek || '',
+              slotIds: [],
+              slotParts: {},
+            },
+          ];
+
+    const normExistingGroup = normalizeCourseGroupCode(o.courseGroupCode);
+    const fallbackNextGroup = getNextGolestanCourseGroupInfo(
+      o.courseCode,
+      termOfferings,
+      o.id
+    ).nextGroupCode;
+
     setEditingOffId(o.id);
     setOffMajorCode(resolvedMajorCode);
     setOffCourseId(o.courseId);
+    setOffCourseGroupCode(normExistingGroup || fallbackNextGroup);
+    setOffGroupCodeManual(Boolean(normExistingGroup));
     setOffCohortId(o.cohortId);
     setOffSectionId(o.sectionId || '');
     setOffEnrolledCount(String(o.enrolledCount));
     setOffProfessorId(o.professorId || '');
     setOffClassroomId(o.classroomId || '');
-    setOffDay(o.dayOfWeek || '');
-    setOffSlotIds([...o.slotIds]);
-    const parts: Record<string, SchedSlotHalf> = {};
-    o.slotIds.forEach((sid) => {
-      parts[sid] = getOfferingSlotHalf(o, sid);
-    });
-    setOffSlotParts(parts);
+    setOffSessions(loadedSessions);
     setOffSplitPart(o.splitPart || 'full');
     setOffInternshipSessionRole(o.internshipSessionRole || 'combined');
     setOffInternshipSchoolOnlyFull(Boolean(o.internshipSchoolOnlyFull));
@@ -1662,11 +2028,39 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       },
       rules
     );
+
+    const resolvedSessions: SchedOfferingSession[] = offSessions
+      .filter((s) => Boolean(s.dayOfWeek))
+      .map((s, idx) => {
+        const sessRoom = isSchoolOnlyInternship
+          ? undefined
+          : s.classroomId
+          ? classrooms.find((r) => r.id === s.classroomId)
+          : room;
+        const cleanParts: Record<string, SchedSlotHalf> = {};
+        s.slotIds.forEach((sid) => {
+          const h = s.slotParts?.[sid];
+          if (h && h !== 'full') cleanParts[sid] = h;
+        });
+        return {
+          id: s.id || `sess_${idx + 1}`,
+          dayOfWeek: s.dayOfWeek as SchedDayKey,
+          slotIds: [...s.slotIds],
+          slotParts: Object.keys(cleanParts).length > 0 ? cleanParts : undefined,
+          classroomId: sessRoom?.id,
+          classroomName: sessRoom?.name,
+        };
+      });
+
+    const primarySess = resolvedSessions[0];
+    const normGroup = normalizeCourseGroupCode(offCourseGroupCode);
+
     return {
       id: editingOffId || 'draft_preview',
       termKey: activeTerm,
       courseId: selectedOffCourse.id,
       courseCode: selectedOffCourse.courseCode,
+      courseGroupCode: normGroup || undefined,
       courseTitle: selectedOffCourse.title,
       courseType: selectedOffCourse.courseType,
       practicalType: selectedOffCourse.practicalType,
@@ -1687,9 +2081,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       professorName: prof?.fullName,
       classroomId: room?.id,
       classroomName: room?.name,
-      dayOfWeek: offDay || undefined,
-      slotIds: offSlotIds,
-      slotParts: Object.keys(offSlotParts).length > 0 ? offSlotParts : undefined,
+      dayOfWeek: primarySess?.dayOfWeek,
+      slotIds: primarySess ? [...primarySess.slotIds] : [],
+      slotParts: primarySess?.slotParts,
+      sessions: resolvedSessions,
       splitPart: offSplitPart,
       internshipSessionRole:
         selectedOffCourse.practicalType === 'internship' ? offInternshipSessionRole : undefined,
@@ -1728,6 +2123,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     offProfessorId,
     classrooms,
     offClassroomId,
+    offCourseGroupCode,
     offEnrolledCount,
     offInternshipSubLabel,
     offInternshipSessionRole,
@@ -1737,9 +2133,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     editingOffId,
     activeTerm,
     offSharedTargets,
-    offDay,
-    offSlotIds,
-    offSlotParts,
+    offSessions,
     offNotes,
     offExamDayId,
     offExamSlotId,
@@ -1758,15 +2152,17 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           majorCode: originalOff.ownerMajorCode,
           dayOfWeek: originalOff.dayOfWeek,
           slotIds: originalOff.slotIds,
+          sessions: getOfferingSessions(originalOff),
         })
       : { locked: false };
     if (origCheck.locked) return origCheck;
     return checkScheduleEditLock(rules, userRole, actor.id, {
       majorCode: cohort?.majorCode,
-      dayOfWeek: offDay || undefined,
-      slotIds: offSlotIds,
+      sessions: offSessions
+        .filter((s) => Boolean(s.dayOfWeek))
+        .map((s) => ({ dayOfWeek: s.dayOfWeek as SchedDayKey, slotIds: s.slotIds })),
     });
-  }, [offModalOpen, programs, offCohortId, editingOffId, offerings, rules, userRole, actor.id, offDay, offSlotIds]);
+  }, [offModalOpen, programs, offCohortId, editingOffId, offerings, rules, userRole, actor.id, offSessions]);
 
   const candidateConflictReport = useMemo(() => {
     if (!offModalOpen || !candidateOffering) return { hasHardConflict: false, errors: [], warnings: [] };
@@ -1802,6 +2198,41 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     );
   }, [candidateOffering, rules]);
 
+  const getModalSessionFreeRooms = (targetSessions: DraftModalSession[]) => {
+    const enrolled = Math.max(1, Number(normalizeSchedCode(offEnrolledCount)) || 1);
+    const activeRooms = classrooms.filter((r) => r.isActive);
+    const validSess = targetSessions.filter((s) => Boolean(s.dayOfWeek) && s.slotIds.length > 0);
+    const evaluated = activeRooms.map((r) => {
+      const check = checkClassroomAvailabilityForSessions(
+        r.id,
+        activeTerm,
+        validSess.map((s) => ({
+          dayOfWeek: s.dayOfWeek as SchedDayKey,
+          slotIds: s.slotIds,
+          slotParts: s.slotParts,
+        })),
+        termOfferings,
+        editingOffId || undefined
+      );
+      return {
+        room: r,
+        isFree: check.isFree,
+        occupiedBy: check.occupiedBy,
+        capOk: r.capacity >= enrolled,
+      };
+    });
+    return {
+      totalActiveCount: activeRooms.length,
+      evaluated,
+      freeRooms: evaluated
+        .filter((item) => item.isFree)
+        .sort((a, b) => {
+          if (a.capOk !== b.capOk) return Number(b.capOk) - Number(a.capOk);
+          return a.room.capacity - b.room.capacity;
+        }),
+    };
+  };
+
   const modalClassroomAvailability = useMemo(() => {
     if (!offModalOpen) {
       return {
@@ -1817,29 +2248,27 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     }
     const enrolled = Math.max(1, Number(normalizeSchedCode(offEnrolledCount)) || 1);
     const activeRooms = classrooms.filter((r) => r.isActive);
-    const occupiedMap = new Map<string, SchedCourseOffering>();
-    if (offDay && offSlotIds.length > 0) {
-      for (const sid of offSlotIds) {
-        const bucket = termSchedulingIndex.slotBuckets.get(`${offDay}:${sid}`);
-        if (!bucket) continue;
-        const candHalf = offSlotParts?.[sid] || 'full';
-        for (const o of bucket) {
-          if (o.id === editingOffId || !o.classroomId) continue;
-          if (occupiedMap.has(o.classroomId)) continue;
-          if (doSlotHalvesOverlap(candHalf, getOfferingSlotHalf(o, sid))) {
-            occupiedMap.set(o.classroomId, o);
-          }
-        }
-      }
-    }
+    // جلساتی که از کلاس اصلی استفاده می‌کنند (بدون کلاس اختصاصی جداگانه در سطح جلسه)
+    const sessionsUsingPrimaryRoom = offSessions.filter(
+      (s) => Boolean(s.dayOfWeek) && s.slotIds.length > 0 && !s.classroomId
+    );
     const evaluated = activeRooms.map((r) => {
-      const hit = occupiedMap.get(r.id);
-      const capOk = r.capacity >= enrolled;
+      const check = checkClassroomAvailabilityForSessions(
+        r.id,
+        activeTerm,
+        sessionsUsingPrimaryRoom.map((s) => ({
+          dayOfWeek: s.dayOfWeek as SchedDayKey,
+          slotIds: s.slotIds,
+          slotParts: s.slotParts,
+        })),
+        termOfferings,
+        editingOffId || undefined
+      );
       return {
         room: r,
-        isFree: !hit,
-        occupiedBy: hit,
-        capOk,
+        isFree: check.isFree,
+        occupiedBy: check.occupiedBy,
+        capOk: r.capacity >= enrolled,
       };
     });
     const freeRooms = evaluated
@@ -1860,10 +2289,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   }, [
     offModalOpen,
     classrooms,
-    offDay,
-    offSlotIds,
-    offSlotParts,
-    termSchedulingIndex,
+    offSessions,
+    activeTerm,
+    termOfferings,
     editingOffId,
     offEnrolledCount,
     offClassroomId,
@@ -1953,6 +2381,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       return;
     }
 
+    const normalizedBase = normalizeOfferingWithSessions(candidateOffering);
+
     // حالت ثبت چند شعبه کارورزی (مثلاً تقسیم ۲۴ نفر به دو شعبه ۱۲ نفره)
     if (isMultiInternshipMode && selectedOffCourse) {
       const created: SchedCourseOffering[] = [];
@@ -1971,9 +2401,14 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           },
           rules
         );
-        const draftItem: SchedCourseOffering = {
-          ...candidateOffering,
+        const suggestedGroup =
+          i === 0 && normalizeCourseGroupCode(normalizedBase.courseGroupCode)
+            ? normalizeCourseGroupCode(normalizedBase.courseGroupCode)
+            : getNextGolestanCourseGroupInfo(selectedOffCourse.courseCode, workingTerm).nextGroupCode;
+        const draftItem: SchedCourseOffering = normalizeOfferingWithSessions({
+          ...normalizedBase,
           id: `off_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+          courseGroupCode: suggestedGroup,
           enrolledCount: Math.max(1, grp.studentCount || 1),
           weeklyHours: grpBd.weeklyHours,
           internshipSubGroupLabel: grp.label.trim() || `شعبه ${i + 1} کارورزی`,
@@ -1986,7 +2421,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           updatedById: actor.id,
           updatedByName: actor.name,
           updatedAt: new Date().toISOString(),
-        };
+        });
         const grpComp = evaluateOfferingCompleteness(draftItem, rules);
         if (mode === 'final' && !grpComp.isComplete) {
           notify(
@@ -2044,9 +2479,18 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     }
 
     const isProvSave = mode === 'provisional' || !candidateCompleteness.isComplete;
+    const autoGroupCode =
+      normalizeCourseGroupCode(normalizedBase.courseGroupCode) ||
+      getNextGolestanCourseGroupInfo(
+        normalizedBase.courseCode,
+        termOfferings,
+        editingOffId || undefined
+      ).nextGroupCode;
+
     const saved: SchedCourseOffering = {
-      ...candidateOffering,
+      ...normalizedBase,
       id: editingOffId || `off_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      courseGroupCode: autoGroupCode,
       isProvisional: isProvSave ? true : undefined,
       isDisabled: isProvSave ? true : undefined,
       disabledReason: isProvSave
@@ -2057,27 +2501,28 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       updatedAt: new Date().toISOString(),
     };
 
+    const codeLabel = formatGolestanCourseCode(saved.courseCode, saved.courseGroupCode);
     if (editingOffId) {
       commitOfferingsWithHistory(
         offerings.map((o) => (o.id === editingOffId ? saved : o)),
-        `${isProvSave ? 'ذخیره موقت' : 'ثبت نهایی و ویرایش'} درس «${saved.courseTitle}»`
+        `${isProvSave ? 'ذخیره موقت' : 'ثبت نهایی و ویرایش'} درس «${saved.courseTitle}» (${codeLabel})`
       );
       notify(
         'success',
         isProvSave
-          ? `درس «${saved.courseTitle}» به صورت موقت (غیرفعال تا تکمیل نواقص) ذخیره شد.`
-          : `برنامه درس «${saved.courseTitle}» با موفقیت ثبت نهایی شد.`
+          ? `درس «${saved.courseTitle}» (${codeLabel}) به صورت موقت ذخیره شد.`
+          : `برنامه درس «${saved.courseTitle}» (${codeLabel}) با موفقیت ثبت نهایی شد.`
       );
     } else {
       commitOfferingsWithHistory(
         [...offerings, saved],
-        `${isProvSave ? 'ثبت موقت' : 'ثبت نهایی'} درس «${saved.courseTitle}»`
+        `${isProvSave ? 'ثبت موقت' : 'ثبت نهایی'} درس «${saved.courseTitle}» (${codeLabel})`
       );
       notify(
         'success',
         isProvSave
-          ? `درس «${saved.courseTitle}» به صورت موقت در جدول ثبت شد؛ با تکمیل ساعت، استاد و کلاس نهایی خواهد شد.`
-          : `درس «${saved.courseTitle}» با موفقیت در برنامه ترم ${activeTerm} ثبت نهایی شد.`
+          ? `درس «${saved.courseTitle}» (${codeLabel}) به صورت موقت در جدول ثبت شد؛ با تکمیل ساعت، استاد و کلاس نهایی خواهد شد.`
+          : `درس «${saved.courseTitle}» (${codeLabel}) با موفقیت در برنامه ترم ${activeTerm} ثبت نهایی شد.`
       );
     }
     setOffModalOpen(false);
@@ -2111,6 +2556,17 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       groupTitle: 'برنامه‌ریزی و گزارش‌ها',
       items: [
         { key: 'overview', label: 'نمای کلی و وضعیت ترم', icon: LayoutDashboard },
+        {
+          key: 'term_courses',
+          label: 'دروس قابل ارائه ترم (از سرفصل)',
+          icon: ListChecks,
+          badge: String(
+            visibleCohortsForWorkspace.filter((coh) => {
+              const sel = rules.termOfferedCoursesByCohort?.[activeTerm]?.[coh.id];
+              return Array.isArray(sel) && sel.length > 0;
+            }).length
+          ),
+        },
         {
           key: 'master_grid',
           label: 'برنامه جامع و فراگیر (کل رشته‌ها)',
@@ -2540,6 +2996,396 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               })}
             </div>
           )}
+
+          {/* ۰.۵ انتخاب دروس قابل ارائه هر رشته-ورودی در ترم جاری از سرفصل رشته */}
+          {section === 'term_courses' && (() => {
+            const curCohort = activeTermCoursesCohort;
+            const curTermState = curCohort
+              ? getSelectedTermCoursesForCohort({
+                  termKey: activeTerm,
+                  cohortId: curCohort.id,
+                  majorCode: curCohort.majorCode,
+                  allCourses: courses,
+                  rules,
+                })
+              : null;
+            const selectedCodeSet = new Set(curTermState?.selectedCourseCodes || []);
+            const majorEightPlan = curCohort
+              ? getMajorEightTermPlanCourseCodes(appSettingsSnapshot, curCohort.majorCode, courses)
+              : null;
+            const planCodesForChosenTerm = majorEightPlan ? majorEightPlan[termCoursesPlanTerm] || [] : [];
+            const termSearchQ = termCoursesSearch.trim().toLowerCase();
+            const filteredCurriculumForCohort = (curTermState?.majorCourses || [])
+              .filter((c) => {
+                if (termCoursesTypeFilter !== 'all' && c.courseType !== termCoursesTypeFilter) {
+                  return false;
+                }
+                if (!termSearchQ) return true;
+                return (
+                  c.title.toLowerCase().includes(termSearchQ) ||
+                  normalizeSchedCode(c.courseCode).includes(normalizeSchedCode(termSearchQ))
+                );
+              })
+              .sort((a, b) => {
+                const aSel = selectedCodeSet.has(normalizeSchedCode(a.courseCode)) ? 0 : 1;
+                const bSel = selectedCodeSet.has(normalizeSchedCode(b.courseCode)) ? 0 : 1;
+                if (aSel !== bSel) return aSel - bSel;
+                const ta = Number(normalizeCurriculumTermKey(a.recommendedTerm) || 99);
+                const tb = Number(normalizeCurriculumTermKey(b.recommendedTerm) || 99);
+                if (ta !== tb) return ta - tb;
+                return a.courseCode.localeCompare(b.courseCode);
+              });
+
+            const totalSelectedUnits = round2(
+              (curTermState?.selectedCourses || []).reduce(
+                (sum, c) => sum + c.theoreticalUnits + c.practicalUnits,
+                0
+              )
+            );
+            const totalSelectedHours = round2(
+              (curTermState?.selectedCourses || []).reduce(
+                (sum, c) => sum + calculateOfferingBreakdown(c, rules).weeklyHours,
+                0
+              )
+            );
+            const scheduledCourseCodesInCohort = new Set(
+              curCohort
+                ? termOfferings
+                    .filter((o) => o.cohortId === curCohort.id)
+                    .map((o) => normalizeSchedCode(o.courseCode))
+                : []
+            );
+
+            return (
+              <div className="space-y-4 max-w-7xl mx-auto">
+                <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <ListChecks className="w-5 h-5 text-teal-600" />
+                      <span>
+                        انتخاب دروس قابل ارائه ترم <span className="font-mono">{activeTerm}</span> برای هر رشته-ورودی (از سرفصل مصوب)
+                      </span>
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      دروسی که در این بخش برای هر رشته و سال ورود تیک زده می‌شوند، در زمان ثبت درس در جدول برنامه جامع و استودیو برای همان رشته-ورودی نمایش داده خواهند شد.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSection('master_grid')}
+                      className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <LayoutGrid className="w-3.5 h-3.5" />
+                      <span>ورود به برنامه جامع</span>
+                    </button>
+                  </div>
+                </div>
+
+                {visibleCohortsForWorkspace.length === 0 ? (
+                  <div className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center space-y-2">
+                    <div className="text-sm font-extrabold text-slate-700 dark:text-slate-200">
+                      هنوز رشته و ورودی‌ای در اطلاعات اولیه ثبت نشده است.
+                    </div>
+                    {isSystemAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setSection('programs')}
+                        className="px-4 py-2 rounded-xl bg-teal-600 text-white text-xs font-extrabold cursor-pointer"
+                      >
+                        تعریف رشته‌ها، ورودی‌ها و شعب
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                    {/* لیست رشته‌ها و ورودی‌ها */}
+                    <div className="lg:col-span-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 space-y-2 max-h-[680px] overflow-y-auto">
+                      <div className="px-2 py-1 text-xs font-black text-slate-700 dark:text-slate-200 border-b border-slate-100 dark:border-slate-800">
+                        رشته‌ها و ورودی‌های مجاز ({visibleCohortsForWorkspace.length.toLocaleString('fa-IR')} مورد)
+                      </div>
+                      {visibleCohortsForWorkspace.map((coh) => {
+                        const isActive = curCohort?.id === coh.id;
+                        const state = getSelectedTermCoursesForCohort({
+                          termKey: activeTerm,
+                          cohortId: coh.id,
+                          majorCode: coh.majorCode,
+                          allCourses: courses,
+                          rules,
+                        });
+                        return (
+                          <button
+                            key={coh.id}
+                            type="button"
+                            onClick={() => setTermCoursesCohortId(coh.id)}
+                            className={`w-full text-right p-3 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2 ${
+                              isActive
+                                ? 'bg-teal-50 dark:bg-teal-950/40 border-teal-500 text-teal-950 dark:text-teal-100 shadow-xs'
+                                : 'bg-slate-50/70 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:border-teal-300'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="font-extrabold text-xs truncate">
+                                {coh.majorName}
+                              </div>
+                              <div className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1.5">
+                                <span className="font-mono">ورودی {coh.entryTerm}</span>
+                                <span>·</span>
+                                <span className="font-mono">کد {coh.majorCode}</span>
+                              </div>
+                            </div>
+                            <span
+                              className={`px-2 py-1 rounded-lg text-[10.5px] font-black tabular-nums shrink-0 ${
+                                state.selectedCourses.length > 0
+                                  ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200'
+                                  : 'bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300'
+                              }`}
+                            >
+                              {state.selectedCourses.length.toLocaleString('fa-IR')} /{' '}
+                              {state.majorCourses.length.toLocaleString('fa-IR')} درس
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* لیست سرفصل دروس رشته برای انتخاب */}
+                    {curCohort && curTermState && (
+                      <div className="lg:col-span-8 space-y-3">
+                        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                            <div>
+                              <div className="text-sm font-black text-slate-900 dark:text-white">
+                                {curCohort.majorName} — ورودی {curCohort.entryTerm}
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5">
+                                کد رشته: <span className="font-mono font-bold">{curCohort.majorCode}</span> · کل سرفصل رشته:{' '}
+                                {curTermState.majorCourses.length.toLocaleString('fa-IR')} درس
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 text-xs tabular-nums">
+                              <span className="px-3 py-1.5 rounded-xl bg-teal-600 text-white font-extrabold">
+                                انتخاب‌شده در ترم {activeTerm}:{' '}
+                                {curTermState.selectedCourses.length.toLocaleString('fa-IR')} درس ({totalSelectedUnits.toLocaleString('fa-IR')} واحد · {totalSelectedHours.toLocaleString('fa-IR')} ساعت)
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* بارگذاری یک‌کلیکی از برنامه ۸ ترمه پیش‌فرض تنظیم‌شده در تنظیمات */}
+                          <div className="p-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/25 border border-indigo-200 dark:border-indigo-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-extrabold text-indigo-950 dark:text-indigo-200">
+                                بارگذاری از برنامه ۸ ترمه پیش‌فرض:
+                              </span>
+                              <select
+                                value={termCoursesPlanTerm}
+                                onChange={(e) => setTermCoursesPlanTerm(e.target.value as EightTermKey)}
+                                className="px-2.5 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 font-bold"
+                              >
+                                {EIGHT_TERM_KEYS.map((tk) => {
+                                  const cnt = (majorEightPlan?.[tk] || []).length;
+                                  return (
+                                    <option key={tk} value={tk}>
+                                      {EIGHT_TERM_LABELS[tk]} ({cnt.toLocaleString('fa-IR')} درس)
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                disabled={planCodesForChosenTerm.length === 0}
+                                onClick={() => {
+                                  const merged = Array.from(
+                                    new Set([
+                                      ...curTermState.selectedCourseCodes,
+                                      ...planCodesForChosenTerm,
+                                    ])
+                                  );
+                                  setCohortTermSelectedCourseCodes(curCohort, merged);
+                                  notify(
+                                    'success',
+                                    `${planCodesForChosenTerm.length.toLocaleString('fa-IR')} درس ${EIGHT_TERM_LABELS[termCoursesPlanTerm]} به لیست دروس قابل ارائه این ترم اضافه شد.`
+                                  );
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-bold cursor-pointer"
+                              >
+                                + افزودن دروس {EIGHT_TERM_LABELS[termCoursesPlanTerm]}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={planCodesForChosenTerm.length === 0}
+                                onClick={() => {
+                                  setCohortTermSelectedCourseCodes(curCohort, planCodesForChosenTerm);
+                                  notify(
+                                    'success',
+                                    `لیست دروس این ترم با ${planCodesForChosenTerm.length.toLocaleString('fa-IR')} درس ${EIGHT_TERM_LABELS[termCoursesPlanTerm]} جایگزین شد.`
+                                  );
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-indigo-300 dark:border-indigo-700 text-indigo-800 dark:text-indigo-200 disabled:opacity-40 font-bold cursor-pointer hover:bg-indigo-100"
+                              >
+                                جایگزینی با این ترم
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* جستجو و انتخاب گروهی */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <div className="flex flex-wrap items-center gap-2 flex-1">
+                              <div className="relative flex-1 min-w-[200px] max-w-xs">
+                                <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
+                                <input
+                                  type="text"
+                                  value={termCoursesSearch}
+                                  onChange={(e) => setTermCoursesSearch(e.target.value)}
+                                  placeholder="جستجوی نام یا کد ۷ رقمی درس..."
+                                  className="w-full pr-8 pl-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                                />
+                              </div>
+                              <select
+                                value={termCoursesTypeFilter}
+                                onChange={(e) =>
+                                  setTermCoursesTypeFilter(e.target.value as 'all' | SchedCourseType)
+                                }
+                                className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                              >
+                                <option value="all">همه انواع درس</option>
+                                {(Object.keys(SCHED_COURSE_TYPE_LABELS) as SchedCourseType[]).map((k) => (
+                                  <option key={k} value={k}>
+                                    {SCHED_COURSE_TYPE_LABELS[k]}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setCohortTermSelectedCourseCodes(
+                                    curCohort,
+                                    curTermState.majorCourses.map((c) => c.courseCode)
+                                  )
+                                }
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold cursor-pointer"
+                              >
+                                انتخاب همه
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCohortTermSelectedCourseCodes(curCohort, [])}
+                                className="px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold cursor-pointer"
+                              >
+                                پاک کردن همه
+                              </button>
+                            </div>
+                          </div>
+
+                          {curTermState.majorCourses.length === 0 ? (
+                            <div className="p-8 rounded-2xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-center text-xs space-y-2">
+                              <div className="font-extrabold text-amber-900 dark:text-amber-200">
+                                هیچ درسی برای رشته «{curCohort.majorName} ({curCohort.majorCode})» در سرفصل دروس ثبت نشده است.
+                              </div>
+                              <div className="text-slate-600 dark:text-slate-300">
+                                مدیر سامانه می‌تواند در «تنظیمات کل سامانه ← مدیریت مقاطع و رشته‌های مصوب ← تب سرفصل دروس رشته» یا از بخش «لیست دروس» سرفصل این رشته را اضافه کند.
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-x-auto max-h-[460px]">
+                              <table className="w-full text-xs text-right">
+                                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold sticky top-0 z-10">
+                                  <tr>
+                                    <th className="p-2.5 text-center w-12">ارائه</th>
+                                    <th className="p-2.5">کد ۷ رقمی</th>
+                                    <th className="p-2.5">عنوان درس</th>
+                                    <th className="p-2.5">نوع</th>
+                                    <th className="p-2.5 text-center">واحد / ساعت</th>
+                                    <th className="p-2.5 text-center">ترم ۸ترمه</th>
+                                    <th className="p-2.5 text-center">وضعیت جدول</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 tabular-nums">
+                                  {filteredCurriculumForCohort.map((c) => {
+                                    const cleanCode = normalizeSchedCode(c.courseCode);
+                                    const isChecked = selectedCodeSet.has(cleanCode);
+                                    const isAlreadyScheduled = scheduledCourseCodesInCohort.has(cleanCode);
+                                    const bd = calculateOfferingBreakdown(c, rules);
+                                    const recTerm = normalizeCurriculumTermKey(c.recommendedTerm);
+                                    return (
+                                      <tr
+                                        key={c.id}
+                                        onClick={() => {
+                                          const next = isChecked
+                                            ? curTermState.selectedCourseCodes.filter(
+                                                (x) => normalizeSchedCode(x) !== cleanCode
+                                              )
+                                            : [...curTermState.selectedCourseCodes, cleanCode];
+                                          setCohortTermSelectedCourseCodes(curCohort, next);
+                                        }}
+                                        className={`cursor-pointer transition ${
+                                          isChecked
+                                            ? 'bg-emerald-50/70 dark:bg-emerald-950/25 hover:bg-emerald-100/70'
+                                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                                        }`}
+                                      >
+                                        <td className="p-2.5 text-center">
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={() => {}}
+                                            className="w-4 h-4 rounded text-teal-600 cursor-pointer"
+                                          />
+                                        </td>
+                                        <td className="p-2.5 font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                                          {c.courseCode}
+                                        </td>
+                                        <td className="p-2.5 font-bold text-slate-900 dark:text-white">
+                                          {c.title}
+                                        </td>
+                                        <td className="p-2.5 text-slate-500">
+                                          {SCHED_COURSE_TYPE_LABELS[c.courseType]}
+                                        </td>
+                                        <td className="p-2.5 text-center">
+                                          <span className="font-bold">
+                                            {(c.theoreticalUnits + c.practicalUnits).toLocaleString('fa-IR')} و
+                                          </span>{' '}
+                                          <span className="text-slate-500">
+                                            ({bd.weeklyHours.toLocaleString('fa-IR')} س)
+                                          </span>
+                                        </td>
+                                        <td className="p-2.5 text-center">
+                                          {recTerm ? (
+                                            <span className="px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-200 text-[10px] font-bold">
+                                              ترم {recTerm}
+                                            </span>
+                                          ) : (
+                                            '—'
+                                          )}
+                                        </td>
+                                        <td className="p-2.5 text-center">
+                                          {isAlreadyScheduled ? (
+                                            <span className="px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-950/60 text-teal-800 dark:text-teal-200 text-[10px] font-extrabold">
+                                              ثبت‌شده در جدول
+                                            </span>
+                                          ) : (
+                                            <span className="text-slate-400 text-[10px]">—</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* ۱. پیشخوان و نمای کلی */}
           {section === 'overview' && (
@@ -2981,10 +3827,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                               </button>
                               <button
                                 type="button"
-                                onClick={() =>
-                                  persistClassrooms(classrooms.filter((x) => x.id !== r.id))
-                                }
+                                onClick={() => handleDeleteClassroom(r)}
                                 className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-600 border border-rose-200 dark:border-rose-800 cursor-pointer"
+                                title="حذف کلاس فیزیکی و غیرفعال‌سازی دروس مرتبط"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -3108,10 +3953,9 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                               </button>
                               <button
                                 type="button"
-                                onClick={() =>
-                                  persistPrograms(programs.filter((x) => x.id !== p.id))
-                                }
+                                onClick={() => handleDeleteProgramCohort(p)}
                                 className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-600 border border-rose-200 dark:border-rose-800 cursor-pointer"
+                                title="حذف رشته-ورودی و تمام دروس آن در جدول برنامه"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -5917,6 +6761,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                           return {
                             'ترم': o.termKey,
                             'کد درس ۷ رقمی': o.courseCode,
+                            'کد گروه': o.courseGroupCode || '-',
+                            'کد گلستان (درس_گروه)': formatGolestanCourseCode(o.courseCode, o.courseGroupCode),
                             'نام درس': o.courseTitle,
                             'رشته میزبان': `${o.ownerMajorName} (${o.ownerMajorCode})`,
                             'ورودی': o.entryTerm,
@@ -5927,15 +6773,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                 .join('، ') || '-',
                             'تعداد دانشجو': o.enrolledCount,
                             'استاد': o.professorName || '-',
-                            'کلاس فیزیکی': o.classroomName || '-',
-                            'روز': o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'تعیین‌نشده',
-                            'سانس': o.slotIds
-                              .map((id) => {
-                                const idx = sortedSlots.findIndex((s) => s.id === id);
-                                const sl = idx >= 0 ? sortedSlots[idx] : undefined;
-                                return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : id;
-                              })
-                              .join(' + '),
+                            'کلاس فیزیکی اصلی': o.classroomName || '-',
+                            'برنامه جلسات هفتگی': formatOfferingSessionsSummary(o, sortedSlots, true),
                             'زمان امتحان': isCourseEligibleForExam(o)
                               ? formatExamAssignmentShort(o, activeTermExamSettings) || 'تعیین‌نشده'
                               : 'ندارد (عملی/نظری-عملی)',
@@ -6089,8 +6928,8 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             {SCHED_DAY_LABELS[day]}
                           </td>
                           {sortedSlots.map((slot) => {
-                            const items = filteredScheduleOfferings.filter(
-                              (o) => o.dayOfWeek === day && o.slotIds.includes(slot.id)
+                            const items = filteredScheduleOfferings.filter((o) =>
+                              isOfferingAtDaySlot(o, day, slot.id)
                             );
                             return (
                               <td
@@ -6126,9 +6965,19 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                       ...comp.missingItems,
                                       ...conf.errors,
                                     ];
+                                    const sessHere = getOfferingSessions(o).find(
+                                      (s) => s.dayOfWeek === day && s.slotIds.includes(slot.id)
+                                    );
+                                    const halfHere = getOfferingSessionSlotHalf(o, day, slot.id);
+                                    const roomHere = getOfferingClassroomAtSession(o, sessHere);
+                                    const golCode = formatGolestanCourseCode(
+                                      o.courseCode,
+                                      o.courseGroupCode
+                                    );
+                                    const allSessionsCount = getOfferingSessions(o).length;
                                       return (
                                         <div
-                                          key={o.id}
+                                          key={`${o.id}_${day}_${slot.id}`}
                                           onClick={() => openEditOfferingModal(o)}
                                           title={
                                             hoverIssues.length > 0
@@ -6154,9 +7003,24 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                           )}
                                           <div className="font-bold text-slate-900 dark:text-white leading-snug">
                                             {o.courseTitle}
+                                            {halfHere !== 'full' && (
+                                              <span className="mr-1 text-[9.5px] px-1 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200 font-bold">
+                                                {halfHere === 'first_hour' ? '۱س راست' : '۱س چپ'}
+                                              </span>
+                                            )}
                                           </div>
-                                          <div className="text-[10px] font-mono text-slate-500 mt-0.5">
-                                            {o.courseCode} · {bd.rawUnits} واحد ({bd.weeklyHours} س)
+                                          <div className="text-[10px] font-mono text-slate-500 mt-0.5 flex flex-wrap items-center gap-1">
+                                            <span className="font-bold text-indigo-700 dark:text-indigo-300" dir="ltr">
+                                              {golCode}
+                                            </span>
+                                            <span>
+                                              · {bd.rawUnits} واحد ({bd.weeklyHours} س)
+                                            </span>
+                                            {allSessionsCount > 1 && (
+                                              <span className="px-1 rounded bg-sky-100 dark:bg-sky-900/50 text-sky-800 dark:text-sky-200 font-sans font-bold">
+                                                {allSessionsCount.toLocaleString('fa-IR')} جلسه
+                                              </span>
+                                            )}
                                           </div>
                                           <div className="text-[10px] text-slate-600 dark:text-slate-300 mt-0.5">
                                             {o.ownerMajorName} ({o.entryTerm}
@@ -6164,7 +7028,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                           </div>
                                           <div className="text-[10px] text-teal-700 dark:text-teal-400 font-semibold">
                                             {o.professorName || 'بدون استاد'} ·{' '}
-                                            {o.classroomName ||
+                                            {roomHere.classroomName ||
                                               (!isInternshipClassroomRequired(o)
                                                 ? 'محل: مدرسه'
                                                 : 'بدون کلاس')}
@@ -6227,11 +7091,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-right">
-                        <th className="p-3">کد درس ۷ رقمی</th>
+                        <th className="p-3">کد درس / گروه (گلستان)</th>
                         <th className="p-3">عنوان درس</th>
                         <th className="p-3">رشته، ورودی و شعبه</th>
                         <th className="p-3">استاد</th>
-                        <th className="p-3">کلاس / زمان</th>
+                        <th className="p-3">کلاس / جلسات هفتگی</th>
                         <th className="p-3 text-center">ساعت / واحد معادل</th>
                         <th className="p-3 text-center">عملیات</th>
                       </tr>
@@ -6273,7 +7137,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                             }`}
                           >
                             <td className="p-3 font-mono font-bold text-indigo-700 dark:text-indigo-400">
-                              {o.courseCode}
+                              <span dir="ltr">{formatGolestanCourseCode(o.courseCode, o.courseGroupCode)}</span>
                             </td>
                             <td className="p-3 font-bold text-slate-900 dark:text-white">
                               {o.courseTitle}
@@ -6327,16 +7191,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                   (!isInternshipClassroomRequired(o) ? 'محل: مدرسه' : 'بدون کلاس')}
                               </div>
                               <div className="text-[10px] text-slate-500">
-                                {o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'بدون روز'} ·{' '}
-                                {o.slotIds
-                                  .map((id) => {
-                                    const idx = sortedSlots.findIndex((s) => s.id === id);
-                                    const sl = idx >= 0 ? sortedSlots[idx] : undefined;
-                                    return sl
-                                      ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})`
-                                      : id;
-                                  })
-                                  .join(' + ')}
+                                {formatOfferingSessionsSummary(o, sortedSlots, true)}
                               </div>
                             </td>
                             <td className="p-3 text-center">
@@ -6362,6 +7217,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                         majorCode: o.ownerMajorCode,
                                         dayOfWeek: o.dayOfWeek,
                                         slotIds: o.slotIds,
+                                        sessions: getOfferingSessions(o),
                                       }
                                     );
                                     if (lockRes.locked) {
@@ -6412,6 +7268,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         majorCode: item.ownerMajorCode,
                         dayOfWeek: item.dayOfWeek,
                         slotIds: item.slotIds,
+                        sessions: getOfferingSessions(item),
                       })
                     )
                     .find((r) => r.locked);
@@ -6423,13 +7280,17 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     );
                     return;
                   }
+                  const normalizedNew = assignSequentialGolestanGroupCodes(
+                    newOfferings.map(normalizeOfferingWithSessions),
+                    termOfferings
+                  );
                   commitOfferingsWithHistory(
-                    [...offerings, ...newOfferings],
-                    `چینش هوشمند (${newOfferings.length} درس)`
+                    [...offerings, ...normalizedNew],
+                    `چینش هوشمند (${normalizedNew.length} درس)`
                   );
                   notify(
                     'success',
-                    `${newOfferings.length} درس تولیدشده توسط ویزارد هوشمند در برنامه ترم ${activeTerm} ثبت شد.`
+                    `${normalizedNew.length} درس تولیدشده توسط ویزارد هوشمند با کد گروه گلستان در برنامه ترم ${activeTerm} ثبت شد.`
                   );
                   setSection('schedule');
                 }}
@@ -7626,10 +8487,27 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       setOffSectionId(sec?.id || '');
                       const countVal = sec?.studentCount || firstCoh?.totalStudents || 28;
                       setOffEnrolledCount(String(countVal));
-                      const firstCrs = courses.find(
-                        (c) => normalizeMajorCode(c.majorCode) === normNext
-                      );
+                      const firstCohSelected = firstCoh
+                        ? getSelectedTermCoursesForCohort({
+                            termKey: activeTerm,
+                            cohortId: firstCoh.id,
+                            majorCode: normNext,
+                            allCourses: courses,
+                            rules,
+                          }).selectedCourses
+                        : [];
+                      const firstCrs = firstCohSelected[0];
                       setOffCourseId(firstCrs?.id || '');
+                      setOffGroupCodeManual(false);
+                      if (firstCrs) {
+                        setOffCourseGroupCode(
+                          getNextGolestanCourseGroupInfo(
+                            firstCrs.courseCode,
+                            termOfferings,
+                            editingOffId || undefined
+                          ).nextGroupCode
+                        );
+                      }
                       setOffInternshipSchoolOnlyFull(false);
                       if (!editingOffId) {
                         initInternshipGroupsForCourse(firstCrs, countVal, offProfessorId);
@@ -7660,8 +8538,33 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                       setOffSectionId(sec?.id || '');
                       const countVal = sec?.studentCount || coh?.totalStudents || 25;
                       setOffEnrolledCount(String(countVal));
-                      if (!editingOffId && selectedOffCourse?.practicalType === 'internship') {
-                        initInternshipGroupsForCourse(selectedOffCourse, countVal, offProfessorId);
+                      const nextTermState = coh
+                        ? getSelectedTermCoursesForCohort({
+                            termKey: activeTerm,
+                            cohortId: coh.id,
+                            majorCode: coh.majorCode,
+                            allCourses: courses,
+                            rules,
+                          })
+                        : null;
+                      const validCoursesForNext = nextTermState?.selectedCourses || [];
+                      const keepCurrent = validCoursesForNext.find((c) => c.id === offCourseId);
+                      const pickedCrs = keepCurrent || validCoursesForNext[0];
+                      setOffCourseId(pickedCrs?.id || '');
+                      if (pickedCrs) {
+                        setOffGroupCodeManual(false);
+                        setOffCourseGroupCode(
+                          getNextGolestanCourseGroupInfo(
+                            pickedCrs.courseCode,
+                            termOfferings,
+                            editingOffId || undefined
+                          ).nextGroupCode
+                        );
+                      }
+                      if (!editingOffId && pickedCrs?.practicalType === 'internship') {
+                        initInternshipGroupsForCourse(pickedCrs, countVal, offProfessorId);
+                      } else if (!editingOffId) {
+                        initInternshipGroupsForCourse(undefined, countVal, offProfessorId);
                       }
                     }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
@@ -7680,7 +8583,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
                 <label className="space-y-1">
                   <span className="font-bold block">
-                    ۳. نام درس از چارت همین رشته ({coursesForSelectedMajor.length.toLocaleString('fa-IR')} درس) *
+                    ۳. درس از دروس انتخاب‌شده ترم {activeTerm} ({modalSelectableCourses.length.toLocaleString('fa-IR')} درس) *
                   </span>
                   <select
                     required
@@ -7688,8 +8591,16 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     onChange={(e) => {
                       const nextId = e.target.value;
                       setOffCourseId(nextId);
-                      const c = coursesForSelectedMajor.find((x) => x.id === nextId);
+                      const c = modalSelectableCourses.find((x) => x.id === nextId);
                       if (c) {
+                        setOffGroupCodeManual(false);
+                        setOffCourseGroupCode(
+                          getNextGolestanCourseGroupInfo(
+                            c.courseCode,
+                            termOfferings,
+                            editingOffId || undefined
+                          ).nextGroupCode
+                        );
                         const currentEnrolled = Number(normalizeSchedCode(offEnrolledCount)) || 28;
                         if (c.practicalType !== 'internship') {
                           setOffInternshipSchoolOnlyFull(false);
@@ -7702,18 +8613,143 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                   >
-                    {coursesForSelectedMajor.length === 0 ? (
-                      <option value="">هیچ درسی برای این رشته در سرفصل دروس ثبت نشده است</option>
+                    {modalSelectableCourses.length === 0 ? (
+                      <option value="">
+                        هیچ درسی برای این ورودی در ترم {activeTerm} انتخاب نشده است
+                      </option>
                     ) : (
-                      coursesForSelectedMajor.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.title} — کد {c.courseCode}
-                        </option>
-                      ))
+                      modalSelectableCourses.map((c) => {
+                        const isOutsideTermList =
+                          !selectedTermCourseState.selectedCourses.some((x) => x.id === c.id);
+                        return (
+                          <option key={c.id} value={c.id}>
+                            {c.title} — کد {c.courseCode}
+                            {isOutsideTermList ? ' (ثبت‌شده قبلی)' : ''}
+                          </option>
+                        );
+                      })
                     )}
                   </select>
                 </label>
               </div>
+
+              {offCohortId && selectedTermCourseState.selectedCourses.length === 0 && (
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/35 border border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-100 text-[11px] font-bold flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    هنوز هیچ درسی از سرفصل برای این رشته-ورودی جهت ارائه در ترم {activeTerm} انتخاب نشده است. ابتدا دروس این ترم را از بخش «دروس قابل ارائه ترم» انتخاب کنید.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTermCoursesCohortId(offCohortId);
+                      setOffModalOpen(false);
+                      setSection('term_courses');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-extrabold cursor-pointer shrink-0"
+                  >
+                    انتخاب دروس قابل ارائه ترم
+                  </button>
+                </div>
+              )}
+
+              {/* کد دو رقمی گروه درس در سامانه گلستان (مثل 1111405_07) */}
+              {selectedOffCourse && golestanGroupSuggestion && (
+                <div className="p-3 rounded-xl bg-teal-50/75 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <div className="font-black text-teal-950 dark:text-teal-100 flex flex-wrap items-center gap-2">
+                        <span>کد ارائه درس در سامانه گلستان (کد ۷ رقمی _ کد گروه ۲ رقمی):</span>
+                        <span
+                          dir="ltr"
+                          className="px-2.5 py-0.5 rounded-lg bg-teal-700 text-white font-mono text-xs tracking-wider shadow-xs"
+                        >
+                          {formatGolestanCourseCode(selectedOffCourse.courseCode, offCourseGroupCode)}
+                        </span>
+                      </div>
+                      <div className="text-[10.5px] text-teal-800 dark:text-teal-300 font-semibold">
+                        {golestanGroupSuggestion.existingCount === 0 ? (
+                          <span>
+                            این کد درس ({selectedOffCourse.courseCode}) برای اولین بار در برنامه جامع این ترم ثبت می‌شود ← شروع خودکار از گروه{' '}
+                            <strong className="font-mono">01</strong>
+                          </span>
+                        ) : (
+                          <span>
+                            قبلاً{' '}
+                            <strong>
+                              {golestanGroupSuggestion.existingCount.toLocaleString('fa-IR')} گروه
+                            </strong>{' '}
+                            از کد درس <span className="font-mono">{selectedOffCourse.courseCode}</span>{' '}
+                            در کل برنامه جامع ثبت شده است ← کد گروه پیشنهادی خودکار:{' '}
+                            <strong className="font-mono">
+                              {golestanGroupSuggestion.nextGroupCode}
+                            </strong>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <label className="inline-flex items-center gap-1.5 text-[11px] font-bold">
+                        <span>کد گروه:</span>
+                        <input
+                          type="text"
+                          maxLength={2}
+                          value={offCourseGroupCode}
+                          onChange={(e) => {
+                            setOffGroupCodeManual(true);
+                            setOffCourseGroupCode(
+                              normalizeSchedCode(e.target.value).replace(/[^\d]/g, '').slice(0, 2)
+                            );
+                          }}
+                          onBlur={() => {
+                            const norm = normalizeCourseGroupCode(offCourseGroupCode);
+                            if (norm) setOffCourseGroupCode(norm);
+                          }}
+                          dir="ltr"
+                          className="w-14 px-2 py-1 rounded-lg border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-900 font-mono text-center font-black"
+                        />
+                      </label>
+                      {(offGroupCodeManual ||
+                        normalizeCourseGroupCode(offCourseGroupCode) !==
+                          golestanGroupSuggestion.nextGroupCode) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOffGroupCodeManual(false);
+                            setOffCourseGroupCode(golestanGroupSuggestion.nextGroupCode);
+                          }}
+                          className="px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-200 text-[10.5px] font-bold hover:bg-teal-100 cursor-pointer"
+                        >
+                          گروه خودکار ({golestanGroupSuggestion.nextGroupCode})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {duplicateGroupConflictOffering && (
+                    <div className="p-2 rounded-lg bg-amber-100/90 dark:bg-amber-950/60 border border-amber-400 text-amber-950 dark:text-amber-100 text-[10.5px] font-bold flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        ⚠️ کد گروه{' '}
+                        <span className="font-mono" dir="ltr">
+                          {formatGolestanCourseCode(selectedOffCourse.courseCode, offCourseGroupCode)}
+                        </span>{' '}
+                        قبلاً برای «{duplicateGroupConflictOffering.ownerMajorName} (ورودی{' '}
+                        {duplicateGroupConflictOffering.entryTerm})» ثبت شده است.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOffGroupCodeManual(false);
+                          setOffCourseGroupCode(golestanGroupSuggestion.nextGroupCode);
+                        }}
+                        className="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
+                      >
+                        اصلاح خودکار به {golestanGroupSuggestion.nextGroupCode}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <label className="space-y-1">
@@ -7829,8 +8865,17 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                               pickedParts[s12.id] = getSlotDurationHours(s12) <= 1 ? 'full' : 'first_hour';
                             }
                             if (pickedIds.length > 0) {
-                              setOffSlotIds(pickedIds);
-                              setOffSlotParts(pickedParts);
+                              setOffSessions((prev) =>
+                                prev.map((sess, idx) =>
+                                  idx === 0
+                                    ? {
+                                        ...sess,
+                                        slotIds: pickedIds,
+                                        slotParts: pickedParts,
+                                      }
+                                    : sess
+                                )
+                              );
                               setOffClassroomId('');
                               if (!slot07_08) {
                                 notify(
@@ -8261,188 +9306,341 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     <label className="space-y-1">
                       <div className="flex flex-wrap items-center justify-between gap-1">
                         <span className="font-bold">تخصیص کلاس فیزیکی</span>
-                        <span
-                          className={`text-[10px] font-extrabold ${
-                            isSchoolExempt
-                              ? 'text-emerald-700 dark:text-emerald-300'
-                              : 'text-emerald-700 dark:text-emerald-300'
-                          }`}
-                        >
-                          {isSchoolExempt
-                            ? 'حضور در مدرسه — بدون نیاز به کلاس فیزیکی'
-                            : offDay && offSlotIds.length > 0
-                            ? `فقط کلاس‌های خالی (${modalClassroomAvailability.freeRooms.length.toLocaleString('fa-IR')} از ${modalClassroomAvailability.totalActiveCount.toLocaleString('fa-IR')})`
-                            : `(${modalClassroomAvailability.totalActiveCount.toLocaleString('fa-IR')} کلاس فعال)`}
-                        </span>
-                      </div>
-                      {isSchoolExempt ? (
-                        <div className="px-3 py-2 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200 font-bold text-[11px]">
-                          ✓ برای حضور در مدرسه نیازی به انتخاب کلاس فیزیکی دانشگاه نیست.
-                        </div>
-                      ) : (
-                        <>
-                          <select
-                            value={offClassroomId}
-                            onChange={(e) => setOffClassroomId(e.target.value)}
-                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                          <span
+                            className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300"
                           >
-                            <option value="">-- بدون کلاس فیزیکی --</option>
+                            {isSchoolExempt
+                              ? 'حضور در مدرسه — بدون نیاز به کلاس فیزیکی'
+                              : offSessions.some((s) => Boolean(s.dayOfWeek) && s.slotIds.length > 0 && !s.classroomId)
+                              ? `فقط کلاس‌های خالی در تمام جلسات (${modalClassroomAvailability.freeRooms.length.toLocaleString('fa-IR')} از ${modalClassroomAvailability.totalActiveCount.toLocaleString('fa-IR')})`
+                              : `(${modalClassroomAvailability.totalActiveCount.toLocaleString('fa-IR')} کلاس فعال)`}
+                          </span>
+                        </div>
+                        {isSchoolExempt ? (
+                          <div className="px-3 py-2 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200 font-bold text-[11px]">
+                            ✓ برای حضور در مدرسه نیازی به انتخاب کلاس فیزیکی دانشگاه نیست.
+                          </div>
+                        ) : (
+                          <>
+                            <select
+                              value={offClassroomId}
+                              onChange={(e) => setOffClassroomId(e.target.value)}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                            >
+                              <option value="">-- بدون کلاس فیزیکی --</option>
+                              {modalClassroomAvailability.selectedOccupiedItem && (
+                                <option value={modalClassroomAvailability.selectedOccupiedItem.room.id}>
+                                  ⛔ اشغال‌شده در یکی از جلسات —{' '}
+                                  {modalClassroomAvailability.selectedOccupiedItem.room.name} (توسط «
+                                  {modalClassroomAvailability.selectedOccupiedItem.occupiedBy?.courseTitle ||
+                                    'درس دیگر'}
+                                  »)
+                                </option>
+                              )}
+                              {modalClassroomAvailability.freeRooms.map(({ room, capOk }) => (
+                                <option key={room.id} value={room.id}>
+                                  {capOk ? '✅' : '🟡 ظرفیت کمتر —'} {room.name} (کد {room.code} · ظرفیت{' '}
+                                  {room.capacity} · {SCHED_ROOM_TYPE_LABELS[room.roomType]})
+                                </option>
+                              ))}
+                            </select>
+                            {selectedOffCourse?.practicalType === 'internship' &&
+                              offInternshipSessionRole === 'university_orientation' && (
+                                <div className="mt-1 text-[10.5px] font-bold text-violet-700 dark:text-violet-300">
+                                  برای ۲ ساعت جلسه توجیهی کارورزی در دانشگاه، انتخاب کلاس فیزیکی الزامی است.
+                                </div>
+                              )}
                             {modalClassroomAvailability.selectedOccupiedItem && (
-                              <option value={modalClassroomAvailability.selectedOccupiedItem.room.id}>
-                                ⛔ اشغال‌شده در این ساعت —{' '}
-                                {modalClassroomAvailability.selectedOccupiedItem.room.name} (توسط «
-                                {modalClassroomAvailability.selectedOccupiedItem.occupiedBy?.courseTitle ||
-                                  'درس دیگر'}
-                                »)
-                              </option>
-                            )}
-                            {modalClassroomAvailability.freeRooms.map(({ room, capOk }) => (
-                              <option key={room.id} value={room.id}>
-                                {capOk ? '✅' : '🟡 ظرفیت کمتر —'} {room.name} (کد {room.code} · ظرفیت{' '}
-                                {room.capacity} · {SCHED_ROOM_TYPE_LABELS[room.roomType]})
-                              </option>
-                            ))}
-                          </select>
-                          {selectedOffCourse?.practicalType === 'internship' &&
-                            offInternshipSessionRole === 'university_orientation' && (
-                              <div className="mt-1 text-[10.5px] font-bold text-violet-700 dark:text-violet-300">
-                                برای ۲ ساعت جلسه توجیهی کارورزی در دانشگاه، انتخاب کلاس فیزیکی الزامی است.
+                              <div className="mt-1 p-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[10.5px] text-rose-700 dark:text-rose-200 flex flex-wrap items-center justify-between gap-1.5">
+                                <span>
+                                  کلاس انتخاب‌شده در یکی از روز/سانس‌ها اشغال است؛ می‌توانید کلاس دیگری انتخاب کنید یا برای جلسه جداگانه کلاس مجزا تعیین نمایید.
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOffClassroomId(modalClassroomAvailability.freeRooms[0]?.room.id || '')
+                                  }
+                                  className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
+                                >
+                                  {modalClassroomAvailability.freeRooms[0]
+                                    ? `انتخاب ${modalClassroomAvailability.freeRooms[0].room.name}`
+                                    : 'پاک کردن کلاس'}
+                                </button>
                               </div>
                             )}
-                          {modalClassroomAvailability.selectedOccupiedItem && (
-                            <div className="mt-1 p-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[10.5px] text-rose-700 dark:text-rose-200 flex flex-wrap items-center justify-between gap-1.5">
-                              <span>
-                                کلاس انتخاب‌شده قبلی در این روز و سانس اشغال است؛ یکی از کلاس‌های خالی را انتخاب کنید.
+                            {offSessions.some((s) => Boolean(s.dayOfWeek) && s.slotIds.length > 0 && !s.classroomId) &&
+                              modalClassroomAvailability.freeRooms.length === 0 && (
+                                <div className="mt-1 text-[10.5px] font-bold text-amber-700 dark:text-amber-300">
+                                  در همه روزها/سانس‌های انتخابی یک کلاس مشترک خالی یافت نشد؛ می‌توانید برای هر جلسه پایین‌تر کلاس جداگانه انتخاب کنید.
+                                </div>
+                              )}
+                          </>
+                        )}
+                      </label>
+                    );
+                  })()}
+                </div>
+
+                {/* زمان‌بندی منعطف چندجلسه‌ای (روزها و سانس‌های مختلف، مثلا ۲ س یکشنبه + ۱ س سه‌شنبه) */}
+                <div className="p-3 rounded-xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <Clock className="w-4 h-4 text-teal-600" />
+                        <span>زمان‌بندی جلسات هفتگی درس (امکان تقسیم در روزها و سانس‌های مختلف)</span>
+                      </div>
+                      <p className="text-[10.5px] text-slate-500 mt-0.5">
+                        برای دروس چندساعته (مانند درس ۳ ساعته: ۲ ساعت در سانس اول یکشنبه + ۱ ساعت در تک‌ساعت اول سانس آخر سه‌شنبه) می‌توانید بیش از یک جلسه تعریف کنید.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const usedDays = new Set(offSessions.map((s) => s.dayOfWeek).filter(Boolean));
+                        const nextDay =
+                          activeDays.find((d) => !usedDays.has(d)) ||
+                          activeDays[offSessions.length % Math.max(1, activeDays.length)] ||
+                          'tuesday';
+                        const rem = candidateCompleteness
+                          ? round2(
+                              candidateCompleteness.requiredTableHours -
+                                candidateCompleteness.scheduledHours
+                            )
+                          : 0;
+                        const lastSlot = sortedSlots[sortedSlots.length - 1];
+                        const suggestSlots =
+                          rem > 0.9 && rem <= 1.1 && lastSlot ? [lastSlot.id] : [];
+                        const suggestParts: Record<string, SchedSlotHalf> = {};
+                        if (suggestSlots.length === 1 && lastSlot) {
+                          suggestParts[lastSlot.id] =
+                            getSlotDurationHours(lastSlot) > 1 ? 'first_hour' : 'full';
+                        }
+                        setOffSessions((prev) => [
+                          ...prev,
+                          {
+                            id: `sess_${Date.now()}_${prev.length + 1}`,
+                            dayOfWeek: nextDay,
+                            slotIds: suggestSlots,
+                            slotParts: suggestParts,
+                          },
+                        ]);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer shadow-xs"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>افزودن جلسه در روز/سانس دیگر</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {offSessions.map((sess, sessIdx) => {
+                      const sessHours = sess.slotIds.reduce((sum, sid) => {
+                        const sl = sortedSlots.find((x) => x.id === sid);
+                        const dur = sl ? getSlotDurationHours(sl) : 2;
+                        const h = sess.slotParts?.[sid] || 'full';
+                        return sum + (h === 'full' ? dur : Math.min(dur, 1));
+                      }, 0);
+                      const isSchoolExempt = Boolean(
+                        selectedOffCourse?.practicalType === 'internship' &&
+                          (offInternshipSessionRole === 'school_attendance' ||
+                            (offInternshipSessionRole === 'combined' && offInternshipSchoolOnlyFull))
+                      );
+                      const sessRoomInfo =
+                        offSessions.length > 1 && !isSchoolExempt && sess.dayOfWeek && sess.slotIds.length > 0
+                          ? getModalSessionFreeRooms([sess])
+                          : null;
+
+                      return (
+                        <div
+                          key={sess.id}
+                          className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2.5"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 font-black text-[11px] text-slate-800 dark:text-slate-100">
+                                جلسه {(sessIdx + 1).toLocaleString('fa-IR')}
+                                {sessIdx === 0 && offSessions.length > 1 ? ' (اصلی)' : ''}
                               </span>
+                              <span className="text-[10.5px] font-bold text-teal-700 dark:text-teal-300">
+                                ({round2(sessHours).toLocaleString('fa-IR')} ساعت در این جلسه)
+                              </span>
+                            </div>
+                            {offSessions.length > 1 && (
                               <button
                                 type="button"
                                 onClick={() =>
-                                  setOffClassroomId(modalClassroomAvailability.freeRooms[0]?.room.id || '')
+                                  setOffSessions((prev) => prev.filter((_, i) => i !== sessIdx))
                                 }
-                                className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
+                                className="px-2 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-600 border border-rose-200 dark:border-rose-800 text-[10.5px] font-bold inline-flex items-center gap-1 cursor-pointer hover:bg-rose-100"
                               >
-                                {modalClassroomAvailability.freeRooms[0]
-                                  ? `انتخاب ${modalClassroomAvailability.freeRooms[0].room.name}`
-                                  : 'پاک کردن کلاس'}
+                                <Trash2 className="w-3 h-3" />
+                                <span>حذف جلسه</span>
                               </button>
-                            </div>
-                          )}
-                          {offDay &&
-                            offSlotIds.length > 0 &&
-                            modalClassroomAvailability.freeRooms.length === 0 && (
-                              <div className="mt-1 text-[10.5px] font-bold text-amber-700 dark:text-amber-300">
-                                در این روز و سانس هیچ کلاس فیزیکی خالی یافت نشد.
-                              </div>
                             )}
-                        </>
-                      )}
-                    </label>
-                  );
-                })()}
-              </div>
+                          </div>
 
-              {/* روز و سانس و تفکیک دو تک‌ساعت */}
-              <div className="space-y-2.5">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="space-y-1">
-                    <span className="font-bold">روز برگزاری کلاس</span>
-                    <select
-                      value={offDay}
-                      onChange={(e) => setOffDay(e.target.value as SchedDayKey | '')}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                    >
-                      <option value="">پیش‌نویس بدون روز قطعی</option>
-                      {activeDays.map((d) => (
-                        <option key={d} value={d}>
-                          {SCHED_DAY_LABELS[d]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="space-y-1">
-                    <span className="font-bold block">سانس‌های زمانی</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {sortedSlots.map((slot, sIdx) => {
-                        const checked = offSlotIds.includes(slot.id);
-                        return (
-                          <button
-                            key={slot.id}
-                            type="button"
-                            onClick={() => {
-                              if (checked) {
-                                setOffSlotIds((prev) => prev.filter((id) => id !== slot.id));
-                                setOffSlotParts((prev) => {
-                                  const next = { ...prev };
-                                  delete next[slot.id];
-                                  return next;
-                                });
-                              } else {
-                                setOffSlotIds((prev) => [...prev, slot.id]);
-                                setOffSlotParts((prev) => ({
-                                  ...prev,
-                                  [slot.id]: prev[slot.id] || 'full',
-                                }));
-                              }
-                            }}
-                            className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold cursor-pointer ${
-                              checked
-                                ? 'bg-teal-600 text-white border-teal-600'
-                                : 'bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700'
-                            }`}
-                          >
-                            {getSchedSlotTitle(slot, sIdx)} ({slot.startTime}-{slot.endTime})
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label className="space-y-1">
+                              <span className="font-bold">روز برگزاری جلسه</span>
+                              <select
+                                value={sess.dayOfWeek}
+                                onChange={(e) => {
+                                  const nextDay = e.target.value as SchedDayKey | '';
+                                  setOffSessions((prev) =>
+                                    prev.map((x, i) => (i === sessIdx ? { ...x, dayOfWeek: nextDay } : x))
+                                  );
+                                }}
+                                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                              >
+                                <option value="">پیش‌نویس بدون روز قطعی</option>
+                                {activeDays.map((d) => (
+                                  <option key={d} value={d}>
+                                    {SCHED_DAY_LABELS[d]}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
 
-                {offSlotIds.length > 0 && (
-                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
-                    <div className="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
-                      تعیین کل سانس یا تفکیک دو تک‌ساعت (نیمه راست: ساعت اول · نیمه چپ: ساعت دوم)
-                    </div>
-                    <div className="space-y-1.5">
-                      {offSlotIds.map((sid) => {
-                        const sIdx = sortedSlots.findIndex((x) => x.id === sid);
-                        const sl = sIdx >= 0 ? sortedSlots[sIdx] : undefined;
-                        const curHalf: SchedSlotHalf = offSlotParts[sid] || 'full';
-                        return (
-                          <div
-                            key={`half_${sid}`}
-                            className="flex flex-wrap items-center justify-between gap-2 text-[11px]"
-                          >
-                            <span className="font-bold text-slate-700 dark:text-slate-200">
-                              {sl ? `${getSchedSlotTitle(sl, sIdx)} (${sl.startTime}-${sl.endTime})` : sid}:
-                            </span>
-                            <div className="inline-flex items-center gap-1">
-                              {(
-                                ['full', 'first_hour', 'second_hour'] as SchedSlotHalf[]
-                              ).map((h) => (
-                                <button
-                                  key={h}
-                                  type="button"
-                                  onClick={() =>
-                                    setOffSlotParts((prev) => ({ ...prev, [sid]: h }))
-                                  }
-                                  className={`px-2.5 py-1 rounded-lg border font-bold cursor-pointer ${
-                                    curHalf === h
-                                      ? 'bg-indigo-600 text-white border-indigo-600'
-                                      : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                                  }`}
+                            {offSessions.length > 1 && !isSchoolExempt && (
+                              <label className="space-y-1">
+                                <span className="font-bold">کلاس فیزیکی این جلسه (اختیاری)</span>
+                                <select
+                                  value={sess.classroomId || ''}
+                                  onChange={(e) => {
+                                    const nextRoomId = e.target.value || undefined;
+                                    setOffSessions((prev) =>
+                                      prev.map((x, i) =>
+                                        i === sessIdx ? { ...x, classroomId: nextRoomId } : x
+                                      )
+                                    );
+                                  }}
+                                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                                 >
-                                  {getSlotHalfLabel(h)}
-                                </button>
-                              ))}
+                                  <option value="">
+                                    همسان با کلاس اصلی ({classrooms.find((r) => r.id === offClassroomId)?.name || 'تعیین‌نشده'})
+                                  </option>
+                                  {(sessRoomInfo
+                                    ? sessRoomInfo.freeRooms
+                                    : classrooms.filter((r) => r.isActive).map((r) => ({ room: r, capOk: true }))
+                                  ).map(({ room, capOk }) => (
+                                    <option key={room.id} value={room.id}>
+                                      {capOk ? '✅' : '🟡 ظرفیت کمتر —'} {room.name} (ظرفیت {room.capacity})
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
+                          </div>
+
+                          <div className="space-y-1">
+                            <span className="font-bold block">سانس‌های زمانی جلسه</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {sortedSlots.map((slot, sIdx) => {
+                                const checked = sess.slotIds.includes(slot.id);
+                                return (
+                                  <button
+                                    key={slot.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setOffSessions((prev) =>
+                                        prev.map((x, i) => {
+                                          if (i !== sessIdx) return x;
+                                          if (checked) {
+                                            const nextParts = { ...x.slotParts };
+                                            delete nextParts[slot.id];
+                                            return {
+                                              ...x,
+                                              slotIds: x.slotIds.filter((id) => id !== slot.id),
+                                              slotParts: nextParts,
+                                            };
+                                          }
+                                          const remHours = candidateCompleteness
+                                            ? round2(
+                                                candidateCompleteness.requiredTableHours -
+                                                  candidateCompleteness.scheduledHours
+                                              )
+                                            : 0;
+                                          const dur = getSlotDurationHours(slot);
+                                          const defaultHalf: SchedSlotHalf =
+                                            dur > 1 && remHours > 0.9 && remHours <= 1.1
+                                              ? 'first_hour'
+                                              : x.slotParts[slot.id] || 'full';
+                                          return {
+                                            ...x,
+                                            slotIds: [...x.slotIds, slot.id],
+                                            slotParts: { ...x.slotParts, [slot.id]: defaultHalf },
+                                          };
+                                        })
+                                      );
+                                    }}
+                                    className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold cursor-pointer ${
+                                      checked
+                                        ? 'bg-teal-600 text-white border-teal-600'
+                                        : 'bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700'
+                                    }`}
+                                  >
+                                    {getSchedSlotTitle(slot, sIdx)} ({slot.startTime}-{slot.endTime})
+                                  </button>
+                                );
+                              })}
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
+
+                          {sess.slotIds.length > 0 && (
+                            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
+                              <div className="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
+                                تعیین کل سانس یا تک‌ساعت (ساعت اول / ساعت دوم):
+                              </div>
+                              <div className="space-y-1.5">
+                                {sess.slotIds.map((sid) => {
+                                  const sIdx = sortedSlots.findIndex((x) => x.id === sid);
+                                  const sl = sIdx >= 0 ? sortedSlots[sIdx] : undefined;
+                                  const curHalf: SchedSlotHalf = sess.slotParts?.[sid] || 'full';
+                                  return (
+                                    <div
+                                      key={`half_${sess.id}_${sid}`}
+                                      className="flex flex-wrap items-center justify-between gap-2 text-[11px]"
+                                    >
+                                      <span className="font-bold text-slate-700 dark:text-slate-200">
+                                        {sl ? `${getSchedSlotTitle(sl, sIdx)} (${sl.startTime}-${sl.endTime})` : sid}:
+                                      </span>
+                                      <div className="inline-flex items-center gap-1">
+                                        {(
+                                          ['full', 'first_hour', 'second_hour'] as SchedSlotHalf[]
+                                        ).map((h) => (
+                                          <button
+                                            key={h}
+                                            type="button"
+                                            onClick={() =>
+                                              setOffSessions((prev) =>
+                                                prev.map((x, i) =>
+                                                  i === sessIdx
+                                                    ? { ...x, slotParts: { ...x.slotParts, [sid]: h } }
+                                                    : x
+                                                )
+                                              )
+                                            }
+                                            className={`px-2.5 py-1 rounded-lg border font-bold cursor-pointer ${
+                                              curHalf === h
+                                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                                : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                                            }`}
+                                          >
+                                            {getSlotHalfLabel(h)}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                )}
-              </div>
+                </div>
 
               {/* روز و سانس امتحان پایان ترم (صرفاً برای دروس نظری) */}
               {selectedOffCourse && (
@@ -8533,17 +9731,23 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         <span className="font-black">
                           درس نیم‌واحدی / ساعتی کسری (مانند تربیت بدنی: ۱ ساعت عملی + ۱ ساعت نظری در جدول):
                         </span>
-                        {offSlotIds.length > 0 &&
+                        {offSessions[0]?.slotIds.length > 0 &&
                           (offSplitPart !== 'full' ||
-                            offSlotParts[offSlotIds[0]] !== 'full') && (
+                            offSessions[0]?.slotParts?.[offSessions[0].slotIds[0]] !== 'full') && (
                             <button
                               type="button"
                               onClick={() => {
                                 setOffSplitPart('full');
-                                setOffSlotParts((prev) => ({
-                                  ...prev,
-                                  [offSlotIds[0]]: 'full',
-                                }));
+                                setOffSessions((prev) =>
+                                  prev.map((s, idx) =>
+                                    idx === 0 && s.slotIds[0]
+                                      ? {
+                                          ...s,
+                                          slotParts: { ...s.slotParts, [s.slotIds[0]]: 'full' },
+                                        }
+                                      : s
+                                  )
+                                );
                               }}
                               className="px-2 py-0.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[10px] font-extrabold cursor-pointer"
                             >
@@ -8612,12 +9816,18 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                                 const rec = buildRecommendedSlotsForHours(
                                   candidateCompleteness.requiredTableHours,
                                   sortedSlots,
-                                  offSlotIds[0]
+                                  offSessions[0]?.slotIds[0]
                                 );
                                 if (rec.slotIds.length > 0) {
-                                  if (!offDay) setOffDay(activeDays[0] || 'saturday');
-                                  setOffSlotIds(rec.slotIds);
-                                  setOffSlotParts(rec.slotParts);
+                                  setOffSessions([
+                                    {
+                                      id: offSessions[0]?.id || 'sess_1',
+                                      dayOfWeek: offSessions[0]?.dayOfWeek || activeDays[0] || 'saturday',
+                                      slotIds: rec.slotIds,
+                                      slotParts: rec.slotParts,
+                                      classroomId: offSessions[0]?.classroomId,
+                                    },
+                                  ]);
                                 }
                               }}
                               className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10.5px] font-extrabold cursor-pointer"

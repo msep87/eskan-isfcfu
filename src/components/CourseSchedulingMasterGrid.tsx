@@ -38,16 +38,22 @@ import {
   evaluateProfessorEquivalentUnitStatus,
   exportJsonRowsToExcel,
   formatExamAssignmentShort,
+  formatGolestanCourseCode,
   formatProfessorDepartmentAndField,
   getExamSettingsForTerm,
+  getOfferingClassroomAtSession,
+  getOfferingSessionSlotHalf,
+  getOfferingSessions,
   getOfferingSlotHalf,
   getProfessorEquivalentUnitBounds,
   getSchedSlotTitle,
   getSlotDurationHours,
   getSlotHalfLabel,
+  hasOfferingAnySchedule,
   isCourseEligibleForExam,
   isInternshipClassroomRequired,
   isOfferingEffectivelyActive,
+  normalizeOfferingWithSessions,
   normalizePersianText,
   printSchedHtml,
   round2,
@@ -475,6 +481,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   // پنجره بررسی و رفع تداخل در صورت بروز تداخل پس از رها کردن
   const [pendingDrop, setPendingDrop] = useState<{
     originalOffering: SchedCourseOffering;
+    sourceDay?: SchedDayKey;
+    sourceSlotIds?: string[];
     targetDay: SchedDayKey;
     targetSlotIds: string[];
     targetSlotParts?: Record<string, SchedSlotHalf>;
@@ -943,6 +951,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       majorCode: o.ownerMajorCode,
       dayOfWeek: o.dayOfWeek,
       slotIds: o.slotIds,
+      sessions: getOfferingSessions(o),
     });
     if (lockRes.locked) return false;
     if (canManageMasterData) return true;
@@ -1068,12 +1077,18 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
             else activeMap.set(r.rowKey, [o]);
           }
 
-          if (o.dayOfWeek && o.slotIds.length > 0) {
-            for (const sid of o.slotIds) {
-              const cKey = `${r.rowKey}|${o.dayOfWeek}|${sid}`;
+          const sessions = getOfferingSessions(o);
+          for (const sess of sessions) {
+            for (const sid of sess.slotIds) {
+              const cKey = `${r.rowKey}|${sess.dayOfWeek}|${sid}`;
               const cList = cellMap.get(cKey);
-              if (cList) cList.push(o);
-              else cellMap.set(cKey, [o]);
+              if (cList) {
+                if (!cList.some((existing) => existing.id === o.id)) {
+                  cList.push(o);
+                }
+              } else {
+                cellMap.set(cKey, [o]);
+              }
             }
           }
         }
@@ -1117,8 +1132,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         const rowOffs = rowAllOfferingsMap.get(r.rowKey) || EMPTY_CELL_OFFERINGS;
         return rowOffs.some(
           (o) =>
-            o.dayOfWeek &&
-            o.slotIds.length > 0 &&
+            hasOfferingAnySchedule(o) &&
             (!isFocusActive || !hideUnmatchedRows || doesOfferingMatchFocus(o))
         );
       });
@@ -1203,8 +1217,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       for (const o of list) {
         if (
           !seenIds.has(o.id) &&
-          o.dayOfWeek &&
-          o.slotIds.length > 0 &&
+          hasOfferingAnySchedule(o) &&
           (!isFocusActive || !hideUnmatchedRows || doesOfferingMatchFocus(o))
         ) {
           seenIds.add(o.id);
@@ -1223,10 +1236,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     const usedDaySet = new Set<SchedDayKey>();
     const usedSlotIndices: number[] = [];
     for (const o of relevantOfferings) {
-      if (o.dayOfWeek) usedDaySet.add(o.dayOfWeek);
-      for (const sid of o.slotIds) {
-        const sIdx = slotOriginalIndexMap.get(sid);
-        if (sIdx !== undefined) usedSlotIndices.push(sIdx);
+      for (const sess of getOfferingSessions(o)) {
+        usedDaySet.add(sess.dayOfWeek);
+        for (const sid of sess.slotIds) {
+          const sIdx = slotOriginalIndexMap.get(sid);
+          if (sIdx !== undefined) usedSlotIndices.push(sIdx);
+        }
       }
     }
 
@@ -1483,7 +1498,11 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
     const totalPossibleSlots = Math.max(1, displayedDays.length * displayedSlots.length);
     const occupiedSlotCount = new Set(
-      matched.flatMap((o) => (o.dayOfWeek ? o.slotIds.map((sid) => `${o.dayOfWeek}:${sid}`) : []))
+      matched.flatMap((o) =>
+        getOfferingSessions(o).flatMap((sess) =>
+          sess.slotIds.map((sid) => `${sess.dayOfWeek}:${sid}`)
+        )
+      )
     ).size;
 
     let label = '';
@@ -1535,9 +1554,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     if (focusMode !== 'classroom' || !focusRoomId) return new Set<string>();
     const set = new Set<string>();
     termOfferings
-      .filter((o) => !o.isDisabled && o.classroomId === focusRoomId && o.dayOfWeek)
+      .filter((o) => !o.isDisabled)
       .forEach((o) => {
-        o.slotIds.forEach((sid) => set.add(`${o.dayOfWeek}:${sid}`));
+        getOfferingSessions(o).forEach((sess) => {
+          const sessRoom = getOfferingClassroomAtSession(o, sess);
+          if (sessRoom.classroomId === focusRoomId) {
+            sess.slotIds.forEach((sid) => set.add(`${sess.dayOfWeek}:${sid}`));
+          }
+        });
       });
     return set;
   }, [focusMode, focusRoomId, termOfferings]);
@@ -1557,6 +1581,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     if (!draggingState) return;
     const dragged = termOfferings.find((o) => o.id === draggingState.offeringId);
     const sourceRowKey = draggingState.rowKey;
+    const sourceDay = draggingState.fromDay;
+    const sourceSlotIds = draggingState.fromSlotIds;
     setDraggingState(null);
 
     if (!dragged) return;
@@ -1569,7 +1595,20 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       return;
     }
 
-    const prevSlotIds = dragged.slotIds.length > 0 ? dragged.slotIds : [targetSlotId];
+    const allSessions = getOfferingSessions(dragged);
+    const draggedSessionIdx = allSessions.findIndex(
+      (s) =>
+        (!sourceDay || s.dayOfWeek === sourceDay) &&
+        (sourceSlotIds.length === 0 || sourceSlotIds.some((sid) => s.slotIds.includes(sid)))
+    );
+    const activeDraggedSession =
+      draggedSessionIdx >= 0 ? allSessions[draggedSessionIdx] : allSessions[0];
+    const prevSlotIds =
+      activeDraggedSession && activeDraggedSession.slotIds.length > 0
+        ? activeDraggedSession.slotIds
+        : dragged.slotIds.length > 0
+        ? dragged.slotIds
+        : [targetSlotId];
     const targetIdx = sortedSlots.findIndex((s) => s.id === targetSlotId);
     if (targetIdx < 0) return;
 
@@ -1584,16 +1623,24 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       const clampedStart = Math.min(targetIdx, Math.max(0, sortedSlots.length - span));
       newSlotIds = sortedSlots.slice(clampedStart, clampedStart + span).map((s) => s.id);
       if (span === 1) {
-        const oldHalf = prevSlotIds[0] ? getOfferingSlotHalf(dragged, prevSlotIds[0]) : 'full';
+        const oldHalf =
+          prevSlotIds[0] && activeDraggedSession
+            ? getOfferingSessionSlotHalf(dragged, activeDraggedSession.dayOfWeek, prevSlotIds[0])
+            : prevSlotIds[0]
+            ? getOfferingSlotHalf(dragged, prevSlotIds[0])
+            : 'full';
         newSlotParts = oldHalf !== 'full' ? { [newSlotIds[0]]: oldHalf } : undefined;
-      } else if (dragged.slotParts) {
-        newSlotParts = {};
-        prevSlotIds.forEach((oldSid, idx) => {
-          const ns = newSlotIds[idx];
-          if (ns && dragged.slotParts?.[oldSid]) {
-            newSlotParts![ns] = dragged.slotParts[oldSid];
-          }
-        });
+      } else {
+        const prevParts = activeDraggedSession?.slotParts || dragged.slotParts;
+        if (prevParts) {
+          newSlotParts = {};
+          prevSlotIds.forEach((oldSid, idx) => {
+            const ns = newSlotIds[idx];
+            if (ns && prevParts[oldSid]) {
+              newSlotParts![ns] = prevParts[oldSid];
+            }
+          });
+        }
       }
     }
 
@@ -1608,28 +1655,50 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       return;
     }
 
-    const sameDay = dragged.dayOfWeek === targetDay;
+    const sameDay = (activeDraggedSession?.dayOfWeek || dragged.dayOfWeek) === targetDay;
     const sameSlots =
       sameDay &&
-      newSlotIds.length === dragged.slotIds.length &&
-      newSlotIds.every((id, i) => id === dragged.slotIds[i]) &&
+      newSlotIds.length === prevSlotIds.length &&
+      newSlotIds.every((id, i) => id === prevSlotIds[i]) &&
       newSlotIds.every(
-        (id) => (newSlotParts?.[id] || 'full') === getOfferingSlotHalf(dragged, id)
+        (id) => (newSlotParts?.[id] || 'full') === getOfferingSessionSlotHalf(dragged, targetDay, id)
       );
     if (sameSlots) return;
 
-    const candidateBase: SchedCourseOffering = {
+    const replaceIdx = draggedSessionIdx >= 0 ? draggedSessionIdx : 0;
+    const updatedSessions =
+      allSessions.length > 0
+        ? allSessions.map((s, idx) =>
+            idx === replaceIdx
+              ? {
+                  ...s,
+                  dayOfWeek: targetDay,
+                  slotIds: newSlotIds,
+                  slotParts: newSlotParts,
+                }
+              : s
+          )
+        : [
+            {
+              id: 'sess_1',
+              dayOfWeek: targetDay,
+              slotIds: newSlotIds,
+              slotParts: newSlotParts,
+              classroomId: dragged.classroomId,
+              classroomName: dragged.classroomName,
+            },
+          ];
+
+    const candidateBase = normalizeOfferingWithSessions({
       ...dragged,
-      dayOfWeek: targetDay,
-      slotIds: newSlotIds,
-      slotParts: newSlotParts,
+      sessions: updatedSessions,
       isDisabled: false,
       isProvisional: false,
       disabledReason: undefined,
       updatedById: actor.id,
       updatedByName: actor.name,
       updatedAt: new Date().toISOString(),
-    };
+    });
     const movedComp = evaluateOfferingCompleteness(candidateBase, rules);
     const candidate: SchedCourseOffering = movedComp.isComplete
       ? candidateBase
@@ -1667,13 +1736,16 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       return;
     }
 
+    const activeRoom = getOfferingClassroomAtSession(dragged, activeDraggedSession);
     setPendingDrop({
       originalOffering: dragged,
+      sourceDay: activeDraggedSession?.dayOfWeek || sourceDay,
+      sourceSlotIds: prevSlotIds,
       targetDay,
       targetSlotIds: newSlotIds,
       targetSlotParts: newSlotParts,
       pickedProfessorId: dragged.professorId || '',
-      pickedClassroomId: dragged.classroomId || '',
+      pickedClassroomId: activeRoom.classroomId || '',
     });
   };
 
@@ -1682,23 +1754,63 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     const prof = effectiveIndex.profById.get(pendingDrop.pickedProfessorId);
     const room = effectiveIndex.roomById.get(pendingDrop.pickedClassroomId);
 
-    const candidateDraft: SchedCourseOffering = {
+    const origSessions = getOfferingSessions(pendingDrop.originalOffering);
+    const srcIdx = origSessions.findIndex(
+      (s) =>
+        (!pendingDrop.sourceDay || s.dayOfWeek === pendingDrop.sourceDay) &&
+        (!pendingDrop.sourceSlotIds ||
+          pendingDrop.sourceSlotIds.length === 0 ||
+          pendingDrop.sourceSlotIds.some((sid) => s.slotIds.includes(sid)))
+    );
+    const replaceIdx = srcIdx >= 0 ? srcIdx : 0;
+    const nextSessions =
+      origSessions.length > 0
+        ? origSessions.map((s, idx) =>
+            idx === replaceIdx
+              ? {
+                  ...s,
+                  dayOfWeek: pendingDrop.targetDay,
+                  slotIds: pendingDrop.targetSlotIds,
+                  slotParts: pendingDrop.targetSlotParts,
+                  classroomId: room?.id,
+                  classroomName: room?.name,
+                }
+              : s
+          )
+        : [
+            {
+              id: 'sess_1',
+              dayOfWeek: pendingDrop.targetDay,
+              slotIds: pendingDrop.targetSlotIds,
+              slotParts: pendingDrop.targetSlotParts,
+              classroomId: room?.id,
+              classroomName: room?.name,
+            },
+          ];
+
+    const candidateDraft = normalizeOfferingWithSessions({
       ...pendingDrop.originalOffering,
-      dayOfWeek: pendingDrop.targetDay,
-      slotIds: pendingDrop.targetSlotIds,
-      slotParts: pendingDrop.targetSlotParts,
+      sessions: nextSessions,
       professorId: prof?.id,
       professorCode: prof?.professorCode,
       professorName: prof?.fullName,
-      classroomId: room?.id,
-      classroomName: room?.name,
+      classroomId:
+        replaceIdx === 0 || origSessions.length <= 1
+          ? room?.id
+          : pendingDrop.originalOffering.classroomId || room?.id,
+      classroomName:
+        replaceIdx === 0 || origSessions.length <= 1
+          ? room?.name
+          : pendingDrop.originalOffering.classroomId
+          ? pendingDrop.originalOffering.classroomName
+          : room?.name,
       isDisabled: false,
       isProvisional: false,
       disabledReason: undefined,
       updatedById: actor.id,
       updatedByName: actor.name,
       updatedAt: new Date().toISOString(),
-    };
+    });
     const compAfterFix = evaluateOfferingCompleteness(candidateDraft, rules);
     const candidate: SchedCourseOffering = compAfterFix.isComplete
       ? candidateDraft
@@ -1860,12 +1972,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       targetRows = buildMasterDisplayRows(allRawRows);
     } else if (cfg.printScope === 'populated_only') {
       const popDays = activeDays.filter((d) =>
-        termOfferings.some((o) => o.dayOfWeek === d && o.slotIds.length > 0)
+        termOfferings.some((o) =>
+          getOfferingSessions(o).some((s) => s.dayOfWeek === d && s.slotIds.length > 0)
+        )
       );
       targetDays = popDays.length > 0 ? popDays : activeDays;
       const popRaw = allRawRows.filter((r) =>
-        (rowAllOfferingsMap.get(r.rowKey) || EMPTY_CELL_OFFERINGS).some(
-          (o) => o.dayOfWeek && o.slotIds.length > 0
+        (rowAllOfferingsMap.get(r.rowKey) || EMPTY_CELL_OFFERINGS).some((o) =>
+          hasOfferingAnySchedule(o)
         )
       );
       targetRows = buildMasterDisplayRows(popRaw.length > 0 ? popRaw : allRawRows);
@@ -2155,12 +2269,23 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
               const htmlItems = items
                 .map((o) => {
-                  const half = getOfferingSlotHalf(o, slot.id);
+                  const sessionsList = getOfferingSessions(o);
+                  const sessIdx = sessionsList.findIndex(
+                    (s) => s.dayOfWeek === day && s.slotIds.includes(slot.id)
+                  );
+                  const sessHere = sessIdx >= 0 ? sessionsList[sessIdx] : undefined;
+                  const sessRoom = getOfferingClassroomAtSession(o, sessHere);
+                  const golestanCode = formatGolestanCourseCode(o.courseCode, o.courseGroupCode);
+                  const half = getOfferingSessionSlotHalf(o, day, slot.id);
                   const halfTag =
                     half === 'first_hour'
                       ? ' [ساعت ۱]'
                       : half === 'second_hour'
                       ? ' [ساعت ۲]'
+                      : '';
+                  const sessionTag =
+                    sessionsList.length > 1
+                      ? ` [جلسه ${(sessIdx + 1).toLocaleString('fa-IR')}/${sessionsList.length.toLocaleString('fa-IR')}]`
                       : '';
                   const internTag =
                     o.practicalType === 'internship'
@@ -2175,12 +2300,15 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       ? ' [حضور مدرسه ۸ ساعته]'
                       : '';
                   const subParts: string[] = [];
+                  if (golestanCode) {
+                    subParts.push(`<span class="mono">${escapeHtml(golestanCode)}</span>`);
+                  }
                   if (cfg.includeProfessor) {
                     subParts.push(escapeHtml(o.professorName || 'بدون استاد'));
                   }
                   if (cfg.includeClassroom) {
-                    if (o.classroomName) {
-                      subParts.push(escapeHtml(o.classroomName));
+                    if (sessRoom.classroomName) {
+                      subParts.push(escapeHtml(sessRoom.classroomName));
                     } else if (!isInternshipClassroomRequired(o)) {
                       subParts.push('محل: مدرسه');
                     }
@@ -2208,7 +2336,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                     effectiveIndex.completenessMap.get(o.id) ||
                     evaluateOfferingCompleteness(o, rules);
                   const provTag = compPrint.isEffectivelyInactive ? ' [موقت/ناقص]' : '';
-                  const inner = `<strong>${escapeHtml(o.courseTitle)}${escapeHtml(internTag)}${escapeHtml(roleTag)}${escapeHtml(halfTag)}${escapeHtml(provTag)}</strong>${subLine}`;
+                  const inner = `<strong>${escapeHtml(o.courseTitle)}${escapeHtml(internTag)}${escapeHtml(roleTag)}${escapeHtml(halfTag)}${escapeHtml(sessionTag)}${escapeHtml(provTag)}</strong>${subLine}`;
                   const itemBg = cfg.includeColors
                     ? compPrint.isEffectivelyInactive
                       ? 'background:#fef3c7;border-color:#f59e0b;border-style:dashed;opacity:0.85;'
@@ -2348,12 +2476,23 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
               ? ''
               : items
                   .map((o) => {
-                    const half = getOfferingSlotHalf(o, slot.id);
+                    const sessionsList = getOfferingSessions(o);
+                    const sessIdx = sessionsList.findIndex(
+                      (s) => s.dayOfWeek === day && s.slotIds.includes(slot.id)
+                    );
+                    const sessHere = sessIdx >= 0 ? sessionsList[sessIdx] : undefined;
+                    const sessRoom = getOfferingClassroomAtSession(o, sessHere);
+                    const golestanCode = formatGolestanCourseCode(o.courseCode, o.courseGroupCode);
+                    const half = getOfferingSessionSlotHalf(o, day, slot.id);
                     const hLabel =
                       half === 'first_hour'
                         ? '[ساعت اول] '
                         : half === 'second_hour'
                         ? '[ساعت دوم] '
+                        : '';
+                    const sessionStr =
+                      sessionsList.length > 1
+                        ? ` (جلسه ${sessIdx + 1}/${sessionsList.length})`
                         : '';
                     const intern =
                       o.practicalType === 'internship' ? ` (ظرفیت ${o.enrolledCount})` : '';
@@ -2361,12 +2500,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       isCourseEligibleForExam(o) && o.examDayId && o.examSlotId
                         ? ` {آزمون: ${formatExamAssignmentShort(o, examSettings)}}`
                         : '';
-                    const roomStr = o.classroomName
-                      ? ` [${o.classroomName}]`
+                    const roomStr = sessRoom.classroomName
+                      ? ` [${sessRoom.classroomName}]`
                       : !isInternshipClassroomRequired(o)
                       ? ' [محل: مدرسه]'
                       : '';
-                    return `${hLabel}${o.courseTitle}${intern} - ${o.professorName || 'بدون استاد'}${roomStr}${examStr}`;
+                    return `${hLabel}${o.courseTitle}${golestanCode ? ` (${golestanCode})` : ''}${sessionStr}${intern} - ${o.professorName || 'بدون استاد'}${roomStr}${examStr}`;
                   })
                   .join(' | ');
         });
@@ -3623,13 +3762,13 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                           EMPTY_CELL_OFFERINGS;
 
                         const fullItems = cellOfferings.filter(
-                          (o) => getOfferingSlotHalf(o, slot.id) === 'full'
+                          (o) => getOfferingSessionSlotHalf(o, day, slot.id) === 'full'
                         );
                         const firstHourItems = cellOfferings.filter(
-                          (o) => getOfferingSlotHalf(o, slot.id) === 'first_hour'
+                          (o) => getOfferingSessionSlotHalf(o, day, slot.id) === 'first_hour'
                         );
                         const secondHourItems = cellOfferings.filter(
-                          (o) => getOfferingSlotHalf(o, slot.id) === 'second_hour'
+                          (o) => getOfferingSessionSlotHalf(o, day, slot.id) === 'second_hour'
                         );
                         const showSplitView =
                           (slotDuration > 1 && alwaysShowHalfSlots) ||
@@ -3671,6 +3810,16 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         const isCompactCards = Boolean(liveLayout.scheduleCells.compactCards);
 
                         const renderOfferingChip = (o: SchedCourseOffering, compactHalf = false) => {
+                          const sessList = getOfferingSessions(o);
+                          const sessIdx = sessList.findIndex(
+                            (s) => s.dayOfWeek === day && s.slotIds.includes(slot.id)
+                          );
+                          const sessHere = sessIdx >= 0 ? sessList[sessIdx] : undefined;
+                          const sessRoom = getOfferingClassroomAtSession(o, sessHere);
+                          const golestanCode = formatGolestanCourseCode(
+                            o.courseCode,
+                            o.courseGroupCode
+                          );
                           const conf =
                             effectiveIndex.conflictMap.get(o.id) ||
                             detectOfferingConflicts(
@@ -3729,14 +3878,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
                           const cardTooltip =
                             hoverIssues.length > 0
-                              ? `وضعیت موقت / نواقص درس:\n• ${hoverIssues.join('\n• ')}\n(کلیک کنید تا تکمیل و نهایی شود)`
+                              ? `کد گلستان: ${golestanCode}\nوضعیت موقت / نواقص درس:\n• ${hoverIssues.join('\n• ')}\n(کلیک کنید تا تکمیل و نهایی شود)`
                               : editable
-                              ? 'کلیک برای ویرایش یا انتخاب و کشیدن در همین ردیف برای جابجایی'
-                              : 'فقط مشاهده (تغییرات مسدود شده یا متعلق به گروه دیگر است)';
+                              ? `کد گلستان: ${golestanCode}\nکلیک برای ویرایش یا انتخاب و کشیدن در همین ردیف برای جابجایی`
+                              : `کد گلستان: ${golestanCode}\nفقط مشاهده (تغییرات مسدود شده یا متعلق به گروه دیگر است)`;
 
                           return (
                             <div
-                              key={`${o.id}_${slot.id}`}
+                              key={`${o.id}_${day}_${slot.id}`}
                               draggable={editable}
                               onDragStart={(e) => {
                                 if (!editable) return;
@@ -3746,8 +3895,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                 setDraggingState({
                                   offeringId: o.id,
                                   rowKey: row.rowKey,
-                                  fromDay: o.dayOfWeek,
-                                  fromSlotIds: [...o.slotIds],
+                                  fromDay: day,
+                                  fromSlotIds: sessHere ? [...sessHere.slotIds] : [slot.id],
                                 });
                               }}
                               onDragEnd={() => {
@@ -3882,12 +4031,37 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                     )}
                                   </div>
 
-                                  {o.classroomName ? (
+                                  {(golestanCode || sessList.length > 1) && (
+                                    <div
+                                      style={{
+                                        justifyContent:
+                                          getRtlHorizontalJustifyContent(slotTextAlign),
+                                      }}
+                                      className="flex flex-wrap items-center gap-1 mt-0.5"
+                                    >
+                                      {golestanCode && (
+                                        <span
+                                          className="px-1 py-0.2 rounded bg-white/80 dark:bg-slate-800/90 border border-slate-300/70 dark:border-slate-700 font-mono text-[8px] font-black text-slate-700 dark:text-slate-200"
+                                          dir="ltr"
+                                        >
+                                          {golestanCode}
+                                        </span>
+                                      )}
+                                      {sessList.length > 1 && (
+                                        <span className="px-1 py-0.2 rounded bg-indigo-100/80 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200 text-[8px] font-black">
+                                          جلسه {(sessIdx + 1).toLocaleString('fa-IR')}/
+                                          {sessList.length.toLocaleString('fa-IR')}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {sessRoom.classroomName ? (
                                     <div
                                       style={{ fontSize: `${Math.max(7, subPx - 0.5)}px` }}
                                       className={`text-slate-500 dark:text-slate-400 ${textFitClass}`}
                                     >
-                                      کلاس: {o.classroomName}
+                                      کلاس: {sessRoom.classroomName}
                                     </div>
                                   ) : !isInternshipClassroomRequired(o) ? (
                                     <div
@@ -4078,7 +4252,15 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                                 : isProfUnavailableHere
                                 ? 'bg-rose-50/70 dark:bg-rose-950/30'
                                 : isRoomBusyHere &&
-                                  cellOfferings.every((o) => o.classroomId !== focusRoomId)
+                                  cellOfferings.every((o) => {
+                                    const s = getOfferingSessions(o).find(
+                                      (x) => x.dayOfWeek === day && x.slotIds.includes(slot.id)
+                                    );
+                                    return (
+                                      getOfferingClassroomAtSession(o, s).classroomId !==
+                                      focusRoomId
+                                    );
+                                  })
                                 ? 'bg-amber-50/50 dark:bg-amber-950/20'
                                 : dayTintBg
                             }`}

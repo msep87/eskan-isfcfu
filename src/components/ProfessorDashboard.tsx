@@ -10,8 +10,15 @@ import {
   calculateProfessorLoadSummary,
   evaluateProfessorEquivalentUnitStatus,
   exportJsonRowsToExcel,
+  formatGolestanCourseCode,
+  formatOfferingSessionsSummary,
+  getOfferingClassroomAtSession,
+  getOfferingSessionSlotHalf,
+  getOfferingSessions,
   getProfessorAvailabilityWindowStatus,
   getSchedSlotTitle,
+  getSlotHalfLabel,
+  isOfferingAtDaySlot,
   isOfferingEffectivelyActive,
   printSchedHtml,
 } from '../utils/schedulingUtils';
@@ -195,17 +202,32 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
       .map((day) => {
         const cols = sortedSlots
           .map((slot) => {
-            const matched = myOfferings.filter(
-              (o) => o.dayOfWeek === day && o.slotIds.includes(slot.id)
-            );
+            const matched = myOfferings.filter((o) => isOfferingAtDaySlot(o, day, slot.id));
             if (matched.length === 0) return '<td style="text-align:center;color:#94a3b8;">—</td>';
             const cells = matched
               .map((o) => {
                 const bd = calculateOfferingBreakdown(o, rules);
+                const sessList = getOfferingSessions(o);
+                const sessIdx = sessList.findIndex(
+                  (s) => s.dayOfWeek === day && s.slotIds.includes(slot.id)
+                );
+                const sessHere = sessIdx >= 0 ? sessList[sessIdx] : undefined;
+                const sessRoom = getOfferingClassroomAtSession(o, sessHere);
+                const half = getOfferingSessionSlotHalf(o, day, slot.id);
+                const halfBadge =
+                  half !== 'full'
+                    ? `<div class="muted"><strong>${escapeHtml(getSlotHalfLabel(half))}</strong></div>`
+                    : '';
+                const sessBadge =
+                  sessList.length > 1
+                    ? ` [جلسه ${(sessIdx + 1).toLocaleString('fa-IR')}/${sessList.length.toLocaleString('fa-IR')}]`
+                    : '';
+                const golestanCode = formatGolestanCourseCode(o.courseCode, o.courseGroupCode);
                 return `<div class="cell-item">
-                  <div><strong>${escapeHtml(o.courseTitle)}</strong> <span class="mono">(${escapeHtml(o.courseCode)})</span></div>
+                  ${halfBadge}
+                  <div><strong>${escapeHtml(o.courseTitle)}</strong>${escapeHtml(sessBadge)} <span class="mono">(${escapeHtml(golestanCode)})</span></div>
                   <div class="muted">${escapeHtml(o.ownerMajorName)} (${escapeHtml(o.entryTerm)}${o.sectionName ? ` - ${escapeHtml(o.sectionName)}` : ''})</div>
-                  <div class="muted">کلاس: ${escapeHtml(o.classroomName || 'نامشخص')} | ${bd.weeklyHours} ساعت | ${bd.equivalentUnits} معادل</div>
+                  <div class="muted">کلاس: ${escapeHtml(sessRoom.classroomName || 'نامشخص')} | ${bd.weeklyHours} ساعت | ${bd.equivalentUnits} معادل</div>
                 </div>`;
               })
               .join('');
@@ -235,17 +257,12 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
         'کد استاد': professor.professorCode,
         'نام استاد': professor.fullName,
         'کد درس': o.courseCode,
+        'کد گروه': o.courseGroupCode || '-',
+        'کد گلستان (درس_گروه)': formatGolestanCourseCode(o.courseCode, o.courseGroupCode),
         'عنوان درس': o.courseTitle,
         'رشته و ورودی': `${o.ownerMajorName} (${o.entryTerm}${o.sectionName ? ` - ${o.sectionName}` : ''})`,
         'کلاس فیزیکی': o.classroomName || '-',
-        'روز هفته': o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'تعیین‌نشده',
-        'سانس‌ها': o.slotIds
-          .map((id) => {
-            const idx = sortedSlots.findIndex((s) => s.id === id);
-            const sl = idx >= 0 ? sortedSlots[idx] : undefined;
-            return sl ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})` : id;
-          })
-          .join(' + '),
+        'برنامه جلسات هفتگی': formatOfferingSessionsSummary(o, sortedSlots, true),
         'تعداد دانشجو': o.enrolledCount,
         'واحد کل': bd.rawUnits,
         'ساعات تدریس هفتگی': bd.weeklyHours,
@@ -448,9 +465,7 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
                     {SCHED_DAY_LABELS[day]}
                   </td>
                   {sortedSlots.map((slot) => {
-                    const items = myOfferings.filter(
-                      (o) => o.dayOfWeek === day && o.slotIds.includes(slot.id)
-                    );
+                    const items = myOfferings.filter((o) => isOfferingAtDaySlot(o, day, slot.id));
                     return (
                       <td
                         key={slot.id}
@@ -464,16 +479,39 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
                           <div className="space-y-1.5">
                             {items.map((o) => {
                               const bd = calculateOfferingBreakdown(o, rules);
+                              const sessList = getOfferingSessions(o);
+                              const sessIdx = sessList.findIndex(
+                                (s) => s.dayOfWeek === day && s.slotIds.includes(slot.id)
+                              );
+                              const sessHere = sessIdx >= 0 ? sessList[sessIdx] : undefined;
+                              const sessRoom = getOfferingClassroomAtSession(o, sessHere);
+                              const half = getOfferingSessionSlotHalf(o, day, slot.id);
+                              const golestanCode = formatGolestanCourseCode(
+                                o.courseCode,
+                                o.courseGroupCode
+                              );
                               return (
                                 <div
-                                  key={o.id}
+                                  key={`${o.id}_${day}_${slot.id}`}
                                   className="p-2 rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50/50 dark:bg-teal-950/25 space-y-0.5"
                                 >
                                   <div className="font-bold text-slate-900 dark:text-white">
                                     {o.courseTitle}
                                   </div>
-                                  <div className="text-[10px] font-mono text-slate-500">
-                                    کد {o.courseCode} · {bd.weeklyHours} ساعت
+                                  <div className="text-[10px] font-mono text-slate-500 flex flex-wrap items-center gap-1">
+                                    <span dir="ltr">{golestanCode}</span>
+                                    <span>· {bd.weeklyHours} ساعت</span>
+                                    {half !== 'full' && (
+                                      <span className="px-1 rounded bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 font-sans font-bold">
+                                        {getSlotHalfLabel(half)}
+                                      </span>
+                                    )}
+                                    {sessList.length > 1 && (
+                                      <span className="px-1 rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-sans font-bold">
+                                        جلسه {(sessIdx + 1).toLocaleString('fa-IR')}/
+                                        {sessList.length.toLocaleString('fa-IR')}
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="text-[10px] text-slate-700 dark:text-slate-300">
                                     {o.ownerMajorName} ({o.entryTerm}
@@ -488,7 +526,7 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
                                     </div>
                                   )}
                                   <div className="text-[10px] font-bold text-teal-700 dark:text-teal-400">
-                                    مکان: {o.classroomName || 'تعیین‌نشده'}
+                                    مکان: {sessRoom.classroomName || 'تعیین‌نشده'}
                                   </div>
                                 </div>
                               );
@@ -536,9 +574,14 @@ export const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({
                   const bd = calculateOfferingBreakdown(o, rules);
                   return (
                     <tr key={o.id}>
-                      <td className="p-2.5 font-mono font-bold">{o.courseCode}</td>
+                      <td className="p-2.5 font-mono font-bold" dir="ltr">
+                        {formatGolestanCourseCode(o.courseCode, o.courseGroupCode)}
+                      </td>
                       <td className="p-2.5 font-bold">
                         {o.courseTitle}
+                        <span className="block text-[10px] font-normal text-indigo-700 dark:text-indigo-300">
+                          {formatOfferingSessionsSummary(o, sortedSlots, true)}
+                        </span>
                         {bd.activePracticalUnits > 0 && (
                           <span className="block text-[10px] font-normal text-slate-500">
                             نوع عملی: {SCHED_PRACTICAL_TYPE_LABELS[o.practicalType]}

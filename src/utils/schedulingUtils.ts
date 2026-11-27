@@ -1,4 +1,6 @@
 import {
+  AppSettings,
+  SchedCellComment,
   SchedClassroom,
   SchedClassroomType,
   SchedCourseOffering,
@@ -11,6 +13,7 @@ import {
   SchedExamSlot,
   SchedOfferingHistoryDelta,
   SchedOfferingHistoryEntry,
+  SchedOfferingSession,
   SchedPaperSize,
   SchedPracticalUnitType,
   SchedPrintColorMode,
@@ -97,6 +100,121 @@ export const DEFAULT_SCHED_PROFESSOR_UNIT_LIMITS: Record<
 
 export function normalizeSchedCode(raw: string | number | undefined | null): string {
   return toEnglishDigits(String(raw ?? '')).replace(/\s+/g, '').trim();
+}
+
+export function normalizeCourseGroupCode(raw: string | number | undefined | null): string {
+  const digits = toEnglishDigits(String(raw ?? ''))
+    .replace(/[^\d]/g, '')
+    .trim();
+  if (!digits) return '';
+  const num = Number(digits);
+  if (!Number.isFinite(num) || num <= 0) return '';
+  return String(Math.floor(num)).padStart(2, '0');
+}
+
+export function formatGolestanCourseCode(
+  courseCode: string | number | undefined | null,
+  courseGroupCode?: string | number | null
+): string {
+  const cleanCode = normalizeSchedCode(courseCode);
+  const cleanGroup = normalizeCourseGroupCode(courseGroupCode);
+  if (!cleanCode) return cleanGroup;
+  return cleanGroup ? `${cleanCode}_${cleanGroup}` : cleanCode;
+}
+
+export interface GolestanCourseGroupSuggestion {
+  existingCount: number;
+  nextGroupNum: number;
+  nextGroupCode: string;
+  formattedCode: string;
+  usedGroupCodes: string[];
+}
+
+/**
+ * بررسی تعداد گروه‌های ثبت‌شده قبلی از یک کد درس ۷ رقمی در کل برنامه جامع ترم
+ * و تولید خودکار کد گروه دو رقمی بعدی در قالب گلستان (مثلاً ۶ بار ثبت‌شده ← 07، یعنی 1111405_07).
+ */
+export function getNextGolestanCourseGroupInfo(
+  courseCode: string | number | undefined | null,
+  termOfferings: SchedCourseOffering[],
+  excludeOfferingId?: string
+): GolestanCourseGroupSuggestion {
+  const cleanCode = normalizeSchedCode(courseCode);
+  const sameCourse = cleanCode
+    ? termOfferings.filter(
+        (o) => o.id !== excludeOfferingId && normalizeSchedCode(o.courseCode) === cleanCode
+      )
+    : [];
+
+  const usedNums = new Set<number>();
+  const usedGroupCodes: string[] = [];
+  for (const o of sameCourse) {
+    const normGrp = normalizeCourseGroupCode(o.courseGroupCode);
+    if (normGrp) {
+      const n = Number(normGrp);
+      if (Number.isFinite(n) && n > 0) {
+        usedNums.add(n);
+        usedGroupCodes.push(normGrp);
+      }
+    }
+  }
+
+  const existingCount = sameCourse.length;
+  const maxExplicit = usedNums.size > 0 ? Math.max(...Array.from(usedNums)) : 0;
+  let nextGroupNum = Math.max(existingCount, maxExplicit) + 1;
+  while (usedNums.has(nextGroupNum)) {
+    nextGroupNum += 1;
+  }
+  const nextGroupCode = String(nextGroupNum).padStart(2, '0');
+
+  return {
+    existingCount,
+    nextGroupNum,
+    nextGroupCode,
+    formattedCode: formatGolestanCourseCode(cleanCode, nextGroupCode),
+    usedGroupCodes: Array.from(new Set(usedGroupCodes)).sort((a, b) => Number(a) - Number(b)),
+  };
+}
+
+export function findDuplicateGolestanGroupOffering(
+  courseCode: string | number | undefined | null,
+  courseGroupCode: string | number | undefined | null,
+  termOfferings: SchedCourseOffering[],
+  excludeOfferingId?: string
+): SchedCourseOffering | undefined {
+  const cleanCode = normalizeSchedCode(courseCode);
+  const cleanGroup = normalizeCourseGroupCode(courseGroupCode);
+  if (!cleanCode || !cleanGroup) return undefined;
+  return termOfferings.find(
+    (o) =>
+      o.id !== excludeOfferingId &&
+      normalizeSchedCode(o.courseCode) === cleanCode &&
+      normalizeCourseGroupCode(o.courseGroupCode) === cleanGroup
+  );
+}
+
+export function assignSequentialGolestanGroupCodes(
+  newOfferings: SchedCourseOffering[],
+  existingOfferings: SchedCourseOffering[]
+): SchedCourseOffering[] {
+  const runningPool = [...existingOfferings];
+  return newOfferings.map((item) => {
+    const termPool = runningPool.filter((o) => o.termKey === item.termKey);
+    const currentNorm = normalizeCourseGroupCode(item.courseGroupCode);
+    const hasDup =
+      currentNorm &&
+      findDuplicateGolestanGroupOffering(item.courseCode, currentNorm, termPool, item.id);
+    const assignedGroup =
+      currentNorm && !hasDup
+        ? currentNorm
+        : getNextGolestanCourseGroupInfo(item.courseCode, termPool, item.id).nextGroupCode;
+    const updated: SchedCourseOffering = {
+      ...item,
+      courseGroupCode: assignedGroup,
+    };
+    runningPool.push(updated);
+    return updated;
+  });
 }
 
 export function parseDecimalUnits(raw: string | number | undefined | null): number {
@@ -223,6 +341,160 @@ export function getOfferingSlotHalf(
   return offering.slotParts?.[slotId] || 'full';
 }
 
+export function getOfferingSessions(
+  offering: Pick<
+    SchedCourseOffering,
+    'dayOfWeek' | 'slotIds' | 'slotParts' | 'classroomId' | 'classroomName' | 'sessions'
+  >
+): SchedOfferingSession[] {
+  if (Array.isArray(offering.sessions) && offering.sessions.length > 0) {
+    return offering.sessions
+      .filter((s) => Boolean(s.dayOfWeek) && Array.isArray(s.slotIds) && s.slotIds.length > 0)
+      .map((s, idx) => ({
+        id: s.id || `sess_${idx + 1}`,
+        dayOfWeek: s.dayOfWeek,
+        slotIds: [...s.slotIds],
+        slotParts: s.slotParts ? { ...s.slotParts } : undefined,
+        classroomId: s.classroomId ?? offering.classroomId,
+        classroomName: s.classroomId ? s.classroomName : offering.classroomName,
+      }));
+  }
+  if (offering.dayOfWeek && Array.isArray(offering.slotIds) && offering.slotIds.length > 0) {
+    return [
+      {
+        id: 'sess_1',
+        dayOfWeek: offering.dayOfWeek,
+        slotIds: [...offering.slotIds],
+        slotParts: offering.slotParts ? { ...offering.slotParts } : undefined,
+        classroomId: offering.classroomId,
+        classroomName: offering.classroomName,
+      },
+    ];
+  }
+  return [];
+}
+
+export function hasOfferingAnySchedule(
+  offering: Pick<SchedCourseOffering, 'dayOfWeek' | 'slotIds' | 'sessions'>
+): boolean {
+  if (Array.isArray(offering.sessions) && offering.sessions.length > 0) {
+    return offering.sessions.some(
+      (s) => Boolean(s.dayOfWeek) && Array.isArray(s.slotIds) && s.slotIds.length > 0
+    );
+  }
+  return Boolean(offering.dayOfWeek && offering.slotIds && offering.slotIds.length > 0);
+}
+
+export function getOfferingSessionSlotHalf(
+  offering: Pick<SchedCourseOffering, 'dayOfWeek' | 'slotIds' | 'slotParts' | 'sessions'>,
+  dayOfWeek: SchedDayKey,
+  slotId: string
+): SchedSlotHalf {
+  if (Array.isArray(offering.sessions) && offering.sessions.length > 0) {
+    const matched = offering.sessions.find(
+      (s) => s.dayOfWeek === dayOfWeek && s.slotIds.includes(slotId)
+    );
+    if (matched) {
+      return matched.slotParts?.[slotId] || 'full';
+    }
+  }
+  return getOfferingSlotHalf(offering, slotId);
+}
+
+export function getOfferingClassroomAtSession(
+  offering: Pick<SchedCourseOffering, 'classroomId' | 'classroomName'>,
+  session?: Pick<SchedOfferingSession, 'classroomId' | 'classroomName'>
+): { classroomId?: string; classroomName?: string } {
+  if (session?.classroomId) {
+    return {
+      classroomId: session.classroomId,
+      classroomName: session.classroomName || offering.classroomName,
+    };
+  }
+  return {
+    classroomId: offering.classroomId,
+    classroomName: offering.classroomName,
+  };
+}
+
+export function isOfferingAtDaySlot(
+  offering: Pick<SchedCourseOffering, 'dayOfWeek' | 'slotIds' | 'sessions'>,
+  dayOfWeek: SchedDayKey,
+  slotId: string
+): boolean {
+  return getOfferingSessions(offering).some(
+    (s) => s.dayOfWeek === dayOfWeek && s.slotIds.includes(slotId)
+  );
+}
+
+export function normalizeOfferingWithSessions(draft: SchedCourseOffering): SchedCourseOffering {
+  const validSessions = getOfferingSessions(draft)
+    .map((s, idx) => {
+      const cleanedSlots = Array.from(new Set(s.slotIds));
+      const cleanedParts: Record<string, SchedSlotHalf> = {};
+      cleanedSlots.forEach((sid) => {
+        const h = s.slotParts?.[sid];
+        if (h && h !== 'full') cleanedParts[sid] = h;
+      });
+      return {
+        id: s.id || `sess_${idx + 1}`,
+        dayOfWeek: s.dayOfWeek,
+        slotIds: cleanedSlots,
+        slotParts: Object.keys(cleanedParts).length > 0 ? cleanedParts : undefined,
+        classroomId: s.classroomId || draft.classroomId,
+        classroomName: s.classroomId ? s.classroomName : draft.classroomName,
+      };
+    })
+    .sort((a, b) => SCHED_DAYS_ORDER.indexOf(a.dayOfWeek) - SCHED_DAYS_ORDER.indexOf(b.dayOfWeek));
+
+  const primary = validSessions[0];
+  const primaryRoomId = draft.classroomId || primary?.classroomId;
+  const primaryRoomName = draft.classroomId ? draft.classroomName : primary?.classroomName;
+  const normGroup = normalizeCourseGroupCode(draft.courseGroupCode);
+
+  return {
+    ...draft,
+    courseGroupCode: normGroup || undefined,
+    classroomId: primaryRoomId,
+    classroomName: primaryRoomName,
+    dayOfWeek: primary?.dayOfWeek,
+    slotIds: primary ? [...primary.slotIds] : [],
+    slotParts: primary?.slotParts,
+    sessions: validSessions.length > 0 ? validSessions : undefined,
+  };
+}
+
+export function formatOfferingSessionsSummary(
+  offering: Pick<
+    SchedCourseOffering,
+    'dayOfWeek' | 'slotIds' | 'slotParts' | 'classroomId' | 'classroomName' | 'sessions'
+  >,
+  sortedSlots: SchedTimeSlot[],
+  includeSessionRoom = false
+): string {
+  const sessions = getOfferingSessions(offering);
+  if (sessions.length === 0) return 'زمانبندی نامشخص';
+
+  return sessions
+    .map((sess) => {
+      const slotDesc = sess.slotIds
+        .map((id) => {
+          const sIdx = sortedSlots.findIndex((s) => s.id === id);
+          const sObj = sIdx >= 0 ? sortedSlots[sIdx] : undefined;
+          const half = sess.slotParts?.[id] || 'full';
+          const title = sObj ? getSchedSlotTitle(sObj, sIdx) : id;
+          return `${title}${half !== 'full' ? ` (${getSlotHalfLabel(half)})` : ''}`;
+        })
+        .join(' + ');
+      const roomSuffix =
+        includeSessionRoom && sess.classroomName && sess.classroomId !== offering.classroomId
+          ? ` [${sess.classroomName}]`
+          : '';
+      return `${SCHED_DAY_LABELS[sess.dayOfWeek]} (${slotDesc})${roomSuffix}`;
+    })
+    .join('  +  ');
+}
+
 export function doSlotHalvesOverlap(h1: SchedSlotHalf, h2: SchedSlotHalf): boolean {
   if (h1 === 'full' || h2 === 'full') return true;
   return h1 === h2;
@@ -340,23 +612,34 @@ export function calculateOfferingBreakdown(
 }
 
 export function getOfferingScheduledHours(
-  offering: Pick<SchedCourseOffering, 'dayOfWeek' | 'slotIds' | 'slotParts'>,
+  offering: Pick<
+    SchedCourseOffering,
+    'dayOfWeek' | 'slotIds' | 'slotParts' | 'classroomId' | 'classroomName' | 'sessions'
+  >,
   rules: SchedRulesSettings
 ): number {
-  if (!offering.dayOfWeek || !offering.slotIds || offering.slotIds.length === 0) {
-    return 0;
-  }
-  let total = 0;
-  for (const sid of offering.slotIds) {
-    const slot = rules.timeSlots.find((s) => s.id === sid);
-    const dur = slot ? getSlotDurationHours(slot) : 2;
-    const half = getOfferingSlotHalf(offering, sid);
-    if (half === 'first_hour' || half === 'second_hour') {
-      total += Math.min(dur, 1);
-    } else {
-      total += dur;
+  const sessions = getOfferingSessions(offering);
+  if (sessions.length === 0) return 0;
+  // در محاسبه جمع ساعت، از محاسبه مضاعف یک روز+سانس یکسان جلوگیری می‌کنیم
+  const byDaySlot = new Map<string, number>();
+  for (const sess of sessions) {
+    for (const sid of sess.slotIds) {
+      const slot = rules.timeSlots.find((s) => s.id === sid);
+      const dur = slot ? getSlotDurationHours(slot) : 2;
+      const half = sess.slotParts?.[sid] || 'full';
+      const hrs =
+        half === 'first_hour' || half === 'second_hour' ? Math.min(dur, 1) : dur;
+      const key = `${sess.dayOfWeek}:${sid}`;
+      const prev = byDaySlot.get(key) || 0;
+      if (half === 'full') {
+        byDaySlot.set(key, dur);
+      } else {
+        byDaySlot.set(key, Math.min(dur, prev > 0 ? prev + hrs : hrs));
+      }
     }
   }
+  let total = 0;
+  for (const h of byDaySlot.values()) total += h;
   return round2(total);
 }
 
@@ -445,17 +728,22 @@ export function evaluateOfferingCompleteness(
     | 'dayOfWeek'
     | 'slotIds'
     | 'slotParts'
+    | 'sessions'
     | 'professorId'
     | 'classroomId'
+    | 'classroomName'
     | 'isDisabled'
     | 'isProvisional'
     | 'disabledReason'
   >,
   rules: SchedRulesSettings
 ): OfferingCompletenessReport {
-  const hasDayAndSlots = Boolean(
-    offering.dayOfWeek && offering.slotIds && offering.slotIds.length > 0
-  );
+  const sessions = getOfferingSessions(offering);
+  const hasEmptyDraftSession =
+    Array.isArray(offering.sessions) &&
+    offering.sessions.length > 0 &&
+    offering.sessions.some((s) => !s.dayOfWeek || !s.slotIds || s.slotIds.length === 0);
+  const hasDayAndSlots = sessions.length > 0 && !hasEmptyDraftSession;
   const scheduledHours = getOfferingScheduledHours(offering, rules);
   const { actualWeeklyHours, requiredTableHours, isFractionalRounded } =
     getOfferingRequiredTableHours(offering, rules);
@@ -463,13 +751,19 @@ export function evaluateOfferingCompleteness(
   const hoursExact = hasDayAndSlots && Math.abs(hourDiff) < 0.01;
   const hasProfessor = Boolean(offering.professorId && offering.professorId.trim());
   const classroomRequired = isInternshipClassroomRequired(offering);
-  const hasClassroom = Boolean(offering.classroomId && offering.classroomId.trim());
+  const hasClassroom = !classroomRequired
+    ? true
+    : sessions.length > 0
+    ? sessions.every((s) => Boolean((s.classroomId || offering.classroomId)?.trim()))
+    : Boolean(offering.classroomId && offering.classroomId.trim());
 
   const missingItems: string[] = [];
 
   if (!hasDayAndSlots) {
     missingItems.push(
-      `زمان برگزاری (روز و سانس) برای ${requiredTableHours.toLocaleString('fa-IR')} ساعت درس انتخاب نشده است.`
+      hasEmptyDraftSession
+        ? 'یکی از جلسات تعریف‌شده برای درس فاقد روز یا سانس است.'
+        : `زمان برگزاری (روز و سانس) برای ${requiredTableHours.toLocaleString('fa-IR')} ساعت درس انتخاب نشده است.`
     );
   } else if (!hoursExact) {
     if (hourDiff < 0) {
@@ -489,7 +783,7 @@ export function evaluateOfferingCompleteness(
     missingItems.push('استاد درس هنوز تعیین نشده است.');
   }
   if (classroomRequired && !hasClassroom) {
-    missingItems.push('کلاس فیزیکی درس هنوز تعیین نشده است.');
+    missingItems.push('کلاس فیزیکی درس (یا کلاس یکی از جلسات) هنوز تعیین نشده است.');
   }
   if (
     offering.isDisabled &&
@@ -713,7 +1007,9 @@ export function calculateProfessorLoadSummary(
     practicalUnits += bd.activePracticalUnits;
     weeklyHours += bd.weeklyHours;
     equivalentUnits += bd.equivalentUnits;
-    if (off.dayOfWeek) daySet.add(off.dayOfWeek);
+    getOfferingSessions(off).forEach((sess) => {
+      daySet.add(sess.dayOfWeek);
+    });
   }
 
   return {
@@ -818,6 +1114,56 @@ export function evaluateProfessorEquivalentUnitStatus(
   };
 }
 
+export function checkClassroomAvailabilityForSessions(
+  classroomId: string,
+  termKey: string,
+  sessions: Array<{
+    dayOfWeek?: SchedDayKey;
+    slotIds: string[];
+    slotParts?: Record<string, SchedSlotHalf>;
+  }>,
+  offerings: SchedCourseOffering[],
+  excludeOfferingId?: string
+): { isFree: boolean; occupiedBy?: SchedCourseOffering; conflictDay?: SchedDayKey; conflictSlotId?: string } {
+  const validSessions = sessions.filter((s) => Boolean(s.dayOfWeek) && s.slotIds.length > 0);
+  if (!classroomId || validSessions.length === 0) {
+    return { isFree: true };
+  }
+  for (const o of offerings) {
+    if (
+      o.id === excludeOfferingId ||
+      o.isDisabled ||
+      o.isProvisional ||
+      o.termKey !== termKey
+    ) {
+      continue;
+    }
+    const otherSessions = getOfferingSessions(o);
+    for (const cs of validSessions) {
+      if (!cs.dayOfWeek) continue;
+      for (const os of otherSessions) {
+        if (os.dayOfWeek !== cs.dayOfWeek) continue;
+        const osRoomId = getOfferingClassroomAtSession(o, os).classroomId;
+        if (osRoomId !== classroomId) continue;
+        const hitSid = os.slotIds.find(
+          (sid) =>
+            cs.slotIds.includes(sid) &&
+            doSlotHalvesOverlap(cs.slotParts?.[sid] || 'full', os.slotParts?.[sid] || 'full')
+        );
+        if (hitSid) {
+          return {
+            isFree: false,
+            occupiedBy: o,
+            conflictDay: cs.dayOfWeek,
+            conflictSlotId: hitSid,
+          };
+        }
+      }
+    }
+  }
+  return { isFree: true };
+}
+
 export function checkClassroomAvailabilityAtSlots(
   classroomId: string,
   termKey: string,
@@ -830,23 +1176,16 @@ export function checkClassroomAvailabilityAtSlots(
   if (!classroomId || !dayOfWeek || slotIds.length === 0) {
     return { isFree: true };
   }
-  const hit = offerings.find(
-    (o) =>
-      o.id !== excludeOfferingId &&
-      !o.isDisabled &&
-      !o.isProvisional &&
-      o.termKey === termKey &&
-      o.classroomId === classroomId &&
-      o.dayOfWeek === dayOfWeek &&
-      o.slotIds.some(
-        (sid) =>
-          slotIds.includes(sid) &&
-          doSlotHalvesOverlap(slotParts?.[sid] || 'full', getOfferingSlotHalf(o, sid))
-      )
+  const res = checkClassroomAvailabilityForSessions(
+    classroomId,
+    termKey,
+    [{ dayOfWeek, slotIds, slotParts }],
+    offerings,
+    excludeOfferingId
   );
   return {
-    isFree: !hit,
-    occupiedBy: hit,
+    isFree: res.isFree,
+    occupiedBy: res.occupiedBy,
   };
 }
 
@@ -942,18 +1281,28 @@ export function buildTermSchedulingIndex(
 
     const isActive = !comp.isEffectivelyInactive;
 
-    if (!o.isDisabled && !o.isProvisional && o.dayOfWeek && o.slotIds.length > 0) {
-      for (const sid of o.slotIds) {
-        const sKey = `${o.dayOfWeek}:${sid}`;
-        const list = slotBuckets.get(sKey);
-        if (list) list.push(o);
-        else slotBuckets.set(sKey, [o]);
+    if (!o.isDisabled && !o.isProvisional) {
+      const sessions = getOfferingSessions(o);
+      for (const sess of sessions) {
+        const effRoomId = getOfferingClassroomAtSession(o, sess).classroomId;
+        for (const sid of sess.slotIds) {
+          const sKey = `${sess.dayOfWeek}:${sid}`;
+          const list = slotBuckets.get(sKey);
+          if (list) {
+            if (!list.some((x) => x.id === o.id)) list.push(o);
+          } else {
+            slotBuckets.set(sKey, [o]);
+          }
 
-        if (o.classroomId) {
-          const rKey = `${o.dayOfWeek}:${sid}:${o.classroomId}`;
-          const rList = roomSlotBuckets.get(rKey);
-          if (rList) rList.push(o);
-          else roomSlotBuckets.set(rKey, [o]);
+          if (effRoomId) {
+            const rKey = `${sess.dayOfWeek}:${sid}:${effRoomId}`;
+            const rList = roomSlotBuckets.get(rKey);
+            if (rList) {
+              if (!rList.some((x) => x.id === o.id)) rList.push(o);
+            } else {
+              roomSlotBuckets.set(rKey, [o]);
+            }
+          }
         }
       }
     }
@@ -986,7 +1335,9 @@ export function buildTermSchedulingIndex(
       acc.practicalUnits += bd.activePracticalUnits;
       acc.weeklyHours += bd.weeklyHours;
       acc.equivalentUnits += bd.equivalentUnits;
-      if (o.dayOfWeek) acc.daySet.add(o.dayOfWeek);
+      getOfferingSessions(o).forEach((sess) => {
+        acc!.daySet.add(sess.dayOfWeek);
+      });
     }
   }
 
@@ -1038,9 +1389,15 @@ export function detectOfferingConflicts(
 ): OfferingConflictReport {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const pushUniqueErr = (msg: string) => {
+    if (!errors.includes(msg)) errors.push(msg);
+  };
+  const pushUniqueWarn = (msg: string) => {
+    if (!warnings.includes(msg)) warnings.push(msg);
+  };
 
   if (candidate.isDisabled || candidate.isProvisional) {
-    warnings.push(
+    pushUniqueWarn(
       candidate.disabledReason ||
         'این درس به صورت موقت یا غیرفعال ثبت شده و تا تکمیل اطلاعات در برنامه نهایی و محاسبات لحاظ نمی‌شود.'
     );
@@ -1050,103 +1407,135 @@ export function detectOfferingConflicts(
   if (candidate.sharedWithTargets && candidate.sharedWithTargets.length > 0) {
     const cleanCode = normalizeSchedCode(candidate.courseCode);
     if (!/^\d{7}$/.test(cleanCode)) {
-      warnings.push('برای دروس مشترک بین چند رشته، کد درس باید دقیقاً ۷ رقمی معتبر باشد.');
+      pushUniqueWarn('برای دروس مشترک بین چند رشته، کد درس باید دقیقاً ۷ رقمی معتبر باشد.');
     }
   }
 
-  // بررسی تداخل زمانی فقط در صورتی که روز و حداقل یک سانس انتخاب شده باشد (دروس غیرفعال/موقت تداخل ایجاد نمی‌کنند)
-  if (!candidate.isDisabled && !candidate.isProvisional && candidate.dayOfWeek && candidate.slotIds.length > 0) {
-    let sameTermOthers: SchedCourseOffering[];
-    if (precomputedIndex) {
-      const seenIds = new Set<string>();
-      const collected: SchedCourseOffering[] = [];
-      for (const sid of candidate.slotIds) {
-        const bucket = precomputedIndex.slotBuckets.get(`${candidate.dayOfWeek}:${sid}`);
-        if (!bucket) continue;
-        const candHalf = getOfferingSlotHalf(candidate, sid);
-        for (const o of bucket) {
-          if (o.id === candidate.id || seenIds.has(o.id)) continue;
-          if (o.termKey !== candidate.termKey) continue;
-          if (doSlotHalvesOverlap(candHalf, getOfferingSlotHalf(o, sid))) {
-            seenIds.add(o.id);
+  const candSessions = getOfferingSessions(candidate);
+
+  // بررسی تداخل درونی بین جلسات خودِ یک درس (در صورت تکرار روز و سانس هم‌پوشان)
+  for (let i = 0; i < candSessions.length; i++) {
+    for (let j = i + 1; j < candSessions.length; j++) {
+      const si = candSessions[i];
+      const sj = candSessions[j];
+      if (si.dayOfWeek !== sj.dayOfWeek) continue;
+      const overlapSid = si.slotIds.find(
+        (sid) =>
+          sj.slotIds.includes(sid) &&
+          doSlotHalvesOverlap(si.slotParts?.[sid] || 'full', sj.slotParts?.[sid] || 'full')
+      );
+      if (overlapSid) {
+        pushUniqueErr(
+          `تداخل درونی جلسات درس: دو جلسه هم‌پوشان در روز ${SCHED_DAY_LABELS[si.dayOfWeek]} انتخاب شده است.`
+        );
+      }
+    }
+  }
+
+  // بررسی تداخل زمانی در تمام جلسات درس (دروس غیرفعال/موقت تداخل ایجاد نمی‌کنند)
+  if (!candidate.isDisabled && !candidate.isProvisional && candSessions.length > 0) {
+    for (const candSess of candSessions) {
+      const candRoom = getOfferingClassroomAtSession(candidate, candSess);
+      const dayLabel = SCHED_DAY_LABELS[candSess.dayOfWeek];
+
+      let slotPool: SchedCourseOffering[];
+      if (precomputedIndex) {
+        const seen = new Set<string>();
+        const collected: SchedCourseOffering[] = [];
+        for (const sid of candSess.slotIds) {
+          const bucket = precomputedIndex.slotBuckets.get(`${candSess.dayOfWeek}:${sid}`);
+          if (!bucket) continue;
+          for (const o of bucket) {
+            if (o.id === candidate.id || seen.has(o.id) || o.termKey !== candidate.termKey) continue;
+            seen.add(o.id);
             collected.push(o);
           }
         }
+        slotPool = collected;
+      } else {
+        slotPool = allOfferings.filter(
+          (o) =>
+            o.id !== candidate.id &&
+            !o.isDisabled &&
+            !o.isProvisional &&
+            o.termKey === candidate.termKey
+        );
       }
-      sameTermOthers = collected;
-    } else {
-      sameTermOthers = allOfferings.filter(
-        (o) =>
-          o.id !== candidate.id &&
-          !o.isDisabled &&
-          !o.isProvisional &&
-          o.termKey === candidate.termKey &&
-          o.dayOfWeek === candidate.dayOfWeek &&
-          o.slotIds.some(
-            (sid) =>
-              candidate.slotIds.includes(sid) &&
-              doSlotHalvesOverlap(
-                getOfferingSlotHalf(candidate, sid),
-                getOfferingSlotHalf(o, sid)
-              )
-          )
-      );
+
+      for (const other of slotPool) {
+        const otherSessions = getOfferingSessions(other);
+        const matchingOtherSess = otherSessions.find(
+          (os) =>
+            os.dayOfWeek === candSess.dayOfWeek &&
+            os.slotIds.some(
+              (sid) =>
+                candSess.slotIds.includes(sid) &&
+                doSlotHalvesOverlap(candSess.slotParts?.[sid] || 'full', os.slotParts?.[sid] || 'full')
+            )
+        );
+        if (!matchingOtherSess) continue;
+
+        const otherRoom = getOfferingClassroomAtSession(other, matchingOtherSess);
+
+        // ۱. تداخل کلاس فیزیکی در این جلسه
+        if (candRoom.classroomId && otherRoom.classroomId === candRoom.classroomId) {
+          pushUniqueErr(
+            `تداخل مکان (${dayLabel}): کلاس «${candRoom.classroomName || otherRoom.classroomName}» در همین ساعت به درس «${other.courseTitle}» (${other.ownerMajorName}) اختصاص دارد.`
+          );
+        }
+
+        // ۲. تداخل استاد در این جلسه
+        if (candidate.professorId && other.professorId === candidate.professorId) {
+          pushUniqueErr(
+            `تداخل استاد (${dayLabel}): «${candidate.professorName || other.professorName}» همزمان در درس «${other.courseTitle}» (${other.ownerMajorName}) کلاس دارد.`
+          );
+        }
+
+        // ۳. تداخل ورودی/شعبه دانشجویان در این جلسه
+        const bothInternshipSplit =
+          candidate.practicalType === 'internship' &&
+          other.practicalType === 'internship' &&
+          (Boolean(candidate.internshipSubGroupLabel) || Boolean(other.internshipSubGroupLabel));
+        const cohortOverlap = bothInternshipSplit ? null : doTargetsOverlap(candidate, other);
+        if (cohortOverlap) {
+          pushUniqueErr(
+            `تداخل برنامه دانشجویان (${cohortOverlap} · ${dayLabel}): همزمان درس «${other.courseTitle}» برای این گروه برنامه‌ریزی شده است.`
+          );
+        }
+      }
     }
 
-    for (const other of sameTermOthers) {
-      // ۱. تداخل کلاس فیزیکی
-      if (candidate.classroomId && other.classroomId === candidate.classroomId) {
-        errors.push(
-          `تداخل مکان: کلاس «${candidate.classroomName || other.classroomName}» در همین روز و ساعت به درس «${other.courseTitle}» (${other.ownerMajorName}) اختصاص دارد.`
-        );
-      }
-
-      // ۲. تداخل استاد
-      if (candidate.professorId && other.professorId === candidate.professorId) {
-        errors.push(
-          `تداخل استاد: «${candidate.professorName || other.professorName}» همزمان در درس «${other.courseTitle}» (${other.ownerMajorName}) کلاس دارد.`
-        );
-      }
-
-      // ۳. تداخل ورودی/شعبه دانشجویان (برای شعبه‌های کارورزی همان بخش با ظرفیت تقسیم‌شده، تداخل دانشجو محسوب نمی‌شود)
-      const bothInternshipSplit =
-        candidate.practicalType === 'internship' &&
-        other.practicalType === 'internship' &&
-        (Boolean(candidate.internshipSubGroupLabel) || Boolean(other.internshipSubGroupLabel));
-      const cohortOverlap = bothInternshipSplit ? null : doTargetsOverlap(candidate, other);
-      if (cohortOverlap) {
-        errors.push(
-          `تداخل برنامه دانشجویان (${cohortOverlap}): همزمان درس «${other.courseTitle}» برای این گروه برنامه‌ریزی شده است.`
-        );
-      }
-    }
-
-    // بررسی محدودیت زمان عدم حضور استاد
+    // بررسی محدودیت زمان عدم حضور استاد در تمام جلسات
     if (candidate.professorId) {
       const prof = precomputedIndex
         ? precomputedIndex.profById.get(candidate.professorId)
         : professors.find((p) => p.id === candidate.professorId);
       if (prof?.unavailableKeys && prof.unavailableKeys.length > 0) {
-        const hit = candidate.slotIds.some((sid) =>
-          prof.unavailableKeys!.includes(`${candidate.dayOfWeek}:${sid}`)
+        const hitSess = candSessions.find((cs) =>
+          cs.slotIds.some((sid) => prof.unavailableKeys!.includes(`${cs.dayOfWeek}:${sid}`))
         );
-        if (hit) {
-          warnings.push(
-            `استاد «${prof.fullName}» این روز/سانس را جزو زمان‌های عدم امکان حضور اعلام کرده است.`
+        if (hitSess) {
+          pushUniqueWarn(
+            `استاد «${prof.fullName}» روز ${SCHED_DAY_LABELS[hitSess.dayOfWeek]} / این سانس را جزو زمان‌های عدم امکان حضور اعلام کرده است.`
           );
         }
       }
     }
   }
 
-  // بررسی ظرفیت و نوع کلاس فیزیکی
-  if (candidate.classroomId) {
+  // بررسی ظرفیت و نوع کلاس فیزیکی در همه کلاس‌های استفاده‌شده در جلسات
+  const roomIdsToCheck = new Set<string>();
+  if (candidate.classroomId) roomIdsToCheck.add(candidate.classroomId);
+  candSessions.forEach((s) => {
+    if (s.classroomId) roomIdsToCheck.add(s.classroomId);
+  });
+  for (const rId of roomIdsToCheck) {
     const room = precomputedIndex
-      ? precomputedIndex.roomById.get(candidate.classroomId)
-      : classrooms.find((r) => r.id === candidate.classroomId);
+      ? precomputedIndex.roomById.get(rId)
+      : classrooms.find((r) => r.id === rId);
     if (room) {
       if (candidate.enrolledCount > room.capacity) {
-        warnings.push(
+        pushUniqueWarn(
           `تعداد دانشجویان (${candidate.enrolledCount.toLocaleString('fa-IR')} نفر) از ظرفیت کلاس «${room.name}» (${room.capacity.toLocaleString('fa-IR')} نفر) بیشتر است.`
         );
       }
@@ -1155,19 +1544,27 @@ export function detectOfferingConflicts(
         candidate.practicalType === 'workshop' &&
         room.roomType !== 'workshop'
       ) {
-        warnings.push(`این درس دارای واحد کارگاهی است اما کلاس «${room.name}» کارگاه نیست.`);
+        pushUniqueWarn(`این درس دارای واحد کارگاهی است اما کلاس «${room.name}» کارگاه نیست.`);
       }
     }
   }
 
   if (!candidate.professorId) {
-    warnings.push('استاد این درس هنوز تعیین نشده است.');
+    pushUniqueWarn('استاد این درس هنوز تعیین نشده است.');
   }
-  if (!candidate.classroomId && isInternshipClassroomRequired(candidate)) {
-    if (candidate.practicalType === 'internship' && candidate.internshipSessionRole === 'university_orientation') {
-      warnings.push('کلاس فیزیکی برای جلسه توجیهی کارورزی در دانشگاه هنوز تعیین نشده است.');
+  const missingRoom =
+    isInternshipClassroomRequired(candidate) &&
+    (candSessions.length > 0
+      ? candSessions.some((s) => !getOfferingClassroomAtSession(candidate, s).classroomId)
+      : !candidate.classroomId);
+  if (missingRoom) {
+    if (
+      candidate.practicalType === 'internship' &&
+      candidate.internshipSessionRole === 'university_orientation'
+    ) {
+      pushUniqueWarn('کلاس فیزیکی برای جلسه توجیهی کارورزی در دانشگاه هنوز تعیین نشده است.');
     } else {
-      warnings.push('کلاس فیزیکی این درس هنوز تعیین نشده است.');
+      pushUniqueWarn('کلاس فیزیکی این درس (یا یکی از جلسات آن) هنوز تعیین نشده است.');
     }
   }
 
@@ -1177,7 +1574,7 @@ export function detectOfferingConflicts(
       ? precomputedIndex.examBuckets.get(`${candidate.examDayId}:${candidate.examSlotId}`) || []
       : allOfferings;
     const examWarns = detectOfferingExamConflicts(candidate, examSource, rules);
-    warnings.push(...examWarns);
+    examWarns.forEach(pushUniqueWarn);
   }
 
   // اخطار رعایت حداقل و حداکثر واحد معادل استاد (صرفاً هشدار؛ مانع ثبت نمی‌شود)
@@ -1226,7 +1623,7 @@ export function detectOfferingConflicts(
       const projectedEq = round2(existingProfEq + candidateEq);
       const limitCheck = evaluateProfessorEquivalentUnitStatus(prof, projectedEq, effectiveRules);
       if (limitCheck.message) {
-        warnings.push(limitCheck.message);
+        pushUniqueWarn(limitCheck.message);
       }
     }
   }
@@ -1329,13 +1726,20 @@ export function runSmartAutoScheduler(
       if (
         off.termKey === config.termKey &&
         off.cohortId === item.cohort.id &&
-        (!item.sectionId || !off.sectionId || off.sectionId === item.sectionId) &&
-        off.dayOfWeek
+        (!item.sectionId || !off.sectionId || off.sectionId === item.sectionId)
       ) {
-        cohortDaysUsage.set(
-          off.dayOfWeek,
-          (cohortDaysUsage.get(off.dayOfWeek) || 0) + off.weeklyHours
-        );
+        getOfferingSessions(off).forEach((sess) => {
+          const sessHrs = sess.slotIds.reduce((sum, sid) => {
+            const sl = rules.timeSlots.find((s) => s.id === sid);
+            const dur = sl ? getSlotDurationHours(sl) : 2;
+            const h = sess.slotParts?.[sid] || 'full';
+            return sum + (h === 'full' ? dur : Math.min(dur, 1));
+          }, 0);
+          cohortDaysUsage.set(
+            sess.dayOfWeek,
+            round2((cohortDaysUsage.get(sess.dayOfWeek) || 0) + sessHrs)
+          );
+        });
       }
     }
 
@@ -1372,6 +1776,10 @@ export function runSmartAutoScheduler(
     }
     roomCandidates.sort((a, b) => a.capacity - b.capacity);
 
+    const groupSuggestion = getNextGolestanCourseGroupInfo(
+      item.course.courseCode,
+      workingOfferings.filter((w) => w.termKey === config.termKey)
+    );
     let placed = false;
 
     for (const day of candidateDays) {
@@ -1423,6 +1831,7 @@ export function runSmartAutoScheduler(
             termKey: config.termKey,
             courseId: item.course.id,
             courseCode: item.course.courseCode,
+            courseGroupCode: groupSuggestion.nextGroupCode,
             courseTitle: item.course.title,
             courseType: item.course.courseType,
             practicalType: item.course.practicalType,
@@ -1444,6 +1853,16 @@ export function runSmartAutoScheduler(
             dayOfWeek: day,
             slotIds,
             slotParts,
+            sessions: [
+              {
+                id: 'sess_1',
+                dayOfWeek: day,
+                slotIds: [...slotIds],
+                slotParts: Object.keys(slotParts).length > 0 ? slotParts : undefined,
+                classroomId: room?.id,
+                classroomName: room?.name,
+              },
+            ],
             splitPart: 'full',
             createdById: actor.id,
             createdByName: actor.name,
@@ -1464,7 +1883,8 @@ export function runSmartAutoScheduler(
             candidateDraft,
             workingOfferings,
             classrooms,
-            professors
+            professors,
+            rules
           );
           if (!conflict.hasHardConflict) {
             workingOfferings.push(candidate);
@@ -2577,6 +2997,7 @@ export function checkScheduleEditLock(
     majorCode?: string;
     dayOfWeek?: SchedDayKey;
     slotIds?: string[];
+    sessions?: Array<{ dayOfWeek?: SchedDayKey; slotIds?: string[] }>;
   }
 ): ScheduleLockCheckResult {
   // مدیر سامانه دسترسی کامل دارد و هرگز مشمول مسدودسازی نمی‌شود
@@ -2623,16 +3044,33 @@ export function checkScheduleEditLock(
         'تغییرات برنامه برای این رشته توسط مدیر سامانه بسته و مسدود شده است.',
     };
   }
-  if (target?.dayOfWeek && locks.lockedDays?.includes(target.dayOfWeek)) {
-    return {
-      locked: true,
-      reason:
-        fallbackMsg ||
-        `تغییرات برنامه در روز «${SCHED_DAY_LABELS[target.dayOfWeek]}» توسط مدیر سامانه مسدود شده است.`,
-    };
+
+  const allDaysToCheck: SchedDayKey[] = [];
+  if (target?.dayOfWeek) allDaysToCheck.push(target.dayOfWeek);
+  target?.sessions?.forEach((s) => {
+    if (s.dayOfWeek && !allDaysToCheck.includes(s.dayOfWeek)) {
+      allDaysToCheck.push(s.dayOfWeek);
+    }
+  });
+  for (const d of allDaysToCheck) {
+    if (locks.lockedDays?.includes(d)) {
+      return {
+        locked: true,
+        reason:
+          fallbackMsg ||
+          `تغییرات برنامه در روز «${SCHED_DAY_LABELS[d]}» توسط مدیر سامانه مسدود شده است.`,
+      };
+    }
   }
-  if (target?.slotIds && target.slotIds.length > 0 && locks.lockedSlotIds?.length) {
-    const hit = target.slotIds.find((sid) => locks.lockedSlotIds!.includes(sid));
+
+  const allSlotsToCheck: string[] = [...(target?.slotIds || [])];
+  target?.sessions?.forEach((s) => {
+    s.slotIds?.forEach((sid) => {
+      if (!allSlotsToCheck.includes(sid)) allSlotsToCheck.push(sid);
+    });
+  });
+  if (allSlotsToCheck.length > 0 && locks.lockedSlotIds?.length) {
+    const hit = allSlotsToCheck.find((sid) => locks.lockedSlotIds!.includes(sid));
     if (hit) {
       return {
         locked: true,
@@ -2923,6 +3361,7 @@ export function applyOfferingHistoryStep(params: {
         majorCode: expectedNow.ownerMajorCode,
         dayOfWeek: expectedNow.dayOfWeek,
         slotIds: expectedNow.slotIds,
+        sessions: getOfferingSessions(expectedNow),
       });
       if (lockCur.locked) {
         return {
@@ -2936,6 +3375,7 @@ export function applyOfferingHistoryStep(params: {
         majorCode: targetState.ownerMajorCode,
         dayOfWeek: targetState.dayOfWeek,
         slotIds: targetState.slotIds,
+        sessions: getOfferingSessions(targetState),
       });
       if (lockTarget.locked) {
         return {
@@ -3115,13 +3555,19 @@ export function deactivateOfferingsForRemovedProfessors(
     if (!o.professorId || !idSet.has(o.professorId)) return o;
     affectedCount += 1;
     const prevName = profNameById?.get(o.professorId) || o.professorName || 'استاد حذف‌شده';
+    const reasonText = `استاد پیشین (${prevName}) از لیست اساتید حذف شده است`;
+    const mergedReason =
+      o.disabledReason && !o.disabledReason.includes(reasonText)
+        ? `${o.disabledReason} | ${reasonText}`
+        : reasonText;
     return {
       ...o,
       professorId: undefined,
       professorCode: undefined,
       professorName: undefined,
       isDisabled: true,
-      disabledReason: `استاد پیشین (${prevName}) از لیست اساتید حذف شده است`,
+      isProvisional: true,
+      disabledReason: mergedReason,
       updatedById: actor?.id || o.updatedById,
       updatedByName: actor?.name || o.updatedByName,
       updatedAt: nowIso,
@@ -3129,6 +3575,384 @@ export function deactivateOfferingsForRemovedProfessors(
   });
   return { nextOfferings, affectedCount };
 }
+
+export function deactivateOfferingsForRemovedClassrooms(
+  offerings: SchedCourseOffering[],
+  removedRoomIds: Iterable<string>,
+  actor?: { id: string; name: string },
+  roomNameById?: Map<string, string>
+): { nextOfferings: SchedCourseOffering[]; affectedCount: number } {
+  const idSet = new Set(removedRoomIds);
+  if (idSet.size === 0) {
+    return { nextOfferings: offerings, affectedCount: 0 };
+  }
+  const nowIso = new Date().toISOString();
+  let affectedCount = 0;
+  const nextOfferings = offerings.map((o) => {
+    const topMatched = Boolean(o.classroomId && idSet.has(o.classroomId));
+    const sessions = Array.isArray(o.sessions) ? o.sessions : [];
+    const sessMatched = sessions.some((s) => Boolean(s.classroomId && idSet.has(s.classroomId)));
+    if (!topMatched && !sessMatched) return o;
+
+    affectedCount += 1;
+    const removedNames = new Set<string>();
+    if (topMatched && o.classroomId) {
+      removedNames.add(roomNameById?.get(o.classroomId) || o.classroomName || 'کلاس حذف‌شده');
+    }
+    sessions.forEach((s) => {
+      if (s.classroomId && idSet.has(s.classroomId)) {
+        removedNames.add(roomNameById?.get(s.classroomId) || s.classroomName || 'کلاس حذف‌شده');
+      }
+    });
+    const reasonText = `کلاس فیزیکی پیشین (${Array.from(removedNames).join('، ')}) حذف شده است`;
+    const mergedReason =
+      o.disabledReason && !o.disabledReason.includes(reasonText)
+        ? `${o.disabledReason} | ${reasonText}`
+        : reasonText;
+
+    const nextSessions =
+      sessions.length > 0
+        ? sessions.map((s) =>
+            s.classroomId && idSet.has(s.classroomId)
+              ? { ...s, classroomId: undefined, classroomName: undefined }
+              : s
+          )
+        : o.sessions;
+
+    return {
+      ...o,
+      classroomId: topMatched ? undefined : o.classroomId,
+      classroomName: topMatched ? undefined : o.classroomName,
+      sessions: nextSessions,
+      isDisabled: true,
+      isProvisional: true,
+      disabledReason: mergedReason,
+      updatedById: actor?.id || o.updatedById,
+      updatedByName: actor?.name || o.updatedByName,
+      updatedAt: nowIso,
+    };
+  });
+  return { nextOfferings, affectedCount };
+}
+
+export function cascadeRemovedProgramsFromSchedule(
+  offerings: SchedCourseOffering[],
+  cellComments: SchedCellComment[],
+  removedCohortIds: Iterable<string>,
+  remainingPrograms?: SchedProgramCohort[],
+  actor?: { id: string; name: string }
+): {
+  nextOfferings: SchedCourseOffering[];
+  nextCellComments: SchedCellComment[];
+  removedOfferingsCount: number;
+  updatedSharedCount: number;
+  removedCommentsCount: number;
+} {
+  const removedCohortSet = new Set(removedCohortIds);
+  const validCohortMap = remainingPrograms
+    ? new Map(remainingPrograms.map((p) => [p.id, p]))
+    : null;
+  const nowIso = new Date().toISOString();
+
+  let removedOfferingsCount = 0;
+  let updatedSharedCount = 0;
+  const nextOfferings: SchedCourseOffering[] = [];
+
+  for (const o of offerings) {
+    if (removedCohortSet.has(o.cohortId)) {
+      removedOfferingsCount += 1;
+      continue;
+    }
+    if (validCohortMap) {
+      const coh = validCohortMap.get(o.cohortId);
+      if (!coh) {
+        removedOfferingsCount += 1;
+        continue;
+      }
+      if (o.sectionId && !coh.sections.some((s) => s.id === o.sectionId)) {
+        removedOfferingsCount += 1;
+        continue;
+      }
+    }
+
+    let updated = o;
+    if (Array.isArray(o.sharedWithTargets) && o.sharedWithTargets.length > 0) {
+      let removedStudents = 0;
+      const filteredTargets = o.sharedWithTargets.filter((t) => {
+        if (removedCohortSet.has(t.cohortId)) {
+          removedStudents += t.studentCount || 0;
+          return false;
+        }
+        if (validCohortMap) {
+          const tCoh = validCohortMap.get(t.cohortId);
+          if (!tCoh) {
+            removedStudents += t.studentCount || 0;
+            return false;
+          }
+          if (t.sectionId && !tCoh.sections.some((s) => s.id === t.sectionId)) {
+            removedStudents += t.studentCount || 0;
+            return false;
+          }
+        }
+        return true;
+      });
+      if (filteredTargets.length !== o.sharedWithTargets.length) {
+        updatedSharedCount += 1;
+        updated = {
+          ...o,
+          sharedWithTargets: filteredTargets,
+          enrolledCount: Math.max(1, o.enrolledCount - removedStudents),
+          updatedById: actor?.id || o.updatedById,
+          updatedByName: actor?.name || o.updatedByName,
+          updatedAt: nowIso,
+        };
+      }
+    }
+
+    nextOfferings.push(updated);
+  }
+
+  let removedCommentsCount = 0;
+  const nextCellComments = cellComments.filter((c) => {
+    if (removedCohortSet.has(c.cohortId)) {
+      removedCommentsCount += 1;
+      return false;
+    }
+    if (validCohortMap) {
+      const coh = validCohortMap.get(c.cohortId);
+      if (!coh || (c.sectionId && !coh.sections.some((s) => s.id === c.sectionId))) {
+        removedCommentsCount += 1;
+        return false;
+      }
+    }
+    return true;
+  });
+
+  return {
+    nextOfferings,
+    nextCellComments,
+    removedOfferingsCount,
+    updatedSharedCount,
+    removedCommentsCount,
+  };
+}
+
+export function reconcileScheduleWithMasterData(params: {
+  offerings: SchedCourseOffering[];
+  cellComments: SchedCellComment[];
+  programs: SchedProgramCohort[];
+  professors: SchedProfessor[];
+  classrooms: SchedClassroom[];
+  actor?: { id: string; name: string };
+}): {
+  changed: boolean;
+  nextOfferings: SchedCourseOffering[];
+  nextCellComments: SchedCellComment[];
+  removedProgramsOfferingsCount: number;
+  unassignedProfessorOfferingsCount: number;
+  clearedClassroomOfferingsCount: number;
+  removedCommentsCount: number;
+} {
+  const { offerings, cellComments, programs, professors, classrooms, actor } = params;
+  const programIds = new Set(programs.map((p) => p.id));
+  const profIds = new Set(professors.map((p) => p.id));
+  const roomIds = new Set(classrooms.map((r) => r.id));
+
+  const missingCohortIds = new Set<string>();
+  offerings.forEach((o) => {
+    if (!programIds.has(o.cohortId)) missingCohortIds.add(o.cohortId);
+  });
+  cellComments.forEach((c) => {
+    if (!programIds.has(c.cohortId)) missingCohortIds.add(c.cohortId);
+  });
+
+  const progRes = cascadeRemovedProgramsFromSchedule(
+    offerings,
+    cellComments,
+    missingCohortIds,
+    programs,
+    actor
+  );
+
+  const missingProfIds = new Set<string>();
+  const missingRoomIds = new Set<string>();
+  progRes.nextOfferings.forEach((o) => {
+    if (o.professorId && !profIds.has(o.professorId)) missingProfIds.add(o.professorId);
+    if (o.classroomId && !roomIds.has(o.classroomId)) missingRoomIds.add(o.classroomId);
+    (o.sessions || []).forEach((s) => {
+      if (s.classroomId && !roomIds.has(s.classroomId)) missingRoomIds.add(s.classroomId);
+    });
+  });
+
+  const profRes = deactivateOfferingsForRemovedProfessors(
+    progRes.nextOfferings,
+    missingProfIds,
+    actor
+  );
+  const roomRes = deactivateOfferingsForRemovedClassrooms(
+    profRes.nextOfferings,
+    missingRoomIds,
+    actor
+  );
+
+  const changed =
+    progRes.removedOfferingsCount > 0 ||
+    progRes.updatedSharedCount > 0 ||
+    progRes.removedCommentsCount > 0 ||
+    profRes.affectedCount > 0 ||
+    roomRes.affectedCount > 0;
+
+  return {
+    changed,
+    nextOfferings: roomRes.nextOfferings,
+    nextCellComments: progRes.nextCellComments,
+    removedProgramsOfferingsCount: progRes.removedOfferingsCount,
+    unassignedProfessorOfferingsCount: profRes.affectedCount,
+    clearedClassroomOfferingsCount: roomRes.affectedCount,
+    removedCommentsCount: progRes.removedCommentsCount,
+  };
+}
+
+export const EIGHT_TERM_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8'] as const;
+export type EightTermKey = (typeof EIGHT_TERM_KEYS)[number];
+
+export const EIGHT_TERM_LABELS: Record<EightTermKey, string> = {
+  '1': 'ترم اول',
+  '2': 'ترم دوم',
+  '3': 'ترم سوم',
+  '4': 'ترم چهارم',
+  '5': 'ترم پنجم',
+  '6': 'ترم ششم',
+  '7': 'ترم هفتم',
+  '8': 'ترم هشتم',
+};
+
+export function normalizeCurriculumTermKey(raw?: string): EightTermKey | null {
+  const digits = normalizeSchedCode(raw || '').replace(/[^\d]/g, '');
+  if (digits >= '1' && digits <= '8' && digits.length === 1) {
+    return digits as EightTermKey;
+  }
+  const n = Number(digits);
+  if (Number.isInteger(n) && n >= 1 && n <= 8) {
+    return String(n) as EightTermKey;
+  }
+  return null;
+}
+
+export function getMajorEightTermPlanCourseCodes(
+  settings: Pick<AppSettings, 'majorEightTermPlans'> | undefined,
+  majorCode: string,
+  allCourses: SchedCurriculumCourse[]
+): Record<EightTermKey, string[]> {
+  const normMajor = normalizeSchedCode(majorCode);
+  const result: Record<EightTermKey, string[]> = {
+    '1': [],
+    '2': [],
+    '3': [],
+    '4': [],
+    '5': [],
+    '6': [],
+    '7': [],
+    '8': [],
+  };
+  const majorCourses = allCourses.filter((c) => normalizeSchedCode(c.majorCode) === normMajor);
+  const validCodes = new Set(majorCourses.map((c) => normalizeSchedCode(c.courseCode)));
+  const explicitPlan = settings?.majorEightTermPlans?.[normMajor];
+
+  if (explicitPlan && typeof explicitPlan === 'object') {
+    const seen = new Set<string>();
+    EIGHT_TERM_KEYS.forEach((tk) => {
+      const rawList = Array.isArray(explicitPlan[tk]) ? explicitPlan[tk] : [];
+      result[tk] = rawList
+        .map((code) => normalizeSchedCode(code))
+        .filter((code) => {
+          if (!code || !validCodes.has(code) || seen.has(code)) return false;
+          seen.add(code);
+          return true;
+        });
+    });
+    return result;
+  }
+
+  // استخراج خودکار از فیلد recommendedTerm در سرفصل دروس در صورت نبود تنظیم صریح
+  const seen = new Set<string>();
+  majorCourses.forEach((c) => {
+    const code = normalizeSchedCode(c.courseCode);
+    const tk = normalizeCurriculumTermKey(c.recommendedTerm);
+    if (tk && !seen.has(code)) {
+      seen.add(code);
+      result[tk].push(code);
+    }
+  });
+  return result;
+}
+
+export function getSelectedTermCoursesForCohort(params: {
+  termKey: string;
+  cohortId: string;
+  majorCode: string;
+  allCourses: SchedCurriculumCourse[];
+  rules: SchedRulesSettings;
+}): {
+  majorCourses: SchedCurriculumCourse[];
+  selectedCourses: SchedCurriculumCourse[];
+  selectedCourseCodes: string[];
+  hasExplicitSelection: boolean;
+} {
+  const { termKey, cohortId, majorCode, allCourses, rules } = params;
+  const normMajor = normalizeSchedCode(majorCode);
+  const majorCourses = allCourses.filter(
+    (c) => normalizeSchedCode(c.majorCode) === normMajor
+  );
+  const rawList = rules.termOfferedCoursesByCohort?.[termKey]?.[cohortId];
+  const selectedCodes = Array.isArray(rawList)
+    ? Array.from(new Set(rawList.map((x) => normalizeSchedCode(x)).filter(Boolean)))
+    : [];
+  const selectedSet = new Set(selectedCodes);
+  const selectedCourses = majorCourses.filter(
+    (c) => selectedSet.has(normalizeSchedCode(c.courseCode)) || selectedSet.has(c.id)
+  );
+  return {
+    majorCourses,
+    selectedCourses,
+    selectedCourseCodes: selectedCourses.map((c) => normalizeSchedCode(c.courseCode)),
+    hasExplicitSelection: Array.isArray(rawList),
+  };
+}
+
+export function estimateCohortCurrentSemester(
+  entryTerm: string,
+  activeTerm: string
+): EightTermKey {
+  const parseTerm = (t: string): { year: number; half: number } | null => {
+    const clean = normalizeSchedCode(t).replace(/[^\d]/g, '');
+    if (clean.length === 4) {
+      // مثلاً 4031 => سال 403، نیمسال 1
+      const year = Number(clean.slice(0, 3));
+      const half = Number(clean.slice(3, 4));
+      if (Number.isFinite(year) && (half === 1 || half === 2)) {
+        return { year, half };
+      }
+    } else if (clean.length === 5) {
+      // مثلاً 14031 => سال 1403، نیمسال 1
+      const year = Number(clean.slice(0, 4)) % 1000;
+      const half = Number(clean.slice(4, 5));
+      if (Number.isFinite(year) && (half === 1 || half === 2)) {
+        return { year, half };
+      }
+    }
+    return null;
+  };
+  const ent = parseTerm(entryTerm);
+  const act = parseTerm(activeTerm);
+  if (!ent || !act) return '1';
+  const entY = ent.year < 1000 ? ent.year + 1000 : ent.year;
+  const actY = act.year < 1000 ? act.year + 1000 : act.year;
+  const diffSem = (actY - entY) * 2 + (act.half - ent.half) + 1;
+  const clamped = Math.max(1, Math.min(8, diffSem));
+  return String(clamped) as EightTermKey;
+}
+
 
 
 

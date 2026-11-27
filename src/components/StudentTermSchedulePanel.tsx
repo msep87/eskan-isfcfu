@@ -17,13 +17,17 @@ import {
   doesStudentMatchEntryTerm,
   doesStudentMatchMajor,
   exportJsonRowsToExcel,
-  getOfferingSlotHalf,
+  formatGolestanCourseCode,
+  formatOfferingSessionsSummary,
+  getOfferingClassroomAtSession,
+  getOfferingSessionSlotHalf,
+  getOfferingSessions,
   getSchedSlotTitle,
   getSlotHalfLabel,
+  isOfferingAtDaySlot,
   isOfferingEffectivelyActive,
   normalizePersianText,
   printSchedHtml,
-  round2,
   summarizeSectionOfferings,
 } from '../utils/schedulingUtils';
 import { escapeHtml } from '../utils/sanitizeHtml';
@@ -247,7 +251,9 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
   const summaryStats = useMemo(() => {
     const daysUsed = new Set<SchedDayKey>();
     for (const o of filteredOfferings) {
-      if (o.dayOfWeek) daysUsed.add(o.dayOfWeek);
+      for (const sess of getOfferingSessions(o)) {
+        daysUsed.add(sess.dayOfWeek);
+      }
     }
     const secSummary = summarizeSectionOfferings(filteredOfferings, rules, {
       groupByCohortSection: true,
@@ -274,26 +280,35 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
       .map((day) => {
         const cols = sortedSlots
           .map((slot) => {
-            const matched = filteredOfferings.filter(
-              (o) => o.dayOfWeek === day && o.slotIds.includes(slot.id)
-            );
+            const matched = filteredOfferings.filter((o) => isOfferingAtDaySlot(o, day, slot.id));
             if (matched.length === 0) {
               return '<td style="text-align:center;color:#94a3b8;">—</td>';
             }
             const cells = matched
               .map((o) => {
-                const half = getOfferingSlotHalf(o, slot.id);
+                const sessList = getOfferingSessions(o);
+                const sessIdx = sessList.findIndex(
+                  (s) => s.dayOfWeek === day && s.slotIds.includes(slot.id)
+                );
+                const sessHere = sessIdx >= 0 ? sessList[sessIdx] : undefined;
+                const sessRoom = getOfferingClassroomAtSession(o, sessHere);
+                const golestanCode = formatGolestanCourseCode(o.courseCode, o.courseGroupCode);
+                const half = getOfferingSessionSlotHalf(o, day, slot.id);
                 const halfBadge =
                   half !== 'full'
                     ? `<div class="muted"><strong>${escapeHtml(getSlotHalfLabel(half))}</strong></div>`
+                    : '';
+                const sessBadge =
+                  sessList.length > 1
+                    ? ` [جلسه ${(sessIdx + 1).toLocaleString('fa-IR')}/${sessList.length.toLocaleString('fa-IR')}]`
                     : '';
                 const secTxt = [o.sectionName, o.internshipSubGroupLabel]
                   .filter(Boolean)
                   .join(' · ');
                 return `<div class="cell-item">
                   ${halfBadge}
-                  <div><strong>${escapeHtml(o.courseTitle)}</strong> <span class="mono">(${escapeHtml(o.courseCode)})</span></div>
-                  <div class="muted">${escapeHtml(o.professorName || 'استاد نامشخص')} | کلاس: ${escapeHtml(o.classroomName || 'نامشخص')}</div>
+                  <div><strong>${escapeHtml(o.courseTitle)}</strong>${escapeHtml(sessBadge)} <span class="mono">(${escapeHtml(golestanCode)})</span></div>
+                  <div class="muted">${escapeHtml(o.professorName || 'استاد نامشخص')} | کلاس: ${escapeHtml(sessRoom.classroomName || 'نامشخص')}</div>
                   ${
                     scope !== 'own_cohort' || secTxt
                       ? `<div class="muted">${escapeHtml(o.ownerMajorName)} (${escapeHtml(o.entryTerm)}${secTxt ? ` - ${escapeHtml(secTxt)}` : ''})</div>`
@@ -330,6 +345,8 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
       return {
         'نیمسال': o.termKey,
         'کد درس': o.courseCode,
+        'کد گروه': o.courseGroupCode || '-',
+        'کد گلستان (درس_گروه)': formatGolestanCourseCode(o.courseCode, o.courseGroupCode),
         'عنوان درس': o.courseTitle,
         'نوع درس': SCHED_COURSE_TYPE_LABELS[o.courseType],
         'رشته': o.ownerMajorName,
@@ -337,16 +354,7 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
         'شعبه / گروه': [o.sectionName, o.internshipSubGroupLabel].filter(Boolean).join(' - ') || 'کل ورودی',
         'استاد': o.professorName || 'تعیین‌نشده',
         'کلاس': o.classroomName || 'تعیین‌نشده',
-        'روز': o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'تعیین‌نشده',
-        'سانس': o.slotIds
-          .map((id) => {
-            const idx = sortedSlots.findIndex((s) => s.id === id);
-            const sl = idx >= 0 ? sortedSlots[idx] : undefined;
-            const half = getOfferingSlotHalf(o, id);
-            const halfSuffix = half !== 'full' ? ` (${getSlotHalfLabel(half)})` : '';
-            return sl ? `${getSchedSlotTitle(sl, idx)} ${sl.startTime}-${sl.endTime}${halfSuffix}` : id;
-          })
-          .join(' + '),
+        'برنامه جلسات هفتگی': formatOfferingSessionsSummary(o, sortedSlots, true),
         'واحد کل': bd.rawUnits,
         'ساعت هفتگی': bd.weeklyHours,
       };
@@ -354,9 +362,14 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
     void exportJsonRowsToExcel(rows, 'برنامه ترم', `برنامه_ترم_${selectedTerm}_${student.studentId}.xlsx`);
   };
 
-  const renderSlotCard = (o: SchedCourseOffering, slotId: string) => {
+  const renderSlotCard = (o: SchedCourseOffering, day: SchedDayKey, slotId: string) => {
     const bd = calculateOfferingBreakdown(o, rules);
-    const half = getOfferingSlotHalf(o, slotId);
+    const sessList = getOfferingSessions(o);
+    const sessIdx = sessList.findIndex((s) => s.dayOfWeek === day && s.slotIds.includes(slotId));
+    const sessHere = sessIdx >= 0 ? sessList[sessIdx] : undefined;
+    const sessRoom = getOfferingClassroomAtSession(o, sessHere);
+    const golestanCode = formatGolestanCourseCode(o.courseCode, o.courseGroupCode);
+    const half = getOfferingSessionSlotHalf(o, day, slotId);
     const isSharedWithStudent =
       !doesStudentMatchMajor(student.fieldOfStudy, o.ownerMajorName, o.ownerMajorCode) &&
       o.sharedWithTargets?.some((t) =>
@@ -365,7 +378,7 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
 
     return (
       <div
-        key={`${o.id}_${slotId}`}
+        key={`${o.id}_${day}_${slotId}`}
         className={`p-2 rounded-xl border text-right space-y-1 transition ${
           o.internshipSubGroupLabel
             ? 'bg-violet-50/80 dark:bg-violet-950/30 border-violet-200 dark:border-violet-800'
@@ -380,8 +393,11 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
           <div className="font-extrabold text-[11.5px] text-slate-900 dark:text-white leading-snug">
             {o.courseTitle}
           </div>
-          <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-white/80 dark:bg-slate-900/70 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 shrink-0">
-            {o.courseCode}
+          <span
+            className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-white/80 dark:bg-slate-900/70 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 shrink-0"
+            dir="ltr"
+          >
+            {golestanCode}
           </span>
         </div>
 
@@ -389,6 +405,11 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
           {half !== 'full' && (
             <span className="px-1.5 py-0.5 rounded bg-white/90 dark:bg-slate-900 font-extrabold text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
               {getSlotHalfLabel(half)}
+            </span>
+          )}
+          {sessList.length > 1 && (
+            <span className="px-1.5 py-0.5 rounded bg-indigo-100/80 dark:bg-indigo-900/50 font-extrabold text-indigo-700 dark:text-indigo-200">
+              جلسه {(sessIdx + 1).toLocaleString('fa-IR')}/{sessList.length.toLocaleString('fa-IR')}
             </span>
           )}
           {o.sectionName && (
@@ -413,10 +434,10 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
           <span className="truncate font-semibold">{o.professorName || 'استاد تعیین‌نشده'}</span>
         </div>
 
-        <div className="text-[10.5px] text-slate-600 dark:text-slate-400 flex items-center justify-between gap-1">
+        <div className="text-[10px] text-slate-600 dark:text-slate-400 flex items-center justify-between gap-1">
           <span className="inline-flex items-center gap-1 truncate">
             <Building2 className="w-3 h-3 text-indigo-500 shrink-0" />
-            <span className="truncate">{o.classroomName || 'کلاس نامشخص'}</span>
+            <span className="truncate">{sessRoom.classroomName || 'کلاس نامشخص'}</span>
           </span>
           <span className="text-[9.5px] font-bold text-slate-500 shrink-0">
             {bd.rawUnits} واحد
@@ -671,16 +692,20 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
                       {SCHED_DAY_LABELS[day]}
                     </td>
                     {sortedSlots.map((slot) => {
-                      const items = filteredOfferings.filter(
-                        (o) => o.dayOfWeek === day && o.slotIds.includes(slot.id)
+                      const items = filteredOfferings.filter((o) =>
+                        isOfferingAtDaySlot(o, day, slot.id)
                       );
-                      const hasHalf = items.some((o) => getOfferingSlotHalf(o, slot.id) !== 'full');
-                      const fullItems = items.filter((o) => getOfferingSlotHalf(o, slot.id) === 'full');
+                      const hasHalf = items.some(
+                        (o) => getOfferingSessionSlotHalf(o, day, slot.id) !== 'full'
+                      );
+                      const fullItems = items.filter(
+                        (o) => getOfferingSessionSlotHalf(o, day, slot.id) === 'full'
+                      );
                       const firstHourItems = items.filter(
-                        (o) => getOfferingSlotHalf(o, slot.id) === 'first_hour'
+                        (o) => getOfferingSessionSlotHalf(o, day, slot.id) === 'first_hour'
                       );
                       const secondHourItems = items.filter(
-                        (o) => getOfferingSlotHalf(o, slot.id) === 'second_hour'
+                        (o) => getOfferingSessionSlotHalf(o, day, slot.id) === 'second_hour'
                       );
 
                       return (
@@ -694,14 +719,14 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
                             </div>
                           ) : hasHalf ? (
                             <div className="space-y-1.5">
-                              {fullItems.map((o) => renderSlotCard(o, slot.id))}
+                              {fullItems.map((o) => renderSlotCard(o, day, slot.id))}
                               <div className="grid grid-cols-2 gap-1.5">
                                 <div className="space-y-1 rounded-xl p-1 bg-sky-50/40 dark:bg-sky-950/15 border border-dashed border-sky-200/80 dark:border-sky-900">
                                   <div className="text-[9px] font-black text-sky-700 dark:text-sky-300 text-center">
                                     ساعت اول
                                   </div>
                                   {firstHourItems.length > 0 ? (
-                                    firstHourItems.map((o) => renderSlotCard(o, slot.id))
+                                    firstHourItems.map((o) => renderSlotCard(o, day, slot.id))
                                   ) : (
                                     <div className="text-[10px] text-center text-slate-300 py-2">
                                       خالی
@@ -713,7 +738,7 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
                                     ساعت دوم
                                   </div>
                                   {secondHourItems.length > 0 ? (
-                                    secondHourItems.map((o) => renderSlotCard(o, slot.id))
+                                    secondHourItems.map((o) => renderSlotCard(o, day, slot.id))
                                   ) : (
                                     <div className="text-[10px] text-center text-slate-300 py-2">
                                       خالی
@@ -724,7 +749,7 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
                             </div>
                           ) : (
                             <div className="space-y-1.5">
-                              {items.map((o) => renderSlotCard(o, slot.id))}
+                              {items.map((o) => renderSlotCard(o, day, slot.id))}
                             </div>
                           )}
                         </td>
@@ -756,8 +781,8 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
                   const bd = calculateOfferingBreakdown(o, rules);
                   return (
                     <tr key={o.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                      <td className="p-3 font-mono font-bold text-indigo-700 dark:text-indigo-400">
-                        {o.courseCode}
+                      <td className="p-3 font-mono font-bold text-indigo-700 dark:text-indigo-400" dir="ltr">
+                        {formatGolestanCourseCode(o.courseCode, o.courseGroupCode)}
                       </td>
                       <td className="p-3">
                         <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
@@ -789,20 +814,7 @@ export const StudentTermSchedulePanel: React.FC<StudentTermSchedulePanelProps> =
                       <td className="p-3">{o.classroomName || 'تعیین‌نشده'}</td>
                       <td className="p-3">
                         <div className="font-bold text-slate-800 dark:text-slate-200">
-                          {o.dayOfWeek ? SCHED_DAY_LABELS[o.dayOfWeek] : 'نامشخص'}
-                        </div>
-                        <div className="text-[10.5px] text-slate-500 mt-0.5">
-                          {o.slotIds
-                            .map((id) => {
-                              const idx = sortedSlots.findIndex((s) => s.id === id);
-                              const sl = idx >= 0 ? sortedSlots[idx] : undefined;
-                              const half = getOfferingSlotHalf(o, id);
-                              const halfStr = half !== 'full' ? ` [${getSlotHalfLabel(half)}]` : '';
-                              return sl
-                                ? `${getSchedSlotTitle(sl, idx)} (${sl.startTime}-${sl.endTime})${halfStr}`
-                                : id;
-                            })
-                            .join(' + ')}
+                          {formatOfferingSessionsSummary(o, sortedSlots, true)}
                         </div>
                       </td>
                       <td className="p-3 text-center">
