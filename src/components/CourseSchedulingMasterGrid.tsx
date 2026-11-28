@@ -1,5 +1,6 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ApprovedAcademicMajor,
   SchedCellComment,
   SchedCellTextAlign,
   SchedCellTextFit,
@@ -24,6 +25,8 @@ import {
   DEFAULT_MASTER_GRID_LAYOUT,
   DEFAULT_MASTER_PRINT_SETTINGS,
 } from '../utils/sampleData';
+import { Storage } from '../utils/storage';
+import { getEffectiveApprovedMajors, normalizeMajorCode } from '../utils/academicMajors';
 import {
   SCHED_DAY_LABELS,
   SCHED_PAPER_SIZES_MM,
@@ -146,6 +149,7 @@ interface CourseSchedulingMasterGridProps {
   hasExternalModalOpen?: boolean;
   onCloseExternalModals?: () => void;
   precomputedIndex?: TermSchedulingIndex;
+  approvedMajors?: ApprovedAcademicMajor[];
   onOpenNewProfessorProposal?: () => void;
   onNotify: (type: 'success' | 'error', text: string) => void;
 }
@@ -155,6 +159,7 @@ type RowGroupingMode = 'by_major' | 'by_entry';
 interface MasterRowRaw {
   rowKey: string;
   cohortId: string;
+  degreeLevel: string;
   majorCode: string;
   majorName: string;
   entryTerm: string;
@@ -162,11 +167,14 @@ interface MasterRowRaw {
   sectionId?: string;
   sectionName: string;
   sectionStudentCount: number;
+  degreeColorIdx: number;
   majorColorIdx: number;
   entryColorIdx: number;
 }
 
 interface MasterRowDisplay extends MasterRowRaw {
+  isFirstDegreeBlock: boolean;
+  degreeBlockSpan: number;
   isFirstMajorBlock: boolean;
   majorBlockSpan: number;
   isFirstEntryBlock: boolean;
@@ -256,6 +264,14 @@ const ENTRY_DISTINCT_PALETTES = [
   'bg-amber-50/90 dark:bg-amber-950/40 text-amber-950 dark:text-amber-100',
 ];
 
+const DEGREE_DISTINCT_PALETTES = [
+  'bg-slate-100/95 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100',
+  'bg-indigo-50/90 dark:bg-indigo-950/45 text-indigo-950 dark:text-indigo-100',
+  'bg-teal-50/90 dark:bg-teal-950/45 text-teal-950 dark:text-teal-100',
+  'bg-amber-50/90 dark:bg-amber-950/45 text-amber-950 dark:text-amber-100',
+  'bg-emerald-50/90 dark:bg-emerald-950/45 text-emerald-950 dark:text-emerald-100',
+];
+
 const ROLE_LABELS_FA: Record<SchedWorkspaceRole, string> = {
   admin: 'مدیر سامانه',
   academic_deputy: 'معاونت آموزشی',
@@ -264,6 +280,7 @@ const ROLE_LABELS_FA: Record<SchedWorkspaceRole, string> = {
 };
 
 const META_COL_LABELS: Record<SchedMetaColumnKey, string> = {
+  degreeLevel: 'مقطع',
   major: 'رشته',
   entry: 'ورودی',
   totalStudents: 'تعداد کل',
@@ -322,10 +339,17 @@ const EMPTY_CELL_OFFERINGS: SchedCourseOffering[] = [];
 
 const cloneDefaultLayout = (): SchedMasterGridLayoutSettings => ({
   metaColumns: {
+    degreeLevel: { ...DEFAULT_MASTER_GRID_LAYOUT.metaColumns.degreeLevel },
     major: { ...DEFAULT_MASTER_GRID_LAYOUT.metaColumns.major },
     entry: { ...DEFAULT_MASTER_GRID_LAYOUT.metaColumns.entry },
     totalStudents: { ...DEFAULT_MASTER_GRID_LAYOUT.metaColumns.totalStudents },
     section: { ...DEFAULT_MASTER_GRID_LAYOUT.metaColumns.section },
+  },
+  showDegreeLevelColumn: Boolean(DEFAULT_MASTER_GRID_LAYOUT.showDegreeLevelColumn),
+  mergeMetaColumns: {
+    degreeLevel: DEFAULT_MASTER_GRID_LAYOUT.mergeMetaColumns?.degreeLevel ?? true,
+    major: DEFAULT_MASTER_GRID_LAYOUT.mergeMetaColumns?.major ?? true,
+    entry: DEFAULT_MASTER_GRID_LAYOUT.mergeMetaColumns?.entry ?? true,
   },
   defaultSlotWidth: DEFAULT_MASTER_GRID_LAYOUT.defaultSlotWidth,
   slotWidthsBySlotId: {},
@@ -340,6 +364,7 @@ const mergeMasterGridLayout = (
   if (!incoming) return def;
   return {
     metaColumns: {
+      degreeLevel: { ...def.metaColumns.degreeLevel, ...(incoming.metaColumns?.degreeLevel || {}) },
       major: { ...def.metaColumns.major, ...(incoming.metaColumns?.major || {}) },
       entry: { ...def.metaColumns.entry, ...(incoming.metaColumns?.entry || {}) },
       totalStudents: {
@@ -347,6 +372,12 @@ const mergeMasterGridLayout = (
         ...(incoming.metaColumns?.totalStudents || {}),
       },
       section: { ...def.metaColumns.section, ...(incoming.metaColumns?.section || {}) },
+    },
+    showDegreeLevelColumn: Boolean(incoming.showDegreeLevelColumn),
+    mergeMetaColumns: {
+      degreeLevel: incoming.mergeMetaColumns?.degreeLevel ?? true,
+      major: incoming.mergeMetaColumns?.major ?? true,
+      entry: incoming.mergeMetaColumns?.entry ?? true,
     },
     defaultSlotWidth:
       typeof incoming.defaultSlotWidth === 'number' && incoming.defaultSlotWidth >= 60
@@ -440,6 +471,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   hasExternalModalOpen = false,
   onCloseExternalModals,
   precomputedIndex,
+  approvedMajors: approvedMajorsProp,
   onOpenNewProfessorProposal,
   onNotify,
 }) => {
@@ -551,6 +583,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     'presets_meta'
   );
   const [selectedBatchMetaKeys, setSelectedBatchMetaKeys] = useState<SchedMetaColumnKey[]>([
+    'degreeLevel',
     'major',
     'entry',
     'totalStudents',
@@ -995,13 +1028,72 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     return false;
   };
 
-  // ساخت سطرهای خام بر اساس حالت چیدمان (بر اساس رشته یا بر اساس ورودی)
+  const showDegreeLevelColumn = Boolean(liveLayout.showDegreeLevelColumn);
+  const mergeDegreeLevelCol = liveLayout.mergeMetaColumns?.degreeLevel ?? true;
+  const mergeMajorCol = liveLayout.mergeMetaColumns?.major ?? true;
+  const mergeEntryCol = liveLayout.mergeMetaColumns?.entry ?? true;
+
+  const effectiveApprovedMajors = useMemo(() => {
+    if (approvedMajorsProp && approvedMajorsProp.length > 0) return approvedMajorsProp;
+    return getEffectiveApprovedMajors(Storage.getSettings(), true);
+  }, [approvedMajorsProp, programs]);
+
+  const approvedMajorByCodeMap = useMemo(() => {
+    const map = new Map<string, ApprovedAcademicMajor>();
+    effectiveApprovedMajors.forEach((m) => {
+      const code = normalizeMajorCode(m.code);
+      if (code && !map.has(code)) map.set(code, m);
+    });
+    return map;
+  }, [effectiveApprovedMajors]);
+
+  const approvedMajorByNameMap = useMemo(() => {
+    const map = new Map<string, ApprovedAcademicMajor>();
+    effectiveApprovedMajors.forEach((m) => {
+      const nm = normalizePersianText(m.name);
+      if (nm && !map.has(nm)) map.set(nm, m);
+    });
+    return map;
+  }, [effectiveApprovedMajors]);
+
+  const resolveCohortDegreeLevel = (p: SchedProgramCohort): string => {
+    if (p.degreeLevel && p.degreeLevel.trim()) return p.degreeLevel.trim();
+    const byCode = approvedMajorByCodeMap.get(normalizeMajorCode(p.majorCode));
+    if (byCode?.degreeLevelName?.trim()) return byCode.degreeLevelName.trim();
+    const byName = approvedMajorByNameMap.get(normalizePersianText(p.majorName));
+    if (byName?.degreeLevelName?.trim()) return byName.degreeLevelName.trim();
+    return 'نامشخص';
+  };
+
+  const uniqueDegreeLevels = useMemo(() => {
+    const set = new Set<string>();
+    programs.forEach((p) => set.add(resolveCohortDegreeLevel(p)));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'fa'));
+  }, [programs, approvedMajorByCodeMap, approvedMajorByNameMap]);
+
+  const degreeColorIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    uniqueDegreeLevels.forEach((dl, idx) => map.set(dl, idx));
+    return map;
+  }, [uniqueDegreeLevels]);
+
+  // ساخت سطرهای خام بر اساس حالت چیدمان (بر اساس رشته یا بر اساس ورودی) و ستون مقطع
   const allRawRows = useMemo<MasterRowRaw[]>(() => {
     const sortedProgs = [...programs].sort((a, b) => {
+      const degA = resolveCohortDegreeLevel(a);
+      const degB = resolveCohortDegreeLevel(b);
       if (rowGrouping === 'by_entry') {
         const eCmp = b.entryTerm.localeCompare(a.entryTerm, 'en');
         if (eCmp !== 0) return eCmp;
+        if (showDegreeLevelColumn) {
+          const dCmp = degA.localeCompare(degB, 'fa');
+          if (dCmp !== 0) return dCmp;
+        }
         return a.majorName.localeCompare(b.majorName, 'fa');
+      }
+      if (showDegreeLevelColumn) {
+        const dCmp = degA.localeCompare(degB, 'fa');
+        if (dCmp !== 0) return dCmp;
       }
       const mCmp = a.majorName.localeCompare(b.majorName, 'fa');
       if (mCmp !== 0) return mCmp;
@@ -1010,6 +1102,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
     const rows: MasterRowRaw[] = [];
     for (const p of sortedProgs) {
+      const degLevel = resolveCohortDegreeLevel(p);
+      const dColorIdx = degreeColorIndexMap.get(degLevel) ?? 0;
       const mColorIdx = majorColorIndexMap.get(p.majorCode) ?? 0;
       const eColorIdx = entryColorIndexMap.get(p.entryTerm) ?? 0;
       const secs =
@@ -1021,6 +1115,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         rows.push({
           rowKey: `${p.id}::${sec.id || 'ALL'}`,
           cohortId: p.id,
+          degreeLevel: degLevel,
           majorCode: p.majorCode,
           majorName: p.majorName,
           entryTerm: p.entryTerm,
@@ -1028,13 +1123,23 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
           sectionId: sec.id || undefined,
           sectionName: sec.name,
           sectionStudentCount: sec.studentCount,
+          degreeColorIdx: dColorIdx,
           majorColorIdx: mColorIdx,
           entryColorIdx: eColorIdx,
         });
       });
     }
     return rows;
-  }, [programs, rowGrouping, majorColorIndexMap, entryColorIndexMap]);
+  }, [
+    programs,
+    rowGrouping,
+    showDegreeLevelColumn,
+    degreeColorIndexMap,
+    majorColorIndexMap,
+    entryColorIndexMap,
+    approvedMajorByCodeMap,
+    approvedMajorByNameMap,
+  ]);
 
   // ایندکس O(N) دروس هر سطر و هر سلول برای رندر پرسرعت ماتریس بدون فیلتر تکراری O(Rows * Days * Slots * Offerings)
   const { rowAllOfferingsMap, rowSummaryMap, cellOfferingsMap } = useMemo(() => {
@@ -1110,7 +1215,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     };
   }, [allRawRows, termOfferings, rules, effectiveIndex]);
 
-  // فیلتر کردن سطرها و محاسبه rowSpan دقیق متناسب با چیدمان انتخابی + حالت محدودشده به دروس ثبت‌شده
+  // فیلتر کردن سطرها و محاسبه rowSpan دقیق متناسب با چیدمان و تنظیمات مرج/جداسازی ستون‌های مقطع، رشته و ورودی
   const displayRows = useMemo<MasterRowDisplay[]>(() => {
     const q = normalizePersianText(deferredRowSearch).toLowerCase();
     let filtered = allRawRows.filter((r) => {
@@ -1118,7 +1223,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       if (entryFilter !== 'all' && r.entryTerm !== entryFilter) return false;
       if (q) {
         const hay = normalizePersianText(
-          `${r.majorName} ${r.majorCode} ${r.entryTerm} ${r.sectionName}`
+          `${r.degreeLevel} ${r.majorName} ${r.majorCode} ${r.entryTerm} ${r.sectionName}`
         ).toLowerCase();
         if (!hay.includes(q)) return false;
       }
@@ -1157,33 +1262,75 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     focusCourseCode,
     focusProfId,
     focusRoomId,
+    rowGrouping,
+    showDegreeLevelColumn,
+    mergeDegreeLevelCol,
+    mergeMajorCol,
+    mergeEntryCol,
   ]);
 
   function buildMasterDisplayRows(filtered: MasterRowRaw[]): MasterRowDisplay[] {
     const result: MasterRowDisplay[] = filtered.map((r) => ({
       ...r,
-      isFirstMajorBlock: false,
+      isFirstDegreeBlock: !mergeDegreeLevelCol,
+      degreeBlockSpan: 1,
+      isFirstMajorBlock: !mergeMajorCol,
       majorBlockSpan: 1,
-      isFirstEntryBlock: false,
+      isFirstEntryBlock: !mergeEntryCol,
       entryBlockSpan: 1,
       isFirstCohortBlock: false,
       cohortBlockSpan: 1,
     }));
 
-    for (let i = 0; i < result.length; ) {
-      let j = i + 1;
-      while (j < result.length && result[j].majorCode === result[i].majorCode) j++;
-      result[i].isFirstMajorBlock = true;
-      result[i].majorBlockSpan = j - i;
-      i = j;
+    if (mergeDegreeLevelCol) {
+      for (let i = 0; i < result.length; ) {
+        let j = i + 1;
+        while (
+          j < result.length &&
+          result[j].degreeLevel === result[i].degreeLevel &&
+          (rowGrouping !== 'by_entry' || result[j].entryTerm === result[i].entryTerm)
+        ) {
+          j++;
+        }
+        result[i].isFirstDegreeBlock = true;
+        result[i].degreeBlockSpan = j - i;
+        i = j;
+      }
     }
 
-    for (let i = 0; i < result.length; ) {
-      let j = i + 1;
-      while (j < result.length && result[j].entryTerm === result[i].entryTerm) j++;
-      result[i].isFirstEntryBlock = true;
-      result[i].entryBlockSpan = j - i;
-      i = j;
+    if (mergeMajorCol) {
+      for (let i = 0; i < result.length; ) {
+        let j = i + 1;
+        while (
+          j < result.length &&
+          (rowGrouping === 'by_entry'
+            ? result[j].cohortId === result[i].cohortId
+            : result[j].majorCode === result[i].majorCode &&
+              (!showDegreeLevelColumn || result[j].degreeLevel === result[i].degreeLevel))
+        ) {
+          j++;
+        }
+        result[i].isFirstMajorBlock = true;
+        result[i].majorBlockSpan = j - i;
+        i = j;
+      }
+    }
+
+    if (mergeEntryCol) {
+      for (let i = 0; i < result.length; ) {
+        let j = i + 1;
+        while (
+          j < result.length &&
+          (rowGrouping === 'by_entry'
+            ? result[j].entryTerm === result[i].entryTerm
+            : result[j].cohortId === result[i].cohortId)
+        ) {
+          j++;
+        }
+        result[i].isFirstEntryBlock = true;
+        result[i].entryBlockSpan = j - i;
+        i = j;
+      }
     }
 
     for (let i = 0; i < result.length; ) {
@@ -1273,6 +1420,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     const clampW = (val: number | undefined, fallback: number, min = 26, max = 380) =>
       typeof val === 'number' && !Number.isNaN(val) ? Math.max(min, Math.min(max, Math.round(val))) : fallback;
     return {
+      degreeLevel: clampW(liveLayout.metaColumns.degreeLevel?.width, 88, 28, 280),
       major: clampW(liveLayout.metaColumns.major?.width, 114, 28, 360),
       entry: clampW(liveLayout.metaColumns.entry?.width, 64, 26, 240),
       totalStudents: clampW(liveLayout.metaColumns.totalStudents?.width, 56, 24, 180),
@@ -1280,21 +1428,35 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     };
   }, [liveLayout.metaColumns]);
 
+  const orderedMetaColumnKeys = useMemo<SchedMetaColumnKey[]>(() => {
+    if (rowGrouping === 'by_entry') {
+      return showDegreeLevelColumn
+        ? ['entry', 'degreeLevel', 'major', 'totalStudents', 'section']
+        : ['entry', 'major', 'totalStudents', 'section'];
+    }
+    return showDegreeLevelColumn
+      ? ['degreeLevel', 'major', 'entry', 'totalStudents', 'section']
+      : ['major', 'entry', 'totalStudents', 'section'];
+  }, [rowGrouping, showDegreeLevelColumn]);
+
   const stickyOffsets = useMemo(() => {
-    const firstWidth =
-      rowGrouping === 'by_major' ? metaColWidths.major : metaColWidths.entry;
-    const secondWidth =
-      rowGrouping === 'by_major' ? metaColWidths.entry : metaColWidths.major;
-    const thirdRight = firstWidth + secondWidth;
-    const fourthRight = thirdRight + metaColWidths.totalStudents;
-    return {
-      firstRight: 0,
-      secondRight: firstWidth,
-      thirdRight,
-      fourthRight,
-      totalMetaWidth: fourthRight + metaColWidths.section,
+    const rightByCol: Record<SchedMetaColumnKey, number> = {
+      degreeLevel: 0,
+      major: 0,
+      entry: 0,
+      totalStudents: 0,
+      section: 0,
     };
-  }, [rowGrouping, metaColWidths]);
+    let cursor = 0;
+    for (const key of orderedMetaColumnKeys) {
+      rightByCol[key] = cursor;
+      cursor += metaColWidths[key];
+    }
+    return {
+      rightByCol,
+      totalMetaWidth: cursor,
+    };
+  }, [orderedMetaColumnKeys, metaColWidths]);
 
   const getSlotColumnStyle = (day: SchedDayKey, slotId: string) => {
     const colKey = `${day}:${slotId}`;
@@ -1991,11 +2153,16 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     }
 
     const useLayout = cfg.useLayoutWidthsAndOrientations;
+    const wDegree = showDegreeLevelColumn
+      ? useLayout
+        ? metaColWidths.degreeLevel
+        : 84
+      : 0;
     const wMajor = useLayout ? metaColWidths.major : 110;
     const wEntry = useLayout ? metaColWidths.entry : 56;
     const wTotal = useLayout ? metaColWidths.totalStudents : 48;
     const wSec = useLayout ? metaColWidths.section : 88;
-    const metaTotalW = wMajor + wEntry + wTotal + wSec;
+    const metaTotalW = wDegree + wMajor + wEntry + wTotal + wSec;
 
     let slotsSumW = 0;
     targetDays.forEach((d) => {
@@ -2045,6 +2212,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     return {
       targetDays,
       targetRows,
+      wDegree,
       wMajor,
       wEntry,
       wTotal,
@@ -2067,6 +2235,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         });
       });
       return {
+        degreeLevel: r.degreeLevel,
         major: r.majorName,
         entry: r.entryTerm,
         total: r.totalCohortStudents.toLocaleString('fa-IR'),
@@ -2081,6 +2250,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       totalTableWidthPx: resolved.totalTableWidthPx,
       computedScalePercent: resolved.computedScalePercent,
       estimatedPages: resolved.estimatedPages,
+      showDegreeLevelColumn,
       dayLabels: resolved.targetDays.map((d) => SCHED_DAY_LABELS[d]),
       slotHeaders: displayedSlots.map((s, idx) =>
         getSchedSlotTitle(s, slotOriginalIndexMap.get(s.id) ?? idx)
@@ -2100,12 +2270,14 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
     liveLayout,
     metaColWidths,
     slotOriginalIndexMap,
+    showDegreeLevelColumn,
   ]);
 
   // چاپ ماتریس جامع با اعمال کامل تنظیمات اکسل‌مانند صفحه، حاشیه، مقیاس، رنگ، سرصفحه و محتوا
   const executeMasterGridPrint = (cfg: SchedMasterPrintSettings) => {
     const resolved = resolvePrintScopeAndScale(cfg);
     const useLayout = cfg.useLayoutWidthsAndOrientations;
+    const mDegree = liveLayout.metaColumns.degreeLevel;
     const mMajor = liveLayout.metaColumns.major;
     const mEntry = liveLayout.metaColumns.entry;
     const mTotal = liveLayout.metaColumns.totalStudents;
@@ -2186,6 +2358,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       )
       .join('');
 
+    const mDegreeAlign = (useLayout ? mDegree?.textAlign : undefined) || 'center';
+    const mDegreeVAlign = (useLayout ? mDegree?.verticalAlign : undefined) || 'middle';
     const mMajorAlign = (useLayout ? mMajor.textAlign : undefined) || 'center';
     const mMajorVAlign = (useLayout ? mMajor.verticalAlign : undefined) || 'middle';
     const mEntryAlign = (useLayout ? mEntry.textAlign : undefined) || 'center';
@@ -2197,6 +2371,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
     const bodyRows = resolved.targetRows
       .map((row) => {
+        const degreeHtml = wrapPrintSpan(
+          escapeHtml(row.degreeLevel),
+          mDegree?.bodyOrientation,
+          mDegree?.textFit,
+          mDegreeAlign
+        );
         const majorHtml = wrapPrintSpan(
           escapeHtml(row.majorName),
           mMajor.bodyOrientation,
@@ -2224,33 +2404,28 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         const majorBg = cfg.includeColors
           ? `background:${MAJOR_PRINT_BG[row.majorColorIdx % MAJOR_PRINT_BG.length]};`
           : '';
+        const degreeBg = cfg.includeColors ? 'background:#f1f5f9;' : '';
+
+        const degreeCellHtml = showDegreeLevelColumn
+          ? row.isFirstDegreeBlock
+            ? `<td rowspan="${row.degreeBlockSpan}" style="width:${resolved.wDegree}px;${degreeBg}font-weight:800;vertical-align:${mDegreeVAlign};text-align:${mDegreeAlign};">${degreeHtml}</td>`
+            : ''
+          : '';
+        const majorCellHtml = row.isFirstMajorBlock
+          ? `<td rowspan="${row.majorBlockSpan}" style="width:${resolved.wMajor}px;${majorBg}font-weight:800;vertical-align:${mMajorVAlign};text-align:${mMajorAlign};">${majorHtml}</td>`
+          : '';
+        const entryCellHtml = row.isFirstEntryBlock
+          ? `<td rowspan="${row.entryBlockSpan}" class="mono" style="width:${resolved.wEntry}px;font-weight:800;vertical-align:${mEntryVAlign};text-align:${mEntryAlign};">${entryHtml}</td>`
+          : '';
+        const totalCellHtml = row.isFirstCohortBlock
+          ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wTotal}px;vertical-align:${mTotalVAlign};text-align:${mTotalAlign};">${totalHtml}</td>`
+          : '';
+        const sectionCellHtml = `<td style="width:${resolved.wSec}px;vertical-align:${mSecVAlign};text-align:${mSecAlign};font-weight:700;">${sectionHtml}</td>`;
 
         const prefixCells =
           rowGrouping === 'by_entry'
-            ? [
-                row.isFirstEntryBlock
-                  ? `<td rowspan="${row.entryBlockSpan}" class="mono" style="width:${resolved.wEntry}px;font-weight:800;vertical-align:${mEntryVAlign};text-align:${mEntryAlign};">${entryHtml}</td>`
-                  : '',
-                row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wMajor}px;${majorBg}font-weight:800;vertical-align:${mMajorVAlign};text-align:${mMajorAlign};">${majorHtml}</td>`
-                  : '',
-                row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wTotal}px;vertical-align:${mTotalVAlign};text-align:${mTotalAlign};">${totalHtml}</td>`
-                  : '',
-                `<td style="width:${resolved.wSec}px;vertical-align:${mSecVAlign};text-align:${mSecAlign};font-weight:700;">${sectionHtml}</td>`,
-              ].join('')
-            : [
-                row.isFirstMajorBlock
-                  ? `<td rowspan="${row.majorBlockSpan}" style="width:${resolved.wMajor}px;${majorBg}font-weight:800;vertical-align:${mMajorVAlign};text-align:${mMajorAlign};">${majorHtml}</td>`
-                  : '',
-                row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" class="mono" style="width:${resolved.wEntry}px;font-weight:700;vertical-align:${mEntryVAlign};text-align:${mEntryAlign};">${entryHtml}</td>`
-                  : '',
-                row.isFirstCohortBlock
-                  ? `<td rowspan="${row.cohortBlockSpan}" style="width:${resolved.wTotal}px;vertical-align:${mTotalVAlign};text-align:${mTotalAlign};">${totalHtml}</td>`
-                  : '',
-                `<td style="width:${resolved.wSec}px;vertical-align:${mSecVAlign};text-align:${mSecAlign};font-weight:700;">${sectionHtml}</td>`,
-              ].join('');
+            ? [entryCellHtml, degreeCellHtml, majorCellHtml, totalCellHtml, sectionCellHtml].join('')
+            : [degreeCellHtml, majorCellHtml, entryCellHtml, totalCellHtml, sectionCellHtml].join('');
 
         const scheduleCells = resolved.targetDays
           .flatMap((day, dIdx) =>
@@ -2373,14 +2548,20 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
       })
       .join('');
 
+    const degreeThHtml = showDegreeLevelColumn
+      ? `<th rowspan="2" style="width:${resolved.wDegree}px;">${wrapPrintSpan('مقطع', mDegree?.headerOrientation, 'wrap')}</th>`
+      : '';
+    const majorThHtml = `<th rowspan="2" style="width:${resolved.wMajor}px;">${wrapPrintSpan('رشته', mMajor.headerOrientation, 'wrap')}</th>`;
+    const entryThHtml = `<th rowspan="2" style="width:${resolved.wEntry}px;">${wrapPrintSpan('ورودی', mEntry.headerOrientation, 'wrap')}</th>`;
+
     const html = `
       <table style="table-layout:fixed;width:${resolved.totalTableWidthPx}px;">
         <thead>
           <tr>
             ${
               rowGrouping === 'by_entry'
-                ? `<th rowspan="2" style="width:${resolved.wEntry}px;">${wrapPrintSpan('ورودی', mEntry.headerOrientation, 'wrap')}</th><th rowspan="2" style="width:${resolved.wMajor}px;">${wrapPrintSpan('رشته', mMajor.headerOrientation, 'wrap')}</th>`
-                : `<th rowspan="2" style="width:${resolved.wMajor}px;">${wrapPrintSpan('رشته', mMajor.headerOrientation, 'wrap')}</th><th rowspan="2" style="width:${resolved.wEntry}px;">${wrapPrintSpan('ورودی', mEntry.headerOrientation, 'wrap')}</th>`
+                ? `${entryThHtml}${degreeThHtml}${majorThHtml}`
+                : `${degreeThHtml}${majorThHtml}${entryThHtml}`
             }
             <th rowspan="2" style="width:${resolved.wTotal}px;">${wrapPrintSpan('تعداد', mTotal.headerOrientation, 'wrap')}</th>
             <th rowspan="2" style="width:${resolved.wSec}px;">${wrapPrintSpan('شعبه / گروه', mSec.headerOrientation, 'wrap')}</th>
@@ -2452,6 +2633,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
         rowGrouping === 'by_entry'
           ? {
               'ورودی': row.entryTerm,
+              ...(showDegreeLevelColumn ? { 'مقطع': row.degreeLevel } : {}),
               'رشته': row.majorName,
               'کد رشته': row.majorCode,
               'تعداد کل ورودی': row.totalCohortStudents,
@@ -2459,6 +2641,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
               'تعداد شعبه': row.sectionStudentCount,
             }
           : {
+              ...(showDegreeLevelColumn ? { 'مقطع': row.degreeLevel } : {}),
               'رشته': row.majorName,
               'کد رشته': row.majorCode,
               'ورودی': row.entryTerm,
@@ -3239,19 +3422,9 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
             className="border-collapse text-[11px] table-fixed w-max min-w-full"
           >
             <colgroup>
-              {rowGrouping === 'by_major' ? (
-                <>
-                  <col style={{ width: `${metaColWidths.major}px` }} />
-                  <col style={{ width: `${metaColWidths.entry}px` }} />
-                </>
-              ) : (
-                <>
-                  <col style={{ width: `${metaColWidths.entry}px` }} />
-                  <col style={{ width: `${metaColWidths.major}px` }} />
-                </>
-              )}
-              <col style={{ width: `${metaColWidths.totalStudents}px` }} />
-              <col style={{ width: `${metaColWidths.section}px` }} />
+              {orderedMetaColumnKeys.map((key) => (
+                <col key={`col_meta_${key}`} style={{ width: `${metaColWidths[key]}px` }} />
+              ))}
               {displayedDays.map((day) =>
                 displayedSlots.map((slot) => {
                   const colW = getSlotColumnStyle(day, slot.id).width;
@@ -3264,40 +3437,17 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
               {/* ردیف اول هدر: ستون‌های مشخصات ثابت در راست + عنوان روزهای هفته */}
               <tr>
                 {(() => {
-                  const orderedFirstTwo: Array<{
-                    key: SchedMetaColumnKey;
-                    rightPx: number;
-                    widthPx: number;
-                  }> =
-                    rowGrouping === 'by_major'
-                      ? [
-                          { key: 'major', rightPx: stickyOffsets.firstRight, widthPx: metaColWidths.major },
-                          { key: 'entry', rightPx: stickyOffsets.secondRight, widthPx: metaColWidths.entry },
-                        ]
-                      : [
-                          { key: 'entry', rightPx: stickyOffsets.firstRight, widthPx: metaColWidths.entry },
-                          { key: 'major', rightPx: stickyOffsets.secondRight, widthPx: metaColWidths.major },
-                        ];
-
                   const allMetaHeaders: Array<{
                     key: SchedMetaColumnKey;
                     rightPx: number;
                     widthPx: number;
                     isSectionEdge?: boolean;
-                  }> = [
-                    ...orderedFirstTwo,
-                    {
-                      key: 'totalStudents',
-                      rightPx: stickyOffsets.thirdRight,
-                      widthPx: metaColWidths.totalStudents,
-                    },
-                    {
-                      key: 'section',
-                      rightPx: stickyOffsets.fourthRight,
-                      widthPx: metaColWidths.section,
-                      isSectionEdge: true,
-                    },
-                  ];
+                  }> = orderedMetaColumnKeys.map((key) => ({
+                    key,
+                    rightPx: stickyOffsets.rightByCol[key],
+                    widthPx: metaColWidths[key],
+                    isSectionEdge: key === 'section',
+                  }));
 
                   return allMetaHeaders.map((mh) => {
                     const cfg = liveLayout.metaColumns[mh.key];
@@ -3475,6 +3625,8 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
 
             <tbody>
               {displayRows.map((row) => {
+                const degreePalette =
+                  DEGREE_DISTINCT_PALETTES[row.degreeColorIdx % DEGREE_DISTINCT_PALETTES.length];
                 const majorPalette =
                   MAJOR_DISTINCT_PALETTES[row.majorColorIdx % MAJOR_DISTINCT_PALETTES.length];
                 const entryPalette =
@@ -3487,6 +3639,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   rowSummaryMap.get(row.rowKey) ||
                   summarizeSectionOfferings(EMPTY_CELL_OFFERINGS, rules);
 
+                const degreeCfg = liveLayout.metaColumns.degreeLevel;
                 const majorCfg = liveLayout.metaColumns.major;
                 const entryCfg = liveLayout.metaColumns.entry;
                 const totalCfg = liveLayout.metaColumns.totalStudents;
@@ -3578,6 +3731,91 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   );
                 };
 
+                const renderDegreeCell = () =>
+                  showDegreeLevelColumn && row.isFirstDegreeBlock ? (
+                    <td
+                      key="td_degreeLevel"
+                      rowSpan={row.degreeBlockSpan}
+                      style={{
+                        right: `${stickyOffsets.rightByCol.degreeLevel}px`,
+                        width: `${metaColWidths.degreeLevel}px`,
+                        minWidth: `${metaColWidths.degreeLevel}px`,
+                        maxWidth: `${metaColWidths.degreeLevel}px`,
+                        textAlign: degreeCfg?.textAlign || 'center',
+                        verticalAlign: degreeCfg?.verticalAlign || 'middle',
+                      }}
+                      className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1 font-extrabold overflow-hidden ${degreePalette}`}
+                    >
+                      {renderMetaInner(
+                        row.degreeLevel,
+                        undefined,
+                        degreeCfg,
+                        metaColWidths.degreeLevel,
+                        row.degreeBlockSpan,
+                        10.5
+                      )}
+                    </td>
+                  ) : null;
+
+                const renderMajorCell = () =>
+                  row.isFirstMajorBlock ? (
+                    <td
+                      key="td_major"
+                      rowSpan={row.majorBlockSpan}
+                      style={{
+                        right: `${stickyOffsets.rightByCol.major}px`,
+                        width: `${metaColWidths.major}px`,
+                        minWidth: `${metaColWidths.major}px`,
+                        maxWidth: `${metaColWidths.major}px`,
+                        textAlign: majorCfg?.textAlign || 'center',
+                        verticalAlign: majorCfg?.verticalAlign || 'middle',
+                      }}
+                      className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1.5 font-black overflow-hidden ${majorPalette.cell}`}
+                    >
+                      {renderMetaInner(
+                        row.majorName,
+                        row.majorCode,
+                        majorCfg,
+                        metaColWidths.major,
+                        row.majorBlockSpan,
+                        11,
+                        `text-[9px] font-mono opacity-80 ${majorPalette.tag}`,
+                        isMajorLocked
+                      )}
+                    </td>
+                  ) : null;
+
+                const renderEntryCell = () =>
+                  row.isFirstEntryBlock ? (
+                    <td
+                      key="td_entry"
+                      rowSpan={row.entryBlockSpan}
+                      style={{
+                        right: `${stickyOffsets.rightByCol.entry}px`,
+                        width: `${metaColWidths.entry}px`,
+                        minWidth: `${metaColWidths.entry}px`,
+                        maxWidth: `${metaColWidths.entry}px`,
+                        textAlign: entryCfg?.textAlign || 'center',
+                        verticalAlign: entryCfg?.verticalAlign || 'middle',
+                      }}
+                      className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1 font-mono font-black overflow-hidden ${
+                        rowGrouping === 'by_entry'
+                          ? entryPalette
+                          : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100'
+                      }`}
+                    >
+                      {renderMetaInner(
+                        row.entryTerm,
+                        rowGrouping === 'by_entry' ? 'ورودی' : undefined,
+                        entryCfg,
+                        metaColWidths.entry,
+                        row.entryBlockSpan,
+                        11,
+                        'text-[8.5px] font-sans opacity-75'
+                      )}
+                    </td>
+                  ) : null;
+
                 return (
                   <tr
                     key={row.rowKey}
@@ -3585,120 +3823,24 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   >
                     {rowGrouping === 'by_major' ? (
                       <>
-                        {/* ستون ۱: رشته با رنگ اختصاصی متمایز */}
-                        {row.isFirstMajorBlock && (
-                          <td
-                            rowSpan={row.majorBlockSpan}
-                            style={{
-                              right: `${stickyOffsets.firstRight}px`,
-                              width: `${metaColWidths.major}px`,
-                              minWidth: `${metaColWidths.major}px`,
-                              maxWidth: `${metaColWidths.major}px`,
-                              textAlign: majorCfg?.textAlign || 'center',
-                              verticalAlign: majorCfg?.verticalAlign || 'middle',
-                            }}
-                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1.5 font-black overflow-hidden ${majorPalette.cell}`}
-                          >
-                            {renderMetaInner(
-                              row.majorName,
-                              row.majorCode,
-                              majorCfg,
-                              metaColWidths.major,
-                              row.majorBlockSpan,
-                              11,
-                              `text-[9px] font-mono opacity-80 ${majorPalette.tag}`,
-                              isMajorLocked
-                            )}
-                          </td>
-                        )}
-
-                        {/* ستون ۲: ورودی */}
-                        {row.isFirstCohortBlock && (
-                          <td
-                            rowSpan={row.cohortBlockSpan}
-                            style={{
-                              right: `${stickyOffsets.secondRight}px`,
-                              width: `${metaColWidths.entry}px`,
-                              minWidth: `${metaColWidths.entry}px`,
-                              maxWidth: `${metaColWidths.entry}px`,
-                              textAlign: entryCfg?.textAlign || 'center',
-                              verticalAlign: entryCfg?.verticalAlign || 'middle',
-                            }}
-                            className="sticky z-20 border border-slate-300 dark:border-slate-700 p-1 font-mono font-black bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 overflow-hidden"
-                          >
-                            {renderMetaInner(
-                              row.entryTerm,
-                              undefined,
-                              entryCfg,
-                              metaColWidths.entry,
-                              row.cohortBlockSpan,
-                              11
-                            )}
-                          </td>
-                        )}
+                        {renderDegreeCell()}
+                        {renderMajorCell()}
+                        {renderEntryCell()}
                       </>
                     ) : (
                       <>
-                        {/* حالت چیدمان بر اساس ورودی: ستون ۱ = ورودی، ستون ۲ = رشته با رنگ اختصاصی */}
-                        {row.isFirstEntryBlock && (
-                          <td
-                            rowSpan={row.entryBlockSpan}
-                            style={{
-                              right: `${stickyOffsets.firstRight}px`,
-                              width: `${metaColWidths.entry}px`,
-                              minWidth: `${metaColWidths.entry}px`,
-                              maxWidth: `${metaColWidths.entry}px`,
-                              textAlign: entryCfg?.textAlign || 'center',
-                              verticalAlign: entryCfg?.verticalAlign || 'middle',
-                            }}
-                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1 font-mono font-black overflow-hidden ${entryPalette}`}
-                          >
-                            {renderMetaInner(
-                              row.entryTerm,
-                              'ورودی',
-                              entryCfg,
-                              metaColWidths.entry,
-                              row.entryBlockSpan,
-                              11,
-                              'text-[8.5px] font-sans opacity-75'
-                            )}
-                          </td>
-                        )}
-
-                        {row.isFirstCohortBlock && (
-                          <td
-                            rowSpan={row.cohortBlockSpan}
-                            style={{
-                              right: `${stickyOffsets.secondRight}px`,
-                              width: `${metaColWidths.major}px`,
-                              minWidth: `${metaColWidths.major}px`,
-                              maxWidth: `${metaColWidths.major}px`,
-                              textAlign: majorCfg?.textAlign || 'center',
-                              verticalAlign: majorCfg?.verticalAlign || 'middle',
-                            }}
-                            className={`sticky z-20 border border-slate-300 dark:border-slate-700 p-1.5 font-black overflow-hidden ${majorPalette.cell}`}
-                          >
-                            {renderMetaInner(
-                              row.majorName,
-                              row.majorCode,
-                              majorCfg,
-                              metaColWidths.major,
-                              row.cohortBlockSpan,
-                              11,
-                              `text-[9px] font-mono opacity-80 ${majorPalette.tag}`,
-                              isMajorLocked
-                            )}
-                          </td>
-                        )}
+                        {renderEntryCell()}
+                        {renderDegreeCell()}
+                        {renderMajorCell()}
                       </>
                     )}
 
-                    {/* ستون ۳: تعداد کل ورودی */}
+                    {/* تعداد کل ورودی */}
                     {row.isFirstCohortBlock && (
                       <td
                         rowSpan={row.cohortBlockSpan}
                         style={{
-                          right: `${stickyOffsets.thirdRight}px`,
+                          right: `${stickyOffsets.rightByCol.totalStudents}px`,
                           width: `${metaColWidths.totalStudents}px`,
                           minWidth: `${metaColWidths.totalStudents}px`,
                           maxWidth: `${metaColWidths.totalStudents}px`,
@@ -3718,10 +3860,10 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       </td>
                     )}
 
-                    {/* ستون ۴: شعبه و تعداد نفرات شعبه (+ خلاصه دروس/واحد با احتساب شعب کارورزی به عنوان ۱ درس) */}
+                    {/* شعبه و تعداد نفرات شعبه */}
                     <td
                       style={{
-                        right: `${stickyOffsets.fourthRight}px`,
+                        right: `${stickyOffsets.rightByCol.section}px`,
                         width: `${metaColWidths.section}px`,
                         minWidth: `${metaColWidths.section}px`,
                         maxWidth: `${metaColWidths.section}px`,
@@ -4896,18 +5038,23 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
               <div className="font-black text-slate-800 dark:text-slate-100 flex items-center justify-between flex-wrap gap-2">
                 <span>الگوهای سریع چیدمان (مانند شیت جامع):</span>
                 <span className="text-[10.5px] font-bold text-slate-500">
-                  مجموع عرض ۴ ستون اول فعلی: <strong className="font-mono text-teal-600">{stickyOffsets.totalMetaWidth}px</strong>
+                  مجموع عرض ستون‌های ثابت فعلی: <strong className="font-mono text-teal-600">{stickyOffsets.totalMetaWidth}px</strong>
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    const def = cloneDefaultLayout();
                     commitLayoutSettings(
-                      cloneDefaultLayout(),
+                      {
+                        ...def,
+                        showDegreeLevelColumn: liveLayout.showDegreeLevelColumn,
+                        mergeMetaColumns: liveLayout.mergeMetaColumns,
+                      },
                       'چیدمان استاندارد (افقی) روی برنامه جامع اعمال شد.'
-                    )
-                  }
+                    );
+                  }}
                   className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:border-teal-500 font-extrabold cursor-pointer"
                 >
                   ۱. پیش‌فرض استاندارد (افقی)
@@ -4917,7 +5064,17 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   onClick={() =>
                     commitLayoutSettings(
                       {
+                        showDegreeLevelColumn: liveLayout.showDegreeLevelColumn,
+                        mergeMetaColumns: liveLayout.mergeMetaColumns,
                         metaColumns: {
+                          degreeLevel: {
+                            width: 38,
+                            headerOrientation: 'horizontal',
+                            bodyOrientation: 'vertical_up',
+                            textFit: 'wrap',
+                            textAlign: 'center',
+                            verticalAlign: 'middle',
+                          },
                           major: {
                             width: 44,
                             headerOrientation: 'horizontal',
@@ -4963,19 +5120,29 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         },
                         columnOverrides: {},
                       },
-                      'حالت جمع‌وجور اکسل (۴ ستون اول عمودی با سرتیتر افقی) اعمال شد.'
+                      'حالت جمع‌وجور اکسل (ستون‌های ثابت عمودی با سرتیتر افقی) اعمال شد.'
                     )
                   }
                   className="px-3 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold cursor-pointer"
                 >
-                  ۲. جمع‌وجور اکسل (۴ ستون اول عمودی · سرتیتر افقی)
+                  ۲. جمع‌وجور اکسل (ستون‌های اول عمودی · سرتیتر افقی)
                 </button>
                 <button
                   type="button"
                   onClick={() =>
                     commitLayoutSettings(
                       {
+                        showDegreeLevelColumn: liveLayout.showDegreeLevelColumn,
+                        mergeMetaColumns: liveLayout.mergeMetaColumns,
                         metaColumns: {
+                          degreeLevel: {
+                            width: 34,
+                            headerOrientation: 'vertical_up',
+                            bodyOrientation: 'vertical_up',
+                            textFit: 'wrap',
+                            textAlign: 'center',
+                            verticalAlign: 'middle',
+                          },
                           major: {
                             width: 38,
                             headerOrientation: 'vertical_up',
@@ -5021,12 +5188,12 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                         },
                         columnOverrides: {},
                       },
-                      'حالت فشرده حداکثری (۴ ستون اول همراه با سرتیتر عمودی) اعمال شد.'
+                      'حالت فشرده حداکثری (ستون‌های اول همراه با سرتیتر عمودی) اعمال شد.'
                     )
                   }
                   className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold cursor-pointer"
                 >
-                  ۳. فشرده حداکثری (۴ ستون اول + سرتیترها عمودی)
+                  ۳. فشرده حداکثری (ستون‌های اول + سرتیترها عمودی)
                 </button>
               </div>
             </div>
@@ -5036,7 +5203,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
               {[
                 {
                   key: 'presets_meta' as const,
-                  label: 'چهار ستون اول (رشته، ورودی، تعداد کل، شعبه)',
+                  label: 'ستون‌های مشخصات (مقطع، رشته، ورودی، تعداد کل، شعبه)',
                   icon: Table2,
                 },
                 {
@@ -5069,17 +5236,136 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
               })}
             </div>
 
-            {/* تب ۱: ۴ ستون اول (فردی و دسته‌ای) */}
+            {/* تب ۱: ستون‌های مشخصات سمت راست (نمایش مقطع، مرج/تفکیک و تنظیم ظاهر) */}
             {layoutTab === 'presets_meta' && (
               <div className="space-y-4">
-                {/* اعمال دسته‌ای روی ستون‌های انتخابی از ۴ ستون اول */}
+                {/* نمایش ستون مقطع و ادغام/تفکیک ستون‌های مقطع، رشته و ورودی */}
+                <div className="p-3.5 rounded-xl bg-teal-50/75 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-black text-teal-950 dark:text-teal-100">
+                        ساختار نمایش ستون «مقطع» و ادغام/تفکیک (Merge) ردیف‌ها
+                      </div>
+                      <div className="text-[11px] text-teal-800/80 dark:text-teal-300 mt-0.5">
+                        برای خوانایی دقیق شعبه‌های هر رشته و ورودی می‌توانید ستون «مقطع» را قبل از «رشته» اضافه یا حذف کنید و مرج یا جداگانه بودن هر ستون را مستقل تعیین نمایید.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextVal = !showDegreeLevelColumn;
+                        commitLayoutSettings(
+                          { ...liveLayout, showDegreeLevelColumn: nextVal },
+                          nextVal
+                            ? 'ستون «مقطع» قبل از ستون «رشته» به برنامه جامع اضافه شد.'
+                            : 'ستون «مقطع» از برنامه جامع حذف شد.'
+                        );
+                      }}
+                      className={`px-3 py-1.5 rounded-xl font-black text-xs border cursor-pointer transition ${
+                        showDegreeLevelColumn
+                          ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:border-teal-500'
+                      }`}
+                    >
+                      {showDegreeLevelColumn
+                        ? '✓ ستون مقطع فعال است (کلیک برای حذف)'
+                        : '+ افزودن ستون مقطع قبل از ستون رشته'}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {(
+                      [
+                        {
+                          key: 'degreeLevel' as const,
+                          title: 'نحوه نمایش ستون مقطع',
+                          isMerged: mergeDegreeLevelCol,
+                          disabled: !showDegreeLevelColumn,
+                        },
+                        {
+                          key: 'major' as const,
+                          title: 'نحوه نمایش ستون رشته',
+                          isMerged: mergeMajorCol,
+                          disabled: false,
+                        },
+                        {
+                          key: 'entry' as const,
+                          title: 'نحوه نمایش ستون ورودی',
+                          isMerged: mergeEntryCol,
+                          disabled: false,
+                        },
+                      ]
+                    ).map((mOpt) => (
+                      <div
+                        key={`merge_opt_${mOpt.key}`}
+                        className={`p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-1.5 ${
+                          mOpt.disabled ? 'opacity-50' : ''
+                        }`}
+                      >
+                        <div className="font-extrabold text-[11px] text-slate-800 dark:text-slate-100">
+                          {mOpt.title}
+                        </div>
+                        <div className="grid grid-cols-2 gap-1">
+                          <button
+                            type="button"
+                            disabled={mOpt.disabled}
+                            onClick={() =>
+                              commitLayoutSettings({
+                                ...liveLayout,
+                                mergeMetaColumns: {
+                                  degreeLevel: mergeDegreeLevelCol,
+                                  major: mergeMajorCol,
+                                  entry: mergeEntryCol,
+                                  [mOpt.key]: true,
+                                },
+                              })
+                            }
+                            className={`py-1 px-2 rounded-lg text-[10.5px] font-bold border cursor-pointer disabled:cursor-not-allowed ${
+                              mOpt.isMerged
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            مرج‌شده (ادغام)
+                          </button>
+                          <button
+                            type="button"
+                            disabled={mOpt.disabled}
+                            onClick={() =>
+                              commitLayoutSettings({
+                                ...liveLayout,
+                                mergeMetaColumns: {
+                                  degreeLevel: mergeDegreeLevelCol,
+                                  major: mergeMajorCol,
+                                  entry: mergeEntryCol,
+                                  [mOpt.key]: false,
+                                },
+                              })
+                            }
+                            className={`py-1 px-2 rounded-lg text-[10.5px] font-bold border cursor-pointer disabled:cursor-not-allowed ${
+                              !mOpt.isMerged
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            جدا جدا (همه سطرها)
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* اعمال دسته‌ای روی ستون‌های انتخابی از ستون‌های مشخصات */}
                 <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-800 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-black text-amber-950 dark:text-amber-100">
                       اعمال دسته‌ای روی ستون‌های انتخاب‌شده:
                     </span>
                     <div className="flex flex-wrap gap-1.5">
-                      {(['major', 'entry', 'totalStudents', 'section'] as SchedMetaColumnKey[]).map(
+                      {(
+                        ['degreeLevel', 'major', 'entry', 'totalStudents', 'section'] as SchedMetaColumnKey[]
+                      ).map(
                         (k) => {
                           const checked = selectedBatchMetaKeys.includes(k);
                           return (
@@ -5240,7 +5526,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {(['major', 'entry', 'totalStudents', 'section'] as SchedMetaColumnKey[]).map(
+                      {(['degreeLevel', 'major', 'entry', 'totalStudents', 'section'] as SchedMetaColumnKey[]).map(
                         (k) => {
                           const cfg = liveLayout.metaColumns[k] || {};
                           const updateOne = (patch: Partial<SchedMasterColumnStyle>) => {
@@ -5256,6 +5542,11 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                             <tr key={`rowcfg_${k}`}>
                               <td className="p-2 font-black text-slate-900 dark:text-white whitespace-nowrap">
                                 {META_COL_LABELS[k]}
+                                {k === 'degreeLevel' && !showDegreeLevelColumn && (
+                                  <span className="mr-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                    مخفی
+                                  </span>
+                                )}
                               </td>
                               <td className="p-2">
                                 <input

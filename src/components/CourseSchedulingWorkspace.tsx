@@ -29,6 +29,7 @@ import {
   StudentScheduleAccessScope,
 } from '../types';
 import { Storage, normalizeAssignedFieldsList, normalizePersianSearch } from '../utils/storage';
+import { DEFAULT_SCHED_RULES } from '../utils/sampleData';
 import { addDaysToJalaliDate, formatJalaliDate, getTodayJalali } from '../utils/jalaliCalendar';
 import {
   findClosestApprovedMajor,
@@ -137,6 +138,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock,
+  Columns3,
   Database,
   Download,
   Edit3,
@@ -925,6 +927,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 ...rawItem,
                 majorCode: normalizeMajorCode(matched.major.code) || rawItem.majorCode,
                 majorName: matched.major.name,
+                degreeLevel: matched.major.degreeLevelName || rawItem.degreeLevel,
               };
               normalizedExcelCount++;
             }
@@ -1133,6 +1136,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     let cleanCode = normalizeSchedCode(progMajorCode);
     let cleanName = progMajorName.trim();
     const cleanEntry = normalizeSchedCode(progEntryTerm);
+    let matchedDegreeLevel: string | undefined;
     if (approvedMajors.length > 0) {
       const matched = approvedMajors.find(
         (m) =>
@@ -1145,6 +1149,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       }
       cleanCode = normalizeMajorCode(matched.code) || cleanCode;
       cleanName = matched.name;
+      matchedDegreeLevel = matched.degreeLevelName;
     } else if (!/^\d{6}$/.test(cleanCode)) {
       notify('error', 'کد رشته باید دقیقاً ۶ رقم عددی باشد.');
       return;
@@ -1174,6 +1179,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               ...p,
               majorCode: cleanCode,
               majorName: cleanName,
+              degreeLevel: matchedDegreeLevel || p.degreeLevel,
               entryTerm: cleanEntry,
               totalStudents: tot,
               sections: cleanSections,
@@ -1228,6 +1234,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           id: `prog_${Date.now()}`,
           majorCode: cleanCode,
           majorName: cleanName,
+          degreeLevel: matchedDegreeLevel,
           entryTerm: cleanEntry,
           totalStudents: tot,
           sections: cleanSections,
@@ -6325,6 +6332,174 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     </div>
                   </div>
                 </div>
+
+                {/* ساختار ستون‌های جدول برنامه جامع: افزودن/حذف ستون مقطع و ادغام/تفکیک ستون‌های مقطع، رشته و ورودی */}
+                {(() => {
+                  const mgLayout = draftRules.masterGridLayout;
+                  const showDegCol = Boolean(mgLayout?.showDegreeLevelColumn);
+                  const mergeCfg = {
+                    degreeLevel: mgLayout?.mergeMetaColumns?.degreeLevel ?? true,
+                    major: mgLayout?.mergeMetaColumns?.major ?? true,
+                    entry: mgLayout?.mergeMetaColumns?.entry ?? true,
+                  };
+                  const updateMasterDisplay = (
+                    patch: Partial<NonNullable<SchedRulesSettings['masterGridLayout']>>,
+                    msg: string
+                  ) => {
+                    if (!isSystemAdmin) return;
+                    const baseLayout = draftRules.masterGridLayout || DEFAULT_SCHED_RULES.masterGridLayout!;
+                    const nextLayout = {
+                      ...baseLayout,
+                      ...patch,
+                      mergeMetaColumns: {
+                        degreeLevel: baseLayout.mergeMetaColumns?.degreeLevel ?? true,
+                        major: baseLayout.mergeMetaColumns?.major ?? true,
+                        entry: baseLayout.mergeMetaColumns?.entry ?? true,
+                        ...(patch.mergeMetaColumns || {}),
+                      },
+                    };
+                    const next: SchedRulesSettings = {
+                      ...draftRules,
+                      masterGridLayout: nextLayout,
+                    };
+                    setDraftRules(next);
+                    persistRules(next);
+                    notify('success', msg);
+                  };
+                  return (
+                    <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-l from-teal-50/80 via-emerald-50/50 to-slate-50 dark:from-teal-950/25 dark:via-emerald-950/15 dark:to-slate-900 border border-teal-200 dark:border-teal-800 space-y-4 text-xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-teal-200/70 dark:border-teal-800/60">
+                        <div className="flex items-start gap-2.5">
+                          <div className="p-2 rounded-xl bg-teal-600 text-white shrink-0">
+                            <Columns3 className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-sm text-teal-950 dark:text-teal-100">
+                              ستون‌های مشخصات و مرج/تفکیک سطرها در «برنامه جامع»
+                            </h3>
+                            <p className="text-[11px] text-teal-800/80 dark:text-teal-300 mt-0.5 leading-relaxed">
+                              امکان افزودن یا حذف ستون «مقطع» قبل از ستون «رشته» و انتخاب مستقل نحوه نمایش (مرج‌شده یا جدا جدا در هر سطر) برای هریک از ستون‌های مقطع، رشته و ورودی.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {!isSystemAdmin && (
+                        <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-[11px] font-bold">
+                          تغییر ساختار ستون‌ها و ادغام سطرهای جدول برنامه جامع صرفاً توسط «مدیر کل سامانه» مجاز است.
+                        </div>
+                      )}
+
+                      <label
+                        className={`flex items-center justify-between gap-3 p-3.5 rounded-xl border transition ${
+                          isSystemAdmin ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'
+                        } ${
+                          showDegCol
+                            ? 'bg-white dark:bg-slate-900 border-teal-400 dark:border-teal-700 shadow-xs'
+                            : 'bg-white/80 dark:bg-slate-900/70 border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            disabled={!isSystemAdmin}
+                            checked={showDegCol}
+                            onChange={(e) => {
+                              const nextVal = e.target.checked;
+                              updateMasterDisplay(
+                                { showDegreeLevelColumn: nextVal },
+                                nextVal
+                                  ? 'ستون «مقطع» قبل از ستون «رشته» به برنامه جامع اضافه شد.'
+                                  : 'ستون «مقطع» از جدول برنامه جامع حذف شد.'
+                              );
+                            }}
+                            className="w-4 h-4 accent-teal-600 rounded cursor-pointer"
+                          />
+                          <div>
+                            <div className="font-black text-slate-900 dark:text-white">
+                              افزودن ستون «مقطع» قبل از ستون «رشته» در برنامه جامع
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                              در صورت فعال بودن، مقطع تحصیلی هر رشته (مانند کارشناسی پیوسته، ناپیوسته و...) در ستون مجزایی بلافاصله قبل از ستون رشته نمایش داده و چاپ می‌شود.
+                            </div>
+                          </div>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-black shrink-0 ${
+                            showDegCol
+                              ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-200'
+                              : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                          }`}
+                        >
+                          {showDegCol ? 'ستون فعال' : 'حذف‌شده'}
+                        </span>
+                      </label>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                        {(
+                          [
+                            { key: 'degreeLevel' as const, label: 'ستون مقطع', note: !showDegCol ? 'هم‌اکنون مخفی است (تنظیم ذخیره می‌شود)' : 'ردیف‌های هم‌مقطع' },
+                            { key: 'major' as const, label: 'ستون رشته', note: 'در رشته‌های دارای چند ورودی/شعبه' },
+                            { key: 'entry' as const, label: 'ستون ورودی', note: 'در ورودی‌های دارای چند شعبه' },
+                          ]
+                        ).map((colItem) => {
+                          const isMerged = mergeCfg[colItem.key];
+                          return (
+                            <div
+                              key={colItem.key}
+                              className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-black text-slate-900 dark:text-white">{colItem.label}</span>
+                                <span className="text-[10px] text-slate-400">{colItem.note}</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={!isSystemAdmin}
+                                  onClick={() =>
+                                    updateMasterDisplay(
+                                      { mergeMetaColumns: { ...mergeCfg, [colItem.key]: true } },
+                                      `نحوه نمایش ${colItem.label} به «مرج‌شده» تغییر یافت.`
+                                    )
+                                  }
+                                  className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition ${
+                                    isSystemAdmin ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'
+                                  } ${
+                                    isMerged
+                                      ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
+                                      : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                                  }`}
+                                >
+                                  مرج‌شده (ادغام)
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!isSystemAdmin}
+                                  onClick={() =>
+                                    updateMasterDisplay(
+                                      { mergeMetaColumns: { ...mergeCfg, [colItem.key]: false } },
+                                      `نحوه نمایش ${colItem.label} به «جدا جدا در هر سطر» تغییر یافت.`
+                                    )
+                                  }
+                                  className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition ${
+                                    isSystemAdmin ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'
+                                  } ${
+                                    !isMerged
+                                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                      : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                                  }`}
+                                >
+                                  جدا جدا (همه سطرها)
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* پشتیبان‌گیری، تخلیه جدول برنامه و پاک‌سازی موردی یا کامل داده‌های برنامه‌ریزی */}
@@ -7008,6 +7183,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 setCommonExamModalOpen(false);
               }}
               precomputedIndex={termSchedulingIndex}
+              approvedMajors={approvedMajors}
               onOpenNewProfessorProposal={!isSystemAdmin ? () => setProposalModalOpen(true) : undefined}
               onNotify={notify}
             />

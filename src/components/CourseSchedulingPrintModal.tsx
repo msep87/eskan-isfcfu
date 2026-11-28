@@ -26,9 +26,11 @@ export interface PrintPreviewSummary {
   totalTableWidthPx: number;
   computedScalePercent: number;
   estimatedPages: number;
+  showDegreeLevelColumn?: boolean;
   dayLabels: string[];
   slotHeaders: string[];
   sampleRows: Array<{
+    degreeLevel?: string;
     major: string;
     entry: string;
     total: string;
@@ -805,6 +807,16 @@ export const CourseSchedulingPrintModal: React.FC<CourseSchedulingPrintModalProp
                     <table className="w-full border-collapse text-[6px]">
                       <thead>
                         <tr>
+                          {previewMeta.showDegreeLevelColumn && (
+                            <th
+                              rowSpan={2}
+                              className={`p-0.5 bg-slate-200 font-black ${
+                                settings.showGridlines ? 'border border-slate-400' : ''
+                              }`}
+                            >
+                              مقطع
+                            </th>
+                          )}
                           <th
                             rowSpan={2}
                             className={`p-0.5 bg-slate-200 font-black ${
@@ -867,6 +879,7 @@ export const CourseSchedulingPrintModal: React.FC<CourseSchedulingPrintModalProp
                           ? previewMeta.sampleRows.slice(0, 5)
                           : [
                               {
+                                degreeLevel: 'کارشناسی پیوسته',
                                 major: 'آموزش ابتدایی',
                                 entry: '۴۰۳۱',
                                 total: '۳۲',
@@ -874,6 +887,7 @@ export const CourseSchedulingPrintModal: React.FC<CourseSchedulingPrintModalProp
                                 cells: ['مبانی تعلیم', '', 'روانشناسی', ''],
                               },
                               {
+                                degreeLevel: 'کارشناسی پیوسته',
                                 major: 'الهیات',
                                 entry: '۴۰۲۱',
                                 total: '۲۸',
@@ -883,6 +897,15 @@ export const CourseSchedulingPrintModal: React.FC<CourseSchedulingPrintModalProp
                             ]
                         ).map((r, rIdx) => (
                           <tr key={`pr_${rIdx}`}>
+                            {previewMeta.showDegreeLevelColumn && (
+                              <td
+                                className={`p-0.5 text-center font-bold bg-slate-50 ${
+                                  settings.showGridlines ? 'border border-slate-300' : ''
+                                }`}
+                              >
+                                {r.degreeLevel || '—'}
+                              </td>
+                            )}
                             <td
                               className={`p-0.5 text-center font-bold ${
                                 settings.includeColors

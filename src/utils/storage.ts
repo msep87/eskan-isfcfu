@@ -14547,10 +14547,17 @@ export const Storage = {
         if (!s || typeof s !== 'object') return def;
         return {
           metaColumns: {
+            degreeLevel: { ...def.metaColumns.degreeLevel, ...(s.metaColumns?.degreeLevel || {}) },
             major: { ...def.metaColumns.major, ...(s.metaColumns?.major || {}) },
             entry: { ...def.metaColumns.entry, ...(s.metaColumns?.entry || {}) },
             totalStudents: { ...def.metaColumns.totalStudents, ...(s.metaColumns?.totalStudents || {}) },
             section: { ...def.metaColumns.section, ...(s.metaColumns?.section || {}) },
+          },
+          showDegreeLevelColumn: Boolean(s.showDegreeLevelColumn),
+          mergeMetaColumns: {
+            degreeLevel: s.mergeMetaColumns?.degreeLevel ?? true,
+            major: s.mergeMetaColumns?.major ?? true,
+            entry: s.mergeMetaColumns?.entry ?? true,
           },
           defaultSlotWidth:
             typeof s.defaultSlotWidth === 'number' && s.defaultSlotWidth >= 60

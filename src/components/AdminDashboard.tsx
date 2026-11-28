@@ -63,8 +63,10 @@ import {
   AboutAttachmentFile,
   AboutContentSettings,
   CurrentUser,
+  SchedRulesSettings,
 } from '../types';
 import { Storage, compressAvatarImageFile } from '../utils/storage';
+import { DEFAULT_SCHED_RULES } from '../utils/sampleData';
 import { ExcelImportTab } from './ExcelImportModal';
 import { StudentActivityTranscriptModal } from './StudentActivityTranscriptModal';
 import {
@@ -230,6 +232,7 @@ import {
   MessagesSquare,
   PackagePlus,
   ScanLine,
+  Columns3,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -888,10 +891,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'home_notes'
     | 'student_portals'
     | 'academic_majors'
+    | 'master_grid_display'
     | 'about'
     | 'quick_users';
   const [openSettingsSection, setOpenSettingsSection] = useState<AdminSettingsSectionKey | null>(null);
   const [appearanceSubTab, setAppearanceSubTab] = useState<'all' | 'logo' | 'fonts_bg' | 'hero'>('all');
+  const [schedRulesForSettings, setSchedRulesForSettings] = useState<SchedRulesSettings>(() =>
+    Storage.getSchedRules()
+  );
+  const [masterGridSaveNote, setMasterGridSaveNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (mainTab === 'settings' || openSettingsSection === 'master_grid_display') {
+      setSchedRulesForSettings(Storage.getSchedRules());
+    }
+  }, [mainTab, openSettingsSection]);
+
+  useEffect(() => {
+    if (!masterGridSaveNote) return;
+    const t = window.setTimeout(() => setMasterGridSaveNote(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [masterGridSaveNote]);
+
+  const updateSchedMasterDisplaySettings = (
+    patch: Partial<NonNullable<SchedRulesSettings['masterGridLayout']>>,
+    note: string
+  ) => {
+    const current = Storage.getSchedRules();
+    const baseLayout = current.masterGridLayout || DEFAULT_SCHED_RULES.masterGridLayout!;
+    const nextLayout = {
+      ...baseLayout,
+      ...patch,
+      mergeMetaColumns: {
+        degreeLevel: baseLayout.mergeMetaColumns?.degreeLevel ?? true,
+        major: baseLayout.mergeMetaColumns?.major ?? true,
+        entry: baseLayout.mergeMetaColumns?.entry ?? true,
+        ...(patch.mergeMetaColumns || {}),
+      },
+    };
+    const nextRules: SchedRulesSettings = {
+      ...current,
+      masterGridLayout: nextLayout,
+    };
+    Storage.setSchedRules(nextRules);
+    setSchedRulesForSettings(nextRules);
+    onRefreshData();
+    setMasterGridSaveNote(note);
+  };
 
   useEffect(() => {
     if (!focusAboutEditorTick) return;
@@ -8768,6 +8814,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     icon: GraduationCap,
                   },
                   {
+                    key: 'master_grid_display' as const,
+                    title: 'ستون‌ها و نمایش برنامه جامع',
+                    desc: 'افزودن/حذف ستون مقطع قبل از رشته و انتخاب مرج یا جدا بودن مقطع، رشته و ورودی',
+                    icon: Columns3,
+                  },
+                  {
                     key: 'student_portals' as const,
                     title: 'سامانه‌های دانشجویان',
                     desc: 'ایجاد، ویرایش، ترتیب‌بندی و حذف لینک‌های تب «سامانه‌ها»',
@@ -8857,6 +8909,306 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               />
             </div>
           )}
+
+          {/* تنظیمات ستون مقطع و ادغام/تفکیک ستون‌های مقطع، رشته و ورودی در برنامه جامع */}
+          {openSettingsSection === 'master_grid_display' && (() => {
+            const layout = schedRulesForSettings.masterGridLayout || DEFAULT_SCHED_RULES.masterGridLayout!;
+            const showDegreeCol = Boolean(layout.showDegreeLevelColumn);
+            const mergeCfg = {
+              degreeLevel: layout.mergeMetaColumns?.degreeLevel ?? true,
+              major: layout.mergeMetaColumns?.major ?? true,
+              entry: layout.mergeMetaColumns?.entry ?? true,
+            };
+            const previewSample = [
+              { degree: 'کارشناسی پیوسته', major: 'آموزش ابتدایی', entry: '4021', total: '۶۵', section: 'گروه ۱' },
+              { degree: 'کارشناسی پیوسته', major: 'آموزش ابتدایی', entry: '4021', total: '۶۵', section: 'گروه ۲' },
+              { degree: 'کارشناسی پیوسته', major: 'آموزش ابتدایی', entry: '4031', total: '۴۲', section: 'گروه ۱' },
+            ];
+            return (
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5 animate-in fade-in duration-150">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2.5 rounded-2xl bg-teal-600 text-white shadow-sm shrink-0">
+                      <Columns3 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                        تنظیمات ستون مقطع و مرج/جداسازی در برنامه جامع درسی
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                        در این بخش می‌توانید ستون «مقطع» را قبل از ستون «رشته» اضافه یا حذف کنید و مشخص نمایید هر یک از ستون‌های مقطع، رشته و ورودی به‌صورت مرج‌شده (ادغام ردیف‌های هم‌نام) یا جدا جدا (نمایش در تمامی سطرها) در جدول برنامه جامع، چاپ و خروجی اکسل نمایش داده شوند.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {masterGridSaveNote && (
+                  <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-extrabold text-emerald-800 dark:text-emerald-200">
+                    <CheckCircle className="w-4 h-4 shrink-0 text-emerald-600" />
+                    <span>{masterGridSaveNote}</span>
+                  </div>
+                )}
+
+                {/* ۱. افزودن یا حذف ستون مقطع قبل از ستون رشته */}
+                <div
+                  className={`p-4 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                    showDegreeCol
+                      ? 'bg-teal-50/60 dark:bg-teal-950/20 border-teal-300 dark:border-teal-700'
+                      : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <label className="flex items-start gap-3 cursor-pointer flex-1">
+                    <input
+                      type="checkbox"
+                      checked={showDegreeCol}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        updateSchedMasterDisplaySettings(
+                          { showDegreeLevelColumn: checked },
+                          checked
+                            ? 'ستون «مقطع» قبل از ستون «رشته» در برنامه جامع اضافه و ذخیره شد.'
+                            : 'ستون «مقطع» از برنامه جامع حذف و ذخیره شد.'
+                        );
+                      }}
+                      className="w-4.5 h-4.5 mt-0.5 accent-teal-600 rounded cursor-pointer"
+                    />
+                    <div>
+                      <div className="font-extrabold text-sm text-slate-900 dark:text-white">
+                        افزودن ستون «مقطع» قبل از ستون «رشته»
+                      </div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                        با فعال‌سازی این گزینه، ستون مقطع تحصیلی (مستند به بخش مقاطع و رشته‌های مصوب) بلافاصله قبل از ستون رشته در برنامه جامع، چاپ و خروجی اکسل قرار می‌گیرد. با برداشتن تیک، ستون مقطع حذف می‌شود.
+                      </div>
+                    </div>
+                  </label>
+                  <div className="flex items-center gap-1.5 shrink-0 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSchedMasterDisplaySettings(
+                          { showDegreeLevelColumn: true },
+                          'ستون «مقطع» قبل از ستون «رشته» در برنامه جامع فعال شد.'
+                        )
+                      }
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
+                        showDegreeCol
+                          ? 'bg-teal-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      افزودن ستون مقطع
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSchedMasterDisplaySettings(
+                          { showDegreeLevelColumn: false },
+                          'ستون «مقطع» از جدول برنامه جامع حذف شد.'
+                        )
+                      }
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
+                        !showDegreeCol
+                          ? 'bg-slate-700 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      حذف ستون مقطع
+                    </button>
+                  </div>
+                </div>
+
+                {/* ۲. انتخاب مستقل حالت مرج‌شده یا جدا جدا برای مقطع، رشته و ورودی */}
+                <div className="space-y-3">
+                  <div>
+                    <div className="font-extrabold text-sm text-slate-900 dark:text-white">
+                      حالت ادغام (Merge) یا تفکیک (جدا جدا) ستون‌های مشخصات
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      در رشته‌هایی که تعداد زیادی ورودی و شعبه دارند، انتخاب حالت «جدا جدا» باعث می‌شود نام رشته، مقطع یا کد ورودی در تمامی سطرهای شعبه‌ها تکرار شده و تشخیص هر شعبه به‌سادگی انجام شود.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {(
+                      [
+                        {
+                          key: 'degreeLevel' as const,
+                          title: 'ستون مقطع',
+                          hint: showDegreeCol
+                            ? 'ردیف‌های دارای مقطع یکسان در برنامه جامع'
+                            : 'ستون مقطع فعلاً مخفی است (تنظیم ذخیره می‌شود)',
+                        },
+                        {
+                          key: 'major' as const,
+                          title: 'ستون رشته',
+                          hint: 'ردیف‌های یک رشته با چند ورودی و شعبه',
+                        },
+                        {
+                          key: 'entry' as const,
+                          title: 'ستون ورودی',
+                          hint: 'ردیف‌های یک ورودی با چند شعبه/گروه',
+                        },
+                      ]
+                    ).map((col) => {
+                      const isMerged = mergeCfg[col.key];
+                      return (
+                        <div
+                          key={col.key}
+                          className="p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 space-y-3"
+                        >
+                          <div>
+                            <div className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center justify-between gap-2">
+                              <span>{col.title}</span>
+                              <span
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+                                  isMerged
+                                    ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-200'
+                                    : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-200'
+                                }`}
+                              >
+                                {isMerged ? 'مرج‌شده' : 'جدا جدا'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                              {col.hint}
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateSchedMasterDisplaySettings(
+                                  { mergeMetaColumns: { ...mergeCfg, [col.key]: true } },
+                                  `نحوه نمایش ${col.title} در برنامه جامع به حالت «مرج‌شده» تنظیم شد.`
+                                )
+                              }
+                              className={`py-2 px-2.5 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                                isMerged
+                                  ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                              }`}
+                            >
+                              مرج‌شده (ادغام)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateSchedMasterDisplaySettings(
+                                  { mergeMetaColumns: { ...mergeCfg, [col.key]: false } },
+                                  `نحوه نمایش ${col.title} در برنامه جامع به حالت «جدا جدا» تنظیم شد.`
+                                )
+                              }
+                              className={`py-2 px-2.5 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                                !isMerged
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                              }`}
+                            >
+                              جدا جدا (هر سطر)
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ۳. پیش‌نمایش زنده ساختار ستون‌ها و ادغام سطرها */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="font-extrabold text-slate-800 dark:text-slate-200">
+                      پیش‌نمایش زنده ترتیب ستون‌ها و وضعیت ادغام در برنامه جامع:
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      تغییرات بلافاصله در جدول برنامه جامع، چاپ و اکسل اعمال می‌شوند
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs border-collapse bg-white dark:bg-slate-900 rounded-xl overflow-hidden">
+                      <thead>
+                        <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-extrabold">
+                          {showDegreeCol && (
+                            <th className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center">
+                              مقطع
+                            </th>
+                          )}
+                          <th className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center">
+                            رشته
+                          </th>
+                          <th className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center">
+                            ورودی
+                          </th>
+                          <th className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center">
+                            تعداد کل
+                          </th>
+                          <th className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center">
+                            شعبه
+                          </th>
+                          <th className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center text-slate-400">
+                            سانس‌های برنامه هفتگی ...
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewSample.map((row, idx) => {
+                          const showDegCell = !mergeCfg.degreeLevel || idx === 0;
+                          const degSpan = mergeCfg.degreeLevel ? 3 : 1;
+                          const showMajCell = !mergeCfg.major || idx === 0;
+                          const majSpan = mergeCfg.major ? 3 : 1;
+                          const showEntCell = !mergeCfg.entry || idx === 0 || idx === 2;
+                          const entSpan = mergeCfg.entry && idx === 0 ? 2 : 1;
+                          const showTotCell = idx === 0 || idx === 2;
+                          const totSpan = idx === 0 ? 2 : 1;
+                          return (
+                            <tr key={idx} className="text-slate-700 dark:text-slate-200">
+                              {showDegreeCol && showDegCell && (
+                                <td
+                                  rowSpan={degSpan}
+                                  className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center font-bold bg-teal-50/40 dark:bg-teal-950/20"
+                                >
+                                  {row.degree}
+                                </td>
+                              )}
+                              {showMajCell && (
+                                <td
+                                  rowSpan={majSpan}
+                                  className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center font-bold"
+                                >
+                                  {row.major}
+                                </td>
+                              )}
+                              {showEntCell && (
+                                <td
+                                  rowSpan={entSpan}
+                                  className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center font-mono font-bold"
+                                >
+                                  {row.entry}
+                                </td>
+                              )}
+                              {showTotCell && (
+                                <td
+                                  rowSpan={totSpan}
+                                  className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center font-bold"
+                                >
+                                  {row.total}
+                                </td>
+                              )}
+                              <td className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center font-semibold">
+                                {row.section}
+                              </td>
+                              <td className="border border-slate-200 dark:border-slate-700 px-3 py-2 text-center text-slate-400">
+                                —
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* مدیریت سامانه‌ها و درگاه‌های بیرونی در کارتابل دانشجویان */}
           {openSettingsSection === 'student_portals' && (

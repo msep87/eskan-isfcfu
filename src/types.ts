@@ -1956,6 +1956,7 @@ export interface SchedProgramCohort {
   id: string;
   majorCode: string; // کد رشته ۶ رقمی
   majorName: string;
+  degreeLevel?: string; // مقطع تحصیلی (دریافت‌شده از رشته‌های مصوب یا تعریف‌شده برای رشته)
   entryTerm: string; // مثلاً 4031 یا ۱۴۰۳
   totalStudents: number;
   sections: SchedProgramSection[];
@@ -2107,7 +2108,12 @@ export interface SchedProgramLockSettings {
   blockedViewUserIds?: string[]; // مسدودسازی کامل مشاهده برنامه برای مدیران گروه، معاونان یا کارشناسان خاص
 }
 
-export type SchedMetaColumnKey = 'major' | 'entry' | 'totalStudents' | 'section';
+export type SchedMetaColumnKey =
+  | 'degreeLevel'
+  | 'major'
+  | 'entry'
+  | 'totalStudents'
+  | 'section';
 export type SchedTextOrientation = 'horizontal' | 'vertical_up' | 'vertical_down';
 export type SchedCellTextFit = 'wrap' | 'shrink' | 'clip';
 export type SchedCellTextAlign = 'right' | 'center' | 'left';
@@ -2125,6 +2131,12 @@ export interface SchedMasterColumnStyle {
 
 export interface SchedMasterGridLayoutSettings {
   metaColumns: Record<SchedMetaColumnKey, SchedMasterColumnStyle>;
+  showDegreeLevelColumn?: boolean; // افزودن/حذف ستون مقطع قبل از ستون رشته (تنظیم مدیر سامانه)
+  mergeMetaColumns?: {
+    degreeLevel?: boolean; // ادغام ردیف‌های هم‌مقطع (true) یا نمایش جداگانه در هر سطر (false)
+    major?: boolean; // ادغام ردیف‌های هم‌رشته (true) یا نمایش جداگانه در هر سطر (false)
+    entry?: boolean; // ادغام ردیف‌های هم‌ورودی (true) یا نمایش جداگانه در هر سطر (false)
+  };
   defaultSlotWidth: number;
   slotWidthsBySlotId?: Record<string, number>;
   scheduleCells: {
