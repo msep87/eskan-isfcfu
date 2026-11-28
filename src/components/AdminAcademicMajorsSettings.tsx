@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AcademicDegreeLevel,
   AppSettings,
@@ -572,6 +572,9 @@ export const AdminAcademicMajorsSettings: React.FC<AdminAcademicMajorsSettingsPr
   const [schedCourses, setSchedCourses] = useState<SchedCurriculumCourse[]>(() =>
     Storage.getSchedCourses()
   );
+  useEffect(() => {
+    setSchedCourses(Storage.getSchedCourses());
+  }, [settings]);
   const schedRules = useMemo(() => Storage.getSchedRules(), []);
 
   const [selectedPlanMajorId, setSelectedPlanMajorId] = useState<string>(

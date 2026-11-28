@@ -755,7 +755,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   <div class="top">
     <div>
       <h1>${escapeHtml(customReportTitle || 'گزارش سفارشی اطلاعات دانشجویان')}</h1>
-      <p>دانشگاه فرهنگیان استان اصفهان • سامانه جامع خدمات دانشجویی</p>
+      <p>دانشگاه فرهنگیان استان اصفهان • سامانه جامع خدمات دانشگاهی</p>
     </div>
     <div style="text-align:left;font-size:10px;color:#334155;">
       <div>تاریخ چاپ: <strong>${escapeHtml(todayFa)}</strong></div>
@@ -2758,7 +2758,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         {/* دکمه خروجی کلیه اطلاعات به اکسل */}
         <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
           <span className="text-xs text-slate-400">
-            دانشگاه فرهنگیان اصفهان - سامانه جامع خدمات دانشجویی
+            دانشگاه فرهنگیان اصفهان - سامانه جامع خدمات دانشگاهی
           </span>
           <button
             onClick={handleExportAllStudents}

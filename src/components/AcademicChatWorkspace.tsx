@@ -248,7 +248,8 @@ export const AcademicChatWorkspace: React.FC<AcademicChatWorkspaceProps> = ({
   // باز کردن مستقیم چت دو به دو در صورت دریافت initialTargetParticipantId (مثلاً از تب اعضای معاونت)
   useEffect(() => {
     if (!initialTargetParticipantId || initialTargetParticipantId === actor.id) return;
-    const target = participants.find((p) => p.id === initialTargetParticipantId);
+    const latestParticipants = Storage.getAcademicChatParticipants();
+    const target = latestParticipants.find((p) => p.id === initialTargetParticipantId);
     if (!target) return;
     const { room, created } = Storage.createOrGetAcademicDmRoom(
       { id: actor.id, name: actor.name, role: actor.role },

@@ -3044,7 +3044,8 @@ export const Storage = {
     if (
       banner &&
       (banner.includes('سامانه جامع سراهای دانشجویی') ||
-        banner.includes('ورود به سامانه جهت'))
+        banner.includes('ورود به سامانه جهت') ||
+        banner.startsWith('سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان — پیشخوان یکپارچه'))
     ) {
       return {
         ...raw,
@@ -4219,7 +4220,7 @@ export const Storage = {
       if (parsed && parsed.role === 'admin' && typeof parsed.username === 'string') {
         return {
           role: 'admin',
-          name: typeof parsed.name === 'string' ? parsed.name : 'مدیر کل سامانه جامع خدمات دانشجویی',
+          name: typeof parsed.name === 'string' ? parsed.name : 'مدیر کل سامانه جامع خدمات دانشگاهی',
           username: parsed.username,
         };
       }
@@ -5472,8 +5473,10 @@ export const Storage = {
     libraryBookRequests: Storage.getLibraryBookRequests(),
     graduationClearances: Storage.getGraduationClearances(),
     academicWorkflowRequests: Storage.getAcademicWorkflowRequests(),
+    academicChatRooms: Storage.getAcademicChatRooms(),
+    academicChatMessages: Storage.getAcademicChatMessages(),
     exportedAt: new Date().toISOString(),
-    appName: 'سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان اصفهان',
+    appName: 'سامانه جامع خدمات دانشگاهی دانشگاه فرهنگیان اصفهان',
   }),
 
   // پشتیبان‌گیری سریع از داده‌ها به صورت فایل JSON
@@ -5483,7 +5486,7 @@ export const Storage = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `پشتیبان_سامانه_جامع_امور_دانشجویی_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `پشتیبان_سامانه_جامع_خدمات_دانشگاهی_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -5910,6 +5913,8 @@ export const Storage = {
     if (Array.isArray(data.libraryBookRequests)) writeCollection(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, data.libraryBookRequests);
     if (Array.isArray(data.graduationClearances)) writeCollection(STORAGE_KEYS.GRADUATION_CLEARANCES, data.graduationClearances);
     if (Array.isArray(data.academicWorkflowRequests)) writeCollection(STORAGE_KEYS.ACADEMIC_WORKFLOW_REQUESTS, data.academicWorkflowRequests);
+    if (Array.isArray(data.academicChatRooms)) writeCollection(STORAGE_KEYS.ACADEMIC_CHAT_ROOMS, data.academicChatRooms);
+    if (Array.isArray(data.academicChatMessages)) writeCollection(STORAGE_KEYS.ACADEMIC_CHAT_MESSAGES, data.academicChatMessages);
   },
 
   // بازیابی نسخه پشتیبان همگام (سازگاری با فراخوانی‌های قدیمی)

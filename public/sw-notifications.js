@@ -1,4 +1,4 @@
-/* Service Worker notification click & push handler for سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان اصفهان */
+/* Service Worker notification click & push handler for سامانه جامع خدمات دانشگاهی دانشگاه فرهنگیان اصفهان */
 
 self.addEventListener('notificationclick', function (event) {
   event.notification.close();
@@ -36,10 +36,10 @@ self.addEventListener('push', function (event) {
   try {
     payload = event.data.json();
   } catch {
-    payload = { title: 'سامانه جامع خدمات دانشجویی', body: event.data.text() };
+    payload = { title: 'سامانه جامع خدمات دانشگاهی', body: event.data.text() };
   }
 
-  const title = payload.title || 'سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان';
+  const title = payload.title || 'سامانه جامع خدمات دانشگاهی دانشگاه فرهنگیان';
   const options = {
     body: payload.body || 'اعلان جدیدی برای شما ثبت شده است.',
     icon: payload.icon || '/pwa-192x192.png',

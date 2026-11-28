@@ -952,7 +952,7 @@ export function buildTranscriptPrintHtml(
   <div class="header">
     <div>
       <h1>کارنامه جامع فعالیت‌های فرهنگی، اجتماعی، ورزشی و انضباطی دانشجو</h1>
-      <p>دانشگاه فرهنگیان استان اصفهان • سامانه جامع خدمات دانشجویی • سال تحصیلی ${escapeHtml(academicYear)}</p>
+      <p>دانشگاه فرهنگیان استان اصفهان • سامانه جامع خدمات دانشگاهی • سال تحصیلی ${escapeHtml(academicYear)}</p>
       <p>تاریخ صدور کارنامه: <strong>${escapeHtml(transcript.generatedAtFa)}</strong></p>
     </div>
     <div class="grade-badge">
@@ -1025,7 +1025,7 @@ export function buildTranscriptPrintHtml(
   </div>
 
   <div class="footer-note">
-    این کارنامه به‌صورت سیستمی از سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان استان اصفهان استخراج شده است.
+    این کارنامه به‌صورت سیستمی از سامانه جامع خدمات دانشگاهی دانشگاه فرهنگیان استان اصفهان استخراج شده است.
   </div>
 </body>
 </html>`;

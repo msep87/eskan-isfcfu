@@ -1142,7 +1142,7 @@ export default function App() {
       impersonatingAdmin ||
       Storage.getAdminImpersonator() || {
         role: 'admin' as const,
-        name: 'مدیر کل سامانه جامع خدمات دانشجویی',
+        name: 'مدیر کل سامانه جامع خدمات دانشگاهی',
         username: 'admin',
       };
 
@@ -1358,7 +1358,7 @@ export default function App() {
                 </>
               ) : (
                 <span className="text-white/95 text-[11px] truncate">
-                  {settings.universityName || 'سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان'}
+                  {settings.universityName || 'سامانه جامع خدمات دانشگاهی دانشگاه فرهنگیان'}
                 </span>
               )}
             </div>
@@ -1387,7 +1387,7 @@ export default function App() {
 
           const homeAnnouncementsTitle =
             settings.homeAnnouncementsTitle?.trim() ||
-            'اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشجویی و سراها';
+            'اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشگاهی و سراها';
 
           return (
           <div className="space-y-5 sm:space-y-7 animate-in fade-in duration-300">
@@ -1427,7 +1427,7 @@ export default function App() {
                 </div>
 
                 <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black leading-tight tracking-tight mb-5">
-                  سامانه جامع خدمات دانشجویی
+                  سامانه جامع خدمات دانشگاهی
                 </h1>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -1967,7 +1967,7 @@ export default function App() {
                   <FarhangianEmblem size={24} customLogoUrl={settings.customLogoUrl} />
                 </div>
               )}
-              <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع خدمات دانشجویی</span>
+              <span>دانشگاه فرهنگیان استان اصفهان • سامانه جامع خدمات دانشگاهی</span>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-3 text-[11px]">
               {currentUser &&
@@ -2158,7 +2158,7 @@ export default function App() {
           />
         )}
 
-        {/* دستیار هوشمند سامانه جامع خدمات دانشجویی */}
+        {/* دستیار هوشمند سامانه جامع خدمات دانشگاهی */}
         {currentUser &&
           currentUser.role !== 'education' &&
           currentUser.role !== 'cultural' &&

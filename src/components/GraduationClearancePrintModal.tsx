@@ -133,7 +133,7 @@ export const GraduationClearancePrintModal: React.FC<GraduationClearancePrintMod
                     دانشگاه فرهنگیان استان اصفهان
                   </h1>
                   <p className="text-xs font-bold text-teal-800 mt-0.5">
-                    سامانه جامع خدمات دانشجویی — برگ تسویه حساب الکترونیک فراغت از تحصیل
+                    سامانه جامع خدمات دانشگاهی — برگ تسویه حساب الکترونیک فراغت از تحصیل
                   </p>
                 </div>
               </div>
@@ -346,7 +346,7 @@ export const GraduationClearancePrintModal: React.FC<GraduationClearancePrintMod
               <div className="border border-slate-300 rounded-lg p-3 min-h-[76px] flex flex-col justify-between">
                 <p className="font-bold text-slate-700">مهر و امضاء معاونت دانشجویی / آموزش:</p>
                 <p className="text-[10px] text-slate-500">
-                  صحت تاییدیه‌های الکترونیک سامانه جامع خدمات دانشجویی تایید می‌گردد.
+                  صحت تاییدیه‌های الکترونیک سامانه جامع خدمات دانشگاهی تایید می‌گردد.
                 </p>
               </div>
               <div className={`border rounded-lg p-3 min-h-[76px] flex flex-col justify-between ${clearance.graduationFinalized ? 'border-emerald-500 bg-emerald-50/70' : 'border-slate-300'}`}>
@@ -383,7 +383,7 @@ export const GraduationClearancePrintModal: React.FC<GraduationClearancePrintMod
             </div>
 
             <p className="text-[10px] text-center text-slate-500 pt-1">
-              این فرم به صورت الکترونیک در «سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان استان اصفهان» صادر شده و با کد رهگیری{' '}
+              این فرم به صورت الکترونیک در «سامانه جامع خدمات دانشگاهی دانشگاه فرهنگیان استان اصفهان» صادر شده و با کد رهگیری{' '}
               <span className="font-mono font-bold">{clearance.trackingCode}</span> قابل استعلام می‌باشد.
             </p>
           </div>

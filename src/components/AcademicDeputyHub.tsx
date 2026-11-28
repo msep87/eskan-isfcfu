@@ -346,7 +346,10 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
 
           <button
             type="button"
-            onClick={() => setHubTab('chat')}
+            onClick={() => {
+              setInitialChatTargetId(null);
+              setHubTab('chat');
+            }}
             className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold inline-flex items-center gap-2 transition cursor-pointer ${
               hubTab === 'chat'
                 ? 'bg-emerald-400 text-slate-950 shadow-md'

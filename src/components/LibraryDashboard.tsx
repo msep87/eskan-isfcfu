@@ -609,7 +609,7 @@ export const LibraryDashboard: React.FC<LibraryDashboardProps> = ({
             </div>
             <div>
               <span className="inline-block px-2.5 py-0.5 rounded-lg bg-white/15 text-[11px] font-bold text-indigo-100 mb-1">
-                کارتابل کتابخانه و پژوهش • سامانه جامع خدمات دانشجویی
+                کارتابل کتابخانه و پژوهش • سامانه جامع خدمات دانشگاهی
               </span>
               <h1 className="text-xl sm:text-2xl font-black tracking-tight">
                 خوش آمدید، {staff.fullName}

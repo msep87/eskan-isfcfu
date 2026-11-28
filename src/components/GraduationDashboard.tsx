@@ -118,7 +118,7 @@ function buildSingleClearancePageHtml(
           <div>
             <div style="font-size:10.5px;font-weight:700;color:#475569;">جمهوری اسلامی ایران • وزارت آموزش و پرورش</div>
             <div style="font-size:15px;font-weight:900;color:#0f172a;margin-top:2px;">دانشگاه فرهنگیان استان اصفهان</div>
-            <div style="font-size:11px;font-weight:800;color:#0f766e;margin-top:2px;">سامانه جامع خدمات دانشجویی — برگ تسویه حساب الکترونیک فراغت از تحصیل</div>
+            <div style="font-size:11px;font-weight:800;color:#0f766e;margin-top:2px;">سامانه جامع خدمات دانشگاهی — برگ تسویه حساب الکترونیک فراغت از تحصیل</div>
           </div>
         </div>
         <div style="border:1px solid #cbd5e1;background:#f8fafc;border-radius:8px;padding:7px 10px;font-size:10.5px;min-width:165px;">
@@ -201,13 +201,13 @@ function buildSingleClearancePageHtml(
         </div>
         <div style="border:1px solid #cbd5e1;border-radius:8px;padding:8px;min-height:72px;display:flex;flex-direction:column;justify-content:space-between;">
           <div style="font-weight:800;color:#334155;">مهر و امضاء معاونت دانشجویی / آموزش:</div>
-          <div style="font-size:9.5px;color:#64748b;">صحت تاییدیه‌های الکترونیک سامانه جامع خدمات دانشجویی تایید می‌گردد.</div>
+          <div style="font-size:9.5px;color:#64748b;">صحت تاییدیه‌های الکترونیک سامانه جامع خدمات دانشگاهی تایید می‌گردد.</div>
         </div>
         ${gradBoxHtml}
       </div>
 
       <div style="text-align:center;font-size:9.5px;color:#64748b;margin-top:8px;">
-        صادر شده از «سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان استان اصفهان» — کد رهگیری: <b dir="ltr">${escapeHtml(clearance.trackingCode)}</b>
+        صادر شده از «سامانه جامع خدمات دانشگاهی دانشگاه فرهنگیان استان اصفهان» — کد رهگیری: <b dir="ltr">${escapeHtml(clearance.trackingCode)}</b>
       </div>
     </div>
   `;

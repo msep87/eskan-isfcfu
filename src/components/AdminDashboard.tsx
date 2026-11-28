@@ -1753,7 +1753,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         title: newAnnTitle.trim(),
         content: newAnnContent.trim(),
         contentHtml: sanitizedHtml,
-        author: 'مدیریت کل سامانه جامع خدمات دانشجویی',
+        author: 'مدیریت کل سامانه جامع خدمات دانشگاهی',
         priority: newAnnPriority,
         date: new Date().toLocaleDateString('fa-IR'),
         targetDormId: newAnnTargetDormId,
@@ -1809,24 +1809,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    Storage.setSettings(localSettings);
+    const fresh = Storage.getSettings();
+    const merged: AppSettings = {
+      ...fresh,
+      ...localSettings,
+      academicDegreeLevels: fresh.academicDegreeLevels ?? localSettings.academicDegreeLevels,
+      approvedMajors: fresh.approvedMajors ?? localSettings.approvedMajors,
+      majorEightTermPlans: fresh.majorEightTermPlans ?? localSettings.majorEightTermPlans,
+    };
+    setLocalSettings(merged);
+    Storage.setSettings(merged);
     Storage.addActivityLog({
       category: 'settings',
       action: 'بروزرسانی تنظیمات سال تحصیلی و سامانه',
-      details: `سال تحصیلی: ${localSettings.currentAcademicYear}، وضعیت انتخاب اتاق: ${localSettings.selectionActive ? 'فعال' : 'غیرفعال'}`,
-      targetName: localSettings.currentAcademicYear,
+      details: `سال تحصیلی: ${merged.currentAcademicYear}، وضعیت انتخاب اتاق: ${merged.selectionActive ? 'فعال' : 'غیرفعال'}`,
+      targetName: merged.currentAcademicYear,
     });
     setActivityLogs(Storage.getActivityLogs());
-    onUpdateSettings(localSettings);
+    onUpdateSettings(merged);
     setSaveStatus(true);
     setTimeout(() => setSaveStatus(false), 3000);
   };
 
   // دکمه فوری باز یا بسته کردن امکان انتخاب اتاق و تخت برای دانشجویان
   const handleToggleSelectionActive = () => {
-    const nextActive = !settings.selectionActive;
+    const fresh = Storage.getSettings();
+    const nextActive = !fresh.selectionActive;
     const updated: AppSettings = {
-      ...settings,
+      ...fresh,
       selectionActive: nextActive,
     };
     setLocalSettings(updated);
@@ -1853,9 +1863,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // دکمه فوری باز یا بسته کردن دسترسی ویرایش ثانویه اطلاعات و تغییر عکس توسط دانشجویان
   const handleToggleStudentSecondaryEdit = () => {
-    const nextEnabled = !Boolean(localSettings.studentSecondaryEditEnabled);
+    const fresh = Storage.getSettings();
+    const nextEnabled = !Boolean(fresh.studentSecondaryEditEnabled);
     const updated: AppSettings = {
-      ...localSettings,
+      ...fresh,
       studentSecondaryEditEnabled: nextEnabled,
     };
     setLocalSettings(updated);
@@ -2052,6 +2063,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // شخصی‌سازی پس‌زمینه کادر بنر اصلی صفحه اول سایت
   const applyHeroSettings = (patch: Partial<AppSettings>, message: string) => {
     const updated: AppSettings = {
+      ...Storage.getSettings(),
       ...localSettingsRef.current,
       ...patch,
     };
@@ -2247,7 +2259,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
 
     const updated: AppSettings = {
-      ...localSettings,
+      ...Storage.getSettings(),
       homeNotesTitle: cleanTitle,
       homeNotes: cleanedNotes,
     };
@@ -2270,7 +2282,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleResetHomeNotes = () => {
     const updated: AppSettings = {
-      ...localSettings,
+      ...Storage.getSettings(),
       homeNotesTitle: undefined,
       homeNotes: undefined,
     };
@@ -2452,7 +2464,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
 
     const updated: AppSettings = {
-      ...localSettings,
+      ...Storage.getSettings(),
       aboutContent: savedAbout,
     };
     lastSyncedAboutJsonRef.current = JSON.stringify(savedAbout);
@@ -2475,7 +2487,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleResetAboutContent = () => {
     const updated: AppSettings = {
-      ...localSettings,
+      ...Storage.getSettings(),
       aboutContent: undefined,
     };
     lastSyncedAboutJsonRef.current = JSON.stringify(null);
@@ -2692,7 +2704,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         onClose={() => setIsAdminWarningModalOpen(false)}
         dorms={dorms}
         rooms={rooms}
-        supervisorName="مدیریت کل سامانه جامع خدمات دانشجویی"
+        supervisorName="مدیریت کل سامانه جامع خدمات دانشگاهی"
         onWarningAdded={onRefreshData}
       />
 
@@ -2707,7 +2719,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         dorms={dorms}
         rooms={rooms}
         initialStudent={evalTargetStudent}
-        evaluatorName="مدیریت کل سامانه جامع خدمات دانشجویی"
+        evaluatorName="مدیریت کل سامانه جامع خدمات دانشگاهی"
         evaluatorRole="admin"
         onSaved={() => {
           setStudentEvaluations(Storage.getStudentEvaluations());
@@ -2725,11 +2737,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <Shield className="w-5 h-5" />
               </span>
               <span className="text-xs font-bold text-purple-300">
-                پنل مدیریت کل سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان
+                پنل مدیریت کل سامانه جامع خدمات دانشگاهی دانشگاه فرهنگیان
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black">
-              مدیریت کل پیشخوان جامع خدمات دانشجویی
+              مدیریت کل پیشخوان جامع خدمات دانشگاهی
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-1">
               مدیریت یکپارچه امور دانشجویی، آموزش، سراهای دانشجویی، مالی، فرهنگی، ورزشی، مشاوره، کتابخانه، هوشمندسازی و تنظیمات کل سامانه
@@ -4009,7 +4021,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               settings={settings}
               onDataChanged={onRefreshData}
               supervisorDormId={selectedCartableDormId}
-              actorName="مدیریت کل سامانه جامع خدمات دانشجویی"
+              actorName="مدیریت کل سامانه جامع خدمات دانشگاهی"
               actorRole="admin"
               actorId="admin"
               onEditStudent={handleOpenEditStudent}
@@ -4030,7 +4042,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               settings={settings}
               onBedSelected={onRefreshData}
               isSupervisorMode={true}
-              actorName="مدیریت کل سامانه جامع خدمات دانشجویی"
+              actorName="مدیریت کل سامانه جامع خدمات دانشگاهی"
               actorRole="admin"
               actorId="admin"
             />
@@ -4764,7 +4776,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
               <div>
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                  ثبت و انتشار اطلاعیه رسمی سامانه جامع خدمات دانشجویی
+                  ثبت و انتشار اطلاعیه رسمی سامانه جامع خدمات دانشگاهی
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   امکان تنظیم انتشار در صفحه اول سایت جهت مشاهده عمومی و مراجعین قبل از ورود، یا اختصاصی دانشجویان سراها
@@ -7183,7 +7195,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <HeartHandshake className="w-8 h-8" />
               </div>
               <div>
-                <h2 className="text-xl font-black">مرکز بهداشت روان و مشاوره دانشگاه (سامانه جامع خدمات دانشجویی)</h2>
+                <h2 className="text-xl font-black">مرکز بهداشت روان و مشاوره دانشگاه (سامانه جامع خدمات دانشگاهی)</h2>
                 <p className="text-xs text-teal-100 mt-1">
                   مدیریت روانشناسان و مشاوران، برنامه‌ریزی شیفت‌های کاری با اکسل، پایش تمام پیام‌ها و گزارش‌های فعالیت
                 </p>
@@ -8930,11 +8942,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   type="text"
                   value={localSettings.homeAnnouncementsTitle || ''}
                   onChange={(e) => setLocalSettings((prev) => ({ ...prev, homeAnnouncementsTitle: e.target.value }))}
-                  placeholder="اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشجویی و سراها"
+                  placeholder="اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشگاهی و سراها"
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium text-xs focus:ring-2 focus:ring-teal-500"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
-                  در صورت خالی گذاشتن، عنوان پیش‌فرض «اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشجویی و سراها» نمایش داده می‌شود.
+                  در صورت خالی گذاشتن، عنوان پیش‌فرض «اطلاعیه‌ها، بخشنامه‌ها و زمان‌بندی سامانه جامع خدمات دانشگاهی و سراها» نمایش داده می‌شود.
                 </p>
               </div>
 
@@ -9615,7 +9627,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/15 text-[10px] font-bold border border-white/20">
                           {localSettings.universityName}
                         </div>
-                        <div className="text-base font-black">سامانه جامع خدمات دانشجویی</div>
+                        <div className="text-base font-black">سامانه جامع خدمات دانشگاهی</div>
                         <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white text-teal-900 text-[10px] font-extrabold shadow">
                           ورود به سامانه جامع
                         </div>
@@ -12061,7 +12073,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         students={students}
         settings={settings}
         initialDormId={selectedCartableDormId}
-        actorTitle="مدیریت کل سامانه جامع خدمات دانشجویی"
+        actorTitle="مدیریت کل سامانه جامع خدمات دانشگاهی"
       />
 
       {/* مدال تأیید عملیات حساس مدیر */}

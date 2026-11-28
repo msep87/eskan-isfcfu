@@ -188,7 +188,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
         setStatusFeedback('نوتیفیکیشن فوری با موفقیت روی دستگاه شما فعال شد.');
         if (prefs.soundEnabled) playNotificationChime();
         await dispatchOSNotification({
-          title: 'اعلان‌های سامانه جامع خدمات دانشجویی فعال شد',
+          title: 'اعلان‌های سامانه جامع خدمات دانشگاهی فعال شد',
           body: 'از این پس پیام‌ها، اطلاعیه‌ها، نظرسنجی‌ها و انتخابات جدید بلافاصله روی گوشی شما نمایش داده می‌شوند.',
           tag: 'cfuis-welcome-notif',
           category: 'system',
@@ -208,7 +208,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
   const handleTestNotification = async () => {
     if (prefs.soundEnabled) playNotificationChime();
     const sent = await dispatchOSNotification({
-      title: 'اعلان آزمایشی سامانه جامع خدمات دانشجویی',
+      title: 'اعلان آزمایشی سامانه جامع خدمات دانشگاهی',
       body: 'سیستم نوتیفیکیشن گوشی شما به درستی فعال است و اعلان‌های جدید را دریافت خواهید کرد.',
       tag: `cfuis-test-${Date.now()}`,
       category: 'system',

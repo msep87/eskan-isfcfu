@@ -177,7 +177,7 @@ export const StudentRoomProfileModal: React.FC<StudentRoomProfileModalProps> = (
     typeof isRoomRepresentative === 'boolean'
       ? isRoomRepresentative
       : Boolean(room?.representativeStudentId === student.studentId);
-  const effectiveRoleLabel = actorRole === 'admin' ? 'مدیریت کل سامانه جامع خدمات دانشجویی' : 'سرپرست سرا';
+  const effectiveRoleLabel = actorRole === 'admin' ? 'مدیریت کل سامانه جامع خدمات دانشگاهی' : 'سرپرست سرا';
 
   const recordPresets =
     recordType === 'report'

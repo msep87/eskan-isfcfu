@@ -23,7 +23,7 @@ interface ImportantAnnouncementsWidgetProps {
 
 export const ImportantAnnouncementsWidget: React.FC<ImportantAnnouncementsWidgetProps> = ({
   announcements,
-  title = 'اطلاعیه‌های مهم سامانه جامع خدمات دانشجویی دانشگاه فرهنگیان',
+  title = 'اطلاعیه‌های مهم سامانه جامع خدمات دانشگاهی دانشگاه فرهنگیان',
   className = '',
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);

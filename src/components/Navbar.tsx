@@ -264,14 +264,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="font-extrabold text-xs sm:text-base text-slate-900 dark:text-white tracking-tight truncate">
-                  سامانه جامع خدمات دانشجویی
+                  سامانه جامع خدمات دانشگاهی
                 </span>
                 <span className="hidden lg:inline-block shrink-0 px-2 py-0.5 text-[11px] font-bold bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 rounded-full border border-teal-200 dark:border-teal-800">
                   دانشگاه فرهنگیان ({settings.currentAcademicYear || '۱۴۰۵-۱۴۰۶'})
                 </span>
               </div>
               <p className="hidden md:block text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
-                پیشخوان جامع خدمات دانشجویی — آموزش، سراهای دانشجویی، مالی، فرهنگی، ورزشی، کتابخانه، مشاوره و هوشمندسازی
+                پیشخوان جامع خدمات دانشگاهی — آموزش، سراهای دانشجویی، مالی، فرهنگی، ورزشی، کتابخانه، مشاوره و هوشمندسازی
               </p>
               <p className="md:hidden text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
                 دانشگاه فرهنگیان اصفهان ({settings.currentAcademicYear || '۱۴۰۵-۱۴۰۶'})
@@ -717,7 +717,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentUser.role === 'graduation' && (currentUser.staff.department || 'اداره امور فارغ‌التحصیلان')}
                     {currentUser.role === 'academic_deputy' && (currentUser.staff.title || currentUser.staff.department || 'معاونت آموزشی دانشگاه فرهنگیان')}
                     {currentUser.role === 'professor' && `کد استاد: ${currentUser.professor.professorCode}`}
-                    {currentUser.role === 'admin' && 'مدیر کل سامانه جامع خدمات دانشجویی'}
+                    {currentUser.role === 'admin' && 'مدیر کل سامانه جامع خدمات دانشگاهی'}
                   </div>
                 </div>
 
@@ -809,7 +809,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       : currentUser.role === 'academic_deputy'
                       ? 'معاونت آموزشی دانشگاه فرهنگیان'
                       : currentUser.role === 'admin'
-                      ? 'مدیر کل سامانه جامع خدمات دانشجویی'
+                      ? 'مدیر کل سامانه جامع خدمات دانشگاهی'
                       : 'کاربر کادر سامانه'}
                   </div>
                 </div>
