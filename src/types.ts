@@ -1842,6 +1842,71 @@ export interface StaffChatDirectoryItem {
   photoUrl?: string;
 }
 
+// -------------------------------------------------------------
+// سیستم چت آنلاین (دونفره و گروهی) و تالارهای مشترک معاونت آموزش
+// -------------------------------------------------------------
+export type AcademicChatRoomType = 'dm' | 'group' | 'forum';
+
+export type AcademicChatForumTopic =
+  | 'curriculum'
+  | 'education_affairs'
+  | 'department_coordination'
+  | 'graduation'
+  | 'general';
+
+export type AcademicChatMemberRole =
+  | 'academic_deputy'
+  | 'department_head'
+  | 'education_expert'
+  | 'graduation'
+  | 'admin';
+
+export interface AcademicChatParticipant {
+  id: string;
+  name: string;
+  role: AcademicChatMemberRole;
+  roleLabel: string;
+  assignedFields?: string[];
+  department?: string;
+  photoUrl?: string;
+}
+
+export interface AcademicChatRoom {
+  id: string;
+  type: AcademicChatRoomType;
+  title: string;
+  description?: string;
+  topic?: AcademicChatForumTopic;
+  creatorId: string;
+  creatorName: string;
+  creatorRoleLabel: string;
+  memberIds: string[]; // برای dm شامل دو عضو، برای group شامل اعضای منتخب، برای forum باز برای کل معاونت آموزش
+  dmPairKey?: string; // `${minId}__${maxId}`
+  isPinned?: boolean;
+  createdAt: string;
+  createdAtIso: string;
+  updatedAtIso: string;
+}
+
+export interface AcademicChatMessage {
+  id: string;
+  roomId: string;
+  senderId: string;
+  senderName: string;
+  senderRole: AcademicChatMemberRole;
+  senderRoleLabel: string;
+  senderFields?: string[];
+  text: string;
+  issueTag?: string; // برچسب موضوع پیام در تالارهای مشترک (مثلاً برنامه درسی، کمبود کلاس/استاد، پیشنهاد، فوری)
+  replyToId?: string;
+  replyToSenderName?: string;
+  replyToText?: string;
+  isEdited?: boolean;
+  editedAt?: string;
+  createdAt: string;
+  createdAtIso: string;
+}
+
 // =============================================================
 // انواع داده‌ای سامانه جامع برنامه‌ریزی درسی دانشگاه فرهنگیان
 // =============================================================

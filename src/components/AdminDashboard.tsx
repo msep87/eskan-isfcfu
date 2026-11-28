@@ -100,6 +100,11 @@ import { CommunityChatHub } from './CommunityChatHub';
 import { AdminStudentPortalsEditor } from './AdminStudentPortalsEditor';
 import { AdminAcademicMajorsSettings } from './AdminAcademicMajorsSettings';
 import { CourseSchedulingWorkspace } from './CourseSchedulingWorkspace';
+import { AcademicChatWorkspace } from './AcademicChatWorkspace';
+import {
+  getAcademicChatTotalUnreadCount,
+  subscribeAcademicChatRealtime,
+} from '../utils/academicChatRealtime';
 import { getStudentResidenceType, getStudentAdmissionStatus } from '../utils/financeUtils';
 import {
   findClosestApprovedMajor,
@@ -303,6 +308,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'surveys'
     | 'clearance'
     | 'course_scheduling'
+    | 'academic_chat'
     | 'community_chat'
     | 'activity_log'
     | 'settings';
@@ -332,7 +338,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
   const [isCourseSchedulingOpen, setIsCourseSchedulingOpen] = useState(false);
+  const [isAcademicChatOpen, setIsAcademicChatOpen] = useState(false);
+  const [academicChatUnreadCount, setAcademicChatUnreadCount] = useState<number>(() =>
+    getAcademicChatTotalUnreadCount('admin')
+  );
   const [usersCategory, setUsersCategory] = useState<UserCategoryKey>('students');
+
+  useEffect(() => {
+    const refresh = () => setAcademicChatUnreadCount(getAcademicChatTotalUnreadCount('admin'));
+    refresh();
+    return subscribeAcademicChatRealtime({ onDataUpdated: refresh });
+  }, [cloudSyncTick, isAcademicChatOpen]);
 
   useEffect(() => {
     try {
@@ -353,6 +369,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleToggleOrSelectTab = (tab: AdminMainTabKey) => {
     if (tab === 'course_scheduling') {
       setIsCourseSchedulingOpen(true);
+      setIsMobileSidebarOpen(false);
+      if (adminSidebarAutoHide) {
+        setIsAutoHideExpanded(false);
+      }
+      return;
+    }
+    if (tab === 'academic_chat') {
+      setIsAcademicChatOpen(true);
       setIsMobileSidebarOpen(false);
       if (adminSidebarAutoHide) {
         setIsAutoHideExpanded(false);
@@ -3027,6 +3051,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             badgeClass: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/70 dark:text-indigo-200',
           },
           {
+            key: 'academic_chat',
+            title: 'چت و تالارهای معاونت آموزش',
+            desc: 'گفتگوی آنلاین دو به دو و گروهی مدیران گروه، کارشناسان، معاون و تالار برنامه درسی',
+            icon: MessagesSquare,
+            iconTone: 'text-teal-600 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-800',
+            activeRing: 'border-teal-500 bg-teal-50/70 dark:bg-teal-950/40 shadow-md shadow-teal-500/10',
+            badge:
+              academicChatUnreadCount > 0
+                ? `${academicChatUnreadCount.toLocaleString('fa-IR')} جدید`
+                : 'آنلاین',
+            badgeClass:
+              academicChatUnreadCount > 0
+                ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/70 dark:text-rose-200'
+                : 'bg-teal-100 text-teal-800 dark:bg-teal-900/70 dark:text-teal-200',
+          },
+          {
             key: 'community_chat',
             title: 'پیام‌رسان و تالارهای گفتگو',
             desc: 'تنظیمات کامل چت، باز/بسته کردن تالار عمومی، تأیید گروه‌ها، مسدودسازی و نظارت',
@@ -3563,6 +3603,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       activeRing: 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/40',
                       badge: 'تمام‌صفحه',
                       badgeClass: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/70 dark:text-indigo-200',
+                    },
+                    {
+                      key: 'academic_chat' as const,
+                      title: 'چت و تالارهای معاونت آموزش',
+                      desc: 'گفتگوی زنده مدیران گروه، کارشناسان آموزش، معاون و تالار برنامه درسی',
+                      icon: MessagesSquare,
+                      iconTone: 'text-teal-600 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-800',
+                      activeRing: 'border-teal-500 bg-teal-50/70 dark:bg-teal-950/40',
+                      badge:
+                        academicChatUnreadCount > 0
+                          ? `${academicChatUnreadCount.toLocaleString('fa-IR')} جدید`
+                          : 'آنلاین',
+                      badgeClass:
+                        academicChatUnreadCount > 0
+                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/70 dark:text-rose-200'
+                          : 'bg-teal-100 text-teal-800 dark:bg-teal-900/70 dark:text-teal-200',
                     },
                     {
                       key: 'community_chat' as const,
@@ -8702,6 +8758,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 settings={localSettings}
                 students={students}
                 onUpdateSettings={(updated) => {
+                  Storage.setSettings(updated);
                   setLocalSettings(updated);
                   onUpdateSettings(updated);
                 }}
@@ -8716,6 +8773,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <AdminStudentPortalsEditor
                 settings={localSettings}
                 onUpdateSettings={(updated) => {
+                  Storage.setSettings(updated);
                   setLocalSettings(updated);
                   onUpdateSettings(updated);
                 }}
@@ -12141,6 +12199,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         userRole="admin"
         actor={{ id: 'admin', name: 'مدیر کل سامانه' }}
         onDataUpdated={onRefreshData}
+      />
+
+      <AcademicChatWorkspace
+        mode="modal"
+        isOpen={isAcademicChatOpen}
+        onClose={() => setIsAcademicChatOpen(false)}
+        actor={{ id: 'admin', name: 'مدیر کل سامانه', role: 'admin' }}
+        cloudSyncTick={cloudSyncTick}
+        onUnreadChange={() => setAcademicChatUnreadCount(getAcademicChatTotalUnreadCount('admin'))}
       />
 
     </div>

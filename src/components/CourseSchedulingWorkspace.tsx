@@ -112,6 +112,11 @@ import { CourseSchedulingMasterGrid } from './CourseSchedulingMasterGrid';
 import { CourseSchedulingCommonExamModal } from './CourseSchedulingCommonExamModal';
 import { PersianDatePicker } from './PersianDatePicker';
 import { PersianTimePicker } from './PersianTimePicker';
+import { AcademicChatWorkspace } from './AcademicChatWorkspace';
+import {
+  getAcademicChatTotalUnreadCount,
+  subscribeAcademicChatRealtime,
+} from '../utils/academicChatRealtime';
 import {
   AlertCircle,
   AlertTriangle,
@@ -138,6 +143,7 @@ import {
   LayoutGrid,
   ListChecks,
   Lock,
+  MessagesSquare,
   Plus,
   Printer,
   Redo2,
@@ -220,6 +226,17 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     Storage.getSchedCellComments()
   );
   const [appSettingsSnapshot, setAppSettingsSnapshot] = useState(() => Storage.getSettings());
+  const [isAcademicChatOpen, setIsAcademicChatOpen] = useState(false);
+  const [academicChatUnread, setAcademicChatUnread] = useState<number>(() =>
+    getAcademicChatTotalUnreadCount(actor.id)
+  );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const refresh = () => setAcademicChatUnread(getAcademicChatTotalUnreadCount(actor.id));
+    refresh();
+    return subscribeAcademicChatRealtime({ onDataUpdated: refresh });
+  }, [isOpen, actor.id, isAcademicChatOpen]);
 
   // همگام‌سازی خودکار داده‌ها با تنظیمات کل سامانه و پاک‌سازی مغایرت‌های احتمالی در زمان باز شدن پنجره
   useEffect(() => {
@@ -2768,6 +2785,21 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               >
                 <CalendarClock className="w-3.5 h-3.5" />
                 <span>برنامه امتحانات مشترک / عمومی</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsAcademicChatOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold inline-flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                title="چت آنلاین دو به دو / چندنفره و تالارهای مشترک معاونت آموزش و برنامه درسی"
+              >
+                <MessagesSquare className="w-3.5 h-3.5" />
+                <span>گفتگو و تالار برنامه درسی</span>
+                {academicChatUnread > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black">
+                    {academicChatUnread.toLocaleString('fa-IR')}
+                  </span>
+                )}
               </button>
             </>
           )}
@@ -10027,6 +10059,27 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         return masterFullscreenPortalEl && commonExamModalOpen
           ? createPortal(examModalNode, masterFullscreenPortalEl)
           : examModalNode;
+      })()}
+
+      {/* مودال چت آنلاین و تالارهای مشترک معاونت آموزش */}
+      {(() => {
+        const chatModalNode = (
+          <AcademicChatWorkspace
+            mode="modal"
+            isOpen={isAcademicChatOpen}
+            onClose={() => setIsAcademicChatOpen(false)}
+            actor={{
+              id: actor.id,
+              name: actor.name,
+              role: userRole,
+              assignedFields: allowedMajorNames,
+            }}
+            onUnreadChange={() => setAcademicChatUnread(getAcademicChatTotalUnreadCount(actor.id))}
+          />
+        );
+        return masterFullscreenPortalEl && isAcademicChatOpen
+          ? createPortal(chatModalNode, masterFullscreenPortalEl)
+          : chatModalNode;
       })()}
 
       {/* نوار اعلان شناور درون حالت تمام‌صفحه */}

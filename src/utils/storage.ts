@@ -103,6 +103,11 @@ import {
   SchedUserHistoryState,
   AcademicDegreeLevel,
   ApprovedAcademicMajor,
+  AcademicChatRoom,
+  AcademicChatMessage,
+  AcademicChatParticipant,
+  AcademicChatForumTopic,
+  AcademicChatMemberRole,
 } from '../types';
 import { getSchedSlotTitle } from './schedulingUtils';
 import {
@@ -367,6 +372,8 @@ const STORAGE_KEYS = {
   COMMUNITY_CHAT_BANS: 'farhangian_dorm_community_chat_bans_prod',
   COMMUNITY_CHAT_REPORTS: 'farhangian_dorm_community_chat_reports_prod',
   COMMUNITY_USER_PREFS: 'farhangian_dorm_community_user_prefs_prod',
+  ACADEMIC_CHAT_ROOMS: 'farhangian_academic_chat_rooms_prod',
+  ACADEMIC_CHAT_MESSAGES: 'farhangian_academic_chat_messages_prod',
 };
 
 export const SECURITY_REPORT_PRESETS: Array<{
@@ -892,6 +899,8 @@ const IMMEDIATE_CLOUD_KEYS = new Set<string>([
   STORAGE_KEYS.COMMUNITY_CHAT_BANS,
   STORAGE_KEYS.COMMUNITY_CHAT_REPORTS,
   STORAGE_KEYS.COMMUNITY_USER_PREFS,
+  STORAGE_KEYS.ACADEMIC_CHAT_ROOMS,
+  STORAGE_KEYS.ACADEMIC_CHAT_MESSAGES,
 ]);
 
 // پنجره ادغام درخواست‌های همگام‌سازی غیرضروری و نشانگر آخرین تغییر جدول students برای Delta Sync
@@ -1292,6 +1301,8 @@ const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.COMMUNITY_CHAT_BANS]: 'فهرست مسدودشدگان پیام‌رسان دانشجویی',
   [STORAGE_KEYS.COMMUNITY_CHAT_REPORTS]: 'گزارش‌های تخلف پیام‌رسان دانشجویی',
   [STORAGE_KEYS.COMMUNITY_USER_PREFS]: 'تنظیمات و تعهدنامه‌های کاربران در پیام‌رسان',
+  [STORAGE_KEYS.ACADEMIC_CHAT_ROOMS]: 'اتاق‌های گفتگو و تالارهای مشترک معاونت آموزش',
+  [STORAGE_KEYS.ACADEMIC_CHAT_MESSAGES]: 'پیام‌های چت آنلاین و تالارهای مشترک معاونت آموزش',
 };
 
 const cloudTelemetryState = {
@@ -17649,6 +17660,349 @@ export const Storage = {
 
   makeCommunityDmRoomId: (studentIdA: string, studentIdB: string): string =>
     makeDmRoomId(studentIdA, studentIdB),
+
+  // -------------------------------------------------------------
+  // سیستم چت آنلاین دو به دو / چندنفره و تالارهای مشترک معاونت آموزش
+  // -------------------------------------------------------------
+  getAcademicChatRoleLabel: (role: AcademicChatMemberRole): string => {
+    switch (role) {
+      case 'academic_deputy':
+        return 'معاون آموزشی';
+      case 'department_head':
+        return 'مدیر گروه آموزشی';
+      case 'education_expert':
+        return 'کارشناس آموزش';
+      case 'graduation':
+        return 'کارشناس واحد فارغ‌التحصیلان';
+      case 'admin':
+      default:
+        return 'مدیر کل سامانه';
+    }
+  },
+
+  getAcademicChatParticipants: (): AcademicChatParticipant[] => {
+    const list: AcademicChatParticipant[] = [];
+    const seenIds = new Set<string>();
+
+    const pushItem = (item: AcademicChatParticipant) => {
+      if (!item.id || seenIds.has(item.id)) return;
+      seenIds.add(item.id);
+      list.push(item);
+    };
+
+    const deputies = Storage.getAcademicDeputyStaff().filter(
+      (a) => a.status !== 'inactive' && a.isActive !== false
+    );
+    for (const d of deputies) {
+      pushItem({
+        id: d.id,
+        name: d.fullName,
+        role: 'academic_deputy',
+        roleLabel: d.title || 'معاون آموزشی',
+        department: d.department || 'معاونت آموزشی پردیس',
+        photoUrl: d.photoUrl,
+      });
+    }
+
+    const eduList = Storage.getEducationStaff().filter(
+      (e) => e.status !== 'inactive' && e.isActive !== false
+    );
+    for (const e of eduList) {
+      const isHead = isEducationDepartmentHead(e);
+      pushItem({
+        id: e.id,
+        name: e.fullName,
+        role: isHead ? 'department_head' : 'education_expert',
+        roleLabel: getEducationStaffRoleLabel(e),
+        assignedFields: normalizeAssignedFieldsList(e.assignedFields),
+        department: e.department,
+        photoUrl: e.photoUrl,
+      });
+    }
+
+    const gradList = Storage.getGraduationStaff().filter(
+      (g) => g.status !== 'inactive' && g.isActive !== false
+    );
+    for (const g of gradList) {
+      pushItem({
+        id: g.id,
+        name: g.fullName,
+        role: 'graduation',
+        roleLabel: 'کارشناس واحد فارغ‌التحصیلان',
+        department: g.department || 'واحد فارغ‌التحصیلان',
+        photoUrl: g.photoUrl,
+      });
+    }
+
+    pushItem({
+      id: 'admin',
+      name: 'مدیر کل سامانه',
+      role: 'admin',
+      roleLabel: 'مدیر کل سامانه',
+      department: 'مدیریت کل',
+    });
+
+    return list;
+  },
+
+  getAcademicChatRooms: (): AcademicChatRoom[] => {
+    const stored = get<AcademicChatRoom[]>(STORAGE_KEYS.ACADEMIC_CHAT_ROOMS, []);
+    const defaultForum: AcademicChatRoom = {
+      id: 'forum_academic_general_curriculum',
+      type: 'forum',
+      title: 'تالار مشترک هماهنگی برنامه درسی و مسائل آموزشی معاونت',
+      description:
+        'تالار گفتگوی عمومی میان معاونت آموزشی، مدیران گروه، کارشناسان آموزش و کارشناسان فارغ‌التحصیلان برای طرح مسائل برنامه درسی، کمبود کلاس/استاد، سرفصل‌ها و پیشنهادات.',
+      topic: 'curriculum',
+      creatorId: 'system',
+      creatorName: 'معاونت آموزشی',
+      creatorRoleLabel: 'تالار پیش‌فرض معاونت',
+      memberIds: [],
+      isPinned: true,
+      createdAt: new Date().toLocaleDateString('fa-IR'),
+      createdAtIso: '2026-01-01T00:00:00.000Z',
+      updatedAtIso: '2026-01-01T00:00:00.000Z',
+    };
+    if (!Array.isArray(stored) || stored.length === 0) {
+      return [defaultForum];
+    }
+    return stored;
+  },
+
+  setAcademicChatRooms: (rooms: AcademicChatRoom[]): boolean => {
+    return set(STORAGE_KEYS.ACADEMIC_CHAT_ROOMS, rooms);
+  },
+
+  upsertAcademicChatRoom: (room: AcademicChatRoom): AcademicChatRoom[] => {
+    const current = [...Storage.getAcademicChatRooms()];
+    const idx = current.findIndex(
+      (r) =>
+        r.id === room.id ||
+        (room.type === 'dm' && room.dmPairKey && r.type === 'dm' && r.dmPairKey === room.dmPairKey)
+    );
+    if (idx !== -1) {
+      const mergedMemberIds = Array.from(
+        new Set([...(current[idx].memberIds || []), ...(room.memberIds || [])])
+      );
+      current[idx] = {
+        ...current[idx],
+        ...room,
+        memberIds: mergedMemberIds,
+      };
+    } else {
+      current.push(room);
+    }
+    Storage.setAcademicChatRooms(current);
+    return current;
+  },
+
+  createOrGetAcademicDmRoom: (
+    actor: { id: string; name: string; role: AcademicChatMemberRole },
+    target: AcademicChatParticipant
+  ): { room: AcademicChatRoom; created: boolean } => {
+    const pairKey = [actor.id, target.id].sort().join('__');
+    const existing = Storage.getAcademicChatRooms().find(
+      (r) => r.type === 'dm' && (r.dmPairKey === pairKey || r.id === `adm_${pairKey}`)
+    );
+    if (existing) {
+      return { room: existing, created: false };
+    }
+    const nowIso = new Date().toISOString();
+    const room: AcademicChatRoom = {
+      id: `adm_${pairKey}`,
+      type: 'dm',
+      title: `${actor.name} و ${target.name}`,
+      creatorId: actor.id,
+      creatorName: actor.name,
+      creatorRoleLabel: Storage.getAcademicChatRoleLabel(actor.role),
+      memberIds: [actor.id, target.id],
+      dmPairKey: pairKey,
+      createdAt: new Date().toLocaleDateString('fa-IR'),
+      createdAtIso: nowIso,
+      updatedAtIso: nowIso,
+    };
+    Storage.upsertAcademicChatRoom(room);
+    return { room, created: true };
+  },
+
+  createAcademicGroupRoom: (params: {
+    title: string;
+    description?: string;
+    creator: { id: string; name: string; role: AcademicChatMemberRole };
+    memberIds: string[];
+  }): AcademicChatRoom => {
+    const nowIso = new Date().toISOString();
+    const cleanMembers = Array.from(new Set([params.creator.id, ...params.memberIds].filter(Boolean)));
+    const room: AcademicChatRoom = {
+      id: makeUniqueId('acgrp'),
+      type: 'group',
+      title: params.title.trim(),
+      description: params.description?.trim() || undefined,
+      creatorId: params.creator.id,
+      creatorName: params.creator.name,
+      creatorRoleLabel: Storage.getAcademicChatRoleLabel(params.creator.role),
+      memberIds: cleanMembers,
+      createdAt: new Date().toLocaleDateString('fa-IR'),
+      createdAtIso: nowIso,
+      updatedAtIso: nowIso,
+    };
+    Storage.upsertAcademicChatRoom(room);
+    return room;
+  },
+
+  createAcademicSharedForum: (params: {
+    title: string;
+    description?: string;
+    topic: AcademicChatForumTopic;
+    isPinned?: boolean;
+    creator: { id: string; name: string; role: AcademicChatMemberRole };
+  }): AcademicChatRoom => {
+    const nowIso = new Date().toISOString();
+    const room: AcademicChatRoom = {
+      id: makeUniqueId('acfrm'),
+      type: 'forum',
+      title: params.title.trim(),
+      description: params.description?.trim() || undefined,
+      topic: params.topic,
+      creatorId: params.creator.id,
+      creatorName: params.creator.name,
+      creatorRoleLabel: Storage.getAcademicChatRoleLabel(params.creator.role),
+      memberIds: [],
+      isPinned: Boolean(params.isPinned),
+      createdAt: new Date().toLocaleDateString('fa-IR'),
+      createdAtIso: nowIso,
+      updatedAtIso: nowIso,
+    };
+    Storage.upsertAcademicChatRoom(room);
+    return room;
+  },
+
+  updateAcademicGroupMembers: (roomId: string, nextMemberIds: string[]): AcademicChatRoom | null => {
+    const rooms = [...Storage.getAcademicChatRooms()];
+    const idx = rooms.findIndex((r) => r.id === roomId && r.type === 'group');
+    if (idx === -1) return null;
+    const clean = Array.from(new Set([rooms[idx].creatorId, ...nextMemberIds].filter(Boolean)));
+    rooms[idx] = {
+      ...rooms[idx],
+      memberIds: clean,
+      updatedAtIso: new Date().toISOString(),
+    };
+    Storage.setAcademicChatRooms(rooms);
+    return rooms[idx];
+  },
+
+  togglePinAcademicForum: (roomId: string): AcademicChatRoom | null => {
+    const rooms = [...Storage.getAcademicChatRooms()];
+    const idx = rooms.findIndex((r) => r.id === roomId && r.type === 'forum');
+    if (idx === -1) return null;
+    rooms[idx] = {
+      ...rooms[idx],
+      isPinned: !rooms[idx].isPinned,
+    };
+    Storage.setAcademicChatRooms(rooms);
+    return rooms[idx];
+  },
+
+  getAcademicChatMessages: (): AcademicChatMessage[] => {
+    return get<AcademicChatMessage[]>(STORAGE_KEYS.ACADEMIC_CHAT_MESSAGES, []);
+  },
+
+  setAcademicChatMessages: (messages: AcademicChatMessage[]): boolean => {
+    return set(STORAGE_KEYS.ACADEMIC_CHAT_MESSAGES, messages);
+  },
+
+  upsertAcademicChatMessage: (msg: AcademicChatMessage): AcademicChatMessage[] => {
+    const current = [...Storage.getAcademicChatMessages()];
+    const idx = current.findIndex((m) => m.id === msg.id);
+    if (idx !== -1) {
+      current[idx] = { ...current[idx], ...msg };
+    } else {
+      current.push(msg);
+      const rooms = [...Storage.getAcademicChatRooms()];
+      const rIdx = rooms.findIndex((r) => r.id === msg.roomId);
+      if (rIdx !== -1 && (!rooms[rIdx].updatedAtIso || msg.createdAtIso > rooms[rIdx].updatedAtIso)) {
+        rooms[rIdx] = { ...rooms[rIdx], updatedAtIso: msg.createdAtIso };
+        Storage.setAcademicChatRooms(rooms);
+      }
+    }
+    current.sort((a, b) => (a.createdAtIso || '').localeCompare(b.createdAtIso || ''));
+    Storage.setAcademicChatMessages(current);
+    return current;
+  },
+
+  sendAcademicChatMessage: (params: {
+    roomId: string;
+    sender: {
+      id: string;
+      name: string;
+      role: AcademicChatMemberRole;
+      assignedFields?: string[];
+    };
+    text: string;
+    issueTag?: string;
+    replyTo?: { id: string; senderName: string; text: string };
+  }): AcademicChatMessage => {
+    const nowIso = new Date().toISOString();
+    const nowFa = new Date().toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }) + ' • ' + new Date().toLocaleDateString('fa-IR');
+
+    // اطمینان از ثبت اتاق (از جمله تالار پیش‌فرض) در فهرست ذخیره‌شده
+    const rooms = [...Storage.getAcademicChatRooms()];
+    const roomIdx = rooms.findIndex((r) => r.id === params.roomId);
+    if (roomIdx !== -1) {
+      rooms[roomIdx] = { ...rooms[roomIdx], updatedAtIso: nowIso };
+      Storage.setAcademicChatRooms(rooms);
+    }
+
+    const msg: AcademicChatMessage = {
+      id: makeUniqueId('acmsg'),
+      roomId: params.roomId,
+      senderId: params.sender.id,
+      senderName: params.sender.name,
+      senderRole: params.sender.role,
+      senderRoleLabel: Storage.getAcademicChatRoleLabel(params.sender.role),
+      senderFields: params.sender.assignedFields?.length ? params.sender.assignedFields : undefined,
+      text: params.text.trim(),
+      issueTag: params.issueTag?.trim() || undefined,
+      replyToId: params.replyTo?.id,
+      replyToSenderName: params.replyTo?.senderName,
+      replyToText: params.replyTo?.text ? params.replyTo.text.slice(0, 120) : undefined,
+      createdAt: nowFa,
+      createdAtIso: nowIso,
+    };
+
+    const current = [...Storage.getAcademicChatMessages(), msg];
+    Storage.setAcademicChatMessages(current);
+    return msg;
+  },
+
+  editAcademicChatMessage: (messageId: string, newText: string): AcademicChatMessage | null => {
+    const current = [...Storage.getAcademicChatMessages()];
+    const idx = current.findIndex((m) => m.id === messageId);
+    if (idx === -1) return null;
+    const editedAt =
+      new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) +
+      ' • ' +
+      new Date().toLocaleDateString('fa-IR');
+    current[idx] = {
+      ...current[idx],
+      text: newText.trim(),
+      isEdited: true,
+      editedAt,
+    };
+    Storage.setAcademicChatMessages(current);
+    return current[idx];
+  },
+
+  deleteAcademicChatMessage: (messageId: string): boolean => {
+    const current = Storage.getAcademicChatMessages();
+    const next = current.filter((m) => m.id !== messageId);
+    if (next.length === current.length) return false;
+    Storage.setAcademicChatMessages(next);
+    return true;
+  },
 };
 
 

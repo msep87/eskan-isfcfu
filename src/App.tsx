@@ -1707,6 +1707,7 @@ export default function App() {
             onOpenAppearance={() => setIsAppearanceModalOpen(true)}
             onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
             onUpdateSettings={(newSt) => {
+              Storage.setSettings(newSt);
               setSettings(newSt);
               refreshAllData();
             }}

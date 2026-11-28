@@ -107,11 +107,14 @@ export const AdminAcademicMajorsSettings: React.FC<AdminAcademicMajorsSettingsPr
   const [confirmDeleteLevelId, setConfirmDeleteLevelId] = useState<string | null>(null);
 
   const persistDegreeLevels = (nextLevels: AcademicDegreeLevel[], updatedMajors?: ApprovedAcademicMajor[]) => {
+    const latestStored = Storage.getSettings();
     const nextSettings: AppSettings = {
+      ...latestStored,
       ...settings,
       academicDegreeLevels: nextLevels,
-      approvedMajors: updatedMajors ?? settings.approvedMajors ?? [],
+      approvedMajors: updatedMajors ?? settings.approvedMajors ?? latestStored.approvedMajors ?? [],
     };
+    Storage.setSettings(nextSettings);
     onUpdateSettings(nextSettings);
   };
 
@@ -233,11 +236,15 @@ export const AdminAcademicMajorsSettings: React.FC<AdminAcademicMajorsSettingsPr
   };
 
   const persistApprovedMajors = (nextMajors: ApprovedAcademicMajor[]) => {
-    onUpdateSettings({
+    const latestStored = Storage.getSettings();
+    const nextSettings: AppSettings = {
+      ...latestStored,
       ...settings,
       academicDegreeLevels: degreeLevels,
       approvedMajors: nextMajors,
-    });
+    };
+    Storage.setSettings(nextSettings);
+    onUpdateSettings(nextSettings);
   };
 
   const handleSaveMajor = (e: React.FormEvent) => {
@@ -513,6 +520,19 @@ export const AdminAcademicMajorsSettings: React.FC<AdminAcademicMajorsSettingsPr
       return;
     }
 
+    const latestStored = Storage.getSettings();
+    const syncedBeforeStd: AppSettings = {
+      ...latestStored,
+      ...settings,
+      academicDegreeLevels:
+        degreeLevels.length > 0 ? degreeLevels : latestStored.academicDegreeLevels,
+      approvedMajors:
+        approvedMajors.length > 0 ? approvedMajors : latestStored.approvedMajors,
+      majorEightTermPlans:
+        settings.majorEightTermPlans ?? latestStored.majorEightTermPlans,
+    };
+    Storage.setSettings(syncedBeforeStd);
+
     const res = Storage.standardizeLegacyAcademicMajors({
       mappings,
       syncEducationStaff,
@@ -586,12 +606,16 @@ export const AdminAcademicMajorsSettings: React.FC<AdminAcademicMajorsSettingsPr
     setSchedCourses(nextCourses);
     Storage.setSchedCourses(nextCourses);
     if (nextPlans) {
-      onUpdateSettings({
+      const latestStored = Storage.getSettings();
+      const nextSettings: AppSettings = {
+        ...latestStored,
         ...settings,
         academicDegreeLevels: degreeLevels,
         approvedMajors: settings.approvedMajors ?? approvedMajors,
         majorEightTermPlans: nextPlans,
-      });
+      };
+      Storage.setSettings(nextSettings);
+      onUpdateSettings(nextSettings);
     }
     onRefreshData();
   };

@@ -19,6 +19,11 @@ import { EducationDashboard } from './EducationDashboard';
 import { GraduationDashboard } from './GraduationDashboard';
 import { AcademicWorkflowPanel } from './AcademicWorkflowPanel';
 import { CourseSchedulingWorkspace } from './CourseSchedulingWorkspace';
+import { AcademicChatWorkspace } from './AcademicChatWorkspace';
+import {
+  getAcademicChatTotalUnreadCount,
+  subscribeAcademicChatRealtime,
+} from '../utils/academicChatRealtime';
 import {
   Award,
   BookOpen,
@@ -30,6 +35,8 @@ import {
   Lock,
   Mail,
   Maximize2,
+  MessageCircle,
+  MessagesSquare,
   PackagePlus,
   Phone,
   ShieldCheck,
@@ -65,8 +72,10 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
   onOpenMessages,
   onOpenUserGuide,
 }) => {
-  const [hubTab, setHubTab] = useState<'panel' | 'workflow' | 'directory'>('panel');
+  const [hubTab, setHubTab] = useState<'panel' | 'workflow' | 'chat' | 'directory'>('panel');
   const [isSchedulingOpen, setIsSchedulingOpen] = useState(false);
+  const [initialChatTargetId, setInitialChatTargetId] = useState<string | null>(null);
+  const [chatUnreadCount, setChatUnreadCount] = useState<number>(0);
 
   const isDeptHead = role === 'education' && educationStaff ? isEducationDepartmentHead(educationStaff) : false;
   const canOpenCourseScheduling = role === 'academic_deputy' || role === 'education';
@@ -204,7 +213,23 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
       ? getEducationStaffRoleLabel(educationStaff)
       : 'حوزه آموزش';
 
+  React.useEffect(() => {
+    if (!currentStaff?.id) return;
+    const refreshUnread = () => {
+      setChatUnreadCount(getAcademicChatTotalUnreadCount(currentStaff.id));
+    };
+    refreshUnread();
+    return subscribeAcademicChatRealtime({
+      onDataUpdated: refreshUnread,
+    });
+  }, [currentStaff?.id, cloudSyncTick, hubTab]);
+
   if (!currentStaff) return null;
+
+  const openDirectChatWith = (targetId: string) => {
+    setInitialChatTargetId(targetId);
+    setHubTab('chat');
+  };
 
   return (
     <div className="space-y-5">
@@ -315,6 +340,24 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
             {pendingMyWorkflowCount > 0 && (
               <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black animate-pulse">
                 {pendingMyWorkflowCount.toLocaleString('fa-IR')} جدید
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setHubTab('chat')}
+            className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold inline-flex items-center gap-2 transition cursor-pointer ${
+              hubTab === 'chat'
+                ? 'bg-emerald-400 text-slate-950 shadow-md'
+                : 'bg-white/10 hover:bg-white/20 text-white border border-white/15'
+            }`}
+          >
+            <MessagesSquare className="w-4 h-4" />
+            <span>چت آنلاین و تالارهای مشترک</span>
+            {chatUnreadCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black animate-pulse">
+                {chatUnreadCount.toLocaleString('fa-IR')} جدید
               </span>
             )}
           </button>
@@ -498,7 +541,30 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
         />
       )}
 
-      {/* تب ۳: دایرکتوری و تبادل سریع اطلاعات بین مدیران گروه، کارشناسان آموزش و کارشناسان فارغ‌التحصیلان */}
+      {/* تب ۳: چت آنلاین دو به دو / چندنفره و تالارهای مشترک معاونت آموزش */}
+      {hubTab === 'chat' && (
+        <AcademicChatWorkspace
+          mode="embedded"
+          actor={{
+            id: currentStaff.id,
+            name: currentStaff.fullName,
+            role:
+              role === 'academic_deputy'
+                ? 'academic_deputy'
+                : role === 'graduation'
+                ? 'graduation'
+                : isDeptHead
+                ? 'department_head'
+                : 'education_expert',
+            assignedFields,
+          }}
+          initialTargetParticipantId={initialChatTargetId}
+          cloudSyncTick={cloudSyncTick}
+          onUnreadChange={() => setChatUnreadCount(getAcademicChatTotalUnreadCount(currentStaff.id))}
+        />
+      )}
+
+      {/* تب ۴: دایرکتوری و تبادل سریع اطلاعات بین مدیران گروه، کارشناسان آموزش و کارشناسان فارغ‌التحصیلان */}
       {hubTab === 'directory' && (
         <div className="space-y-5">
           <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -577,6 +643,18 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
                             <span>{dh.phone}</span>
                           </div>
                         )}
+                        {dh.id !== currentStaff.id && (
+                          <div className="pt-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openDirectChatWith(dh.id)}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              <span>چت آنلاین دو به دو</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -630,6 +708,18 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
                             <span>{ex.phone}</span>
                           </div>
                         )}
+                        {ex.id !== currentStaff.id && (
+                          <div className="pt-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openDirectChatWith(ex.id)}
+                              className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              <span>چت آنلاین دو به دو</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -681,12 +771,46 @@ export const AcademicDeputyHub: React.FC<AcademicDeputyHubProps> = ({
                           <span>{gr.phone}</span>
                         </div>
                       )}
+                      {gr.id !== currentStaff.id && (
+                        <div className="pt-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openDirectChatWith(gr.id)}
+                            className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <MessageCircle className="w-3 h-3" />
+                            <span>چت آنلاین دو به دو</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
               )}
             </div>
           </div>
+          {allAcademicDeputyStaff.filter((d) => d.id !== currentStaff.id).length > 0 && (
+            <div className="rounded-3xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-amber-900/60 p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs font-extrabold text-slate-800 dark:text-white">
+                ارتباط مستقیم با معاون آموزشی:
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {allAcademicDeputyStaff
+                  .filter((d) => d.id !== currentStaff.id)
+                  .map((dep) => (
+                    <button
+                      key={dep.id}
+                      type="button"
+                      onClick={() => openDirectChatWith(dep.id)}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>چت با {dep.fullName}</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
