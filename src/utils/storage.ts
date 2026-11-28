@@ -101,6 +101,7 @@ import {
   StaffChatDirectoryItem,
   SchedCellComment,
   SchedUserHistoryState,
+  SchedProfessorProposal,
   AcademicDegreeLevel,
   ApprovedAcademicMajor,
   AcademicChatRoom,
@@ -108,8 +109,20 @@ import {
   AcademicChatParticipant,
   AcademicChatForumTopic,
   AcademicChatMemberRole,
+  DormAttendanceStatus,
+  DormAttendanceScanMethod,
+  DormAttendanceStateRecord,
+  DormAttendanceLogEntry,
 } from '../types';
-import { getSchedSlotTitle } from './schedulingUtils';
+import {
+  formatProfessorDegreeFull,
+  getNextTemporaryProfessorCode,
+  getSchedSlotTitle,
+  isTemporaryProfessorCode,
+  normalizeProfessorCodeInput,
+  normalizeSchedCode,
+  syncProfessorMetadataInOfferings,
+} from './schedulingUtils';
 import {
   DEFAULT_ACADEMIC_DEGREE_LEVELS,
   normalizeMajorCode,
@@ -362,6 +375,7 @@ const STORAGE_KEYS = {
   SCHED_OFFERINGS: 'farhangian_sched_offerings_prod',
   SCHED_CELL_COMMENTS: 'farhangian_sched_cell_comments_prod',
   SCHED_RULES: 'farhangian_sched_rules_prod',
+  SCHED_PROFESSOR_PROPOSALS: 'farhangian_sched_professor_proposals_prod',
   LIBRARY_BOOKS: 'farhangian_dorm_library_books_prod',
   LIBRARY_BOOK_REQUESTS: 'farhangian_dorm_library_book_requests_prod',
   GRADUATION_CLEARANCES: 'farhangian_dorm_graduation_clearances_prod',
@@ -374,6 +388,8 @@ const STORAGE_KEYS = {
   COMMUNITY_USER_PREFS: 'farhangian_dorm_community_user_prefs_prod',
   ACADEMIC_CHAT_ROOMS: 'farhangian_academic_chat_rooms_prod',
   ACADEMIC_CHAT_MESSAGES: 'farhangian_academic_chat_messages_prod',
+  DORM_ATTENDANCE_STATES: 'farhangian_dorm_attendance_states_prod',
+  DORM_ATTENDANCE_LOGS: 'farhangian_dorm_attendance_logs_prod',
 };
 
 export const SECURITY_REPORT_PRESETS: Array<{
@@ -631,6 +647,9 @@ export function initializeStorageIfNeeded(): void {
   setIfMissing(STORAGE_KEYS.SCHED_OFFERINGS, INITIAL_SCHED_OFFERINGS);
   setIfMissing(STORAGE_KEYS.SCHED_CELL_COMMENTS, INITIAL_SCHED_CELL_COMMENTS);
   setIfMissing(STORAGE_KEYS.SCHED_RULES, DEFAULT_SCHED_RULES);
+  setIfMissing(STORAGE_KEYS.SCHED_PROFESSOR_PROPOSALS, []);
+  setIfMissing(STORAGE_KEYS.DORM_ATTENDANCE_STATES, []);
+  setIfMissing(STORAGE_KEYS.DORM_ATTENDANCE_LOGS, []);
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOKS, INITIAL_LIBRARY_BOOKS);
   setIfMissing(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, INITIAL_LIBRARY_BOOK_REQUESTS);
   setIfMissing(STORAGE_KEYS.GRADUATION_CLEARANCES, INITIAL_GRADUATION_CLEARANCES);
@@ -901,6 +920,9 @@ const IMMEDIATE_CLOUD_KEYS = new Set<string>([
   STORAGE_KEYS.COMMUNITY_USER_PREFS,
   STORAGE_KEYS.ACADEMIC_CHAT_ROOMS,
   STORAGE_KEYS.ACADEMIC_CHAT_MESSAGES,
+  STORAGE_KEYS.SCHED_PROFESSOR_PROPOSALS,
+  STORAGE_KEYS.DORM_ATTENDANCE_STATES,
+  STORAGE_KEYS.DORM_ATTENDANCE_LOGS,
 ]);
 
 // پنجره ادغام درخواست‌های همگام‌سازی غیرضروری و نشانگر آخرین تغییر جدول students برای Delta Sync
@@ -1262,6 +1284,9 @@ const FRIENDLY_SYNC_KEY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.SCHED_OFFERINGS]: 'برنامه هفتگی و دروس ارائه‌شده',
   [STORAGE_KEYS.SCHED_CELL_COMMENTS]: 'یادداشت‌ها و کامنت‌های برنامه جامع درسی',
   [STORAGE_KEYS.SCHED_RULES]: 'تنظیمات ضرایب و سانس‌های برنامه‌ریزی',
+  [STORAGE_KEYS.SCHED_PROFESSOR_PROPOSALS]: 'درخواست‌های ثبت استاد جدید مدیران گروه',
+  [STORAGE_KEYS.DORM_ATTENDANCE_STATES]: 'وضعیت حضور و غیاب لحظه‌ای ساکنان سراها',
+  [STORAGE_KEYS.DORM_ATTENDANCE_LOGS]: 'تاریخچه تردد و اسکن بارکد سراهای دانشجویی',
   [STORAGE_KEYS.LIBRARY_BOOKS]: 'فهرست کتب کتابخانه',
   [STORAGE_KEYS.LIBRARY_BOOK_REQUESTS]: 'درخواست‌ها و امانات کتابخانه',
   [STORAGE_KEYS.GRADUATION_CLEARANCES]: 'تسویه حساب الکترونیک فارغ‌التحصیلان',
@@ -5469,12 +5494,15 @@ export const Storage = {
     schedOfferings: Storage.getSchedOfferings(),
     schedCellComments: Storage.getSchedCellComments(),
     schedRules: Storage.getSchedRules(),
+    schedProfessorProposals: Storage.getSchedProfessorProposals(),
     libraryBooks: Storage.getLibraryBooks(),
     libraryBookRequests: Storage.getLibraryBookRequests(),
     graduationClearances: Storage.getGraduationClearances(),
     academicWorkflowRequests: Storage.getAcademicWorkflowRequests(),
     academicChatRooms: Storage.getAcademicChatRooms(),
     academicChatMessages: Storage.getAcademicChatMessages(),
+    dormAttendanceStates: Storage.getDormAttendanceStates(),
+    dormAttendanceLogs: Storage.getDormAttendanceLogs(),
     exportedAt: new Date().toISOString(),
     appName: 'سامانه جامع خدمات دانشگاهی دانشگاه فرهنگیان اصفهان',
   }),
@@ -5909,12 +5937,17 @@ export const Storage = {
     if (data.schedRules && typeof data.schedRules === 'object' && !Array.isArray(data.schedRules)) {
       writeCollection(STORAGE_KEYS.SCHED_RULES, data.schedRules);
     }
+    if (Array.isArray(data.schedProfessorProposals)) {
+      writeCollection(STORAGE_KEYS.SCHED_PROFESSOR_PROPOSALS, data.schedProfessorProposals);
+    }
     if (Array.isArray(data.libraryBooks)) writeCollection(STORAGE_KEYS.LIBRARY_BOOKS, data.libraryBooks);
     if (Array.isArray(data.libraryBookRequests)) writeCollection(STORAGE_KEYS.LIBRARY_BOOK_REQUESTS, data.libraryBookRequests);
     if (Array.isArray(data.graduationClearances)) writeCollection(STORAGE_KEYS.GRADUATION_CLEARANCES, data.graduationClearances);
     if (Array.isArray(data.academicWorkflowRequests)) writeCollection(STORAGE_KEYS.ACADEMIC_WORKFLOW_REQUESTS, data.academicWorkflowRequests);
     if (Array.isArray(data.academicChatRooms)) writeCollection(STORAGE_KEYS.ACADEMIC_CHAT_ROOMS, data.academicChatRooms);
     if (Array.isArray(data.academicChatMessages)) writeCollection(STORAGE_KEYS.ACADEMIC_CHAT_MESSAGES, data.academicChatMessages);
+    if (Array.isArray(data.dormAttendanceStates)) writeCollection(STORAGE_KEYS.DORM_ATTENDANCE_STATES, data.dormAttendanceStates);
+    if (Array.isArray(data.dormAttendanceLogs)) writeCollection(STORAGE_KEYS.DORM_ATTENDANCE_LOGS, data.dormAttendanceLogs);
   },
 
   // بازیابی نسخه پشتیبان همگام (سازگاری با فراخوانی‌های قدیمی)
@@ -14581,6 +14614,399 @@ export const Storage = {
   },
 
   // -------------------------------------------------------------
+  // درخواست‌های ثبت استاد جدید (مدیر گروه ← تأیید مدیر سامانه با کد موقت new001 تا new999 و قابل اصلاح به کد گلستان)
+  // -------------------------------------------------------------
+  getSchedProfessorProposals: (): SchedProfessorProposal[] =>
+    get<SchedProfessorProposal[]>(STORAGE_KEYS.SCHED_PROFESSOR_PROPOSALS, []),
+  setSchedProfessorProposals: (items: SchedProfessorProposal[]): boolean =>
+    set(STORAGE_KEYS.SCHED_PROFESSOR_PROPOSALS, items),
+
+  submitSchedProfessorProposal: (
+    payload: Omit<
+      SchedProfessorProposal,
+      'id' | 'status' | 'createdAt' | 'updatedAt'
+    >
+  ): { success: boolean; message: string; proposal?: SchedProfessorProposal } => {
+    const firstName = (payload.firstName || '').trim();
+    const lastName = (payload.lastName || '').trim();
+    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim() || payload.fullName.trim();
+    const nationalId = normalizeSchedCode(payload.nationalId);
+    if (!fullName || !nationalId) {
+      return { success: false, message: 'نام، نام خانوادگی و کد ملی استاد الزامی است.' };
+    }
+
+    const existingProfs = Storage.getSchedProfessors();
+    const existingProposals = Storage.getSchedProfessorProposals();
+
+    const matchedProfByNat = existingProfs.find(
+      (p) => normalizeSchedCode(p.nationalId) === nationalId
+    );
+    if (matchedProfByNat) {
+      return {
+        success: false,
+        message: `استاد با کد ملی ${nationalId} هم‌اکنون با نام «${matchedProfByNat.fullName}» و کد «${matchedProfByNat.professorCode}» در بانک اساتید ثبت شده است.`,
+      };
+    }
+
+    const duplicatePendingNat = existingProposals.find(
+      (pr) => pr.status === 'pending' && normalizeSchedCode(pr.nationalId) === nationalId
+    );
+    if (duplicatePendingNat) {
+      return {
+        success: false,
+        message: `درخواست ثبت استاد با کد ملی ${nationalId} پیش‌تر توسط «${duplicatePendingNat.requestedByName}» ثبت شده و در انتظار تأیید مدیر سامانه است.`,
+      };
+    }
+
+    const rawProposedCode = normalizeProfessorCodeInput(payload.proposedProfessorCode);
+    const suggestedTempCode =
+      rawProposedCode || getNextTemporaryProfessorCode(existingProfs, existingProposals) || undefined;
+
+    if (
+      suggestedTempCode &&
+      existingProfs.some(
+        (p) => normalizeProfessorCodeInput(p.professorCode).toLowerCase() === suggestedTempCode.toLowerCase()
+      )
+    ) {
+      return {
+        success: false,
+        message: `کد استاد «${suggestedTempCode}» قبلاً در بانک اساتید استفاده شده است.`,
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const level = (payload.degreeLevel || '').trim();
+    const field = (payload.degreeField || '').trim();
+    const spec = (payload.degreeSpecialization || '').trim();
+    const degreeFull = formatProfessorDegreeFull(level, field, spec) || level || undefined;
+
+    const item: SchedProfessorProposal = {
+      ...payload,
+      id: `profprop_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      firstName: firstName || fullName,
+      lastName,
+      fullName,
+      nationalId,
+      degreeLevel: level || undefined,
+      degreeField: field || undefined,
+      degreeSpecialization: spec || undefined,
+      degreeFull,
+      mobile: normalizeSchedCode(payload.mobile) || undefined,
+      landlinePhone: normalizeSchedCode(payload.landlinePhone) || undefined,
+      bankAccount: normalizeSchedCode(payload.bankAccount) || undefined,
+      proposedProfessorCode: suggestedTempCode,
+      status: 'pending',
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    Storage.setSchedProfessorProposals([item, ...existingProposals]);
+    Storage.addActivityLog({
+      category: 'settings',
+      action: 'درخواست ثبت استاد جدید توسط مدیر گروه',
+      details: `فرم اطلاعات استاد «${item.fullName}» (کد ملی: ${item.nationalId}${item.proposedProfessorCode ? ` · کد پیشنهادی: ${item.proposedProfessorCode}` : ''}) توسط ${item.requestedByName} برای تأیید مدیر سامانه ارسال شد.`,
+      targetName: item.fullName,
+      actorName: item.requestedByName,
+    });
+    return {
+      success: true,
+      message: `فرم اطلاعات استاد «${item.fullName}» برای تأیید به مدیر کل سامانه ارسال گردید.`,
+      proposal: item,
+    };
+  },
+
+  approveSchedProfessorProposal: (params: {
+    proposalId: string;
+    reviewerId: string;
+    reviewerName: string;
+    assignedCode?: string;
+    overrides?: Partial<SchedProfessorProposal>;
+  }): {
+    success: boolean;
+    message: string;
+    professor?: SchedProfessor;
+    proposal?: SchedProfessorProposal;
+  } => {
+    const proposals = Storage.getSchedProfessorProposals();
+    const idx = proposals.findIndex((p) => p.id === params.proposalId);
+    if (idx === -1) {
+      return { success: false, message: 'درخواست مورد نظر یافت نشد.' };
+    }
+    const target = { ...proposals[idx], ...(params.overrides || {}) };
+    if (target.status !== 'pending') {
+      return { success: false, message: 'این درخواست پیش‌تر بررسی و تعیین تکلیف شده است.' };
+    }
+
+    const existingProfs = Storage.getSchedProfessors();
+    let finalCode = normalizeProfessorCodeInput(
+      params.assignedCode !== undefined ? params.assignedCode : target.proposedProfessorCode
+    );
+    if (!finalCode) {
+      finalCode = getNextTemporaryProfessorCode(existingProfs, proposals) || '';
+    }
+    if (!finalCode) {
+      return {
+        success: false,
+        message: 'کد استاد مشخص نشد و ظرفیت کدهای موقت new001 تا new999 تکمیل است. لطفاً کد مشخصه را به صورت دستی وارد کنید.',
+      };
+    }
+
+    const dupCode = existingProfs.find(
+      (p) => normalizeProfessorCodeInput(p.professorCode).toLowerCase() === finalCode.toLowerCase()
+    );
+    if (dupCode) {
+      return {
+        success: false,
+        message: `کد استاد «${finalCode}» قبلاً برای «${dupCode.fullName}» ثبت شده است. لطفاً کد یکتای دیگری وارد کنید.`,
+      };
+    }
+
+    const cleanNat = normalizeSchedCode(target.nationalId) || finalCode;
+    const dupNat = existingProfs.find((p) => normalizeSchedCode(p.nationalId) === cleanNat);
+    if (dupNat) {
+      return {
+        success: false,
+        message: `استادی با کد ملی ${cleanNat} («${dupNat.fullName}» با کد ${dupNat.professorCode}) هم‌اکنون در بانک اساتید موجود است.`,
+      };
+    }
+
+    const isTemp = isTemporaryProfessorCode(finalCode);
+    const nowIso = new Date().toISOString();
+    const cleanFirst = (target.firstName || '').trim();
+    const cleanLast = (target.lastName || '').trim();
+    const cleanFull = [cleanFirst, cleanLast].filter(Boolean).join(' ').trim() || target.fullName.trim();
+    const cleanLevel = (target.degreeLevel || '').trim();
+    const cleanField = (target.degreeField || '').trim();
+    const cleanSpec = (target.degreeSpecialization || '').trim();
+    const cleanDegreeFull =
+      formatProfessorDegreeFull(cleanLevel, cleanField, cleanSpec) || cleanLevel || undefined;
+    const cleanMobile = normalizeSchedCode(target.mobile) || undefined;
+    const cleanLandline = normalizeSchedCode(target.landlinePhone) || undefined;
+
+    const newProfessor: SchedProfessor = {
+      id: `prof_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      professorCode: finalCode,
+      firstName: cleanFirst || undefined,
+      lastName: cleanLast || undefined,
+      fullName: cleanFull,
+      gender: target.gender || undefined,
+      fatherName: target.fatherName || undefined,
+      nationalId: cleanNat,
+      departmentName: target.departmentName || undefined,
+      unitCenterName: target.unitCenterName || undefined,
+      degreeLevel: cleanLevel || undefined,
+      degreeField: cleanField || undefined,
+      degreeSpecialization: cleanSpec || undefined,
+      degreeFull: cleanDegreeFull,
+      academicStep: target.academicStep || undefined,
+      academicRank: target.academicRank || undefined,
+      employmentType: target.employmentType,
+      employmentStatusRaw: target.employmentStatusRaw || undefined,
+      phone: cleanMobile || cleanLandline || undefined,
+      mobile: cleanMobile,
+      landlinePhone: cleanLandline,
+      bankName: target.bankName || undefined,
+      bankAccount: normalizeSchedCode(target.bankAccount) || undefined,
+      minEquivalentUnitsOverride: target.minEquivalentUnitsOverride,
+      maxEquivalentUnitsOverride: target.maxEquivalentUnitsOverride,
+      isTemporaryCode: isTemp,
+      codeUpdatedAt: nowIso,
+      proposalId: target.id,
+      isActive: true,
+      unavailableKeys: [],
+      notes: target.notes || undefined,
+    };
+
+    const updatedProposal: SchedProfessorProposal = {
+      ...target,
+      fullName: cleanFull,
+      status: 'approved',
+      assignedProfessorCode: finalCode,
+      temporaryProfessorCode: isTemp ? finalCode : target.temporaryProfessorCode,
+      approvedProfessorId: newProfessor.id,
+      reviewedById: params.reviewerId,
+      reviewedByName: params.reviewerName,
+      reviewedAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    Storage.setSchedProfessors([...existingProfs, newProfessor]);
+    proposals[idx] = updatedProposal;
+    Storage.setSchedProfessorProposals(proposals);
+
+    Storage.addActivityLog({
+      category: 'settings',
+      action: 'تأیید و افزودن استاد جدید از درخواست مدیر گروه',
+      details: `استاد «${newProfessor.fullName}» با کد ${finalCode}${isTemp ? ' (کد موقت در انتظار کد گلستان)' : ''} تأیید و به بانک اساتید اضافه شد.`,
+      targetName: newProfessor.fullName,
+      actorName: params.reviewerName,
+    });
+
+    return {
+      success: true,
+      message: `استاد «${newProfessor.fullName}» با کد «${finalCode}» تأیید و به بانک اساتید اضافه شد.`,
+      professor: newProfessor,
+      proposal: updatedProposal,
+    };
+  },
+
+  rejectSchedProfessorProposal: (params: {
+    proposalId: string;
+    reviewerId: string;
+    reviewerName: string;
+    reason: string;
+  }): { success: boolean; message: string; proposal?: SchedProfessorProposal } => {
+    const proposals = Storage.getSchedProfessorProposals();
+    const idx = proposals.findIndex((p) => p.id === params.proposalId);
+    if (idx === -1) {
+      return { success: false, message: 'درخواست مورد نظر یافت نشد.' };
+    }
+    const target = proposals[idx];
+    if (target.status !== 'pending') {
+      return { success: false, message: 'این درخواست قبلاً بررسی شده است.' };
+    }
+    const nowIso = new Date().toISOString();
+    const updated: SchedProfessorProposal = {
+      ...target,
+      status: 'rejected',
+      rejectionReason: params.reason.trim() || 'نیاز به اصلاح یا عدم تأیید مشخصات توسط مدیر سامانه',
+      reviewedById: params.reviewerId,
+      reviewedByName: params.reviewerName,
+      reviewedAt: nowIso,
+      updatedAt: nowIso,
+    };
+    proposals[idx] = updated;
+    Storage.setSchedProfessorProposals(proposals);
+
+    Storage.addActivityLog({
+      category: 'settings',
+      action: 'رد درخواست ثبت استاد جدید',
+      details: `درخواست ثبت استاد «${target.fullName}» به دلیل «${updated.rejectionReason}» توسط ${params.reviewerName} رد شد.`,
+      targetName: target.fullName,
+      actorName: params.reviewerName,
+      severity: 'warning',
+    });
+
+    return {
+      success: true,
+      message: `درخواست ثبت استاد «${target.fullName}» رد شد.`,
+      proposal: updated,
+    };
+  },
+
+  updateSchedProfessorAndSync: (params: {
+    professorId: string;
+    updatedFields: Partial<SchedProfessor>;
+    actorName?: string;
+  }): {
+    success: boolean;
+    message: string;
+    professor?: SchedProfessor;
+    updatedOfferingsCount: number;
+  } => {
+    const profList = Storage.getSchedProfessors();
+    const idx = profList.findIndex((p) => p.id === params.professorId);
+    if (idx === -1) {
+      return { success: false, message: 'استاد مورد نظر یافت نشد.', updatedOfferingsCount: 0 };
+    }
+    const prevProf = profList[idx];
+    const nextCodeRaw =
+      params.updatedFields.professorCode !== undefined
+        ? params.updatedFields.professorCode
+        : prevProf.professorCode;
+    const cleanCode = normalizeProfessorCodeInput(nextCodeRaw);
+    if (!cleanCode) {
+      return { success: false, message: 'کد استاد نمی‌تواند خالی باشد.', updatedOfferingsCount: 0 };
+    }
+    const dup = profList.find(
+      (p) =>
+        p.id !== prevProf.id &&
+        normalizeProfessorCodeInput(p.professorCode).toLowerCase() === cleanCode.toLowerCase()
+    );
+    if (dup) {
+      return {
+        success: false,
+        message: `کد استاد «${cleanCode}» قبلاً برای «${dup.fullName}» ثبت شده است.`,
+        updatedOfferingsCount: 0,
+      };
+    }
+
+    const codeChanged = prevProf.professorCode !== cleanCode;
+    const wasTemporary =
+      Boolean(prevProf.isTemporaryCode) || isTemporaryProfessorCode(prevProf.professorCode);
+    const nowIsTemporary = isTemporaryProfessorCode(cleanCode);
+    const nowIso = new Date().toISOString();
+
+    const updatedProf: SchedProfessor = {
+      ...prevProf,
+      ...params.updatedFields,
+      professorCode: cleanCode,
+      isTemporaryCode: nowIsTemporary,
+      previousTemporaryCode:
+        codeChanged && wasTemporary && !nowIsTemporary
+          ? prevProf.professorCode
+          : prevProf.previousTemporaryCode,
+      codeUpdatedAt: codeChanged ? nowIso : prevProf.codeUpdatedAt,
+    };
+
+    const nextProfs = profList.map((p, i) => (i === idx ? updatedProf : p));
+    Storage.setSchedProfessors(nextProfs);
+
+    // همگام‌سازی خودکار کد و نام استاد در تمامی دروس برنامه‌ریزی‌شده
+    const offerings = Storage.getSchedOfferings();
+    const { nextOfferings, updatedCount } = syncProfessorMetadataInOfferings(offerings, updatedProf);
+    if (updatedCount > 0) {
+      Storage.setSchedOfferings(nextOfferings);
+    }
+
+    // همگام‌سازی کد جدید با درخواست اولیه ثبت استاد در صورت وجود
+    const proposals = Storage.getSchedProfessorProposals();
+    let propChanged = false;
+    const nextProposals = proposals.map((pr) => {
+      if (pr.approvedProfessorId === updatedProf.id || (updatedProf.proposalId && pr.id === updatedProf.proposalId)) {
+        propChanged = true;
+        return {
+          ...pr,
+          assignedProfessorCode: cleanCode,
+          temporaryProfessorCode:
+            pr.temporaryProfessorCode || (wasTemporary ? prevProf.professorCode : undefined),
+          updatedAt: nowIso,
+        };
+      }
+      return pr;
+    });
+    if (propChanged) {
+      Storage.setSchedProfessorProposals(nextProposals);
+    }
+
+    // اگر کاربر فعلی همین استاد است، سشن را نیز به‌روز کنیم
+    const cu = Storage.getCurrentUser();
+    if (cu && cu.role === 'professor' && cu.professor.id === updatedProf.id) {
+      Storage.setCurrentUser({ role: 'professor', professor: updatedProf });
+    }
+
+    if (codeChanged) {
+      Storage.addActivityLog({
+        category: 'settings',
+        action: 'اصلاح کد استاد و همگام‌سازی با برنامه درسی',
+        details: `کد استاد «${updatedProf.fullName}» از «${prevProf.professorCode}» به «${cleanCode}» تغییر یافت${updatedCount > 0 ? ` و در ${updatedCount} درس ارائه‌شده به‌روز شد.` : '.'}`,
+        targetName: updatedProf.fullName,
+        actorName: params.actorName || 'مدیر کل سامانه',
+      });
+    }
+
+    return {
+      success: true,
+      message:
+        codeChanged && updatedCount > 0
+          ? `مشخصات استاد «${updatedProf.fullName}» و کد «${cleanCode}» بروزرسانی و در ${updatedCount.toLocaleString('fa-IR')} درس جدول برنامه همگام‌سازی شد.`
+          : `اطلاعات استاد «${updatedProf.fullName}» بروزرسانی شد.`,
+      professor: updatedProf,
+      updatedOfferingsCount: updatedCount,
+    };
+  },
+
+  // -------------------------------------------------------------
   // متدهای گردش کار و ارجاعات یکپارچه حوزه معاونت آموزشی
   // (دانشجو ↔ مدیر گروه تخصصی/رشته ↔ کارشناس آموزش ↔ کارشناس فارغ‌التحصیلان)
   // -------------------------------------------------------------
@@ -18007,6 +18433,169 @@ export const Storage = {
     if (next.length === current.length) return false;
     Storage.setAcademicChatMessages(next);
     return true;
+  },
+
+  // -------------------------------------------------------------
+  // سیستم حضور و غیاب و تردد بارکدی دانشجویان خوابگاهی
+  // (پیش‌فرض: همه دانشجویان خوابگاهی در سرا حضور دارند)
+  // -------------------------------------------------------------
+  getDormAttendanceStates: (): DormAttendanceStateRecord[] =>
+    get<DormAttendanceStateRecord[]>(STORAGE_KEYS.DORM_ATTENDANCE_STATES, []),
+
+  setDormAttendanceStates: (items: DormAttendanceStateRecord[]): boolean =>
+    set(STORAGE_KEYS.DORM_ATTENDANCE_STATES, items),
+
+  getDormAttendanceLogs: (): DormAttendanceLogEntry[] =>
+    get<DormAttendanceLogEntry[]>(STORAGE_KEYS.DORM_ATTENDANCE_LOGS, []),
+
+  setDormAttendanceLogs: (items: DormAttendanceLogEntry[]): boolean =>
+    set(STORAGE_KEYS.DORM_ATTENDANCE_LOGS, items),
+
+  recordDormAttendanceChange: (params: {
+    student: Student;
+    dormName: string;
+    roomNumber?: string;
+    bedLabel?: string;
+    nextStatus: DormAttendanceStatus;
+    method: DormAttendanceScanMethod;
+    scannedCode?: string;
+    actionLabel: string;
+    actorId: string;
+    actorName: string;
+    actorRole: 'admin' | 'supervisor';
+    jalaliDate: string;
+    timeLabel: string;
+    leaveUntilDate?: string;
+    note?: string;
+  }): {
+    previousStatus: DormAttendanceStatus;
+    stateRecord: DormAttendanceStateRecord;
+    logEntry: DormAttendanceLogEntry;
+  } => {
+    const nowIso = new Date().toISOString();
+    const states = Storage.getDormAttendanceStates();
+    const existingIdx = states.findIndex((r) => r.studentId === params.student.studentId);
+    const previousStatus: DormAttendanceStatus =
+      existingIdx >= 0 ? states[existingIdx].status : 'present';
+
+    const stateRecord: DormAttendanceStateRecord = {
+      studentId: params.student.studentId,
+      dormId: params.student.assignedDormId || '',
+      roomId: params.student.assignedRoomId || undefined,
+      status: params.nextStatus,
+      lastBarcodeScanned: params.scannedCode || states[existingIdx]?.lastBarcodeScanned,
+      lastUpdatedAt: nowIso,
+      lastJalaliDate: params.jalaliDate,
+      lastTimeLabel: params.timeLabel,
+      updatedById: params.actorId,
+      updatedByName: params.actorName,
+      method: params.method,
+      leaveUntilDate: params.nextStatus === 'leave' ? params.leaveUntilDate : undefined,
+      note: params.note?.trim() || undefined,
+    };
+
+    const nextStates =
+      existingIdx >= 0
+        ? states.map((r, i) => (i === existingIdx ? stateRecord : r))
+        : [...states, stateRecord];
+    Storage.setDormAttendanceStates(nextStates);
+
+    const logEntry: DormAttendanceLogEntry = {
+      id: makeUniqueId('datt'),
+      studentId: params.student.studentId,
+      studentName: params.student.fullName,
+      nationalId: params.student.nationalId,
+      dormId: params.student.assignedDormId || '',
+      dormName: params.dormName,
+      roomNumber: params.roomNumber,
+      bedLabel: params.bedLabel,
+      previousStatus,
+      nextStatus: params.nextStatus,
+      actionLabel: params.actionLabel,
+      method: params.method,
+      scannedCode: params.scannedCode,
+      actorId: params.actorId,
+      actorName: params.actorName,
+      actorRole: params.actorRole,
+      timestamp: nowIso,
+      jalaliDate: params.jalaliDate,
+      timeLabel: params.timeLabel,
+      leaveUntilDate: params.nextStatus === 'leave' ? params.leaveUntilDate : undefined,
+      note: params.note?.trim() || undefined,
+    };
+
+    const logs = Storage.getDormAttendanceLogs();
+    const nextLogs = [logEntry, ...logs].slice(0, 5000);
+    Storage.setDormAttendanceLogs(nextLogs);
+
+    return { previousStatus, stateRecord, logEntry };
+  },
+
+  resetDormAttendanceToDefault: (params: {
+    students: Student[];
+    dormMap: Map<string, string>;
+    roomMap: Map<string, string>;
+    actorId: string;
+    actorName: string;
+    actorRole: 'admin' | 'supervisor';
+    jalaliDate: string;
+    timeLabel: string;
+    dormScopeLabel: string;
+  }): number => {
+    const targetIds = new Set(params.students.map((s) => s.studentId));
+    if (targetIds.size === 0) return 0;
+
+    const states = Storage.getDormAttendanceStates();
+    const nowIso = new Date().toISOString();
+    let changedCount = 0;
+    const addedLogs: DormAttendanceLogEntry[] = [];
+
+    const nextStates = states.filter((st) => !targetIds.has(st.studentId));
+    states.forEach((st) => {
+      if (targetIds.has(st.studentId) && st.status !== 'present') {
+        const studentObj = params.students.find((s) => s.studentId === st.studentId);
+        if (studentObj) {
+          changedCount += 1;
+          addedLogs.push({
+            id: makeUniqueId('datt'),
+            studentId: studentObj.studentId,
+            studentName: studentObj.fullName,
+            nationalId: studentObj.nationalId,
+            dormId: studentObj.assignedDormId || '',
+            dormName: params.dormMap.get(studentObj.assignedDormId || '') || 'سرا',
+            roomNumber: studentObj.assignedRoomId
+              ? params.roomMap.get(studentObj.assignedRoomId)
+              : undefined,
+            previousStatus: st.status,
+            nextStatus: 'present',
+            actionLabel: 'بازنشانی گروهی به پیش‌فرض (حاضر در سرا)',
+            method: 'batch_reset',
+            actorId: params.actorId,
+            actorName: params.actorName,
+            actorRole: params.actorRole,
+            timestamp: nowIso,
+            jalaliDate: params.jalaliDate,
+            timeLabel: params.timeLabel,
+          });
+        }
+      }
+    });
+
+    Storage.setDormAttendanceStates(nextStates);
+    if (addedLogs.length > 0) {
+      const logs = Storage.getDormAttendanceLogs();
+      Storage.setDormAttendanceLogs([...addedLogs, ...logs].slice(0, 5000));
+    }
+
+    Storage.addActivityLog({
+      category: 'settings',
+      action: 'بازنشانی حضور و غیاب سراها به حالت پیش‌فرض',
+      details: `وضعیت حضور ساکنان در محدوده «${params.dormScopeLabel}» به حالت پیش‌فرض (حاضر در سرا) بازنشانی شد (${changedCount} تغییر وضعیت).`,
+      targetName: params.dormScopeLabel,
+      actorName: params.actorName,
+    });
+
+    return changedCount;
   },
 };
 

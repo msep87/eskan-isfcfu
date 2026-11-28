@@ -1994,7 +1994,55 @@ export interface SchedProfessor {
   availabilityUpdatedAt?: string;
   minEquivalentUnitsOverride?: number; // حداقل واحد معادل اختصاصی استاد (اختیاری؛ جایگزین قانون نوع استخدام)
   maxEquivalentUnitsOverride?: number; // حداکثر واحد معادل اختصاصی استاد (اختیاری؛ جایگزین قانون نوع استخدام)
+  isTemporaryCode?: boolean; // کد موقت new001 تا new999 تا زمان صدور کد مشخصه گلستان
+  previousTemporaryCode?: string; // کد موقت قبلی پس از اصلاح به کد گلستان
+  codeUpdatedAt?: string; // زمان آخرین تغییر کد استاد
+  proposalId?: string; // شناسه درخواست ثبت استاد در صورت ثبت از طریق مدیر گروه
   notes?: string;
+}
+
+export type SchedProfessorProposalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface SchedProfessorProposal {
+  id: string;
+  requestedById: string;
+  requestedByName: string;
+  requestedByRole: SchedWorkspaceRole;
+  requestedByFields?: string[]; // رشته‌های تحت پوشش مدیر گروه متقاضی
+  proposedProfessorCode?: string; // کد موقت پیشنهادی (new001..new999) یا کد واردشده
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  gender?: string;
+  fatherName?: string;
+  nationalId: string;
+  departmentName?: string;
+  unitCenterName?: string;
+  degreeLevel?: string;
+  degreeField?: string;
+  degreeSpecialization?: string;
+  degreeFull?: string;
+  academicStep?: string;
+  academicRank?: string;
+  employmentType: SchedEmploymentType;
+  employmentStatusRaw?: string;
+  mobile?: string;
+  landlinePhone?: string;
+  bankName?: string;
+  bankAccount?: string;
+  minEquivalentUnitsOverride?: number;
+  maxEquivalentUnitsOverride?: number;
+  notes?: string;
+  status: SchedProfessorProposalStatus;
+  assignedProfessorCode?: string; // کد نهایی تخصیص‌یافته هنگام تأیید (مثلاً new001 یا کد گلستان)
+  temporaryProfessorCode?: string; // ثبت کد موقت اولیه برای پیگیری تاریخی
+  approvedProfessorId?: string; // شناسه استاد ایجادشده در بانک اساتید
+  reviewedById?: string;
+  reviewedByName?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SchedCurriculumCourse {
@@ -2296,8 +2344,53 @@ export interface SchedCellComment {
   createdAt: string;
 }
 
+export type DormAttendanceStatus = 'present' | 'out' | 'leave' | 'absent';
 
+export type DormAttendanceScanMethod = 'barcode_scanner' | 'manual' | 'batch_reset';
 
+export type DormAttendanceScanDirection =
+  | 'auto_toggle'
+  | 'check_in'
+  | 'check_out'
+  | 'leave_out'
+  | 'mark_absent';
 
+export interface DormAttendanceStateRecord {
+  studentId: string;
+  dormId: string;
+  roomId?: string;
+  status: DormAttendanceStatus;
+  lastBarcodeScanned?: string;
+  lastUpdatedAt: string;
+  lastJalaliDate: string;
+  lastTimeLabel: string;
+  updatedById: string;
+  updatedByName: string;
+  method: DormAttendanceScanMethod;
+  leaveUntilDate?: string;
+  note?: string;
+}
 
-
+export interface DormAttendanceLogEntry {
+  id: string;
+  studentId: string;
+  studentName: string;
+  nationalId: string;
+  dormId: string;
+  dormName: string;
+  roomNumber?: string;
+  bedLabel?: string;
+  previousStatus: DormAttendanceStatus;
+  nextStatus: DormAttendanceStatus;
+  actionLabel: string;
+  method: DormAttendanceScanMethod;
+  scannedCode?: string;
+  actorId: string;
+  actorName: string;
+  actorRole: 'admin' | 'supervisor';
+  timestamp: string;
+  jalaliDate: string;
+  timeLabel: string;
+  leaveUntilDate?: string;
+  note?: string;
+}

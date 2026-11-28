@@ -18,6 +18,7 @@ import {
   SchedPracticalUnitType,
   SchedPrintColorMode,
   SchedProfessor,
+  SchedProfessorProposal,
   SchedProfessorUnitLimit,
   SchedProgramCohort,
   SchedRulesSettings,
@@ -3953,7 +3954,85 @@ export function estimateCohortCurrentSemester(
   return String(clamped) as EightTermKey;
 }
 
+const TEMP_PROF_CODE_REGEX = /^new(\d{1,3})$/i;
 
+export function isTemporaryProfessorCode(code: string | number | undefined | null): boolean {
+  const clean = normalizeSchedCode(code);
+  const m = clean.match(TEMP_PROF_CODE_REGEX);
+  if (!m) return false;
+  const num = Number(m[1]);
+  return Number.isFinite(num) && num >= 1 && num <= 999;
+}
 
+export function normalizeProfessorCodeInput(raw: string | number | undefined | null): string {
+  const clean = normalizeSchedCode(raw);
+  if (!clean) return '';
+  const m = clean.match(TEMP_PROF_CODE_REGEX);
+  if (m) {
+    const num = Number(m[1]);
+    if (Number.isFinite(num) && num >= 1 && num <= 999) {
+      return `new${String(Math.floor(num)).padStart(3, '0')}`;
+    }
+  }
+  return clean;
+}
 
+export function getNextTemporaryProfessorCode(
+  professors: SchedProfessor[],
+  proposals: SchedProfessorProposal[] = []
+): string | null {
+  const usedNumbers = new Set<number>();
+  const registerCode = (raw?: string | null) => {
+    const clean = normalizeProfessorCodeInput(raw);
+    const m = clean.match(TEMP_PROF_CODE_REGEX);
+    if (!m) return;
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n >= 1 && n <= 999) {
+      usedNumbers.add(n);
+    }
+  };
+
+  professors.forEach((p) => {
+    registerCode(p.professorCode);
+    registerCode(p.previousTemporaryCode);
+  });
+  proposals.forEach((pr) => {
+    if (pr.status === 'rejected') return;
+    registerCode(pr.assignedProfessorCode);
+    registerCode(pr.temporaryProfessorCode);
+    registerCode(pr.proposedProfessorCode);
+  });
+
+  if (usedNumbers.size === 0) return 'new001';
+  const maxUsed = Math.max(...Array.from(usedNumbers));
+  if (maxUsed < 999) {
+    return `new${String(maxUsed + 1).padStart(3, '0')}`;
+  }
+  for (let i = 1; i <= 999; i++) {
+    if (!usedNumbers.has(i)) {
+      return `new${String(i).padStart(3, '0')}`;
+    }
+  }
+  return null;
+}
+
+export function syncProfessorMetadataInOfferings(
+  offerings: SchedCourseOffering[],
+  updatedProfessor: SchedProfessor
+): { nextOfferings: SchedCourseOffering[]; updatedCount: number } {
+  let updatedCount = 0;
+  const nextOfferings = offerings.map((o) => {
+    if (o.professorId !== updatedProfessor.id) return o;
+    const codeChanged = o.professorCode !== updatedProfessor.professorCode;
+    const nameChanged = o.professorName !== updatedProfessor.fullName;
+    if (!codeChanged && !nameChanged) return o;
+    updatedCount++;
+    return {
+      ...o,
+      professorCode: updatedProfessor.professorCode,
+      professorName: updatedProfessor.fullName,
+    };
+  });
+  return { nextOfferings, updatedCount };
+}
 

@@ -100,12 +100,15 @@ import { CommunityChatHub } from './CommunityChatHub';
 import { AdminStudentPortalsEditor } from './AdminStudentPortalsEditor';
 import { AdminAcademicMajorsSettings } from './AdminAcademicMajorsSettings';
 import { CourseSchedulingWorkspace } from './CourseSchedulingWorkspace';
+import { AdminProfessorProposalsPanel } from './AdminProfessorProposalsPanel';
+import { DormAttendancePanel } from './DormAttendancePanel';
 import { AcademicChatWorkspace } from './AcademicChatWorkspace';
 import {
   getAcademicChatTotalUnreadCount,
   subscribeAcademicChatRealtime,
 } from '../utils/academicChatRealtime';
 import { getStudentResidenceType, getStudentAdmissionStatus } from '../utils/financeUtils';
+import { getEffectiveDormAttendanceStatus } from '../utils/dormBarcodeUtils';
 import {
   findClosestApprovedMajor,
   findExactApprovedMajorForStudent,
@@ -226,6 +229,7 @@ import {
   Menu,
   MessagesSquare,
   PackagePlus,
+  ScanLine,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -297,6 +301,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // تب‌های اصلی داشبورد مدیر (در بدو ورود هیچ بخشی باز نباشد تا صفحه سریع بارگذاری شود)
   type AdminMainTabKey =
     | 'cartable'
+    | 'attendance'
     | 'users'
     | 'announcements'
     | 'requests'
@@ -2921,15 +2926,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           graduationStaffList.length +
           academicDeputyStaffList.length;
 
+        const pendingProfessorProposalsCount = Storage.getSchedProfessorProposals().filter(
+          (p) => p.status === 'pending'
+        ).length;
+
         const pendingRequestsTotal =
           pendingStudents.length +
           Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length +
-          academicNotices.filter((n) => n.status === 'pending').length;
+          academicNotices.filter((n) => n.status === 'pending').length +
+          pendingProfessorProposalsCount;
 
         const activeSurveysTotal = Storage.getSurveys().filter((s) => s.status === 'active').length;
         const activeClearancesTotal = Storage.getGraduationClearances().filter(
           (c) => c.status === 'pending_education' || c.status === 'in_clearance'
         ).length;
+        const dormAttendanceStateMap = new Map(
+          Storage.getDormAttendanceStates().map((record) => [record.studentId, record])
+        );
+        const dormResidentsForAttendance = students.filter(
+          (s) => getStudentResidenceType(s) === 'dormitory' && Boolean(s.assignedDormId)
+        );
+        const presentDormResidentsCount = dormResidentsForAttendance.filter(
+          (s) => getEffectiveDormAttendanceStatus(s.studentId, dormAttendanceStateMap) === 'present'
+        ).length;
+        const awayDormResidentsCount = Math.max(0, dormResidentsForAttendance.length - presentDormResidentsCount);
 
         const adminMenuItems: Array<{
           key: AdminMainTabKey;
@@ -2949,6 +2969,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             icon: Building2,
             iconTone: 'text-purple-600 bg-purple-50 dark:bg-purple-950/50 border-purple-200 dark:border-purple-800',
             activeRing: 'border-purple-500 bg-purple-50/70 dark:bg-purple-950/40 shadow-md shadow-purple-500/10',
+          },
+          {
+            key: 'attendance',
+            title: 'حضور و غیاب بارکدی سراها',
+            desc: 'اسکن بارکد کارت خوابگاهی، آمار لحظه‌ای سراها و پیش‌فرض حضور کامل',
+            icon: ScanLine,
+            iconTone: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800',
+            activeRing: 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 shadow-md shadow-emerald-500/10',
+            badge:
+              dormResidentsForAttendance.length > 0
+                ? `${presentDormResidentsCount.toLocaleString('fa-IR')} حاضر${
+                    awayDormResidentsCount > 0 ? ` / ${awayDormResidentsCount.toLocaleString('fa-IR')} خروج` : ''
+                  }`
+                : undefined,
+            badgeClass:
+              awayDormResidentsCount > 0
+                ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/70 dark:text-amber-200'
+                : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/70 dark:text-emerald-200',
           },
           {
             key: 'users',
@@ -3485,6 +3523,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       activeRing: 'border-purple-500 bg-purple-50/70 dark:bg-purple-950/40',
                     },
                     {
+                      key: 'attendance' as const,
+                      title: 'حضور و غیاب بارکدی سراها',
+                      desc: 'اسکن بارکد کارت خوابگاهی و آمار لحظه‌ای ساکنین',
+                      icon: ScanLine,
+                      iconTone: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800',
+                      activeRing: 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40',
+                      badge: (() => {
+                        const attMap = new Map(
+                          Storage.getDormAttendanceStates().map((record) => [record.studentId, record])
+                        );
+                        const dormRes = students.filter(
+                          (s) => getStudentResidenceType(s) === 'dormitory' && Boolean(s.assignedDormId)
+                        );
+                        if (dormRes.length === 0) return undefined;
+                        const presentCount = dormRes.filter(
+                          (s) => getEffectiveDormAttendanceStatus(s.studentId, attMap) === 'present'
+                        ).length;
+                        return `${presentCount.toLocaleString('fa-IR')} حاضر`;
+                      })(),
+                      badgeClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/70 dark:text-emerald-200',
+                    },
+                    {
                       key: 'users' as const,
                       title: 'مدیریت کاربران سامانه',
                       desc: 'دانشجویان، سرپرستان و واحدهای دانشگاه',
@@ -3523,22 +3583,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     },
                     {
                       key: 'requests' as const,
-                      title: 'درخواست‌های اسکان، مهمان و آموزش',
-                      desc: 'بررسی اسکان موقت، مهمان و مکاتبات',
+                      title: 'درخواست‌های اسکان، مهمان، استاد و آموزش',
+                      desc: 'بررسی اسکان موقت، مهمان، تایید استاد جدید و مکاتبات',
                       icon: Clock,
                       iconTone: 'text-amber-600 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800',
                       activeRing: 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/40',
-                      badge:
-                        pendingStudents.length +
+                      badge: (() => {
+                        const reqTotal =
+                          pendingStudents.length +
                           Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length +
-                          academicNotices.filter((n) => n.status === 'pending').length >
-                        0
-                          ? (
-                              pendingStudents.length +
-                              Storage.getGuestRequests().filter((g) => g.status === 'pending_supervisor').length +
-                              academicNotices.filter((n) => n.status === 'pending').length
-                            ).toLocaleString('fa-IR')
-                          : undefined,
+                          academicNotices.filter((n) => n.status === 'pending').length +
+                          Storage.getSchedProfessorProposals().filter((p) => p.status === 'pending').length;
+                        return reqTotal > 0 ? reqTotal.toLocaleString('fa-IR') : undefined;
+                      })(),
                       badgeClass: 'bg-amber-500 text-white',
                     },
                     {
@@ -4756,6 +4813,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* ========================================================= */}
+      {/* ۱/۵. تب حضور و غیاب بارکدی دانشجویان خوابگاهی */}
+      {/* ========================================================= */}
+      {mainTab === 'attendance' && (
+        <DormAttendancePanel
+          mode="admin"
+          dorms={dorms}
+          rooms={rooms}
+          beds={beds}
+          students={students}
+          settings={settings}
+          actor={{ id: 'admin', name: 'مدیر کل سامانه' }}
+          onOpenStudentCard={(st) => setViewCardStudent(st)}
+          onAttendanceUpdated={onRefreshData}
+        />
+      )}
+
+      {/* ========================================================= */}
       {/* ۲. تب ثبت و انتشار اطلاعیه‌های سایت و صفحه اول */}
       {/* ========================================================= */}
       {mainTab === 'announcements' && (
@@ -5123,6 +5197,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* ========================================================= */}
       {mainTab === 'requests' && (
         <div className="space-y-6 animate-in fade-in duration-200">
+        <AdminProfessorProposalsPanel
+          reviewerId="admin"
+          reviewerName="مدیر کل سامانه"
+          onDataChanged={() => onRefreshData()}
+        />
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2.5">

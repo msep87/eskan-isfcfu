@@ -40,6 +40,9 @@ import { StudentReferralModal } from './StudentReferralModal';
 import { GraduationClearanceReviewPanel } from './GraduationClearanceReviewPanel';
 import { CollapsibleMenuGrid } from './CollapsibleMenuGrid';
 import { MaintenanceQuickCommButtons } from './MaintenanceQuickCommButtons';
+import { DormAttendancePanel } from './DormAttendancePanel';
+import { getEffectiveDormAttendanceStatus } from '../utils/dormBarcodeUtils';
+import { getStudentResidenceType } from '../utils/financeUtils';
 import {
   StudentListPaginationBar,
   DEFAULT_STUDENT_PAGE_SIZE,
@@ -89,6 +92,7 @@ import {
   GraduationCap,
   ChevronDown,
   ChevronUp,
+  ScanLine,
 } from 'lucide-react';
 
 interface SupervisorDashboardProps {
@@ -128,7 +132,7 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
   onOpenUserGuide,
   embeddedMode = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'announcements' | 'students' | 'guest_requests' | 'maintenance' | 'warehouse' | 'shifts' | 'clearance' | null>(null);
+  const [activeTab, setActiveTab] = useState<'manager' | 'visual_picker' | 'attendance' | 'announcements' | 'students' | 'guest_requests' | 'maintenance' | 'warehouse' | 'shifts' | 'clearance' | null>(null);
   const [isPendingApprovalsOpen, setIsPendingApprovalsOpen] = useState(false);
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
   const [isStudentEvalModalOpen, setIsStudentEvalModalOpen] = useState(false);
@@ -989,6 +993,18 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
         const pendingClearanceCount = Storage.getGraduationClearances().filter(
           (c) => c.educationGateStatus === 'approved' && c.status === 'in_clearance' && (c.units?.supervisor?.status || 'pending') === 'pending'
         ).length;
+        const attStatesMap = new Map(
+          Storage.getDormAttendanceStates().map((record) => [record.studentId, record])
+        );
+        const scopedDormResidents = students.filter(
+          (s) =>
+            getStudentResidenceType(s) === 'dormitory' &&
+            Boolean(s.assignedDormId) &&
+            activeDormIds.includes(s.assignedDormId as string)
+        );
+        const presentScopedCount = scopedDormResidents.filter(
+          (s) => getEffectiveDormAttendanceStatus(s.studentId, attStatesMap) === 'present'
+        ).length;
 
         return (
           <CollapsibleMenuGrid
@@ -1013,6 +1029,15 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
                     subtitle: 'نمای گرافیکی ظرفیت و اشغال تخت‌های سرا',
                     icon: <BedIcon className="w-4 h-4" />,
                     activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md',
+                  },
+                  {
+                    id: 'attendance',
+                    label: 'حضور و غیاب و اسکن بارکد سرا',
+                    subtitle: 'اسکن کارت خوابگاهی، ثبت ورود/خروج و آمار لحظه‌ای',
+                    icon: <ScanLine className="w-4 h-4" />,
+                    badge: scopedDormResidents.length > 0 ? `${presentScopedCount.toLocaleString('fa-IR')} حاضر` : undefined,
+                    badgeTone: 'teal',
+                    activeClass: 'bg-emerald-600 text-white border-emerald-600 shadow-md',
                   },
                   {
                     id: 'guest_requests',
@@ -2756,6 +2781,22 @@ export const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({
           reviewerName={supervisor.fullName}
           settings={settings}
           onDataChange={onRefreshData}
+        />
+      )}
+
+      {/* تب حضور و غیاب بارکدی سراها */}
+      {activeTab === 'attendance' && (
+        <DormAttendancePanel
+          mode="supervisor"
+          dorms={dorms}
+          rooms={rooms}
+          beds={beds}
+          students={students}
+          settings={settings}
+          actor={{ id: supervisor.id, name: supervisor.fullName }}
+          allowedDormIds={activeDormIds}
+          onOpenStudentCard={(st) => setViewCardStudent(st)}
+          onAttendanceUpdated={onRefreshData}
         />
       )}
 

@@ -146,6 +146,7 @@ interface CourseSchedulingMasterGridProps {
   hasExternalModalOpen?: boolean;
   onCloseExternalModals?: () => void;
   precomputedIndex?: TermSchedulingIndex;
+  onOpenNewProfessorProposal?: () => void;
   onNotify: (type: 'success' | 'error', text: string) => void;
 }
 
@@ -439,6 +440,7 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
   hasExternalModalOpen = false,
   onCloseExternalModals,
   precomputedIndex,
+  onOpenNewProfessorProposal,
   onNotify,
 }) => {
   const isSystemAdmin = userRole === 'admin';
@@ -4725,6 +4727,18 @@ export const CourseSchedulingMasterGrid: React.FC<CourseSchedulingMasterGridProp
                   );
                 })}
               </select>
+              {!isSystemAdmin && onOpenNewProfessorProposal && (
+                <div className="pt-0.5">
+                  <button
+                    type="button"
+                    onClick={onOpenNewProfessorProposal}
+                    className="text-[11px] font-extrabold text-teal-700 dark:text-teal-300 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>استاد مورد نظر در سامانه نیست؟ ارسال فرم استاد جدید به مدیر سامانه</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">

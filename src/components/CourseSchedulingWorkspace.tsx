@@ -17,6 +17,7 @@ import {
   SchedOfferingSession,
   SchedPracticalUnitType,
   SchedProfessor,
+  SchedProfessorProposal,
   SchedProfessorUnitLimit,
   SchedProgramCohort,
   SchedRulesSettings,
@@ -81,6 +82,7 @@ import {
   getExamSettingsForTerm,
   getMajorEightTermPlanCourseCodes,
   getNextGolestanCourseGroupInfo,
+  getNextTemporaryProfessorCode,
   getOfferingClassroomAtSession,
   getOfferingSessionSlotHalf,
   getOfferingSessions,
@@ -96,20 +98,25 @@ import {
   isInternshipClassroomRequired,
   isOfferingAtDaySlot,
   isOfferingEffectivelyActive,
+  isTemporaryProfessorCode,
   normalizeCourseGroupCode,
   normalizeCurriculumTermKey,
   normalizeOfferingWithSessions,
+  normalizeProfessorCodeInput,
   normalizeSchedCode,
   parseDecimalUnits,
   parseSchedExcelFile,
   printSchedHtml,
   reconcileScheduleWithMasterData,
   round2,
+  syncProfessorMetadataInOfferings,
 } from '../utils/schedulingUtils';
 import { CourseSchedulingAutoWizard } from './CourseSchedulingAutoWizard';
 import { CourseSchedulingReports } from './CourseSchedulingReports';
 import { CourseSchedulingMasterGrid } from './CourseSchedulingMasterGrid';
 import { CourseSchedulingCommonExamModal } from './CourseSchedulingCommonExamModal';
+import { ProfessorProposalModal } from './ProfessorProposalModal';
+import { AdminProfessorProposalsPanel } from './AdminProfessorProposalsPanel';
 import { PersianDatePicker } from './PersianDatePicker';
 import { PersianTimePicker } from './PersianTimePicker';
 import { AcademicChatWorkspace } from './AcademicChatWorkspace';
@@ -147,9 +154,11 @@ import {
   Plus,
   Printer,
   Redo2,
+  RefreshCw,
   RotateCcw,
   School,
   Search,
+  Send,
   Settings2,
   Share2,
   ShieldAlert,
@@ -160,6 +169,7 @@ import {
   Undo2,
   Unlock,
   Upload,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
@@ -185,7 +195,8 @@ type WorkspaceSection =
   | 'master_grid'
   | 'schedule'
   | 'auto_wizard'
-  | 'reports';
+  | 'reports'
+  | 'professor_requests';
 
 export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps> = ({
   isOpen,
@@ -215,6 +226,11 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
   const [professors, setProfessors] = useState<SchedProfessor[]>(() =>
     Storage.getSchedProfessors()
   );
+  const [professorProposals, setProfessorProposals] = useState<SchedProfessorProposal[]>(() =>
+    Storage.getSchedProfessorProposals()
+  );
+  const [proposalModalOpen, setProposalModalOpen] = useState(false);
+  const [profTempOnlyFilter, setProfTempOnlyFilter] = useState(false);
   const [courses, setCourses] = useState<SchedCurriculumCourse[]>(() =>
     Storage.getSchedCourses()
   );
@@ -231,6 +247,13 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     getAcademicChatTotalUnreadCount(actor.id)
   );
 
+  const refreshProfessorsAndProposals = () => {
+    setProfessors(Storage.getSchedProfessors());
+    setOfferings(Storage.getSchedOfferings());
+    setProfessorProposals(Storage.getSchedProfessorProposals());
+    onDataUpdated?.();
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     const refresh = () => setAcademicChatUnread(getAcademicChatTotalUnreadCount(actor.id));
@@ -244,6 +267,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     const latestRooms = Storage.getSchedClassrooms();
     const latestPrograms = Storage.getSchedPrograms();
     const latestProfs = Storage.getSchedProfessors();
+    const latestProposals = Storage.getSchedProfessorProposals();
     const latestCourses = Storage.getSchedCourses();
     const latestOfferings = Storage.getSchedOfferings();
     const latestComments = Storage.getSchedCellComments();
@@ -253,6 +277,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setClassrooms(latestRooms);
     setPrograms(latestPrograms);
     setProfessors(latestProfs);
+    setProfessorProposals(latestProposals);
     setCourses(latestCourses);
     setRules(latestRules);
     setAppSettingsSnapshot(latestSettings);
@@ -524,6 +549,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       classrooms,
       programs,
       professors,
+      professorProposals,
       courses,
       offerings,
       cellComments,
@@ -556,6 +582,10 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       if (Array.isArray(parsed.classrooms)) persistClassrooms(parsed.classrooms);
       if (Array.isArray(parsed.programs)) persistPrograms(parsed.programs);
       if (Array.isArray(parsed.professors)) persistProfessors(parsed.professors);
+      if (Array.isArray(parsed.professorProposals)) {
+        Storage.setSchedProfessorProposals(parsed.professorProposals);
+        setProfessorProposals(parsed.professorProposals);
+      }
       if (Array.isArray(parsed.courses)) persistCourses(parsed.courses);
       if (Array.isArray(parsed.offerings)) persistOfferings(parsed.offerings);
       if (Array.isArray(parsed.cellComments)) persistCellComments(parsed.cellComments);
@@ -1308,14 +1338,16 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
   const handleSaveProf = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanCode = normalizeSchedCode(profCode);
+    const cleanCode = normalizeProfessorCodeInput(profCode);
     const cleanFirst = profFirstName.trim();
     const cleanLast = profLastName.trim();
     const cleanName = [cleanFirst, cleanLast].filter(Boolean).join(' ').trim();
     const cleanNat = normalizeSchedCode(profNationalId) || cleanCode;
     if (!cleanCode || !cleanName) return;
     const dup = professors.find(
-      (p) => p.professorCode === cleanCode && p.id !== editingProfId
+      (p) =>
+        normalizeProfessorCodeInput(p.professorCode).toLowerCase() === cleanCode.toLowerCase() &&
+        p.id !== editingProfId
     );
     if (dup) {
       notify(
@@ -1339,50 +1371,54 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
       profMaxEqOverride.trim() !== '' ? parseDecimalUnits(profMaxEqOverride) : undefined;
 
     if (editingProfId) {
-      persistProfessors(
-        professors.map((p) =>
-          p.id === editingProfId
-            ? {
-                ...p,
-                professorCode: cleanCode,
-                firstName: cleanFirst || undefined,
-                lastName: cleanLast || undefined,
-                fullName: cleanName,
-                gender: profGender.trim() || undefined,
-                fatherName: profFatherName.trim() || undefined,
-                nationalId: cleanNat,
-                departmentName: profDepartmentName.trim() || undefined,
-                unitCenterName: profUnitCenterName.trim() || undefined,
-                degreeLevel: cleanLevel || undefined,
-                degreeField: cleanField || undefined,
-                degreeSpecialization: cleanSpec || undefined,
-                degreeFull: cleanDegreeFull,
-                academicStep: normalizeSchedCode(profAcademicStep) || profAcademicStep.trim() || undefined,
-                academicRank: profAcademicRank.trim() || undefined,
-                employmentType: profEmployment,
-                employmentStatusRaw: profEmploymentStatusRaw.trim() || undefined,
-                phone: cleanPhone || undefined,
-                mobile: cleanMobile || undefined,
-                landlinePhone: cleanLandline || undefined,
-                bankName: canViewSensitiveProfInfo
-                  ? profBankName.trim() || undefined
-                  : p.bankName,
-                bankAccount: canViewSensitiveProfInfo
-                  ? normalizeSchedCode(profBank) || undefined
-                  : p.bankAccount,
-                minEquivalentUnitsOverride: minEqOv,
-                maxEquivalentUnitsOverride: maxEqOv,
-              }
-            : p
-        )
-      );
-      notify('success', `اطلاعات استاد «${cleanName}» بروزرسانی شد.`);
+      const existingProf = professors.find((p) => p.id === editingProfId);
+      const res = Storage.updateSchedProfessorAndSync({
+        professorId: editingProfId,
+        updatedFields: {
+          professorCode: cleanCode,
+          firstName: cleanFirst || undefined,
+          lastName: cleanLast || undefined,
+          fullName: cleanName,
+          gender: profGender.trim() || undefined,
+          fatherName: profFatherName.trim() || undefined,
+          nationalId: cleanNat,
+          departmentName: profDepartmentName.trim() || undefined,
+          unitCenterName: profUnitCenterName.trim() || undefined,
+          degreeLevel: cleanLevel || undefined,
+          degreeField: cleanField || undefined,
+          degreeSpecialization: cleanSpec || undefined,
+          degreeFull: cleanDegreeFull,
+          academicStep: normalizeSchedCode(profAcademicStep) || profAcademicStep.trim() || undefined,
+          academicRank: profAcademicRank.trim() || undefined,
+          employmentType: profEmployment,
+          employmentStatusRaw: profEmploymentStatusRaw.trim() || undefined,
+          phone: cleanPhone || undefined,
+          mobile: cleanMobile || undefined,
+          landlinePhone: cleanLandline || undefined,
+          bankName: canViewSensitiveProfInfo
+            ? profBankName.trim() || undefined
+            : existingProf?.bankName,
+          bankAccount: canViewSensitiveProfInfo
+            ? normalizeSchedCode(profBank) || undefined
+            : existingProf?.bankAccount,
+          minEquivalentUnitsOverride: minEqOv,
+          maxEquivalentUnitsOverride: maxEqOv,
+        },
+        actorName: actor.name,
+      });
+      if (!res.success) {
+        notify('error', res.message);
+        return;
+      }
+      refreshProfessorsAndProposals();
+      notify('success', res.message);
     } else {
       persistProfessors([
         ...professors,
         {
           id: `prof_${Date.now()}`,
           professorCode: cleanCode,
+          isTemporaryCode: isTemporaryProfessorCode(cleanCode),
           firstName: cleanFirst || undefined,
           lastName: cleanLast || undefined,
           fullName: cleanName,
@@ -1566,13 +1602,14 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
   const filteredProfessors = useMemo(() => {
     const q = deferredProfSearch.trim().toLowerCase();
-    if (!q) return professors;
-    return professors.filter((p) =>
-      `${p.fullName} ${p.firstName || ''} ${p.lastName || ''} ${p.professorCode} ${p.nationalId || ''} ${p.degreeLevel || ''} ${p.degreeField || ''} ${p.degreeSpecialization || ''} ${p.degreeFull || ''} ${p.departmentName || ''} ${p.unitCenterName || ''} ${p.academicRank || ''} ${p.employmentStatusRaw || ''}`
+    return professors.filter((p) => {
+      if (profTempOnlyFilter && !isTemporaryProfessorCode(p.professorCode)) return false;
+      if (!q) return true;
+      return `${p.fullName} ${p.firstName || ''} ${p.lastName || ''} ${p.professorCode} ${p.previousTemporaryCode || ''} ${p.nationalId || ''} ${p.degreeLevel || ''} ${p.degreeField || ''} ${p.degreeSpecialization || ''} ${p.degreeFull || ''} ${p.departmentName || ''} ${p.unitCenterName || ''} ${p.academicRank || ''} ${p.employmentStatusRaw || ''}`
         .toLowerCase()
-        .includes(q)
-    );
-  }, [professors, deferredProfSearch]);
+        .includes(q);
+    });
+  }, [professors, deferredProfSearch, profTempOnlyFilter]);
 
   const filteredCourses = useMemo(() => {
     const q = deferredCourseSearch.trim().toLowerCase();
@@ -1585,7 +1622,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
 
   useEffect(() => {
     setProfPage(1);
-  }, [deferredProfSearch]);
+  }, [deferredProfSearch, profTempOnlyFilter]);
 
   useEffect(() => {
     setCoursePage(1);
@@ -2558,6 +2595,15 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
     setDraftRules(rules);
   }, [rules]);
 
+  const pendingProfProposalsCount = useMemo(
+    () => professorProposals.filter((p) => p.status === 'pending').length,
+    [professorProposals]
+  );
+  const tempCodedProfsCount = useMemo(
+    () => professors.filter((p) => isTemporaryProfessorCode(p.professorCode)).length,
+    [professors]
+  );
+
   if (!isOpen) return null;
 
   const sidebarGroups: Array<{
@@ -2598,6 +2644,19 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
         },
         { key: 'auto_wizard', label: 'ویزارد چینش هوشمند', icon: Sparkles },
         { key: 'reports', label: 'گزارش‌گیری و فیلتر جامع', icon: FileSpreadsheet },
+        ...(!isSystemAdmin
+          ? [
+              {
+                key: 'professor_requests' as WorkspaceSection,
+                label: 'درخواست ثبت استاد جدید',
+                icon: UserPlus,
+                badge:
+                  pendingProfProposalsCount > 0
+                    ? String(pendingProfProposalsCount)
+                    : undefined,
+              },
+            ]
+          : []),
       ],
     },
     ...(isSystemAdmin
@@ -2626,9 +2685,12 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
               },
               {
                 key: 'professors' as WorkspaceSection,
-                label: 'اساتید و عدم حضور',
+                label: 'اساتید، درخواست‌ها و عدم حضور',
                 icon: Users,
-                badge: String(professors.length),
+                badge:
+                  pendingProfProposalsCount > 0
+                    ? `${professors.length} (${pendingProfProposalsCount} جدید)`
+                    : String(professors.length),
               },
               {
                 key: 'courses' as WorkspaceSection,
@@ -3026,6 +3088,118 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* ۰.۲ درخواست ثبت استاد جدید برای تأیید مدیر سامانه (مدیران گروه / آموزش) */}
+          {section === 'professor_requests' && (
+            <div className="space-y-4 max-w-6xl mx-auto">
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <UserPlus className="w-5 h-5 text-teal-600" />
+                    <span>ارسال اطلاعات استاد جدید برای تأیید مدیر سامانه</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                    چنانچه استادی که قصد تخصیص درس به او را دارید هنوز در لیست اساتید سامانه نیست، فرم مشخصات او را تکمیل و ارسال کنید. پس از تأیید مدیر سامانه، استاد با کد موقت{' '}
+                    <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">new001</span> تا{' '}
+                    <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">new999</span> (یا کد گلستان) به سامانه اضافه می‌شود و بعداً پس از صدور کد رسمی گلستان توسط مدیر سامانه قابل اصلاح است.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setProposalModalOpen(true)}
+                  className="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-black inline-flex items-center gap-1.5 shadow-md shrink-0 cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>+ ارسال فرم استاد جدید</span>
+                </button>
+              </div>
+
+              {professorProposals.length === 0 ? (
+                <div className="rounded-2xl bg-white dark:bg-slate-900 border border-dashed border-slate-300 dark:border-slate-700 p-10 text-center text-xs text-slate-500 space-y-2">
+                  <div className="font-bold text-slate-700 dark:text-slate-200">
+                    هنوز هیچ فرم درخواست ثبت استاد جدیدی ارسال نشده است.
+                  </div>
+                  <p>
+                    روی دکمه «ارسال فرم استاد جدید» کلیک کنید تا مشخصات استاد جهت بررسی و تأیید برای مدیر سامانه ارسال شود.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {professorProposals.map((pr) => {
+                    const linkedProf = pr.approvedProfessorId
+                      ? professors.find((p) => p.id === pr.approvedProfessorId)
+                      : undefined;
+                    const activeCode = linkedProf?.professorCode || pr.assignedProfessorCode || pr.proposedProfessorCode || '';
+                    const isTemp = isTemporaryProfessorCode(activeCode);
+                    const degreeStr =
+                      formatProfessorDegreeFull(pr.degreeLevel, pr.degreeField, pr.degreeSpecialization) ||
+                      pr.degreeFull ||
+                      '—';
+                    return (
+                      <div
+                        key={pr.id}
+                        className={`rounded-2xl p-4 border text-xs space-y-2.5 ${
+                          pr.status === 'pending'
+                            ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800'
+                            : pr.status === 'approved'
+                            ? 'bg-emerald-50/40 dark:bg-emerald-950/15 border-emerald-200 dark:border-emerald-900/60'
+                            : 'bg-rose-50/40 dark:bg-rose-950/15 border-rose-200 dark:border-rose-900/60'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-black text-sm text-slate-900 dark:text-white">
+                              {pr.fullName}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-[11px]" dir="ltr">
+                              کد ملی: {pr.nationalId}
+                            </span>
+                            {activeCode && (
+                              <span
+                                className={`px-2.5 py-0.5 rounded-lg font-mono font-black text-[11px] border ${
+                                  isTemp
+                                    ? 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-700'
+                                    : 'bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-700'
+                                }`}
+                              >
+                                {pr.status === 'approved' ? 'کد ثبت‌شده' : 'کد پیشنهادی'}: {activeCode}
+                                {isTemp ? ' (کد موقت)' : ''}
+                              </span>
+                            )}
+                          </div>
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${
+                              pr.status === 'pending'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                : pr.status === 'approved'
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                            }`}
+                          >
+                            {pr.status === 'pending'
+                              ? 'در انتظار تأیید مدیر سامانه'
+                              : pr.status === 'approved'
+                              ? 'تأیید و اضافه شده به سامانه'
+                              : 'رد شده'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                          <div>مدرک و رشته: <strong>{degreeStr}</strong></div>
+                          <div>گروه / مرتبه: <strong>{pr.departmentName || '—'} · {pr.academicRank || SCHED_EMPLOYMENT_LABELS[pr.employmentType]}</strong></div>
+                          <div>ارسال‌کننده: <strong>{pr.requestedByName}</strong></div>
+                        </div>
+                        {pr.status === 'rejected' && pr.rejectionReason && (
+                          <div className="p-2.5 rounded-xl bg-rose-100/70 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 text-[11px] font-bold">
+                            دلیل رد مدیر سامانه: {pr.rejectionReason}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -3457,6 +3631,66 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                   </button>
                 </div>
               </div>
+
+              {/* هشدار درخواست‌های ثبت استاد جدید و کدهای موقت در نمای کلی */}
+              {isSystemAdmin && (pendingProfProposalsCount > 0 || tempCodedProfsCount > 0) && (
+                <div className="rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5 text-xs">
+                    <UserPlus className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <div className="font-black text-indigo-950 dark:text-indigo-100">
+                        {pendingProfProposalsCount > 0
+                          ? `${pendingProfProposalsCount.toLocaleString('fa-IR')} فرم درخواست ثبت استاد جدید از سوی مدیران گروه در انتظار تأیید شماست.`
+                          : `${tempCodedProfsCount.toLocaleString('fa-IR')} استاد دارای کد موقت (new001 تا new999) در سامانه فعال هستند.`}
+                      </div>
+                      <p className="text-[11px] text-indigo-800 dark:text-indigo-300">
+                        {tempCodedProfsCount > 0
+                          ? 'پس از صدور کد مشخصه رسمی استاد در سامانه گلستان، می‌توانید از بخش اساتید کد موقت را اصلاح و در کل برنامه همگام‌سازی کنید.'
+                          : 'پس از بررسی اطلاعات، می‌توانید استاد را با کد موقت new001 تا new999 یا کد رسمی گلستان تأیید کنید.'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSection('professors')}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold shrink-0 cursor-pointer"
+                  >
+                    بررسی در بخش اساتید
+                  </button>
+                </div>
+              )}
+
+              {!isSystemAdmin && (
+                <div className="rounded-2xl bg-teal-50/70 dark:bg-teal-950/25 border border-teal-200 dark:border-teal-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5 text-xs">
+                    <UserPlus className="w-5 h-5 text-teal-600 dark:text-teal-400 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <div className="font-black text-teal-950 dark:text-teal-100">
+                        نیاز به تعریف استاد جدید در سامانه دارید؟
+                      </div>
+                      <p className="text-[11px] text-teal-800 dark:text-teal-300">
+                        فرم مشخصات استاد جدید را برای تأیید مدیر سامانه ارسال کنید ({pendingProfProposalsCount.toLocaleString('fa-IR')} درخواست در انتظار بررسی).
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setProposalModalOpen(true)}
+                      className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold cursor-pointer"
+                    >
+                      + ارسال فرم استاد جدید
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSection('professor_requests')}
+                      className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-300 text-xs font-bold cursor-pointer"
+                    >
+                      پیگیری وضعیت درخواست‌ها
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* گردش‌کار مرحله‌بندی‌شده آماده‌سازی برنامه ترم */}
               {isSystemAdmin && (
@@ -4077,8 +4311,15 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1 max-w-md">
+              <AdminProfessorProposalsPanel
+                reviewerId={actor.id}
+                reviewerName={actor.name}
+                onDataChanged={() => refreshProfessorsAndProposals()}
+                compactEmpty={true}
+              />
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative flex-1 min-w-[240px] max-w-md">
                   <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
                   <input
                     type="text"
@@ -4088,6 +4329,22 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                     className="w-full pr-9 pl-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
                   />
                 </div>
+                {tempCodedProfsCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setProfTempOnlyFilter((v) => !v)}
+                    className={`px-3 py-2 rounded-xl text-xs font-extrabold border inline-flex items-center gap-1.5 cursor-pointer transition ${
+                      profTempOnlyFilter
+                        ? 'bg-amber-500 text-slate-950 border-amber-500'
+                        : 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>
+                      فقط کدهای موقت new001 تا new999 ({tempCodedProfsCount.toLocaleString('fa-IR')})
+                    </span>
+                  </button>
+                )}
               </div>
 
               <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -4125,10 +4382,28 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         summary.equivalentUnits,
                         rules
                       );
+                      const isTempProf = isTemporaryProfessorCode(p.professorCode);
                       return (
                         <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                             <td className="p-3 font-mono font-bold text-teal-700 dark:text-teal-400">
-                              {p.professorCode}
+                              <div className="flex flex-col items-start gap-1">
+                                <span>{p.professorCode}</span>
+                                {isTempProf && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openProfModal(p)}
+                                    className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 text-[9.5px] font-sans font-extrabold cursor-pointer hover:bg-amber-200"
+                                    title="کلیک کنید تا کد رسمی گلستان را جایگزین کنید"
+                                  >
+                                    کد موقت · اصلاح کد گلستان
+                                  </button>
+                                )}
+                                {!isTempProf && p.previousTemporaryCode && (
+                                  <span className="text-[9.5px] font-sans text-slate-400">
+                                    موقت قبلی: <span className="font-mono">{p.previousTemporaryCode}</span>
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="p-3">
                               <div className="font-bold text-slate-900 dark:text-white">
@@ -6733,6 +7008,7 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                 setCommonExamModalOpen(false);
               }}
               precomputedIndex={termSchedulingIndex}
+              onOpenNewProfessorProposal={!isSystemAdmin ? () => setProposalModalOpen(true) : undefined}
               onNotify={notify}
             />
           )}
@@ -7788,15 +8064,33 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
             <form onSubmit={handleSaveProf} className="space-y-3 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <label className="space-y-1">
-                  <span className="font-bold">شماره شناسایی / کد استاد *</span>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-bold">شماره شناسایی / کد استاد *</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextCode = getNextTemporaryProfessorCode(professors, professorProposals);
+                        if (nextCode) setProfCode(nextCode);
+                      }}
+                      className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      کد موقت (new001)
+                    </button>
+                  </div>
                   <input
                     type="text"
                     required
                     value={profCode}
                     onChange={(e) => setProfCode(e.target.value)}
+                    placeholder="کد گلستان یا new001 تا new999"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
                     dir="ltr"
                   />
+                  {editingProfId && isTemporaryProfessorCode(profCode) && (
+                    <span className="block text-[10px] text-amber-700 dark:text-amber-300 font-bold">
+                      کد موقت فعال است؛ تغییر این کد در تمام دروس برنامه‌ریزی‌شده به‌صورت خودکار اعمال می‌شود.
+                    </span>
+                  )}
                 </label>
                 <label className="space-y-1">
                   <span className="font-bold">نام استاد *</span>
@@ -9271,6 +9565,27 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
                         );
                       })}
                   </select>
+                  <div className="pt-1 flex items-center justify-between gap-2">
+                    {!isSystemAdmin ? (
+                      <button
+                        type="button"
+                        onClick={() => setProposalModalOpen(true)}
+                        className="text-[11px] font-extrabold text-teal-700 dark:text-teal-300 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>استاد جدید در لیست نیست؟ ارسال فرم ثبت استاد به مدیر سامانه</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openProfModal()}
+                        className="text-[11px] font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>+ ثبت سریع استاد جدید (یا کد موقت new001 تا new999)</span>
+                      </button>
+                    )}
+                  </div>
                   {(() => {
                     const selectedProf = professors.find((p) => p.id === offProfessorId);
                     if (!selectedProf) return null;
@@ -10260,6 +10575,21 @@ export const CourseSchedulingWorkspace: React.FC<CourseSchedulingWorkspaceProps>
           </div>
         );
       })()}
+
+      <ProfessorProposalModal
+        isOpen={proposalModalOpen}
+        onClose={() => setProposalModalOpen(false)}
+        actor={actor}
+        userRole={userRole}
+        allowedMajorNames={allowedMajorNames}
+        onSubmitted={(proposal) => {
+          refreshProfessorsAndProposals();
+          notify(
+            'success',
+            `فرم مشخصات استاد جدید «${proposal.fullName}» برای تأیید مدیر کل سامانه ارسال شد.`
+          );
+        }}
+      />
     </div>
   );
 };

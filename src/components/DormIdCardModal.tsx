@@ -1,14 +1,18 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Student, Dormitory, Room, Bed, AppSettings } from '../types';
+import {
+  generateQrCodeDataUrl,
+  getStudentCardBarcodeValue,
+  getStudentCardQrPayload,
+  renderCode128ToSvg,
+} from '../utils/dormBarcodeUtils';
 import {
   X,
   Printer,
   ShieldCheck,
   User,
   GraduationCap,
-  Building,
   CheckCircle2,
-  Sparkles,
 } from 'lucide-react';
 
 interface DormIdCardModalProps {
@@ -31,6 +35,36 @@ export const DormIdCardModal: React.FC<DormIdCardModalProps> = ({
   settings,
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
+  const barcodeSvgRef = useRef<SVGSVGElement>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+
+  const barcodeValue = getStudentCardBarcodeValue(student);
+  const qrPayload = getStudentCardQrPayload(student);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void generateQrCodeDataUrl(qrPayload, 160)
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, qrPayload]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    renderCode128ToSvg(barcodeSvgRef.current, barcodeValue, {
+      width: 1.35,
+      height: 22,
+      displayValue: false,
+      margin: 3,
+    });
+  }, [isOpen, barcodeValue]);
 
   if (!isOpen) return null;
 
@@ -39,52 +73,6 @@ export const DormIdCardModal: React.FC<DormIdCardModalProps> = ({
   };
 
   const academicYear = settings.currentAcademicYear || '۱۴۰۵-۱۴۰۶';
-  const verificationCode = `FAR-${student.studentId.slice(-4)}-${room?.roomNumber || '00'}`;
-
-  // کیوآرکد هندسی دقیق و اصیل برای اعتبارسنجی کارت
-  const renderQrCodeSvg = () => (
-    <svg viewBox="0 0 100 100" className="w-16 h-16 bg-white p-1 rounded-lg border border-teal-200/80 shadow-xs shrink-0">
-      {/* گوشه بالا راست */}
-      <rect x="5" y="5" width="26" height="26" fill="#0d9488" rx="4" />
-      <rect x="9" y="9" width="18" height="18" fill="#ffffff" rx="2" />
-      <rect x="13" y="13" width="10" height="10" fill="#0d9488" rx="2" />
-
-      {/* گوشه بالا چپ */}
-      <rect x="69" y="5" width="26" height="26" fill="#0d9488" rx="4" />
-      <rect x="73" y="9" width="18" height="18" fill="#ffffff" rx="2" />
-      <rect x="77" y="13" width="10" height="10" fill="#0d9488" rx="2" />
-
-      {/* گوشه پایین راست */}
-      <rect x="5" y="69" width="26" height="26" fill="#0d9488" rx="4" />
-      <rect x="9" y="73" width="18" height="18" fill="#ffffff" rx="2" />
-      <rect x="13" y="77" width="10" height="10" fill="#0d9488" rx="2" />
-
-      {/* نقاط داده داخلی */}
-      <rect x="36" y="8" width="6" height="6" fill="#0f766e" />
-      <rect x="48" y="8" width="6" height="6" fill="#0f766e" />
-      <rect x="58" y="14" width="6" height="6" fill="#0f766e" />
-      <rect x="36" y="24" width="8" height="8" fill="#0f766e" />
-      <rect x="50" y="24" width="6" height="6" fill="#0f766e" />
-      <rect x="10" y="38" width="8" height="8" fill="#0f766e" />
-      <rect x="24" y="38" width="6" height="6" fill="#0f766e" />
-      <rect x="36" y="38" width="10" height="10" fill="#0f766e" />
-      <rect x="52" y="38" width="8" height="8" fill="#0f766e" />
-      <rect x="68" y="38" width="6" height="6" fill="#0f766e" />
-      <rect x="82" y="38" width="8" height="8" fill="#0f766e" />
-      <rect x="14" y="52" width="6" height="6" fill="#0f766e" />
-      <rect x="38" y="52" width="6" height="6" fill="#0f766e" />
-      <rect x="50" y="52" width="10" height="10" fill="#0f766e" />
-      <rect x="74" y="52" width="8" height="8" fill="#0f766e" />
-      <rect x="38" y="68" width="8" height="8" fill="#0f766e" />
-      <rect x="54" y="68" width="6" height="6" fill="#0f766e" />
-      <rect x="72" y="68" width="6" height="6" fill="#0f766e" />
-      <rect x="84" y="68" width="8" height="8" fill="#0f766e" />
-      <rect x="38" y="82" width="6" height="6" fill="#0f766e" />
-      <rect x="52" y="82" width="8" height="8" fill="#0f766e" />
-      <rect x="70" y="82" width="6" height="6" fill="#0f766e" />
-      <rect x="86" y="82" width="6" height="6" fill="#0f766e" />
-    </svg>
-  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto animate-in fade-in">
@@ -123,10 +111,10 @@ export const DormIdCardModal: React.FC<DormIdCardModalProps> = ({
             </div>
             <div>
               <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white">
-                کارت شناسایی اسکان (ابعاد استاندارد کارت شناسایی / بانکی)
+                کارت شناسایی اسکان (دارای بارکد واقعی ۱بعدی و QR)
               </h3>
               <p className="text-[10px] text-slate-400">
-                ابعاد استاندارد جیبی (CR80) با کیوآرکد هوشمند اعتبارسنجی
+                ابعاد استاندارد جیبی (CR80) قابل قرائت با انواع دستگاه بارکدخوان لیزری و دوربین
               </p>
             </div>
           </div>
@@ -144,7 +132,7 @@ export const DormIdCardModal: React.FC<DormIdCardModalProps> = ({
           <div
             ref={cardRef}
             id="printable-dorm-card"
-            className="relative w-[380px] sm:w-[410px] h-[245px] bg-gradient-to-br from-teal-900 via-teal-950 to-slate-950 text-white rounded-2xl p-3.5 shadow-2xl border border-teal-500/40 overflow-hidden flex flex-col justify-between select-none"
+            className="relative w-[388px] sm:w-[416px] h-[252px] bg-gradient-to-br from-teal-900 via-teal-950 to-slate-950 text-white rounded-2xl p-3 shadow-2xl border border-teal-500/40 overflow-hidden flex flex-col justify-between select-none"
             style={{
               boxShadow: '0 15px 35px -5px rgba(13, 148, 136, 0.3), 0 0 0 1px rgba(20, 184, 166, 0.2)',
             }}
@@ -155,7 +143,7 @@ export const DormIdCardModal: React.FC<DormIdCardModalProps> = ({
             <div className="absolute -bottom-12 -right-12 w-36 h-36 rounded-full bg-emerald-500/20 blur-2xl pointer-events-none" />
 
             {/* ردیف سربرگ کارت */}
-            <div className="flex items-center justify-between pb-2 border-b border-teal-500/30 relative z-10">
+            <div className="flex items-center justify-between pb-1.5 border-b border-teal-500/30 relative z-10">
               <div className="flex items-center gap-2">
                 {settings.customLogoUrl ? (
                   <img
@@ -173,7 +161,7 @@ export const DormIdCardModal: React.FC<DormIdCardModalProps> = ({
                     دانشگاه فرهنگیان استان اصفهان
                   </h4>
                   <span className="text-[9px] text-teal-300/90 font-medium">
-                    سامانه جامع خدمات دانشگاهی • کارت اسکان سرای دانشجویی
+                    سامانه جامع خدمات دانشگاهی • کارت تردد و اسکان سرای دانشجویی
                   </span>
                 </div>
               </div>
@@ -187,22 +175,22 @@ export const DormIdCardModal: React.FC<DormIdCardModalProps> = ({
             </div>
 
             {/* بدنه اطلاعات دانشجو در ابعاد فشرده کارت بانکی */}
-            <div className="flex items-center gap-3 py-1.5 relative z-10">
+            <div className="flex items-center gap-2.5 py-1 relative z-10">
               {/* عکس پرسنلی */}
               <div className="relative shrink-0">
                 {student.photoUrl ? (
                   <img
                     src={student.photoUrl}
                     alt={student.fullName}
-                    className="w-16 h-20 sm:w-[68px] sm:h-[86px] object-cover rounded-xl border border-teal-400/60 shadow-md bg-slate-900"
+                    className="w-15 h-19 sm:w-[64px] sm:h-[82px] object-cover rounded-xl border border-teal-400/60 shadow-md bg-slate-900"
                   />
                 ) : (
                   <div
-                    className="w-16 h-20 sm:w-[68px] sm:h-[86px] rounded-xl flex flex-col items-center justify-center border border-teal-400/60 shadow-md p-1"
+                    className="w-15 h-19 sm:w-[64px] sm:h-[82px] rounded-xl flex flex-col items-center justify-center border border-teal-400/60 shadow-md p-1"
                     style={{ backgroundColor: student.avatarColor || '#0d9488' }}
                   >
-                    <User className="w-7 h-7 opacity-80" />
-                    <span className="text-[9px] font-black text-center mt-1 leading-none">{student.fullName}</span>
+                    <User className="w-6 h-6 opacity-80" />
+                    <span className="text-[8.5px] font-black text-center mt-1 leading-none">{student.fullName}</span>
                   </div>
                 )}
                 <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs">
@@ -212,11 +200,11 @@ export const DormIdCardModal: React.FC<DormIdCardModalProps> = ({
 
               {/* مشخصات کلیدی و بدون زواید */}
               <div className="flex-1 min-w-0 space-y-1 text-right">
-                <div className="flex items-baseline justify-between">
+                <div className="flex items-baseline justify-between gap-1">
                   <h2 className="font-extrabold text-xs sm:text-sm text-white truncate">
                     {student.fullName}
                   </h2>
-                  <span className="text-[9px] text-teal-300 font-mono" dir="ltr">
+                  <span className="text-[9px] text-teal-300 font-mono shrink-0" dir="ltr">
                     {student.nationalId}
                   </span>
                 </div>
@@ -230,36 +218,52 @@ export const DormIdCardModal: React.FC<DormIdCardModalProps> = ({
                 </div>
 
                 {/* موقعیت اسکان: اتاق و تخت */}
-                <div className="flex items-center gap-2 pt-0.5">
-                  <span className="px-2 py-0.5 rounded-lg bg-teal-800/80 border border-teal-600/40 text-[10px] font-bold text-white">
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <span className="px-2 py-0.5 rounded-lg bg-teal-800/80 border border-teal-600/40 text-[9.5px] font-bold text-white">
                     اتاق {room?.roomNumber || '---'}
                   </span>
-                  <span className="px-2 py-0.5 rounded-lg bg-emerald-900/80 border border-emerald-600/40 text-[10px] font-bold text-emerald-200">
+                  <span className="px-2 py-0.5 rounded-lg bg-emerald-900/80 border border-emerald-600/40 text-[9.5px] font-bold text-emerald-200">
                     {bed?.label || 'تخت مصوب'}
                   </span>
                 </div>
               </div>
 
-              {/* کیوآرکد برای اصالت و اسکن کارت */}
+              {/* کیوآرکد واقعی استاندارد ۲بعدی برای اسکن سریع */}
               <div className="flex flex-col items-center justify-center shrink-0">
-                {renderQrCodeSvg()}
-                <span className="text-[8px] font-mono text-teal-300/80 mt-1" dir="ltr">
-                  {verificationCode}
+                <div className="w-16 h-16 bg-white rounded-lg p-1 border border-teal-200/90 shadow-xs flex items-center justify-center">
+                  {qrDataUrl ? (
+                    <img
+                      src={qrDataUrl}
+                      alt={`QR ${barcodeValue}`}
+                      className="w-full h-full object-contain"
+                    />
+                  ) : (
+                    <span className="text-[8px] font-mono text-slate-400">QR</span>
+                  )}
+                </div>
+                <span className="text-[8px] font-mono text-teal-200 mt-0.5 font-bold" dir="ltr">
+                  {qrPayload}
                 </span>
               </div>
             </div>
 
-            {/* نوار پایین کارت: شبیه‌ساز چیپ امنیتی و بارکد شماره دانشجویی */}
-            <div className="flex items-center justify-between pt-1.5 border-t border-teal-500/30 text-[9px] relative z-10">
-              <div className="flex items-center gap-1.5 text-teal-300">
-                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-[9px] font-semibold text-teal-200">
-                  کارت رسمی معتبر دارای کیوآرکد اصالت
-                </span>
+            {/* نوار پایین کارت: بارکد خطی واقعی Code-128 قابل قرائت با بارکدخوان لیزری + کد دانشجویی */}
+            <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-teal-500/30 text-[9px] relative z-10">
+              <div className="bg-white rounded-md px-1.5 py-0.5 flex items-center shadow-xs shrink-0">
+                <svg
+                  ref={barcodeSvgRef}
+                  className="h-6 max-w-[195px] block"
+                  aria-label={`Code128 ${barcodeValue}`}
+                />
               </div>
 
-              <div className="font-mono font-bold text-[10px] text-amber-300" dir="ltr">
-                کد: {student.studentId}
+              <div className="text-left min-w-0">
+                <div className="font-mono font-extrabold text-[10px] text-amber-300 truncate" dir="ltr">
+                  {barcodeValue}
+                </div>
+                <div className="text-[8px] font-semibold text-teal-200/90 truncate">
+                  بارکد واقعی حضور و تردد
+                </div>
               </div>
             </div>
           </div>
